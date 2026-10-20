@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0c121a" />
+    <link rel="icon" href="data:," />
+    <title>tiainji · cuRobo 规划碰撞球</title>
+  </head>
+  <body class="sphere-page">
+    <header class="app-header">
+      <div class="brand-mark" aria-hidden="true">T</div>
+      <div class="brand"><h1>cuRobo 规划碰撞球</h1><p>双臂跟随当前姿态 · 夹爪固定张开 · 只读查看</p></div>
+      <a class="button secondary sphere-back" href="/">返回工作台</a>
+    </header>
+    <main class="sphere-workspace">
+      <section class="sphere-toolbar" aria-label="查看器控制">
+        <div class="sphere-summary"><strong id="sphere-count">正在读取碰撞球…</strong><span id="sphere-status" role="status" aria-live="polite">连接中</span></div>
+        <div class="sphere-actions"><button id="toggle-follow" class="button secondary" type="button" aria-pressed="false">暂停跟随</button><button id="refresh-spheres" class="button secondary" type="button">刷新快照</button></div>
+        <div class="sphere-display-options">
+          <label><input id="show-spheres" type="checkbox" checked />显示碰撞球</label>
+          <label><input id="show-meshes" type="checkbox" checked />显示场景网格</label>
+          <label class="sphere-opacity-label" for="sphere-opacity">球不透明度 <output id="sphere-opacity-value" for="sphere-opacity">65%</output><input id="sphere-opacity" type="range" min="20" max="100" value="65" step="5" /></label>
+        </div>
+      </section>
+      <section class="viewport-shell sphere-viewport">
+        <div id="viewport" aria-label="当前开夹爪规划碰撞球三维视图"></div>
+        <div id="sphere-loading" class="viewport-loading"><div class="loader"></div><strong>读取当前规划碰撞球</strong><span>使用当前双臂姿态和固定张开的夹爪</span></div>
+        <div class="viewport-bottom"><span>左键旋转 · 右键平移 · 滚轮缩放</span><button id="home-view" class="view-button" type="button">⌖ 默认视角</button></div>
+        <div class="axis-legend"><span class="axis-x">X</span><span class="axis-y">Y</span><span class="axis-z">Z↑</span></div>
+      </section>
+      <footer class="sphere-notes"><p>蓝色球来自当前 YAML 碰撞配置，半径包含该 link 的 buffer。此页面用于核对几何覆盖；显示开夹爪副本，不改变主场景。</p><p id="sphere-source">正在读取配置来源…</p></footer>
+    </main>
+    <script type="module" src="/src/collision-sphere-page.js"></script>
+  </body>
+</html>

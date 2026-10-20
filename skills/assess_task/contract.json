@@ -1,0 +1,22 @@
+{
+  "id": "assess_task",
+  "description": "JEV确认完整任务成员及各数量组；初次continue须校验全部数量、来源和头部掩码后冻结清单，按头部行列编号。未知或缺数不授权运动。place后按已验证完成记录判断完成或继续，不要求末次新图；中转须同ID两段完成。",
+  "inputs": [
+    "JEV judgment",
+    "JEV membership judgments: required|excluded|unknown",
+    "JEV group_membership judgments for literal quantity groups",
+    "original instruction",
+    "task progress",
+    "current observation"
+  ],
+  "requires": {
+    "collection_task": true,
+    "observed": true,
+    "target_selected": false,
+    "task_assessed": false,
+    "recovery_needed": false
+  },
+  "provides": [
+    "task_assessed"
+  ]
+}

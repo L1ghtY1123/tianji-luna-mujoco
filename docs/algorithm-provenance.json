@@ -1,0 +1,255 @@
+{
+  "recorded_date": "2026-09-28",
+  "migration": "User-authorized independent local project; no GaP runtime or source-project runtime imports",
+  "source_repository": "C:\\project\\tianji-jev",
+  "source_commit": "340d2b548a205d70581d74c0ec96752a272a983e",
+  "source_tree_note": "Copies are from the authorized working tree; per-file hashes are authoritative.",
+  "curobo_sdk_commit": "8e734f3ced1df898990bcd92de40abce475907db",
+  "official_evidence": [
+    "curobo/scene.py public VoxelGrid export",
+    "curobo/tests/_src/motion/test_motion_planner_esdf.py signed box ESDF and voxel center convention",
+    "curobo/examples/getting_started/motion_planning.py"
+  ],
+  "sdk_source_verification": "361 packaged Python files checked byte-for-byte against official commit at service startup; no SDK changes",
+  "images": {
+    "curobo": {
+      "tag": "jodell-curobo:0.2.0-guangyu",
+      "id": "sha256:71e2e6cc793cedc7c6b9ae9b1d4e1d92925f66eb3effb40224ae495c157347d8"
+    },
+    "graspgen": {
+      "tag": "jodell-graspgen:0.2.0-guangyu",
+      "id": "sha256:47c4755a5598f1c7aac055040d9fa189d6bf0745c07f8fd804c6f55e4fd5fee4"
+    }
+  },
+  "collision_config": {
+    "source": "Original finger Link1-3 and earlier public MORPHIT parts/central-symmetry configuration retained; four gripper Link4 lists use project-side constrained triangle-enclosing spheres and existing hand/bilateral mirrors",
+    "destination": "resources/curobo/marvin_gui_dual.yml",
+    "sha256": "3b2566219c97f5570f3d5c1dec1618f08b215004d29012a36f9d9476255debe6",
+    "links": 38,
+    "spheres": 349,
+    "sphere_budget": 350,
+    "unchanged": false,
+    "reviewed_date": "2026-10-16",
+    "generation_manifest": "resources/curobo/link4-refit-20261016.json",
+    "original_import": {
+      "source": "C:\\project\\tianji_base\\extensions\\planning\\curobo-planner\\robot_config\\marvin_gui_dual.yml",
+      "destination": "resources/curobo/marvin_gui_dual.yml",
+      "sha256": "d7e627475865271a66bc785258dd59177080eb3a6e106cce26cb4465971421ae",
+      "links": 38,
+      "spheres": 1362,
+      "unchanged": true
+    },
+    "validation_status": "349 spheres across 38 links, within 350 budget. Only four gripper Link4 lists changed, each 4 to 14 spheres. Recursive containment proves their complete collision surfaces/volumes and visual surfaces; other links retain their earlier approximation limits. Open default/zero and observation-pose checks, mirrored templates, unchanged non-sphere settings, and the complete recorded held-IK failure are checked separately. This does not claim overall planning speedup or acceptance of every physical task."
+  },
+  "robot_asset": "assets/marvin_urdf/marvin_with_grippers.urdf shared with MuJoCo; original relative assets retained; only temporary SDK axis/path derived URDF written",
+  "tool_mapping": {
+    "formula": "world_object @ object_grasp @ orientation @ grasp_ee @ inverse(tcp_ee)",
+    "A_orientation_deg": 180,
+    "B_orientation_deg": 0,
+    "grasp_ee_z_m": 0.195,
+    "tcp_ee_z_m": 0.185,
+    "source": "tianji_base/extensions/operations/ee-frame-tools/backend.py DEFAULT_TRANSFORM and tianji-jev/platform/config/profile-reference/profile.json",
+    "physical_check": "MuJoCo imported finger-pad z extents at half closure 0.1375..0.2007m in TCP; 0.185m inside pad"
+  },
+  "copied_files": [
+    {
+      "destination": "vendor/tianji_curobo/__init__.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\__init__.py",
+      "sha256": "bc2ec014f5ffbe80cfb775970a0374cbdf4ffdc4477d15bf4b790cc7622a785c",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/_curobo_impl.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\_curobo_impl.py",
+      "sha256": "8b347827ce4a7ee6271fc229dd827205c1767d77039d267a50f84b1cb5aa9b79",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/axis_linear.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\axis_linear.py",
+      "sha256": "7ba3158d453e9d3cc624d1f74d3b96f1c2910b8c47d5fd54f0fcddb39adf8409",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/contracts.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\contracts.py",
+      "sha256": "9029ec53bf5be4b15916b8cc032577faf9e3bc57d2befcd3f4af4ebcb34bad18",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/curobo_robot_config.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\curobo_robot_config.py",
+      "sha256": "47b7089841d7a57ddafe94ecfe89a841bc93ddc2ccb5f63209dad46d067446a3",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/curobo_scene.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\curobo_scene.py",
+      "sha256": "dd5899cf3f37986cfea9bc8946a08e846fce870e4908a33d89cec78724e7de32",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/curobo_service.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\curobo_service.py",
+      "sha256": "fef15ac7598a5cbb9565a831833302aa9037b178f2c8463b88b3c42d9170dfa0",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/curobo_service_client.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\curobo_service_client.py",
+      "sha256": "9b975dfa52c1f9c5a5da8afa8a627208110ee120ceeaf85bda081e4a9528b208",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/dual_contracts.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\dual_contracts.py",
+      "sha256": "06f9ed77db9126a1f04f090a5e4e0e32835367dfaab268053036c29d02f3a9cb",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/fixed_esdf_mapping.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\fixed_esdf_mapping.py",
+      "sha256": "48e170b3f7d61518c937985a0ce16b35707887a9ff6b9ab8bc26f46b249226ab",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/fixed_esdf_store.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\fixed_esdf_store.py",
+      "sha256": "67c667c799b9303c12423eb8e31783528b3d84e9631a3691650ff465cb3a396f",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/grasp_lift.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\grasp_lift.py",
+      "sha256": "e4a4fa6255cbed00b9f829d2aebe7b33c6364f33042342898824f2e43d928b88",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/grasp_lift_compute.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\grasp_lift_compute.py",
+      "sha256": "c7b2e777e973f8ba7d17ff4d023f09f3dc520265104be9459d709873bbac64d0",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/grasp_planner.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\grasp_planner.py",
+      "sha256": "80870f98fc9e0c9eb98dd0267d13744bb004d8696bef2888538125bf55976d4d",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/gripper_collision_envelope.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\gripper_collision_envelope.py",
+      "sha256": "9254b122a0c0485ad3c987e40284c5d0e8eace188ddb005b8cd2dc2419c8d0f9",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/mixed_esdf_scene.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\mixed_esdf_scene.py",
+      "sha256": "18094e52efe7e1bffa633658d2277ba42ddb4c31794cf1aa3a89c9b650cfed19",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/robot_segmenter.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\robot_segmenter.py",
+      "sha256": "36e0ee03a36dd1f1a6d8bd7d823d3cc5ca2718594704ce811807a7beba12c2b1",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/scene_config.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\scene_config.py",
+      "sha256": "9c9b13c7be00100c55f3e8ba4ca64ebad79954975e6cd426cd63fa428b3be5b4",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/semantic_esdf_transport.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\semantic_esdf_transport.py",
+      "sha256": "51ec8f7c1cfb9ab18c7e3ebd4cc904acf8b8b49c14d1003cd89e0ba1826e63ce",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/support_contact.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\support_contact.py",
+      "sha256": "24fa78bff431357ef9fd74ec985cdc3f18d075aa6cacfa5fa5c0a174035622ce",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/surface_colors.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\surface_colors.py",
+      "sha256": "6de32b719a8a9c556aaafb2a510f1e8fb02b43f38f5c0a578e6b49fa1310ba3a",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/tools.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\tools.py",
+      "sha256": "dc6375dd43cd0882bfb7fdc1ced4a9f93bdfc9bc773a6b09382cebdd07f6f4b0",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/trajectory_interpolation.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\trajectory_interpolation.py",
+      "sha256": "44ab2facb84e342dea608e5c8c5d0dbeeb4e36503eae53c1eab4d9d87c3327de",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/trajectory_validation.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\trajectory_validation.py",
+      "sha256": "1d2cd07d3f0f0dfb5547d75ce04d1d52ddc981fba7178b714249c5527814a8ca",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/urdf_axis_adapter.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\urdf_axis_adapter.py",
+      "sha256": "837012b516327ecdb1315bb0f456d7e24c6e7d25d9903d11c2239c3d916f171a",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_curobo/volumetric_mapper.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-curobo\\tianji_curobo\\volumetric_mapper.py",
+      "sha256": "ec79ecfe357e0c03a6c99dbe151aa9d301cb66cdae008a30ff4384274d85eb69",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_graspgen/__init__.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-graspgen\\tianji_graspgen\\__init__.py",
+      "sha256": "7da643fa559989d6197ff6d708054b2357c5a16daec0a6145b1489f1ec08649a",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_graspgen/client.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-graspgen\\tianji_graspgen\\client.py",
+      "sha256": "ffb5485fe9cd109fc3bf4cb63e482d23028f91d3676b8d9b787361d436d6daac",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_graspgen/contracts.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-graspgen\\tianji_graspgen\\contracts.py",
+      "sha256": "e05f4a233470f05412ff7fd01be5e258aeddfbb329918232cd5dc8738b968053",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_graspgen/service.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-graspgen\\tianji_graspgen\\service.py",
+      "sha256": "e1e2a8d03edba443b49358ab37b051662e967b3466a03ff3fcb1638500f9120d",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_graspgen/tools.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-graspgen\\tianji_graspgen\\tools.py",
+      "sha256": "da2dd01c71380f14fd8a23f51ba6739e18537d64c7a05e8570182839b242c4fb",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_graspgen/visualization.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-graspgen\\tianji_graspgen\\visualization.py",
+      "sha256": "6adb73e84778d3bbe33c8307537aea8fe3033f72fb88a2d6080c0f2df970a04e",
+      "unchanged": true
+    },
+    {
+      "destination": "vendor/tianji_graspgen/wire.py",
+      "source": "C:\\project\\tianji-jev\\open-robot-skills\\tools\\tianji-graspgen\\tianji_graspgen\\wire.py",
+      "sha256": "8447ec9a2eba8b42bab2faa6477c8079d2b2e1df8dc645e643a75800619a10aa",
+      "unchanged": true
+    }
+  ],
+  "licenses": "User-owned wrappers had no general redistribution license. This authorized local copy grants no new license. NVIDIA SDK, GraspGen source and model licenses remain unchanged."
+}

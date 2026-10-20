@@ -1,0 +1,22 @@
+{
+  "id": "build_scene",
+  "description": "所有实例统一使用20 mm TSDF/ESDF，盒子网格中心仍对齐实测底板；每轮抓前使用当前全障碍物图规划双臂到观测位姿，然后三相机精建图，仅排除当前目标；缺少当前运动图时首次用头部、已有场景用原位三相机建立，桌面复用。 三视图取并集；身份关联失败保留证据并停止本轮。",
+  "requires": {
+    "observed": true,
+    "inventory_finalized": true,
+    "destination_ready": true,
+    "target_selected": true,
+    "arm_selected": true,
+    "grasp_completed": false,
+    "scene_ready": false,
+    "recovery_needed": false
+  },
+  "provides": [],
+  "inputs": [
+    "observation",
+    "target_id",
+    "planning_settings",
+    "已有碰撞场景与夹爪反馈",
+    "visual_plan (required JEV-selected purpose for each uncached checkpoint)"
+  ]
+}

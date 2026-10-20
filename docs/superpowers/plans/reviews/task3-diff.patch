@@ -1,0 +1,1322 @@
+--- baseline/src/jev_mujoco/geometry_service.py
++++ current/src/jev_mujoco/geometry_service.py
+@@ -1,19 +1,16 @@
+-"""GPU service for exact simulation geometry and the copied planning wrapper.
+-
+-No vision transport is accepted. The subclass adapts user-owned runtime scene
+-hooks; NVIDIA cuRobo source and installed package remain untouched.
+-"""
++"""GPU service for registered RGBD maps and the copied planning wrapper."""
+ 
+ import hashlib
+ import json
+ import logging
+ import os
+ import subprocess
+ import sys
+ import threading
+ import time
++from contextlib import contextmanager
+ from dataclasses import asdict, replace
+ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ from pathlib import Path
+ 
+ import numpy as np
+@@ -22,14 +19,22 @@
+ from .planning_settings import PlanningSettings
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(ROOT / "vendor"))
+ from tianji_curobo._curobo_impl import CuroboRuntime
+-from tianji_curobo.contracts import CuroboToolError, PlanGraspBatchRequest, SolveIkBatchRequest
++from tianji_curobo.contracts import (
++    CuroboToolError,
++    PlanGraspBatchRequest,
++    PlanPlaceRequest,
++    PlanToPoseRequest,
++    SolveIkBatchRequest,
++)
+ from tianji_curobo.curobo_scene import collision_cache_for_scene
+ 
+ from .backend_builder import build_geometry_backend, maximum_world_sphere_radius
++from .carrying import CarryingBinding, check_command_path, validate_phase_request
++from .perception_mapping import PerceptionMapper, decode_mapping_payload
+ 
+ SDK_COMMIT = "8e734f3ced1df898990bcd92de40abce475907db"
+ LOGGER = logging.getLogger(__name__)
+ 
+ 
+@@ -61,10 +66,13 @@
+         self.geometry_model = None
+         self.planning_settings = PlanningSettings()
+         self.geometry_solver_profile = None
+         self.effective_config = {}
+         self._maximum_sphere_radius = None
++        self.perception_mapper = None
++        self.carrying_binding = None
++        self.gripper_feedback = None
+ 
+     def configure_planning(self, settings):
+         """CUDA graphs cannot outlive the solver configuration they captured."""
+         if settings.solver_payload() == self.planning_settings.solver_payload():
+             self.planning_settings = settings
+@@ -103,10 +111,99 @@
+                     arm, batch_size, ik_only)
+         backend = build_geometry_backend(self, arm, batch_size=batch_size, ik_only=ik_only)
+         LOGGER.info("cuRobo backend construction complete: arm=%s capacity=%s ik_only=%s wall_s=%.3f",
+                     arm, batch_size, ik_only, time.perf_counter() - started)
+         return backend
++
++    @contextmanager
++    def carrying_scope(self, binding, feedback=None):
++        # The extra fixed link is present in every solver's typed robot config.
++        # Discard its allocation at scope exit, including preflight and errors.
++        with self.gpu_lock:
++            self._clear_planners_unlocked()
++            self.carrying_binding = binding
++            self.gripper_feedback = feedback
++        try:
++            yield
++        finally:
++            with self.gpu_lock:
++                self.carrying_binding = None
++                self.gripper_feedback = None
++                self._clear_planners_unlocked()
++
++    def clear_carrying(self):
++        with self.gpu_lock:
++            self.carrying_binding = None
++            self.gripper_feedback = None
++            self._clear_planners_unlocked()
++            self.geometry_scene = None
++            self.geometry_model = None
++            self.geometry_grids = None
++            self.geometry_solver_profile = None
++            if self.perception_mapper is not None:
++                self.perception_mapper.mapper.reset_capture()
++        return {"ok": True, "attached": False}
++
++    def build_perception(self, payload):
++        settings = PlanningSettings.model_validate(payload.get("planning_settings", {}))
++        decoded, identity = decode_mapping_payload(payload)
++        self.configure_planning(settings)
++        with self.gpu_lock:
++            self.carrying_binding = None
++            self.gripper_feedback = None
++            self._clear_planners_unlocked()
++            # Invalidate publication before reusing Mapper buffers. A failed
++            # fresh capture may never leave the old map executable.
++            self.geometry_scene = None
++            self.geometry_grids = None
++            self.geometry_model = None
++            if self.perception_mapper is None:
++                segmenter = self._ensure_robot_segmenter_unlocked()
++                self.perception_mapper = PerceptionMapper(segmenter.sdk_boundary)
++            candidate, grids, model = self.perception_mapper.build(decoded)
++            self.geometry_scene = identity
++            self.geometry_grids = grids
++            self.geometry_model = model
++            self.geometry_solver_profile = settings.solver_payload()
++        instances = list(candidate.instance_metrics)
++        return {"ok": True, **identity, "layer_count": len(grids), "voxel_size_m": .01,
++                "excluded_object_ids": [] if identity["exclusion_state"] == "released" else [identity["target_id"]],
++                "collision_objects": [name for name in instances if identity["exclusion_state"] == "released" or name != identity["target_id"]],
++                "table_collision_enabled": True, "table": dict(candidate.table.model),
++                "instance_metrics": {key: dict(value) for key, value in candidate.instance_metrics.items()},
++                "camera_metrics": {key: dict(value) for key, value in candidate.camera_metrics.items()},
++                "timings_ms": dict(candidate.timings_ms), "solver_profile": self.geometry_solver_profile}
++
++    def plan_place_scoped(self, request, binding, feedback=None):
++        with self.carrying_scope(binding, feedback):
++            native = self.plan_place_native(request, lock_timeout_s=600)
++            evidence = dict(self.effective_config[request.arm]["plan"])
++        return native, evidence
++
++    def plan_retreat_scoped(self, request, feedback=None):
++        if self.geometry_scene.get("exclusion_state") != "released":
++            raise ValueError("detach and rebuild the released-object static map before retreat")
++        with self.carrying_scope(None, feedback):
++            native = self.plan_to_pose_native(request, lock_timeout_s=600)
++            evidence = dict(self.effective_config[request.arm]["plan"])
++        return native, evidence
++
++    def validate_execution(self, payload, binding):
++        phase = validate_phase_request(payload)
++        if phase == "retreat" and self.geometry_scene.get("exclusion_state") != "released":
++            raise ValueError("retreat requires the released-object static map")
++        # Checks consume the exact command samples after project Hermite
++        # insertion, then densely sample every connecting command segment.
++        with self.gpu_lock:
++            self._prepare_scene_cache_unlocked()
++            backend = self._compound_backend_unlocked(payload["arm"],
++                self.planning_settings.trajectory_collision_clearance_m,
++                self.planning_settings.optimizer_collision_activation_distance_m)
++            self._refresh_scene_unlocked(arm=payload["arm"], backend=backend)
++            result = check_command_path(self, backend.motion_planner, payload, binding)
++            self._require_scene_token_unchanged_unlocked(payload["scene_token"])
++            return result
+ 
+     def build_geometry(self, payload):
+         settings = PlanningSettings.model_validate(payload.get("planning_settings", {}))
+         target_id = payload["target_id"]
+         expected = geometry_payload(payload, target_id)
+@@ -144,11 +241,11 @@
+                 "esdf_padding_m": padding_m, "maximum_collision_sphere_radius_m": self._maximum_sphere_radius,
+                 "solver_profile": self.geometry_solver_profile}
+ 
+     def _scene_snapshot_unlocked(self, *, allow_unstable_object=False):
+         if self.geometry_scene is None:
+-            raise ValueError("build a known geometry scene before planning")
++            raise ValueError("build a registered RGBD scene before planning")
+         return self.geometry_scene.copy()
+ 
+     def _prepare_scene_cache_unlocked(self):
+         snapshot = self._scene_snapshot_unlocked()
+         cache = collision_cache_for_scene(self.geometry_model)
+@@ -170,34 +267,83 @@
+         return snapshot
+ 
+     def _refresh_scene_unlocked(self, *, arm, backend, snapshot=None, **kwargs):
+         snapshot = snapshot or self._scene_snapshot_unlocked()
+         backend.update_voxel_scene(self.geometry_grids, self.geometry_model,
+-            disabled_obstacle_names=(f"semantic_instance::{snapshot['target_id']}",))
++            disabled_obstacle_names=snapshot.get("disabled_obstacle_names", (f"semantic_instance::{snapshot['target_id']}",)))
+         return snapshot["scene_token"]
+ 
+     def _refresh_peer_collision_unlocked(self, *, arm, backend, active_joints_deg,
+                                          other_joints_deg, cache_snapshot=True):
+         # The project backend owns a lightweight Kinematics for the other arm.
+         # Update each request so the current stationary-arm joints reach IK,
+         # TrajOpt and the hard checker without creating a second planner.
+         backend.update_peer_collision_model(None, active_joints_deg, other_joints_deg)
++        if self.carrying_binding is not None:
++            backend.attach_measured_carrying(self.carrying_binding, active_joints_deg)
+         return True
+ 
+ 
+ def run_operation(runtime, path, payload):
+     """Validate settings once, then dispatch to the existing typed GPU boundary."""
+     if path == "/geometry/build":
+         return runtime.build_geometry(payload)
+-    if path not in ("/tools/solve_ik_batch", "/tools/plan_grasp_batch"):
++    if path == "/perception/build":
++        return runtime.build_perception(payload)
++    if path == "/carrying/clear":
++        return runtime.clear_carrying()
++    if path == "/tools/plan_to_pose" and payload.get("carrying_binding") is not None:
++        raise ValueError("detach carrying before fresh retreat planning")
++    if path not in ("/tools/solve_ik_batch", "/tools/plan_grasp_batch", "/tools/plan_place", "/tools/plan_to_pose", "/carrying/validate"):
+         raise ValueError("unknown endpoint")
+     settings = PlanningSettings.model_validate(payload["planning_settings"])
+     scene = runtime._scene_snapshot_unlocked()
+     if payload.get("scene_token") != scene["scene_token"]:
+         raise ValueError("request scene token is stale")
+     if settings.solver_payload() != runtime.geometry_solver_profile:
+         raise ValueError("scene planning settings changed; rebuild the geometry scene")
++    if path in ("/tools/plan_place", "/tools/plan_to_pose", "/carrying/validate"):
++        arm = payload.get("arm")
++        carrying = payload.get("carrying_binding")
++        binding = None if carrying is None else CarryingBinding.from_mapping(carrying, scene=scene, arm=arm)
++        if path == "/carrying/validate":
++            validate_phase_request(payload)
++            runtime.configure_planning(settings)
++            return runtime.validate_execution(payload, binding)
++        if path == "/tools/plan_place" and binding is None:
++            raise ValueError("plan_place requires measured or scoped preflight carrying geometry")
++        values = {"freq_hz": settings.freq_hz, "max_attempts": settings.plan_max_attempts}
++        if path == "/tools/plan_place":
++            values.update(trajectory_collision_clearance_m=settings.trajectory_collision_clearance_m,
++                optimizer_collision_activation_distance_m=settings.optimizer_collision_activation_distance_m,
++                approach_axis=settings.place_approach_axis, approach_offset_m=settings.place_approach_offset_m,
++                approach_in_tool_frame=settings.place_approach_in_tool_frame,
++                lift_axis=settings.place_retreat_axis, lift_offset_m=settings.place_retreat_offset_m,
++                lift_in_tool_frame=settings.place_retreat_in_tool_frame)
++        for name, value in values.items():
++            if name in payload and payload[name] != value:
++                raise ValueError(f"{name} conflicts with planning_settings")
++        request_type = PlanPlaceRequest if path == "/tools/plan_place" else PlanToPoseRequest
++        request = request_type.from_mapping(payload | values)
++        if request.trajectory_point_scale is not None:
++            raise ValueError("project execution retains raw derivatives before Hermite insertion")
++        runtime.configure_planning(settings)
++        feedback = payload.get("gripper_joint_positions_rad")
++        if path == "/tools/plan_place":
++            if feedback is None:
++                native, evidence = runtime.plan_place_scoped(request, binding)
++            else:
++                native, evidence = runtime.plan_place_scoped(request, binding, feedback)
++            return {"ok": True, "planner": "curobo_place", "scene_token": native.scene_token,
++                    "phases": {name: asdict(getattr(native, name)) for name in ("approach", "place", "retreat")},
++                    "carrying_binding": asdict(binding), "collision_evidence": evidence,
++                    "retreat_provisional": True, "retreat_requires_replan": True,
++                    "planning_settings_revision": settings.revision()}
++        native, evidence = runtime.plan_retreat_scoped(request, feedback)
++        return {"ok": True, "planner": "curobo_pose", "scene_token": native.scene_token,
++                "trajectory": asdict(native), "collision_evidence": evidence,
++                "attached": False, "planning_settings_revision": settings.revision()}
+     values = {"trajectory_collision_clearance_m": settings.trajectory_collision_clearance_m}
+     ik_only = path == "/tools/solve_ik_batch"
+     if not ik_only:
+         fields = ("freq_hz", "optimizer_collision_activation_distance_m", "approach_axis",
+                   "approach_offset_m", "approach_in_tool_frame", "lift_axis", "lift_offset_m",
+--- baseline/src/jev_mujoco/backend_builder.py
++++ current/src/jev_mujoco/backend_builder.py
+@@ -10,11 +10,12 @@
+ from pathlib import Path
+ from types import SimpleNamespace
+ 
+ import numpy as np
+ 
+-from .trajectory_postprocessing import add_trajectory_derivatives
++from .carrying import carrying_spheres, configure_gripper_feedback, create_carrying_robot_config
++from .trajectory_postprocessing import add_place_derivatives, add_pose_derivatives, add_trajectory_derivatives
+ 
+ ROOT = Path(__file__).resolve().parents[2]
+ sys.path.insert(0, str(ROOT / "vendor"))
+ from tianji_curobo._curobo_impl import (
+     _create_world_clearance_checker,
+@@ -77,10 +78,26 @@
+         result = super().plan_grasp(*args, **kwargs)
+         self.last_grasp_result = result
+         return result
+ 
+ 
++class SinglePlanningOverrides:
++    """Pinned single MotionPlanner has no batch finetuning keyword arguments."""
++
++    def plan_pose(self, goal_tool_poses, current_state, *args, **kwargs):
++        kwargs["max_attempts"] = self.planning_settings.plan_max_attempts
++        result = super().plan_pose(goal_tool_poses, current_state, *args, **kwargs)
++        self.last_pose_result = result
++        return result
++
++    def plan_grasp(self, *args, **kwargs):
++        self.last_grasp_result = None
++        result = super().plan_grasp(*args, **kwargs)
++        self.last_grasp_result = result
++        return result
++
++
+ def validate_grasp_batch(result, validate_trajectory):
+     """Keep only three-phase candidates passing the existing dense hard check."""
+     checked = []
+     for item in result.items:
+         if not item.success:
+@@ -114,10 +131,51 @@
+             result = super().plan_grasp_batch_native(request)
+             result = add_trajectory_derivatives(result, self.motion_planner.last_grasp_result)
+         finally:
+             self.motion_planner.last_grasp_result = None
+         return validate_grasp_batch(result, self.validate_trajectory_native)
++
++
++class ValidatedSingleBackend(_NativeCuroboBackend):
++    def attach_measured_carrying(self, binding, joints_deg):
++        # Configured spheres already reach IK, graph and checker, whose models
++        # are built separately. Public AttachmentManager updates TrajOpt's same
++        # measured link without touching any private SDK state.
++        spheres = self._torch.as_tensor(carrying_spheres(binding), device=self._device, dtype=self._dtype)
++        state = self._state(joints_deg)
++        self.motion_planner.attachment_manager.update(spheres, state, link_name=f"jev_carried_object_{binding.arm}")
++        self.carrying_link = f"jev_carried_object_{binding.arm}"
++
++    def plan_place_native(self, request):
++        self.motion_planner.last_grasp_result = None
++        try:
++            result = super().plan_place_native(request)
++            retained = add_place_derivatives(result, self.motion_planner.last_grasp_result)
++            for phase in (retained.approach, retained.place, retained.retreat):
++                self.validate_trajectory_native(SimpleNamespace(points_deg=np.rad2deg(phase.positions_rad).tolist()))
++            return retained
++        finally:
++            self.motion_planner.last_grasp_result = None
++            self.motion_planner.last_pose_result = None
++
++    def plan_to_pose_native(self, request):
++        self.motion_planner.last_pose_result = None
++        try:
++            result = super().plan_to_pose_native(request)
++            retained = add_pose_derivatives(result, self.motion_planner.last_pose_result)
++            self.validate_trajectory_native(SimpleNamespace(points_deg=np.rad2deg(retained.positions_rad).tolist()))
++            return retained
++        finally:
++            self.motion_planner.last_pose_result = None
++
++    def destroy(self):
++        try:
++            if getattr(self, "carrying_link", None) is not None and self.motion_planner is not None:
++                self.motion_planner.attachment_manager.detach(link_name=self.carrying_link)
++        finally:
++            self.carrying_link = None
++            super().destroy()
+ 
+ 
+ def effective_solver_config(planner, settings, *, ik_only, robot_config_path):
+     """Read values from instantiated solver configs, not the HTTP payload."""
+     ik = planner.config if ik_only else planner.ik_solver.config
+@@ -179,38 +237,53 @@
+     from curobo.motion_planner import MotionPlannerCfg
+     from curobo.scene import Cuboid
+     from curobo.types import GoalToolPose, JointState, Pose, ToolPoseCriteria
+     from tianji_curobo.grasp_planner import GraspBatchMotionPlanner
+ 
+-    if arm not in ("A", "B") or batch_size is None:
+-        raise ValueError("geometry service requires an A/B batched solver")
++    if arm not in ("A", "B"):
++        raise ValueError("geometry service requires an A/B solver")
+     settings = runtime.planning_settings
+     combined = yaml.safe_load(runtime._robot_config_path.read_text(encoding="utf-8"))
+     peer_arm = "B" if arm == "A" else "A"
+     robot = create_frozen_peer_arm_robot_config(
+         combined, arm, urdf_path=runtime._urdf_path, asset_root_path=runtime._asset_root_path,
+     )
+     robot = _exclude_collision_links(robot, runtime._excluded_collision_links)
++    feedback = getattr(runtime, "gripper_feedback", None)
++    robot = configure_gripper_feedback(robot, feedback, runtime._urdf_path)
++    carrying = getattr(runtime, "carrying_binding", None)
++    carrying_link = None
++    if carrying is not None:
++        if carrying.arm != arm or batch_size is not None or ik_only:
++            raise ValueError("carrying is scoped to one single-task arm planner")
++        robot, carrying_link = create_carrying_robot_config(robot, carrying)
+     configured_links = set(robot["robot_cfg"]["kinematics"]["collision_link_names"])
+     active_links = [name for name in collision_links_for_arm(combined, arm, include_shared=True)
+                     if name in configured_links]
++    if carrying_link is not None:
++        active_links.append(carrying_link)
+     peer_links = [name for name in collision_links_for_arm(combined, peer_arm) if name in configured_links]
+     scene = {name: value for name, value in (runtime._scene_model or {}).items() if name != "voxel"}
+     ik_config, motion_config = create_solver_configs(
+         settings, robot=robot, scene_model=scene or {"cuboid": {}},
+-        collision_cache=runtime._collision_cache, batch_size=batch_size,
++        collision_cache=runtime._collision_cache, batch_size=1 if batch_size is None else batch_size,
+         ik_config_type=InverseKinematicsCfg,
+         motion_config_type=None if ik_only else MotionPlannerCfg,
+         graph_rollout=None if ik_only else _graph_planner_rollout_config(),
+     )
+     if ik_only:
+         planner = InverseKinematics(ik_config)
+     else:
+-        class ConfiguredBatchPlanner(BatchPlanningOverrides, GraspBatchMotionPlanner):
+-            pass
+-
+-        planner = ConfiguredBatchPlanner(motion_config)
++        if batch_size is None:
++            from tianji_curobo.grasp_planner import GraspMotionPlanner
++            class ConfiguredSinglePlanner(SinglePlanningOverrides, GraspMotionPlanner):
++                pass
++            planner = ConfiguredSinglePlanner(motion_config)
++        else:
++            class ConfiguredBatchPlanner(BatchPlanningOverrides, GraspBatchMotionPlanner):
++                pass
++            planner = ConfiguredBatchPlanner(motion_config)
+         planner.planning_settings = settings
+     # The authored locks keep both grippers open at zero radians. The hard
+     # checker uses the optimizer's original spheres, including the frozen peer.
+     checker = _create_world_clearance_checker(
+         checker_config_type=RobotCollisionCheckerCfg, checker_type=RobotCollisionChecker,
+@@ -232,12 +305,14 @@
+     # unnecessary solvers and introduce a different planning configuration.
+     peer_config = create_frozen_peer_arm_robot_config(
+         combined, peer_arm, urdf_path=runtime._urdf_path, asset_root_path=runtime._asset_root_path,
+     )
+     peer_config = _exclude_collision_links(peer_config, runtime._excluded_collision_links)
++    peer_config = configure_gripper_feedback(peer_config, feedback, runtime._urdf_path)
+     peer_kinematics = Kinematics(KinematicsCfg.from_data_dict(peer_config, device_cfg=planner.device_cfg))
+-    backend = ValidatedBatchBackend(
++    backend_type = ValidatedSingleBackend if batch_size is None else ValidatedBatchBackend
++    backend = backend_type(
+         arm=arm, motion_planner=planner, peer_kinematics=peer_kinematics, torch_module=torch,
+         joint_state_type=JointState, pose_type=Pose, obstacle_cuboid_type=Cuboid,
+         goal_tool_pose_type=GoalToolPose, tool_pose_criteria_type=ToolPoseCriteria,
+         motion_clearance_checker=checker, active_collision_links=active_links,
+         peer_collision_links=peer_links, peer_baseline_inverse_by_link=peer_inverses,
+@@ -246,7 +321,17 @@
+     runtime._curobo_source = str(Path(curobo.__file__).resolve().parents[1])
+     runtime._curobo_version = str(getattr(curobo, "__version__", "unknown"))
+     runtime._gpu_available = bool(torch.cuda.is_available())
+     effective = effective_solver_config(planner, settings, ik_only=ik_only,
+                                         robot_config_path=runtime._robot_config_path)
++    effective.update(optimizer_attachment=carrying_link is not None,
++                     carried_link=carrying_link,
++                     geometry_coverage="measured_bounding_volume_with_uncertainty" if carrying_link else None,
++                     full_object_coverage=False,
++                     carrying_owner_id=None if carrying is None else carrying.owner_id,
++                     gripper_configuration_source="measured_feedback" if feedback is not None else "configured_open_gripper")
++    if batch_size is None and not ik_only:
++        effective.update(finetune_attempts=None, finetune_dt_scale=None,
++            finetune_settings_applied=False,
++            api_limitations=["Pinned single MotionPlanner.plan_pose does not expose batch finetuning controls"])
+     runtime.effective_config.setdefault(arm, {})["ik" if ik_only else "plan"] = effective
+     return backend
+--- baseline/src/jev_mujoco/trajectory_postprocessing.py
++++ current/src/jev_mujoco/trajectory_postprocessing.py
+@@ -88,14 +88,50 @@
+             )
+         items.append(replace(item, **phases))
+     return replace(native, items=tuple(items))
+ 
+ 
++def add_place_derivatives(native, raw_result):
++    """Retain all compound place phase buffers before another planner call."""
++    phases = {}
++    for native_name, sdk_name in (("approach", "approach"), ("place", "grasp"), ("retreat", "lift")):
++        phase = getattr(native, native_name)
++        q, v, a, names = _phase_samples(raw_result, sdk_name, 1)
++        order = [names.index(joint) for joint in phase.joint_names]
++        count = len(phase.positions_rad)
++        if count < 2 or count > q.shape[2]:
++            raise ValueError(f"invalid {native_name} trajectory length")
++        selected = [values[0, 0, :count][:, order].copy() for values in (q, v, a)]
++        if not np.array_equal(selected[0], np.asarray(phase.positions_rad)):
++            raise ValueError(f"{native_name} positions disagree with SDK buffers")
++        phases[native_name] = RawTrajectory(**asdict(phase), velocities_rad_s=selected[1], accelerations_rad_s2=selected[2])
++    return replace(native, **phases)
++
++
++def add_pose_derivatives(native, raw_result):
++    """Copy a detached retreat's single public interpolated plan."""
++    trajectory = raw_result.get_interpolated_plan()
++    names = trajectory.joint_names
++    arrays = []
++    for name in ("position", "velocity", "acceleration"):
++        tensor = getattr(trajectory, name)
++        if tensor is None:
++            raise ValueError(f"missing pose derivative {name}")
++        values = np.asarray(tensor.detach().cpu().numpy(), dtype=float)
++        if values.ndim != 4 or values.shape[:2] != (1, 1):
++            raise ValueError("invalid pose trajectory shape")
++        order = [names.index(joint) for joint in native.joint_names]
++        arrays.append(values[0, 0, :len(native.positions_rad)][:, order].copy())
++    if not np.array_equal(arrays[0], np.asarray(native.positions_rad)):
++        raise ValueError("pose positions disagree with SDK buffers")
++    return RawTrajectory(**asdict(native), velocities_rad_s=arrays[1], accelerations_rad_s2=arrays[2])
++
++
+ def build_execution_phases(raw_phases, scale):
+     """Insert execution points for one selected grasp; do not run collision checks."""
+     phases = {}
+-    for name in ("approach", "grasp", "lift"):
++    for name in raw_phases:
+         raw = raw_phases[name]
+         positions = raw["positions_rad"]
+         dt = raw["interpolation_dt_s"]
+         command = quintic_hermite_points(
+             positions, raw["velocities_rad_s"], raw["accelerations_rad_s2"],
+--- baseline/src/jev_mujoco/carrying.py
++++ current/src/jev_mujoco/carrying.py
+@@ -0,0 +1,234 @@
++"""Measured TCP-frame carrying geometry and scoped collision configuration."""
++
++import hashlib
++import json
++import xml.etree.ElementTree as ET
++from copy import deepcopy
++from dataclasses import dataclass
++
++import numpy as np
++
++
++@dataclass(frozen=True)
++class CarryingBinding:
++    arm: str
++    owner_id: str
++    observation_id: str
++    generation: int
++    scene_token: str
++    instance_id: str
++    frame: str
++    state: str
++    points_tool_m: tuple
++    uncertainty_m: float
++    coverage: float
++
++    @classmethod
++    def from_mapping(cls, payload, *, scene, arm):
++        if not isinstance(payload, dict):
++            raise TypeError("carrying_binding must contain measured holding evidence")
++        required = set(cls.__dataclass_fields__)
++        if set(payload) != required:
++            raise ValueError("carrying_binding fields are invalid")
++        if arm not in ("A", "B") or payload["arm"] != arm:
++            raise ValueError("carrying arm does not match request")
++        for name in ("owner_id", "observation_id", "scene_token", "instance_id"):
++            if not isinstance(payload[name], str) or not payload[name]:
++                raise ValueError(f"carrying {name} must be nonempty")
++        if type(payload["generation"]) is not int or payload["generation"] < 0:
++            raise ValueError("carrying generation is invalid")
++        for field in ("scene_token", "observation_id", "generation"):
++            if payload[field] != scene.get(field):
++                raise ValueError(f"carrying {field} is stale")
++        if payload["instance_id"] != scene.get("target_id"):
++            raise ValueError("carrying selected instance changed")
++        if payload["frame"] != "tool" or payload["state"] not in ("held", "preflight"):
++            raise ValueError("carrying must be held or preflight in the TCP tool frame")
++        points = np.asarray(payload["points_tool_m"], dtype=float)
++        if points.ndim != 2 or points.shape[1] != 3 or not 2 <= len(points) <= 20000 or not np.isfinite(points).all():
++            raise ValueError("carrying requires finite measured tool points")
++        uncertainty = float(payload["uncertainty_m"])
++        coverage = float(payload["coverage"])
++        if not np.isfinite([uncertainty, coverage]).all() or not 0 <= uncertainty <= .1 or not 0 < coverage <= 1:
++            raise ValueError("carrying uncertainty or coverage is invalid")
++        if np.max(np.ptp(points, axis=0)) <= 0 or np.max(np.abs(points)) > 1:
++            raise ValueError("carrying measured envelope is empty or out of bounds")
++        return cls(**(payload | {"points_tool_m": tuple(map(tuple, points.tolist())),
++                                 "uncertainty_m": uncertainty, "coverage": coverage}))
++
++
++def carrying_spheres(binding, *, maximum_spheres=256):
++    """Cover the entire measured bounding volume; never decimate surface points.
++
++    Filling the measured bounds is conservative for unseen volume inside those
++    bounds. It cannot recover surfaces outside the observed bounds; the caller
++    must reject insufficient perception and provide its measured uncertainty.
++    """
++    points = np.asarray(binding.points_tool_m)
++    low, high = points.min(axis=0), points.max(axis=0)
++    extent = high - low
++    counts = np.maximum(1, np.ceil(extent / .02).astype(int))
++    while int(np.prod(counts)) > maximum_spheres:
++        axis = int(np.argmax(counts))
++        counts[axis] -= 1
++    widths = extent / counts
++    radius = float(np.linalg.norm(widths) * .5 + binding.uncertainty_m + .001)
++    axes = [low[i] + (np.arange(counts[i]) + .5) * widths[i] for i in range(3)]
++    centers = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1).reshape(-1, 3)
++    return np.column_stack((centers, np.full(len(centers), radius))).tolist()
++
++
++def create_carrying_robot_config(robot_config, binding):
++    """Derive the SDK's documented fixed extra-link configuration per request."""
++    result = deepcopy(robot_config)
++    kin = result["robot_cfg"]["kinematics"]
++    link = f"jev_carried_object_{binding.arm}"
++    tool = "TCP_Link_L" if binding.arm == "A" else "TCP_Link_R"
++    prefix = "gripL_" if binding.arm == "A" else "gripR_"
++    kin.setdefault("extra_links", {})[link] = {
++        "fixed_transform": [0, 0, 0, 1, 0, 0, 0], "joint_name": f"jev_carry_joint_{binding.arm}",
++        "joint_type": "FIXED", "link_name": link, "parent_link_name": tool,
++    }
++    # YAML aliases may share collision_link_names with mesh_link_names.
++    kin["collision_link_names"] = [*kin["collision_link_names"], link]
++    kin["collision_spheres"][link] = [{"center": row[:3], "radius": row[3]} for row in carrying_spheres(binding)]
++    buffers = kin.setdefault("collision_sphere_buffer", {})
++    if isinstance(buffers, dict):
++        buffers[link] = 0.
++    kin.setdefault("self_collision_buffer", {})[link] = 0.
++    ignored = kin.setdefault("self_collision_ignore", {})
++    # Measured grasp contact is expected only against the owning fingers/TCP.
++    # Keep all arm, peer-arm, camera and environmental collision checks.
++    contacts = [name for name in kin["collision_link_names"] if name == tool or name.startswith(prefix)]
++    ignored[link] = contacts
++    for contact in contacts:
++        ignored.setdefault(contact, []).append(link)
++    return result, link
++
++
++def validate_phase_request(payload):
++    phase = payload.get("phase")
++    if phase not in ("lift", "approach", "place", "close", "open", "retreat"):
++        raise ValueError("unknown carrying validation phase")
++    carrying = payload.get("carrying_binding")
++    if phase == "retreat" and carrying is not None:
++        raise ValueError("retreat requires detached carrying geometry")
++    if phase in ("lift", "approach", "place", "open") and carrying is None:
++        raise ValueError(f"{phase} requires a measured carrying binding")
++    if phase in ("close", "open"):
++        feedback = payload.get("gripper_joint_positions_rad")
++        if not isinstance(feedback, dict) or set(feedback) != {"A", "B"}:
++            raise ValueError("gripper driver feedback is required")
++        values = [*feedback.values(), payload.get("gripper_start_position_rad"), payload.get("gripper_end_position_rad")]
++        try:
++            if not np.isfinite(np.asarray(values, dtype=float)).all():
++                raise ValueError("gripper driver values must be finite")
++        except (ValueError, TypeError) as error:
++            raise ValueError("gripper driver values must be finite") from error
++    return phase
++
++
++def configure_gripper_feedback(robot_config, feedback, urdf_path):
++    """Lock authored drivers at measured radians; SDK resolves their mimics."""
++    result = deepcopy(robot_config)
++    if feedback is None:
++        return result
++    if not isinstance(feedback, dict) or set(feedback) != {"A", "B"}:
++        raise ValueError("gripper feedback must contain A and B driver radians")
++    joints = {joint.get("name"): joint for joint in ET.parse(urdf_path).getroot().findall("joint")}
++    for arm, prefix in (("A", "gripL_"), ("B", "gripR_")):
++        driver = prefix + "finger_joint"
++        value = float(feedback[arm])
++        limit = joints[driver].find("limit")
++        if not np.isfinite(value) or not float(limit.get("lower")) <= value <= float(limit.get("upper")):
++            raise ValueError("gripper driver feedback exceeds authored limits")
++        result["robot_cfg"]["kinematics"]["lock_joints"][driver] = value
++    return result
++
++
++def check_command_path(runtime, planner, payload, binding):
++    """Query public cuRobo checker for measured grippers and carried body.
++
++    The owning fingers' complete authored sweep is checked against the full
++    world for open/close. Exact measured geometry supplies self collision;
++    cross-time union geometry is never used for self collision.
++    """
++    import torch
++    import yaml
++    from curobo.collision_checking import RobotCollisionChecker, RobotCollisionCheckerCfg
++    from tianji_curobo.curobo_robot_config import ARM_CONFIG_SPECS, create_dual_arm_robot_config
++    from tianji_curobo.grasp_lift import collision_samples
++    from tianji_curobo.grasp_lift_compute import collision_verdict
++    from tianji_curobo.gripper_collision_envelope import create_gripper_closing_envelope
++
++    phase = validate_phase_request(payload)
++    positions = np.asarray(payload.get("positions_rad"), dtype=float)
++    names = payload.get("joint_names")
++    expected_names = ARM_CONFIG_SPECS[payload["arm"]]["joint_names"]
++    if (positions.ndim != 2 or positions.shape[1] != 7 or not 1 <= len(positions) <= 10000
++            or not np.isfinite(positions).all() or not isinstance(names, (list, tuple))
++            or len(names) != 7 or set(names) != set(expected_names)):
++        raise ValueError("actual command positions and named joint order are invalid")
++    peer = np.asarray(payload.get("other_joints_deg"), dtype=float)
++    if peer.shape != (7,) or not np.isfinite(peer).all():
++        raise ValueError("stationary arm telemetry is required")
++    feedback = payload.get("gripper_joint_positions_rad")
++    if feedback is None:
++        raise ValueError("actual measured gripper driver feedback is required")
++    original = yaml.safe_load(runtime._robot_config_path.read_bytes())
++    robot = create_dual_arm_robot_config(original, urdf_path=runtime._urdf_path,
++                                         asset_root_path=runtime._asset_root_path)
++    robot = configure_gripper_feedback(robot, feedback, runtime._urdf_path)
++    if binding is not None:
++        robot, _carried_link = create_carrying_robot_config(robot, binding)
++    exact = RobotCollisionChecker(RobotCollisionCheckerCfg.load_from_config(
++        robot_config=robot, device_cfg=planner.device_cfg,
++        scene_collision_checker=planner.scene_collision_checker,
++        collision_activation_distance=runtime.planning_settings.trajectory_collision_clearance_m))
++    if exact.collision_cost is None or exact.self_collision_cost is None:
++        raise ValueError("required world and self collision terms are unavailable")
++    sweep = None
++    if phase in ("close", "open"):
++        for value in (payload["gripper_start_position_rad"], payload["gripper_end_position_rad"]):
++            configure_gripper_feedback(robot, feedback | {payload["arm"]: value}, runtime._urdf_path)
++        envelope = create_gripper_closing_envelope(robot, payload["arm"], runtime._urdf_path)
++        sweep = RobotCollisionChecker(RobotCollisionCheckerCfg.load_from_config(
++            robot_config=envelope, device_cfg=planner.device_cfg,
++            scene_collision_checker=planner.scene_collision_checker,
++            collision_activation_distance=runtime.planning_settings.trajectory_collision_clearance_m))
++    ordered_active = positions[:, [names.index(name) for name in expected_names]]
++    samples, source_indices = collision_samples(ordered_active)
++    stationary = np.repeat([np.deg2rad(peer)], len(samples), axis=0)
++    both = np.concatenate((samples, stationary) if payload["arm"] == "A" else (stationary, samples), axis=1)
++    all_names = ARM_CONFIG_SPECS["A"]["joint_names"] + ARM_CONFIG_SPECS["B"]["joint_names"]
++    if set(exact.kinematics.joint_names) != set(all_names):
++        raise ValueError("collision checker must retain both robot arm chains")
++    ordered = both[:, [all_names.index(name) for name in exact.kinematics.joint_names]]
++    valid = []
++    with torch.no_grad():
++        for offset in range(0, len(ordered), 128):
++            chunk = ordered[offset:offset + 128]
++            q = torch.as_tensor(chunk[None], **planner.device_cfg.as_torch_dict()).contiguous()
++            state = exact.get_kinematics(q)
++            world = exact.get_collision_distance(state).detach().cpu().numpy().copy()
++            self_cost = exact.get_self_collision_distance(state.robot_spheres).detach().cpu().numpy().copy()
++            bounds = exact.get_bound(q).detach().cpu().numpy().copy()
++            free = np.asarray(collision_verdict(world, self_cost, bounds, len(chunk)))
++            if sweep is not None:
++                if sweep.kinematics.joint_names != exact.kinematics.joint_names:
++                    raise ValueError("gripper sweep joint order differs")
++                cost = sweep.get_collision_distance(sweep.get_kinematics(q)).detach().cpu().numpy().copy()
++                zeros = np.zeros((1, len(chunk), 1))
++                free &= collision_verdict(cost, zeros, zeros, len(chunk))
++            valid.extend(free.tolist())
++    invalid = next((index for index, free in enumerate(valid) if not free), None)
++    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, allow_nan=False, separators=(",", ":")).encode()).hexdigest()
++    return {"ok": True, "collision_free": invalid is None, "phase": phase,
++            "checked_point_count": len(samples), "command_point_count": len(positions),
++            "first_invalid_index": None if invalid is None else source_indices[invalid],
++            "scene_token": payload["scene_token"], "binding_sha256": digest,
++            "attached": binding is not None, "carrying_owner_id": None if binding is None else binding.owner_id,
++            "geometry_coverage": "measured_bounding_volume_with_uncertainty", "full_object_coverage": False,
++            "gripper_joint_positions_rad": dict(feedback), "gripper_configuration_source": "measured_feedback",
++            "gripper_sweep_checked": sweep is not None, "max_joint_check_step_rad": np.deg2rad(.25),
++            "validation_method": "public_RobotCollisionChecker_with_fixed_carried_link"}
+--- baseline/src/jev_mujoco/perception_mapping.py
++++ current/src/jev_mujoco/perception_mapping.py
+@@ -0,0 +1,65 @@
++"""Registered RGBD transport into the frozen semantic GPU Mapper adapter."""
++
++import hashlib
++import json
++import sys
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "vendor"))
++from tianji_curobo.semantic_esdf_transport import decode_semantic_esdf_request
++
++
++def decode_mapping_payload(payload):
++    values = {name: value for name, value in payload.items() if name not in ("planning_settings", "exclusion_state")}
++    decoded = decode_semantic_esdf_request(values)
++    selected = decoded["confirmed_instance_id"]
++    observation = decoded["observation_set_id"]
++    generation = decoded["selection_generation"]
++    if not isinstance(observation, str) or not observation or type(generation) is not int or generation < 1:
++        raise ValueError("mapping observation identity or generation is invalid")
++    views = decoded["views"]
++    sequences = {view.get("stereo_sequence") for view in views.values()}
++    joints = [view.get("robot_joints_at_capture") for view in views.values()]
++    if len(sequences) != 1 or any(value != joints[0] for value in joints[1:]):
++        raise ValueError("mapping views must share one frozen capture")
++    instance_ids = set().union(*(set(view["instance_masks"]) for view in views.values()))
++    if selected not in instance_ids:
++        raise ValueError("selected instance is absent from registered RGBD masks")
++    exclusion = payload.get("exclusion_state", "selected")
++    if exclusion not in ("selected", "held", "released"):
++        raise ValueError("invalid mapping exclusion_state")
++    content = json.dumps(values, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
++    token = "rgbd:" + hashlib.sha256(content + exclusion.encode()).hexdigest()[:24]
++    identity = {"scene_token": token, "observation_id": observation, "generation": generation,
++                "target_id": selected, "exclusion_state": exclusion,
++                "disabled_obstacle_names": () if exclusion == "released" else (f"semantic_instance::{selected}",),
++                "collision_world_source": "measured_semantic_esdf", "source": "registered_rgbd"}
++    return decoded, identity
++
++
++class PerceptionMapper:
++    def __init__(self, segmenter_boundary):
++        from curobo.scene import Scene
++        from tianji_curobo.fixed_esdf_mapping import SemanticEsdfCandidateBuilder
++        from tianji_curobo.volumetric_mapper import CuroboVolumetricMapperBoundary
++
++        self.mapper = CuroboVolumetricMapperBoundary(robot_segmenter_boundary=segmenter_boundary)
++        self.builder = SemanticEsdfCandidateBuilder(robot_segmenter_boundary=segmenter_boundary,
++                       mapper_boundary=self.mapper, scene_type=Scene, robot_spheres=segmenter_boundary.robot_spheres)
++
++    def build(self, decoded):
++        self.mapper.reset_capture()
++        try:
++            candidate = self.builder.build(decoded)
++            grids = list(self.mapper.scene_voxel_grids)
++            model = {name: dict(value) for name, value in candidate.scene_model.items()}
++            model["voxel"] = dict(model["voxel"])
++            # Capacity includes the measured background grid, even though the
++            # frozen builder stores only instance grid metadata in scene_model.
++            for grid in grids:
++                model["voxel"].setdefault(grid.name, {"pose": list(grid.pose), "dims": list(grid.dims),
++                    "voxel_size": float(grid.voxel_size)})
++            return candidate, grids, model
++        except Exception:
++            self.mapper.reset_capture()
++            raise
+--- baseline/tests/test_carrying.py
++++ current/tests/test_carrying.py
+@@ -0,0 +1,65 @@
++from copy import deepcopy
++
++import numpy as np
++import pytest
++
++
++def binding(**updates):
++    return {"arm": "A", "owner_id": "hold-1", "observation_id": "rgbd-2",
++            "generation": 2, "scene_token": "scene-2", "instance_id": "sam-source",
++            "frame": "tool", "state": "held", "points_tool_m": [[-.03, -.02, -.04], [.03, .02, .04]],
++            "uncertainty_m": .004, "coverage": .6} | updates
++
++
++def test_carrying_rejects_stale_owner_frame_or_observation():
++    from jev_mujoco.carrying import CarryingBinding
++
++    scene = {"scene_token": "scene-2", "observation_id": "rgbd-2", "generation": 2, "target_id": "sam-source"}
++    valid = CarryingBinding.from_mapping(binding(), scene=scene, arm="A")
++    assert valid.owner_id == "hold-1"
++    for changes in ({"generation": 1}, {"arm": "B"}, {"scene_token": "old"},
++                    {"observation_id": "old"}, {"frame": "world"}, {"owner_id": ""},
++                    {"points_tool_m": [[float("nan"), 0, 0]]}):
++        with pytest.raises(ValueError):
++            CarryingBinding.from_mapping(binding(**changes), scene=scene, arm="A")
++
++
++def test_measured_envelope_covers_bounding_volume_and_uncertainty():
++    from jev_mujoco.carrying import CarryingBinding, carrying_spheres
++
++    value = CarryingBinding.from_mapping(binding(), scene={"scene_token": "scene-2", "observation_id": "rgbd-2",
++                                                          "generation": 2, "target_id": "sam-source"}, arm="A")
++    spheres = np.asarray(carrying_spheres(value))
++    corners = np.array([[x, y, z] for x in (-.03, .03) for y in (-.02, .02) for z in (-.04, .04)])
++    distance = np.linalg.norm(corners[:, None] - spheres[None, :, :3], axis=-1)
++    assert np.all(np.min(distance - spheres[None, :, 3], axis=1) <= -.004 + 1e-12)
++    assert 1 <= len(spheres) <= 256
++
++
++def test_configured_carried_link_preserves_robot_and_only_ignores_hold_contacts():
++    from jev_mujoco.carrying import CarryingBinding, create_carrying_robot_config
++
++    robot = {"robot_cfg": {"kinematics": {"tool_frames": ["TCP_Link_L"],
++             "collision_link_names": ["Link1_L", "TCP_Link_L", "gripL_Base", "gripR_Base"],
++             "collision_spheres": {"Link1_L": [{"center": [0, 0, 0], "radius": .05}]},
++             "self_collision_ignore": {"Link1_L": []}}}}
++    original = deepcopy(robot)
++    value = CarryingBinding.from_mapping(binding(), scene={"scene_token": "scene-2", "observation_id": "rgbd-2",
++                                                          "generation": 2, "target_id": "sam-source"}, arm="A")
++    configured, link = create_carrying_robot_config(robot, value)
++    kin = configured["robot_cfg"]["kinematics"]
++    assert robot == original
++    assert kin["extra_links"][link]["parent_link_name"] == "TCP_Link_L"
++    assert kin["collision_spheres"][link]
++    assert link not in kin["self_collision_ignore"]["Link1_L"]
++    assert link not in kin["self_collision_ignore"].get("gripR_Base", [])
++
++
++def test_retreat_never_accepts_attachment_and_open_requires_driver_feedback():
++    from jev_mujoco.carrying import validate_phase_request
++
++    with pytest.raises(ValueError, match="retreat"):
++        validate_phase_request({"phase": "retreat", "carrying_binding": binding()})
++    with pytest.raises(ValueError, match="gripper"):
++        validate_phase_request({"phase": "open", "carrying_binding": binding()})
++
+--- baseline/tests/test_perception_mapping.py
++++ current/tests/test_perception_mapping.py
+@@ -0,0 +1,42 @@
++import numpy as np
++import pytest
++
++
++def wire():
++    from tianji_curobo.semantic_esdf_transport import encode_semantic_esdf_request
++
++    eye = np.eye(4).tolist()
++    views = {camera: {"camera_id": camera, "stereo_sequence": 4,
++             "depth_left_m": np.ones((2, 3), dtype=np.float32),
++             "valid_left_mask": np.ones((2, 3), dtype=np.uint8),
++             "left_intrinsics": [[4, 0, 1], [0, 4, .5], [0, 0, 1]],
++             "T_base_left_camera": eye, "robot_joints_at_capture": {"A": [0.] * 7, "B": [0.] * 7},
++             "rgb_size": [3, 2], "rgb_intrinsics": [[4, 0, 1], [0, 4, .5], [0, 0, 1]],
++             "left_to_rgb": eye, "instance_masks": {"source": np.ones((2, 3), dtype=np.uint8)}}
++             for camera in ("1", "2", "3")}
++    return encode_semantic_esdf_request({"observation_set_id": "rgbd-4", "sam3_generation": 4,
++                                       "confirmed_instance_id": "source", "selection_generation": 4, "views": views})
++
++
++def test_registered_transport_preserves_pixels_and_release_enables_all_layers():
++    from jev_mujoco.perception_mapping import decode_mapping_payload
++
++    decoded, identity = decode_mapping_payload(wire() | {"planning_settings": {}, "exclusion_state": "released"})
++    assert decoded["views"]["3"]["depth_left_m"].shape == (2, 3)
++    assert decoded["views"]["3"]["depth_left_m"].tolist() == [[1., 1., 1.], [1., 1., 1.]]
++    assert identity["observation_id"] == "rgbd-4" and identity["generation"] == 4
++    assert identity["disabled_obstacle_names"] == ()
++
++
++def test_mapping_rejects_missing_selected_instance_and_mismatched_capture():
++    from jev_mujoco.perception_mapping import decode_mapping_payload
++
++    payload = wire()
++    payload["confirmed_instance_id"] = "hidden-truth-id"
++    with pytest.raises(ValueError, match="selected"):
++        decode_mapping_payload(payload)
++    payload = wire()
++    payload["views"]["1"]["stereo_sequence"] = 5
++    with pytest.raises(ValueError, match="capture"):
++        decode_mapping_payload(payload)
++
+--- baseline/tests/test_place_service.py
++++ current/tests/test_place_service.py
+@@ -0,0 +1,156 @@
++from dataclasses import asdict
++from types import SimpleNamespace
++
++import pytest
++from test_carrying import binding
++
++from jev_mujoco import geometry_service
++from jev_mujoco.planning_settings import PlanningSettings
++
++
++def test_place_maps_independent_offsets_and_marks_native_retreat_provisional():
++    from tianji_curobo.contracts import NativePlacePlan, NativeTrajectory, PlanPlaceRequest
++
++    settings = PlanningSettings(place_approach_offset_m=.12, place_retreat_offset_m=.15)
++    phase = NativeTrajectory(positions_rad=((0.,) * 7, (.1,) * 7), joint_names=tuple(f"Joint{i}_L" for i in range(1, 8)),
++                             interpolation_dt_s=.02, planning_time_s=.1, position_error_m=0., rotation_error_rad=0., scene_token="scene-2")
++    class Runtime:
++        geometry_solver_profile = settings.solver_payload()
++        def __init__(self):
++            self.effective_config = {"A": {"plan": {"max_batch_size": 1}}}
++        def _scene_snapshot_unlocked(self):
++            return {"scene_token": "scene-2", "observation_id": "rgbd-2", "generation": 2, "target_id": "sam-source"}
++        def configure_planning(self, settings):
++            pass
++        def plan_place_scoped(self, request, carrying):
++            assert isinstance(request, PlanPlaceRequest)
++            assert request.approach_offset_m == .12 and request.approach_in_tool_frame is False
++            assert request.lift_offset_m == .15 and request.lift_in_tool_frame is False
++            return NativePlacePlan.create(approach=phase, place=phase, retreat=phase), {"optimizer_attachment": True}
++    payload = {"arm": "A", "start_joints_deg": [0.] * 7, "other_joints_deg": [0.] * 7,
++               "goal_position_m": [.5, 0, .7], "goal_quaternion_wxyz": [1, 0, 0, 0],
++               "scene_token": "scene-2", "planning_settings": settings.model_dump(), "carrying_binding": binding()}
++    result = geometry_service.run_operation(Runtime(), "/tools/plan_place", payload)
++    assert result["retreat_provisional"] is True and result["retreat_requires_replan"] is True
++    assert result["phases"]["place"]["positions_rad"] == asdict(phase)["positions_rad"]
++    assert result["collision_evidence"]["optimizer_attachment"] is True
++
++
++def test_detached_pose_request_rejects_old_attachment():
++    runtime = geometry_service.GeometryRuntime()
++    with pytest.raises(ValueError, match="detach"):
++        geometry_service.run_operation(runtime, "/tools/plan_to_pose", {"carrying_binding": binding()})
++
++
++def test_reset_clear_invalidates_scene_and_destroys_all_carried_backend_references():
++    runtime = geometry_service.GeometryRuntime()
++    runtime.geometry_scene = {"scene_token": "old"}
++    runtime.geometry_model = {"voxel": {}}
++    destroyed = []
++    runtime._compound_backends["A"] = SimpleNamespace(destroy=lambda: destroyed.append(True))
++    result = geometry_service.run_operation(runtime, "/carrying/clear", {})
++    assert result["attached"] is False
++    assert destroyed == [True] and not runtime._compound_backends
++    with pytest.raises(ValueError, match="RGBD"):
++        runtime._scene_snapshot_unlocked()
++
++
++def test_compound_derivatives_survive_later_sdk_buffer_reuse():
++    import numpy as np
++    from test_trajectory_postprocessing import Tensor
++    from tianji_curobo.contracts import NativePlacePlan, NativeTrajectory
++
++    from jev_mujoco.trajectory_postprocessing import add_place_derivatives, build_execution_phases
++
++    phase = NativeTrajectory(positions_rad=((0.,) * 7, (.1,) * 7), joint_names=tuple(f"joint{i}" for i in range(7)),
++                             interpolation_dt_s=.02, planning_time_s=.1, position_error_m=0., rotation_error_rad=0.)
++    q = np.array([[[[0.] * 7, [.1] * 7]]])
++    trajectory = SimpleNamespace(position=Tensor(q), velocity=Tensor(np.ones_like(q)),
++                                 acceleration=Tensor(np.zeros_like(q)), joint_names=list(phase.joint_names))
++    raw = SimpleNamespace(**{f"{name}_interpolated_trajectory": trajectory for name in ("approach", "grasp", "lift")})
++    retained = add_place_derivatives(NativePlacePlan.create(approach=phase, place=phase, retreat=phase), raw)
++    trajectory.velocity.values[:] = 99
++    assert retained.place.velocities_rad_s == ((1.,) * 7,) * 2
++    commands = build_execution_phases({name: asdict(getattr(retained, name)) for name in ("approach", "place", "retreat")}, 3)
++    assert set(commands) == {"approach", "place", "retreat"}
++    assert commands["place"]["raw_point_count"] == 2 and commands["place"]["command_point_count"] == 4
++
++
++def test_single_compound_builder_reaches_public_solver_with_carried_geometry(monkeypatch):
++    import sys
++    from types import ModuleType
++
++    from test_backend_builder import ConfigFactory, profile
++
++    from jev_mujoco import backend_builder
++    from jev_mujoco.carrying import CarryingBinding
++
++    constructed = []
++    class BoundaryReached(Exception):
++        pass
++    class Planner:
++        def __init__(self, config):
++            constructed.append(config)
++            self.device_cfg = object()
++            self.scene_collision_checker = object()
++    class CheckerConfig:
++        @staticmethod
++        def load_from_config(**kwargs):
++            assert "jev_carried_object_A" in kwargs["robot_config"]["robot_cfg"]["kinematics"]["collision_spheres"]
++            raise BoundaryReached
++    modules = {"curobo": {}, "torch": {},
++        "curobo.collision_checking": {"RobotCollisionChecker": object, "RobotCollisionCheckerCfg": CheckerConfig},
++        "curobo.inverse_kinematics": {"InverseKinematics": Planner, "InverseKinematicsCfg": ConfigFactory},
++        "curobo.kinematics": {"Kinematics": object, "KinematicsCfg": object},
++        "curobo.motion_planner": {"MotionPlannerCfg": ConfigFactory}, "curobo.scene": {"Cuboid": object},
++        "curobo.types": dict.fromkeys(("GoalToolPose", "JointState", "Pose", "ToolPoseCriteria"), object),
++        "tianji_curobo.grasp_planner": {"GraspBatchMotionPlanner": Planner, "GraspMotionPlanner": Planner}}
++    for name, exports in modules.items():
++        module = ModuleType(name)
++        module.__dict__.update(exports)
++        monkeypatch.setitem(sys.modules, name, module)
++    monkeypatch.setattr(backend_builder, "_graph_planner_rollout_config", dict)
++    root = backend_builder.ROOT
++    scene = {"scene_token": "scene-2", "observation_id": "rgbd-2", "generation": 2, "target_id": "sam-source"}
++    runtime = SimpleNamespace(planning_settings=profile(), _robot_config_path=root / "resources/curobo/marvin_gui_dual.yml",
++        _urdf_path=root / "assets/marvin_urdf/marvin_with_grippers.urdf", _asset_root_path=root / "assets",
++        _excluded_collision_links=(), _scene_model=None, _collision_cache={}, gripper_feedback=None,
++        carrying_binding=CarryingBinding.from_mapping(binding(), scene=scene, arm="A"))
++    with pytest.raises(BoundaryReached):
++        backend_builder.build_geometry_backend(runtime, "A", batch_size=None, ik_only=False)
++    assert len(constructed) == 1
++    assert constructed[0].max_batch_size == 1
++    assert constructed[0].ik_solver_config.robot is constructed[0].robot
++
++
++def test_pinned_single_planner_forwards_only_supported_public_arguments():
++    from test_backend_builder import profile
++
++    from jev_mujoco.backend_builder import SinglePlanningOverrides
++
++    class PinnedPlanner:
++        def plan_pose(self, goal, state, use_implicit_goal=True, max_attempts=5, enable_graph_attempt=1):
++            return {"max_attempts": max_attempts, "enable_graph_attempt": enable_graph_attempt}
++    class Configured(SinglePlanningOverrides, PinnedPlanner):
++        pass
++    planner = Configured()
++    planner.planning_settings = profile(plan_max_attempts=3, finetune_attempts=7)
++    assert planner.plan_pose("goal", "state") == {"max_attempts": 3, "enable_graph_attempt": 1}
++
++
++def test_attachment_detach_error_still_releases_public_planner_buffers():
++    from jev_mujoco.backend_builder import ValidatedSingleBackend
++
++    destroyed = []
++    def broken_detach(**kwargs):
++        raise RuntimeError("detach failed")
++    backend = ValidatedSingleBackend.__new__(ValidatedSingleBackend)
++    backend.carrying_link = "jev_carried_object_A"
++    backend.motion_planner = SimpleNamespace(attachment_manager=SimpleNamespace(detach=broken_detach),
++                                             destroy=lambda: destroyed.append(True))
++    backend._peer_baseline_inverse_by_link = {}
++    backend._torch = SimpleNamespace()
++    with pytest.raises(RuntimeError, match="detach failed"):
++        backend.destroy()
++    assert destroyed == [True]
++    assert backend.motion_planner is None and backend.carrying_link is None
+--- baseline/tests/carrying_gpu_smoke.py
++++ current/tests/carrying_gpu_smoke.py
+@@ -0,0 +1,176 @@
++"""Run directly inside the pinned, isolated cuRobo image; no robot hardware."""
++
++import json
++
++import numpy as np
++
++
++def main():
++    import torch
++    import yaml
++    from curobo.collision_checking import RobotCollisionChecker, RobotCollisionCheckerCfg
++    from curobo.kinematics import Kinematics, KinematicsCfg
++    from curobo.types import JointState
++    from tianji_curobo.curobo_robot_config import create_dual_arm_robot_config
++    from tianji_curobo.curobo_service import materialize_urdf
++    from tianji_curobo.gripper_collision_envelope import create_gripper_closing_envelope
++
++    from jev_mujoco.carrying import CarryingBinding, configure_gripper_feedback, create_carrying_robot_config
++    from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
++    from jev_mujoco.planning_settings import PlanningSettings
++
++    assert sdk_identity()[0] == "8e734f3ced1df898990bcd92de40abce475907db"
++    urdf = materialize_urdf(ROOT / "assets/marvin_urdf/marvin_with_grippers.urdf",
++        marvin_meshes=ROOT / "assets/marvin_urdf/meshes", rag_meshes=ROOT / "assets/marvin_urdf/rag100_050/meshes")
++    runtime = GeometryRuntime(urdf_path=urdf, asset_root_path=urdf.parent)
++    scene = {"scene_token": "gpu-test", "observation_id": "synthetic-test", "generation": 1,
++             "target_id": "surface", "disabled_obstacle_names": ()}
++    binding = CarryingBinding.from_mapping({"arm": "A", "owner_id": "test-only", "observation_id": "synthetic-test",
++        "generation": 1, "scene_token": "gpu-test", "instance_id": "surface", "frame": "tool", "state": "preflight",
++        "points_tool_m": [[.23, -.02, -.02], [.27, .02, .02]], "uncertainty_m": .002, "coverage": .5}, scene=scene, arm="A")
++    runtime.geometry_scene = scene
++    runtime.geometry_grids = []
++    runtime.geometry_model = {"cuboid": {}, "voxel": {}}
++    runtime.geometry_solver_profile = runtime.planning_settings.solver_payload()
++    report = {"sdk": sdk_identity()[0], "torch": torch.__version__, "cuda": torch.version.cuda}
++    with runtime.carrying_scope(binding, {"A": 0., "B": 0.}):  # noqa: SIM117
++        with runtime.gpu_lock:
++            runtime._prepare_scene_cache_unlocked()
++            backend = runtime._compound_backend_unlocked("A", .01, .03)
++            q = backend.motion_planner.default_joint_state.position.reshape(-1).detach().cpu().numpy()
++            backend.attach_measured_carrying(binding, np.rad2deg(q))
++            planner = backend.motion_planner
++            manager = planner.attachment_manager
++            indices = manager.kinematics_params.get_sphere_index_from_link_name("jev_carried_object_A")
++            spheres = manager.kinematics_params.link_spheres[0, indices].detach().cpu().numpy()
++            assert len(spheres) > 0 and np.all(spheres[:, 3] > 0)
++            report["optimizer_attachment"] = runtime.effective_config["A"]["plan"]["optimizer_attachment"]
++            report["sphere_count"] = len(spheres)
++            original = yaml.safe_load(runtime._robot_config_path.read_bytes())
++            robot = create_dual_arm_robot_config(original, urdf_path=urdf, asset_root_path=urdf.parent)
++            kinematics = Kinematics(KinematicsCfg.from_data_dict(robot, tool_frames=["TCP_Link_L"], device_cfg=planner.device_cfg))
++            both = np.concatenate((q, q))
++            joint_state = JointState.from_position(torch.as_tensor(both[None], **planner.device_cfg.as_torch_dict()),
++                                                   joint_names=kinematics.joint_names)
++            pose = kinematics.compute_kinematics(joint_state).tool_poses.get_link_pose("TCP_Link_L")
++            point = pose.transform_points(torch.as_tensor([[.25, 0., 0.]], **planner.device_cfg.as_torch_dict())).reshape(-1, 3)[0]
++            world = {"cuboid": {"bin_wall": {"pose": [*point.detach().cpu().tolist(), 1, 0, 0, 0], "dims": [.025, .025, .025]}}}
++            def checker(config):
++                return RobotCollisionChecker(RobotCollisionCheckerCfg.load_from_config(robot_config=config,
++                    device_cfg=planner.device_cfg, scene_model=world, collision_activation_distance=.01))
++            robot_checker = checker(robot)
++            carried_robot, _link = create_carrying_robot_config(robot, binding)
++            carried_checker = checker(carried_robot)
++            positions = torch.as_tensor(both[None, None], **planner.device_cfg.as_torch_dict())
++            robot_cost = robot_checker.get_collision_distance(robot_checker.get_kinematics(positions)).detach().cpu().numpy()
++            carried_cost = carried_checker.get_collision_distance(carried_checker.get_kinematics(positions)).detach().cpu().numpy()
++            assert np.all(robot_cost == 0), robot_cost
++            assert np.any(carried_cost > 0), carried_cost
++            report["robot_clears_wall"] = True
++            report["carried_body_hits_wall"] = True
++    assert runtime.carrying_binding is None and not runtime._compound_backends
++    report["scoped_detach_cleanup"] = True
++    settings = PlanningSettings(place_approach_offset_m=.06, place_retreat_offset_m=.06)
++    runtime.geometry_solver_profile = settings.solver_payload()
++    matrix = pose.get_matrix().reshape(-1, 4, 4)[0].detach().cpu().numpy()
++    goal_position = matrix[:3, 3].copy()
++    goal_position[2] += .03
++    result = run_operation(runtime, "/tools/plan_place", {
++        "arm": "A", "start_joints_deg": np.rad2deg(q).tolist(), "other_joints_deg": np.rad2deg(q).tolist(),
++        "goal_position_m": goal_position.tolist(), "goal_quaternion_wxyz": pose.quaternion.reshape(-1, 4)[0].detach().cpu().tolist(),
++        "scene_token": "gpu-test", "planning_settings": settings.model_dump(),
++        "carrying_binding": {name: getattr(binding, name) for name in binding.__dataclass_fields__},
++        "gripper_joint_positions_rad": {"A": 0., "B": 0.}})
++    assert result["collision_evidence"]["optimizer_attachment"] is True
++    assert result["retreat_provisional"] and result["retreat_requires_replan"]
++    for phase in result["phases"].values():
++        assert len(phase["velocities_rad_s"]) == len(phase["positions_rad"])
++        assert len(phase["accelerations_rad_s2"]) == len(phase["positions_rad"])
++    report["native_place_phase_points"] = {name: len(phase["positions_rad"]) for name, phase in result["phases"].items()}
++    report["place_qva_retained"] = True
++    runtime.geometry_model = world | {"voxel": {}}
++    carrying_payload = {name: getattr(binding, name) for name in binding.__dataclass_fields__}
++    check_payload = {"arm": "A", "phase": "place", "positions_rad": [q.tolist(), q.tolist()],
++        "joint_names": backend.joint_names, "other_joints_deg": np.rad2deg(q).tolist(),
++        "scene_token": "gpu-test", "planning_settings": settings.model_dump(),
++        "gripper_joint_positions_rad": {"A": 0., "B": 0.}, "carrying_binding": carrying_payload}
++    checked = run_operation(runtime, "/carrying/validate", check_payload)
++    assert checked["collision_free"] is False and checked["attached"] is True
++    report["actual_command_carried_wall_rejected"] = True
++    runtime.geometry_scene = scene | {"exclusion_state": "released", "disabled_obstacle_names": ()}
++    retreat_payload = check_payload | {"phase": "retreat"}
++    retreat_payload.pop("carrying_binding")
++    checked = run_operation(runtime, "/carrying/validate", retreat_payload)
++    assert checked["collision_free"] is True and checked["attached"] is False
++    report["released_retreat_robot_only"] = True
++    retreat_goal = goal_position.copy()
++    retreat_goal[2] += settings.place_retreat_offset_m
++    fresh = run_operation(runtime, "/tools/plan_to_pose", {
++        "arm": "A", "start_joints_deg": np.rad2deg(result["phases"]["place"]["positions_rad"][-1]).tolist(),
++        "other_joints_deg": np.rad2deg(q).tolist(), "goal_position_m": retreat_goal.tolist(),
++        "goal_quaternion_wxyz": pose.quaternion.reshape(-1, 4)[0].detach().cpu().tolist(),
++        "scene_token": "gpu-test", "planning_settings": settings.model_dump(),
++        "gripper_joint_positions_rad": {"A": 0., "B": 0.}})
++    assert fresh["attached"] is False
++    assert len(fresh["trajectory"]["velocities_rad_s"]) == len(fresh["trajectory"]["positions_rad"])
++    report["fresh_detached_retreat_points"] = len(fresh["trajectory"]["positions_rad"])
++    driver_diagnostics = {}
++    free_driver_positions = []
++    for driver_position in (.1, .2, .3, .4):
++        candidate_robot = configure_gripper_feedback(robot, {"A": driver_position, "B": 0.}, urdf)
++        candidate_robot, _ = create_carrying_robot_config(candidate_robot, binding)
++        candidate_checker = checker(candidate_robot)
++        state = candidate_checker.get_kinematics(positions)
++        self_cost = float(candidate_checker.get_self_collision_distance(state.robot_spheres).max().detach().cpu())
++        driver_diagnostics[str(driver_position)] = self_cost
++        if self_cost == 0:
++            free_driver_positions.append(driver_position)
++    assert free_driver_positions, driver_diagnostics
++    closed_driver = max(free_driver_positions)
++    report["authored_driver_self_costs"] = driver_diagnostics
++    report["tested_closed_driver_rad"] = closed_driver
++    closed_robot = configure_gripper_feedback(robot, {"A": closed_driver, "B": 0.}, urdf)
++    swept_robot = create_gripper_closing_envelope(closed_robot, "A", urdf)
++    def world_spheres(config):
++        model = Kinematics(KinematicsCfg.from_data_dict(config, device_cfg=planner.device_cfg))
++        return model, model.compute_kinematics(joint_state).robot_spheres[0, 0].detach().cpu().numpy()
++    _closed_model, closed_spheres = world_spheres(closed_robot)
++    swept_model, swept_spheres = world_spheres(swept_robot)
++    finger_indices = []
++    for name in robot["robot_cfg"]["kinematics"]["collision_link_names"]:
++        if name.startswith("gripL_") and name != "gripL_Base":
++            finger_indices.extend(swept_model.kinematics_config.get_sphere_index_from_link_name(name).detach().cpu().tolist())
++    best_gap, candidate_point = -np.inf, None
++    for sphere in swept_spheres[finger_indices]:
++        for direction in np.concatenate((np.eye(3), -np.eye(3))):
++            sample = sphere[:3] + sphere[3] * .85 * direction
++            gap = np.min(np.linalg.norm(closed_spheres[:, :3] - sample, axis=1) - closed_spheres[:, 3])
++            if gap > best_gap:
++                best_gap, candidate_point = gap, sample
++    assert best_gap > .02, best_gap
++    runtime.geometry_model = {"cuboid": {"bin_wall": {"pose": [*candidate_point.tolist(), 1, 0, 0, 0], "dims": [.008] * 3}}, "voxel": {}}
++    runtime.geometry_scene = scene
++    closed_payload = check_payload | {"gripper_joint_positions_rad": {"A": closed_driver, "B": 0.}}
++    closed_check = run_operation(runtime, "/carrying/validate", closed_payload)
++    if not closed_check["collision_free"]:
++        world = runtime.geometry_model
++        diagnostic_robot, _ = create_carrying_robot_config(closed_robot, binding)
++        diagnostic_checker = checker(diagnostic_robot)
++        diagnostic_state = diagnostic_checker.get_kinematics(positions)
++        print(json.dumps({"closed_check": closed_check, "candidate_gap_m": float(best_gap),
++            "wall_center": candidate_point.tolist(),
++            "world_cost": diagnostic_checker.get_collision_distance(diagnostic_state).detach().cpu().tolist(),
++            "self_cost": diagnostic_checker.get_self_collision_distance(diagnostic_state.robot_spheres).detach().cpu().tolist(),
++            "bound_cost": diagnostic_checker.get_bound(positions).detach().cpu().tolist()}), flush=True)
++    assert closed_check["collision_free"] is True
++    open_check = run_operation(runtime, "/carrying/validate", closed_payload | {
++        "phase": "open", "gripper_start_position_rad": closed_driver, "gripper_end_position_rad": 0.})
++    assert open_check["collision_free"] is False and open_check["gripper_sweep_checked"] is True
++    report["closed_gripper_clears_wall"] = True
++    report["opening_gripper_wall_rejected"] = True
++    report["maximum_cuda_memory_gib"] = torch.cuda.max_memory_allocated() / 1024**3
++    print(json.dumps(report, indent=2), flush=True)
++
++
++if __name__ == "__main__":
++    main()
+--- baseline/tests/perception_mapping_gpu_smoke.py
++++ current/tests/perception_mapping_gpu_smoke.py
+@@ -0,0 +1,58 @@
++"""Synthetic registered camera fixture validates the real public GPU Mapper."""
++
++import json
++import time
++
++import numpy as np
++
++
++def main():
++    from tianji_curobo.curobo_service import materialize_urdf
++    from tianji_curobo.semantic_esdf_transport import encode_semantic_esdf_request
++
++    from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
++
++    urdf = materialize_urdf(ROOT / "assets/marvin_urdf/marvin_with_grippers.urdf",
++        marvin_meshes=ROOT / "assets/marvin_urdf/meshes", rag_meshes=ROOT / "assets/marvin_urdf/rag100_050/meshes")
++    runtime = GeometryRuntime(urdf_path=urdf, asset_root_path=urdf.parent)
++    depth = np.full((96, 96), .6, dtype=np.float32)
++    source_mask = np.zeros(depth.shape, dtype=np.uint8)
++    source_mask[42:54, 56:68] = 1
++    obstacle_mask = np.zeros(depth.shape, dtype=np.uint8)
++    obstacle_mask[30:42, 25:37] = 1
++    depth[source_mask != 0] = .54
++    depth[obstacle_mask != 0] = .53
++    transform = [[1, 0, 0, .55], [0, -1, 0, 0], [0, 0, -1, 1.3], [0, 0, 0, 1]]
++    intrinsics = [[120, 0, 47.5], [0, 120, 47.5], [0, 0, 1]]
++    views = {camera: {"camera_id": camera, "stereo_sequence": 1,
++        "depth_left_m": depth, "valid_left_mask": np.ones(depth.shape, dtype=np.uint8),
++        "left_intrinsics": intrinsics, "T_base_left_camera": transform,
++        "robot_joints_at_capture": {"A": [0, 0, 0, -42.5, 0, 0, 0], "B": [0, 0, 0, -42.5, 0, 0, 0]},
++        "rgb_size": [96, 96], "rgb_intrinsics": intrinsics, "left_to_rgb": np.eye(4).tolist(),
++        "instance_masks": {"selected": source_mask, "obstacle": obstacle_mask}} for camera in ("1", "2", "3")}
++    payload = encode_semantic_esdf_request({"observation_set_id": "synthetic-registered", "sam3_generation": 1,
++        "confirmed_instance_id": "selected", "selection_generation": 1, "views": views})
++    started = time.perf_counter()
++    result = run_operation(runtime, "/perception/build", payload | {"planning_settings": {}})
++    assert result["source"] == "registered_rgbd"
++    assert result["excluded_object_ids"] == ["selected"]
++    assert "obstacle" in result["collision_objects"]
++    assert result["layer_count"] == 3 and result["table_collision_enabled"]
++    grids = {grid.name: grid for grid in runtime.geometry_grids}
++    assert "semantic_instance::selected" in grids and "semantic_instance::obstacle" in grids
++    selected_centers = np.asarray(runtime.geometry_model["voxel"]["semantic_instance::selected"]["centers_base_m"])
++    assert np.allclose(np.median(selected_centers[:, 2]), .76, atol=.025), selected_centers
++    first = result["scene_token"]
++    released = run_operation(runtime, "/perception/build", payload | {"planning_settings": {}, "exclusion_state": "released"})
++    assert released["scene_token"] != first and released["excluded_object_ids"] == []
++    assert set(released["collision_objects"]) == {"selected", "obstacle"}
++    assert runtime.geometry_scene["disabled_obstacle_names"] == ()
++    print(json.dumps({"sdk": sdk_identity()[0], "mapper": "public_curobo_perception_Mapper",
++        "source": result["source"], "layer_count": result["layer_count"],
++        "selected_surface_height_m": float(np.median(selected_centers[:, 2])),
++        "non_target_layer_enabled": True, "released_source_layer_enabled": True,
++        "wall_time_s": time.perf_counter() - started, "timings_ms": result["timings_ms"]}, indent=2), flush=True)
++
++
++if __name__ == "__main__":
++    main()

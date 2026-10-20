@@ -1,0 +1,10 @@
+{
+  "sdk": "8e734f3ced1df898990bcd92de40abce475907db",
+  "scope": "coordinate algebra only; not a grasp/holding proof",
+  "input_frame": "physical_TCP_link_local",
+  "configured_carried_link_transform": "identity_fixed_TCP_child",
+  "world_objects_pose_offset": null,
+  "manager_local_spheres_bitwise_equal_input": true,
+  "maximum_world_fk_center_error_m": 6.697926724363867e-08,
+  "sphere_count": 12
+}

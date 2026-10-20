@@ -1,0 +1,21 @@
+# verify_place
+
+**目的与调用时机：**放置、开爪和空爪撤离完成后，分别确认物理释放与指定区域到达，更新搬运清单，包括最后一个物体。
+
+**输入与前提：**released=true、place_execution_completed=true、place_verification_completed=false；当前夹爪反馈、原物体ID、当前阶段目的区域、固定清单、初始视觉参考及外层JEV选定的verify_transfer用途。已确认释放的地图重试复用原确认。
+
+**固定算法：**检查当前generation、完整执行、已记录释放、开爪命令和实测夹爪位置。成立时清除holding，记录release_feedback_id，尚不记完成。立即原位采三相机，通过observe中的SAM3/RGBD/Decisions流程更新原ID与去向。只有该ID的当前观测返回at_destination、region_id和slot_id与本阶段释放绑定一致且已有释放反馈，才确认完成；elsewhere/unknown保持待确认并直接返回，不再建图。只有视觉确认成功且尚有required阶段时，才以同一观测建立包含全部物体的observation碰撞图，然后才允许后续双臂观测位姿运动；桌面cuboid复用。
+
+**输出与状态：**verification_scope=release_and_visual_destination、destination_region_verified、visual_evidence及feedback_id。destination_pose_verified=false：到达区域不等于测量精确落姿。释放动作绑定阶段和目的区域；视觉证据须属于本次观测，确认后该释放动作不能再完成另一阶段；两段路线第一段完成后仅进入pending第二段。网页区分已释放/待视觉确认与已完成。
+
+**失败含义与边界：**缺少释放反馈不能用图像替代；视觉身份不确定、接口失败或目标区域未确认时不记完成，保留释放证据并结束本轮为needs_attention，不反复recover。技能内部不请求JEV子决策，不移动补视角。缺少Decisions结果明确失败；包括最后一个物体在内，均不能仅凭释放反馈完成搬运。
+
+视觉确认成功后若全障碍建图失败，同一释放动作重试复用已确认的图像与阶段结论，只重试建图，不重复计数或再次请求Decisions。
+
+**外层视觉参数：**`Runner.select_arguments` 必须先调用 `Decisions.choose_visual_plan`，由外层JEV在skill_start前为每个尚未分析的checkpoint选择initialize_inventory、associate_inventory或verify_transfer。visual_plan是有限映射；build_scene最多列出原位补图与抓前观测两个checkpoint。每项只消费一次；缺少、skip或不匹配的用途均拒绝。Perception再次检查source=jev和用途；缺少Decisions结果明确失败，不启用距离、颜色、掩码或动作预测身份回退。同帧已完成分析及已确认释放后的地图重试复用缓存，不增加图片请求。
+
+**分区证据：**程序保留destination_id、region_id、slot_id及本地实测布局，模型只收到语义ID和RGB中的二维区域标注，不收到世界坐标。槽位XY定义TCP锚点，不能改成物体中心或全部attachment投影包含要求。视觉判断同一实体是否已释放且在目标支撑面/容器中，与分区标注是否明显矛盾；精确TCP落点与底面间隙由本地规划/执行校验，图片不证明毫米级准确。完成证据仍绑定释放阶段和指定region_id/slot_id。
+
+standalone place 保留持物的冻结编号和原搬运分区容量，规划和视觉使用相同 slot_id。最后一件若已确认到达，不为无后续运动额外要求完整障碍地图；有剩余运动时仍须通过全障碍地图发布校验。
+
+**视觉输入边界：**沿用observe_scene的RGB、参考框和候选框输入；SAM3掩码、深度图和点云均不发送给Decisions。候选身份问题只返回固定ID、reject或unknown，不要求模型评判未提供的掩码；放置去向问题仍返回at_destination、elsewhere或unknown，原置信度门槛与释放反馈要求不变。

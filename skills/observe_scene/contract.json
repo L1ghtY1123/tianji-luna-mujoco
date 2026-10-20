@@ -1,0 +1,19 @@
+{
+  "id": "observe_scene",
+  "description": "按外层JEV用途，首次由Responses从头部RGB建立固定全清单与搬运子集；SAM3按描述提供掩码，Decisions从RGB把候选关联到固定ID。缺少几何保留实体并阻止不完整建图；视觉接口失败停止，不回退旧关联。",
+  "requires": {
+    "observed": false
+  },
+  "provides": [
+    "observed",
+    "inventory_ready"
+  ],
+  "inputs": [
+    "capture",
+    "instruction",
+    "fixed_scene_entities",
+    "initial_visual_reference",
+    "transport_progress",
+    "visual_plan (required JEV-selected purpose for each uncached checkpoint)"
+  ]
+}

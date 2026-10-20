@@ -1,0 +1,1065 @@
+{
+  "results": [
+    {
+      "instruction": "抓取左边的红色方块到右边的蓝色盒子里",
+      "expected_task": "grasp_place",
+      "expected_source": {
+        "kind": "cube",
+        "color": "red",
+        "position": "left"
+      },
+      "expected_destination": {
+        "kind": "bin",
+        "color": "blue",
+        "position": "right"
+      },
+      "task": "grasp_place",
+      "source": {
+        "kind": "cube",
+        "color": "red",
+        "position": "left"
+      },
+      "destination": {
+        "kind": "bin",
+        "color": "blue",
+        "position": "right"
+      },
+      "passed": true
+    },
+    {
+      "instruction": "抓取蓝色圆柱到红色盒子里",
+      "expected_task": "grasp_place",
+      "expected_source": {
+        "kind": "cylinder",
+        "color": "blue",
+        "position": "any"
+      },
+      "expected_destination": {
+        "kind": "bin",
+        "color": "red",
+        "position": "any"
+      },
+      "task": "grasp_place",
+      "source": {
+        "kind": "cylinder",
+        "color": "blue",
+        "position": "any"
+      },
+      "destination": {
+        "kind": "bin",
+        "color": "red",
+        "position": "any"
+      },
+      "passed": true
+    },
+    {
+      "instruction": "Pick the red cube on the left and place it in the blue bin on the right",
+      "expected_task": "grasp_place",
+      "expected_source": {
+        "kind": "cube",
+        "color": "red",
+        "position": "left"
+      },
+      "expected_destination": {
+        "kind": "bin",
+        "color": "blue",
+        "position": "right"
+      },
+      "task": "grasp_place",
+      "source": {
+        "kind": "cube",
+        "color": "red",
+        "position": "left"
+      },
+      "destination": {
+        "kind": "bin",
+        "color": "blue",
+        "position": "right"
+      },
+      "passed": true
+    },
+    {
+      "instruction": "把手里物体放到蓝色盒子里",
+      "expected_task": "place",
+      "expected_source": null,
+      "expected_destination": {
+        "kind": "bin",
+        "color": "blue",
+        "position": "any"
+      },
+      "task": "place",
+      "destination": {
+        "kind": "bin",
+        "color": "blue",
+        "position": "any"
+      },
+      "passed": true
+    },
+    {
+      "destination_selection_position": "right",
+      "expected": "blue_right",
+      "destination": "blue_right",
+      "passed": true
+    },
+    {
+      "destination_selection_position": "any",
+      "expected": "ambiguous",
+      "destination": "ambiguous",
+      "passed": true
+    }
+  ],
+  "records": [
+    {
+      "decision_kind": "选择任务",
+      "state": {
+        "instruction": "抓取左边的红色方块到右边的蓝色盒子里"
+      },
+      "questions": {
+        "task": {
+          "instructions": "选择完整自然语言指令的任务类型。抓取源物体到指定位置或容器属于 grasp_place；仅放置已握住的物体属于 place；仅抓取并提起属于 grasp。不要将抓取并放置误选成单独抓取。",
+          "criteria": {
+            "grasp": "抓取物体并提起",
+            "place": "放置已经握住的物体",
+            "grasp_place": "抓取物体再放到指定位置或容器",
+            "unsupported": "不属于以上任务"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "task": "grasp_place"
+      },
+      "provider_details": {
+        "confidence": {
+          "task": 1.0
+        },
+        "probabilities": {
+          "task": {
+            "grasp": 0.0,
+            "place": 0.0,
+            "grasp_place": 1.0,
+            "unsupported": 0.0
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 501,
+        "output_tokens": 50
+      },
+      "duration_s": 4.057235677959397
+    },
+    {
+      "decision_kind": "选择物体属性",
+      "state": {
+        "instruction": "抓取左边的红色方块到右边的蓝色盒子里",
+        "task": "grasp_place",
+        "selection_role": "source"
+      },
+      "questions": {
+        "kind": {
+          "instructions": "从用户指令中选择要抓取的源物体（source）的 kind 属性。只选择明确表达的限制，未限定选 any，不要猜测。目的地盒子（destination）的颜色、类别和位置不是源物体属性。",
+          "criteria": {
+            "cube": "方块/长方体",
+            "sphere": "球",
+            "cylinder": "圆柱",
+            "any": "只说物体/东西，未限定形状",
+            "unsupported": "其他形状或无法判断"
+          }
+        },
+        "color": {
+          "instructions": "从用户指令中选择要抓取的源物体（source）的 color 属性。只选择明确表达的限制，未限定选 any，不要猜测。目的地盒子（destination）的颜色、类别和位置不是源物体属性。",
+          "criteria": {
+            "black": "黑色",
+            "red": "红色",
+            "blue": "蓝色",
+            "green": "绿色",
+            "yellow": "黄色",
+            "white": "白色",
+            "orange": "橙色",
+            "gray": "灰色",
+            "any": "没有颜色限定",
+            "unsupported": "其他颜色或无法判断"
+          }
+        },
+        "position": {
+          "instructions": "从用户指令中选择用于识别要抓取的源物体（source）的相对位置限制。未描述源物体位置选 any；未描述不等于无法理解。目的地盒子的位置不属于源物体。只按明确要求选择，不能由颜色或形状推断位置。否定位置或选项无法表达的位置要求选 unsupported；不是左侧不能推断为右侧。抓取后移动方向不是目标位置。",
+          "criteria": {
+            "left": "左侧",
+            "right": "右侧",
+            "front": "前面/近处",
+            "back": "后面/远处",
+            "any": "用户没有描述目标物体的位置，只有任务、形状或颜色等要求；没有位置要求就选 any。",
+            "unsupported": "用户明确给出位置要求，但不能用单个左、右、前、后表示，例如中间、两者之间、上方、否定位置，或含义不清的位置描述。未描述位置应选 any。"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "kind": "cube",
+        "color": "red",
+        "position": "left"
+      },
+      "provider_details": {
+        "confidence": {
+          "kind": 1.0,
+          "color": 1.0,
+          "position": 0.87
+        },
+        "probabilities": {
+          "kind": {
+            "cube": 1.0,
+            "sphere": 0.0,
+            "cylinder": 0.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          },
+          "color": {
+            "black": 0.0,
+            "red": 1.0,
+            "blue": 0.0,
+            "green": 0.0,
+            "yellow": 0.0,
+            "white": 0.0,
+            "orange": 0.0,
+            "gray": 0.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          },
+          "position": {
+            "left": 0.89,
+            "right": 0.0,
+            "front": 0.0,
+            "back": 0.0,
+            "any": 0.1,
+            "unsupported": 0.01
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 1180,
+        "output_tokens": 194
+      },
+      "duration_s": 0.2389674480073154
+    },
+    {
+      "decision_kind": "选择目的容器属性",
+      "state": {
+        "instruction": "抓取左边的红色方块到右边的蓝色盒子里",
+        "task": "place",
+        "selection_role": "destination"
+      },
+      "questions": {
+        "kind": {
+          "instructions": "从用户指令中选择放置目的容器（destination）的 kind 属性。只选择明确表达的限制，未限定选 any，不要猜测。要抓取的源物体（source）的颜色、形状和位置不是目的容器属性。",
+          "criteria": {
+            "bin": "有底板、四壁及开放内腔的盒子/物料盒/容器，不是实心长方体",
+            "any": "用户未限定目的容器类别",
+            "unsupported": "其他目的地类别或无法判断"
+          }
+        },
+        "color": {
+          "instructions": "从用户指令中选择放置目的容器（destination）的 color 属性。只选择明确表达的限制，未限定选 any，不要猜测。要抓取的源物体（source）的颜色、形状和位置不是目的容器属性。",
+          "criteria": {
+            "black": "黑色",
+            "red": "红色",
+            "blue": "蓝色",
+            "green": "绿色",
+            "yellow": "黄色",
+            "white": "白色",
+            "orange": "橙色",
+            "gray": "灰色",
+            "any": "没有颜色限定",
+            "unsupported": "其他颜色或无法判断"
+          }
+        },
+        "position": {
+          "instructions": "只选择用于识别放置目的容器（destination）的相对位置限制。源物体的位置不属于目的容器。未描述目的容器位置选 any；只按明确要求选择。否定位置或选项无法表达的位置要求选 unsupported；不是左侧不能推断为右侧。",
+          "criteria": {
+            "left": "左侧",
+            "right": "右侧",
+            "front": "前面/近处",
+            "back": "后面/远处",
+            "any": "用户没有限定目的容器的位置",
+            "unsupported": "用户明确给出位置要求，但不能用单个左、右、前、后表示，例如中间、两者之间、上方、否定位置，或含义不清的位置描述。未描述位置应选 any。"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "kind": "bin",
+        "color": "blue",
+        "position": "right"
+      },
+      "provider_details": {
+        "confidence": {
+          "kind": 0.97,
+          "color": 1.0,
+          "position": 0.96
+        },
+        "probabilities": {
+          "kind": {
+            "bin": 0.98,
+            "any": 0.01,
+            "unsupported": 0.01
+          },
+          "color": {
+            "black": 0.0,
+            "red": 0.0,
+            "blue": 1.0,
+            "green": 0.0,
+            "yellow": 0.0,
+            "white": 0.0,
+            "orange": 0.0,
+            "gray": 0.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          },
+          "position": {
+            "left": 0.0,
+            "right": 0.97,
+            "front": 0.0,
+            "back": 0.0,
+            "any": 0.02,
+            "unsupported": 0.01
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 1111,
+        "output_tokens": 178
+      },
+      "duration_s": 0.22442684299312532
+    },
+    {
+      "decision_kind": "选择任务",
+      "state": {
+        "instruction": "抓取蓝色圆柱到红色盒子里"
+      },
+      "questions": {
+        "task": {
+          "instructions": "选择完整自然语言指令的任务类型。抓取源物体到指定位置或容器属于 grasp_place；仅放置已握住的物体属于 place；仅抓取并提起属于 grasp。不要将抓取并放置误选成单独抓取。",
+          "criteria": {
+            "grasp": "抓取物体并提起",
+            "place": "放置已经握住的物体",
+            "grasp_place": "抓取物体再放到指定位置或容器",
+            "unsupported": "不属于以上任务"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "task": "grasp_place"
+      },
+      "provider_details": {
+        "confidence": {
+          "task": 1.0
+        },
+        "probabilities": {
+          "task": {
+            "grasp": 0.0,
+            "place": 0.0,
+            "grasp_place": 1.0,
+            "unsupported": 0.0
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 495,
+        "output_tokens": 50
+      },
+      "duration_s": 0.23879808303900063
+    },
+    {
+      "decision_kind": "选择物体属性",
+      "state": {
+        "instruction": "抓取蓝色圆柱到红色盒子里",
+        "task": "grasp_place",
+        "selection_role": "source"
+      },
+      "questions": {
+        "kind": {
+          "instructions": "从用户指令中选择要抓取的源物体（source）的 kind 属性。只选择明确表达的限制，未限定选 any，不要猜测。目的地盒子（destination）的颜色、类别和位置不是源物体属性。",
+          "criteria": {
+            "cube": "方块/长方体",
+            "sphere": "球",
+            "cylinder": "圆柱",
+            "any": "只说物体/东西，未限定形状",
+            "unsupported": "其他形状或无法判断"
+          }
+        },
+        "color": {
+          "instructions": "从用户指令中选择要抓取的源物体（source）的 color 属性。只选择明确表达的限制，未限定选 any，不要猜测。目的地盒子（destination）的颜色、类别和位置不是源物体属性。",
+          "criteria": {
+            "black": "黑色",
+            "red": "红色",
+            "blue": "蓝色",
+            "green": "绿色",
+            "yellow": "黄色",
+            "white": "白色",
+            "orange": "橙色",
+            "gray": "灰色",
+            "any": "没有颜色限定",
+            "unsupported": "其他颜色或无法判断"
+          }
+        },
+        "position": {
+          "instructions": "从用户指令中选择用于识别要抓取的源物体（source）的相对位置限制。未描述源物体位置选 any；未描述不等于无法理解。目的地盒子的位置不属于源物体。只按明确要求选择，不能由颜色或形状推断位置。否定位置或选项无法表达的位置要求选 unsupported；不是左侧不能推断为右侧。抓取后移动方向不是目标位置。",
+          "criteria": {
+            "left": "左侧",
+            "right": "右侧",
+            "front": "前面/近处",
+            "back": "后面/远处",
+            "any": "用户没有描述目标物体的位置，只有任务、形状或颜色等要求；没有位置要求就选 any。",
+            "unsupported": "用户明确给出位置要求，但不能用单个左、右、前、后表示，例如中间、两者之间、上方、否定位置，或含义不清的位置描述。未描述位置应选 any。"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "kind": "cylinder",
+        "color": "blue",
+        "position": "any"
+      },
+      "provider_details": {
+        "confidence": {
+          "kind": 1.0,
+          "color": 1.0,
+          "position": 1.0
+        },
+        "probabilities": {
+          "kind": {
+            "cube": 0.0,
+            "sphere": 0.0,
+            "cylinder": 1.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          },
+          "color": {
+            "black": 0.0,
+            "red": 0.0,
+            "blue": 1.0,
+            "green": 0.0,
+            "yellow": 0.0,
+            "white": 0.0,
+            "orange": 0.0,
+            "gray": 0.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          },
+          "position": {
+            "left": 0.0,
+            "right": 0.0,
+            "front": 0.0,
+            "back": 0.0,
+            "any": 1.0,
+            "unsupported": 0.0
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 1174,
+        "output_tokens": 196
+      },
+      "duration_s": 0.2545308908447623
+    },
+    {
+      "decision_kind": "选择目的容器属性",
+      "state": {
+        "instruction": "抓取蓝色圆柱到红色盒子里",
+        "task": "place",
+        "selection_role": "destination"
+      },
+      "questions": {
+        "kind": {
+          "instructions": "从用户指令中选择放置目的容器（destination）的 kind 属性。只选择明确表达的限制，未限定选 any，不要猜测。要抓取的源物体（source）的颜色、形状和位置不是目的容器属性。",
+          "criteria": {
+            "bin": "有底板、四壁及开放内腔的盒子/物料盒/容器，不是实心长方体",
+            "any": "用户未限定目的容器类别",
+            "unsupported": "其他目的地类别或无法判断"
+          }
+        },
+        "color": {
+          "instructions": "从用户指令中选择放置目的容器（destination）的 color 属性。只选择明确表达的限制，未限定选 any，不要猜测。要抓取的源物体（source）的颜色、形状和位置不是目的容器属性。",
+          "criteria": {
+            "black": "黑色",
+            "red": "红色",
+            "blue": "蓝色",
+            "green": "绿色",
+            "yellow": "黄色",
+            "white": "白色",
+            "orange": "橙色",
+            "gray": "灰色",
+            "any": "没有颜色限定",
+            "unsupported": "其他颜色或无法判断"
+          }
+        },
+        "position": {
+          "instructions": "只选择用于识别放置目的容器（destination）的相对位置限制。源物体的位置不属于目的容器。未描述目的容器位置选 any；只按明确要求选择。否定位置或选项无法表达的位置要求选 unsupported；不是左侧不能推断为右侧。",
+          "criteria": {
+            "left": "左侧",
+            "right": "右侧",
+            "front": "前面/近处",
+            "back": "后面/远处",
+            "any": "用户没有限定目的容器的位置",
+            "unsupported": "用户明确给出位置要求，但不能用单个左、右、前、后表示，例如中间、两者之间、上方、否定位置，或含义不清的位置描述。未描述位置应选 any。"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "kind": "bin",
+        "color": "red",
+        "position": "any"
+      },
+      "provider_details": {
+        "confidence": {
+          "kind": 0.91,
+          "color": 1.0,
+          "position": 0.94
+        },
+        "probabilities": {
+          "kind": {
+            "bin": 0.94,
+            "any": 0.01,
+            "unsupported": 0.05
+          },
+          "color": {
+            "black": 0.0,
+            "red": 1.0,
+            "blue": 0.0,
+            "green": 0.0,
+            "yellow": 0.0,
+            "white": 0.0,
+            "orange": 0.0,
+            "gray": 0.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          },
+          "position": {
+            "left": 0.0,
+            "right": 0.0,
+            "front": 0.0,
+            "back": 0.0,
+            "any": 0.95,
+            "unsupported": 0.05
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 1105,
+        "output_tokens": 178
+      },
+      "duration_s": 0.24905446404591203
+    },
+    {
+      "decision_kind": "选择任务",
+      "state": {
+        "instruction": "Pick the red cube on the left and place it in the blue bin on the right"
+      },
+      "questions": {
+        "task": {
+          "instructions": "选择完整自然语言指令的任务类型。抓取源物体到指定位置或容器属于 grasp_place；仅放置已握住的物体属于 place；仅抓取并提起属于 grasp。不要将抓取并放置误选成单独抓取。",
+          "criteria": {
+            "grasp": "抓取物体并提起",
+            "place": "放置已经握住的物体",
+            "grasp_place": "抓取物体再放到指定位置或容器",
+            "unsupported": "不属于以上任务"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "task": "grasp_place"
+      },
+      "provider_details": {
+        "confidence": {
+          "task": 1.0
+        },
+        "probabilities": {
+          "task": {
+            "grasp": 0.0,
+            "place": 0.0,
+            "grasp_place": 1.0,
+            "unsupported": 0.0
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 500,
+        "output_tokens": 50
+      },
+      "duration_s": 0.231486540986225
+    },
+    {
+      "decision_kind": "选择物体属性",
+      "state": {
+        "instruction": "Pick the red cube on the left and place it in the blue bin on the right",
+        "task": "grasp_place",
+        "selection_role": "source"
+      },
+      "questions": {
+        "kind": {
+          "instructions": "从用户指令中选择要抓取的源物体（source）的 kind 属性。只选择明确表达的限制，未限定选 any，不要猜测。目的地盒子（destination）的颜色、类别和位置不是源物体属性。",
+          "criteria": {
+            "cube": "方块/长方体",
+            "sphere": "球",
+            "cylinder": "圆柱",
+            "any": "只说物体/东西，未限定形状",
+            "unsupported": "其他形状或无法判断"
+          }
+        },
+        "color": {
+          "instructions": "从用户指令中选择要抓取的源物体（source）的 color 属性。只选择明确表达的限制，未限定选 any，不要猜测。目的地盒子（destination）的颜色、类别和位置不是源物体属性。",
+          "criteria": {
+            "black": "黑色",
+            "red": "红色",
+            "blue": "蓝色",
+            "green": "绿色",
+            "yellow": "黄色",
+            "white": "白色",
+            "orange": "橙色",
+            "gray": "灰色",
+            "any": "没有颜色限定",
+            "unsupported": "其他颜色或无法判断"
+          }
+        },
+        "position": {
+          "instructions": "从用户指令中选择用于识别要抓取的源物体（source）的相对位置限制。未描述源物体位置选 any；未描述不等于无法理解。目的地盒子的位置不属于源物体。只按明确要求选择，不能由颜色或形状推断位置。否定位置或选项无法表达的位置要求选 unsupported；不是左侧不能推断为右侧。抓取后移动方向不是目标位置。",
+          "criteria": {
+            "left": "左侧",
+            "right": "右侧",
+            "front": "前面/近处",
+            "back": "后面/远处",
+            "any": "用户没有描述目标物体的位置，只有任务、形状或颜色等要求；没有位置要求就选 any。",
+            "unsupported": "用户明确给出位置要求，但不能用单个左、右、前、后表示，例如中间、两者之间、上方、否定位置，或含义不清的位置描述。未描述位置应选 any。"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "kind": "cube",
+        "color": "red",
+        "position": "left"
+      },
+      "provider_details": {
+        "confidence": {
+          "kind": 1.0,
+          "color": 1.0,
+          "position": 0.99
+        },
+        "probabilities": {
+          "kind": {
+            "cube": 1.0,
+            "sphere": 0.0,
+            "cylinder": 0.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          },
+          "color": {
+            "black": 0.0,
+            "red": 1.0,
+            "blue": 0.0,
+            "green": 0.0,
+            "yellow": 0.0,
+            "white": 0.0,
+            "orange": 0.0,
+            "gray": 0.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          },
+          "position": {
+            "left": 0.99,
+            "right": 0.0,
+            "front": 0.0,
+            "back": 0.0,
+            "any": 0.01,
+            "unsupported": 0.0
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 1179,
+        "output_tokens": 194
+      },
+      "duration_s": 0.22678782092407346
+    },
+    {
+      "decision_kind": "选择目的容器属性",
+      "state": {
+        "instruction": "Pick the red cube on the left and place it in the blue bin on the right",
+        "task": "place",
+        "selection_role": "destination"
+      },
+      "questions": {
+        "kind": {
+          "instructions": "从用户指令中选择放置目的容器（destination）的 kind 属性。只选择明确表达的限制，未限定选 any，不要猜测。要抓取的源物体（source）的颜色、形状和位置不是目的容器属性。",
+          "criteria": {
+            "bin": "有底板、四壁及开放内腔的盒子/物料盒/容器，不是实心长方体",
+            "any": "用户未限定目的容器类别",
+            "unsupported": "其他目的地类别或无法判断"
+          }
+        },
+        "color": {
+          "instructions": "从用户指令中选择放置目的容器（destination）的 color 属性。只选择明确表达的限制，未限定选 any，不要猜测。要抓取的源物体（source）的颜色、形状和位置不是目的容器属性。",
+          "criteria": {
+            "black": "黑色",
+            "red": "红色",
+            "blue": "蓝色",
+            "green": "绿色",
+            "yellow": "黄色",
+            "white": "白色",
+            "orange": "橙色",
+            "gray": "灰色",
+            "any": "没有颜色限定",
+            "unsupported": "其他颜色或无法判断"
+          }
+        },
+        "position": {
+          "instructions": "只选择用于识别放置目的容器（destination）的相对位置限制。源物体的位置不属于目的容器。未描述目的容器位置选 any；只按明确要求选择。否定位置或选项无法表达的位置要求选 unsupported；不是左侧不能推断为右侧。",
+          "criteria": {
+            "left": "左侧",
+            "right": "右侧",
+            "front": "前面/近处",
+            "back": "后面/远处",
+            "any": "用户没有限定目的容器的位置",
+            "unsupported": "用户明确给出位置要求，但不能用单个左、右、前、后表示，例如中间、两者之间、上方、否定位置，或含义不清的位置描述。未描述位置应选 any。"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "kind": "bin",
+        "color": "blue",
+        "position": "right"
+      },
+      "provider_details": {
+        "confidence": {
+          "kind": 1.0,
+          "color": 1.0,
+          "position": 1.0
+        },
+        "probabilities": {
+          "kind": {
+            "bin": 1.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          },
+          "color": {
+            "black": 0.0,
+            "red": 0.0,
+            "blue": 1.0,
+            "green": 0.0,
+            "yellow": 0.0,
+            "white": 0.0,
+            "orange": 0.0,
+            "gray": 0.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          },
+          "position": {
+            "left": 0.0,
+            "right": 1.0,
+            "front": 0.0,
+            "back": 0.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 1110,
+        "output_tokens": 178
+      },
+      "duration_s": 0.22826047404669225
+    },
+    {
+      "decision_kind": "选择任务",
+      "state": {
+        "instruction": "把手里物体放到蓝色盒子里"
+      },
+      "questions": {
+        "task": {
+          "instructions": "选择完整自然语言指令的任务类型。抓取源物体到指定位置或容器属于 grasp_place；仅放置已握住的物体属于 place；仅抓取并提起属于 grasp。不要将抓取并放置误选成单独抓取。",
+          "criteria": {
+            "grasp": "抓取物体并提起",
+            "place": "放置已经握住的物体",
+            "grasp_place": "抓取物体再放到指定位置或容器",
+            "unsupported": "不属于以上任务"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "task": "place"
+      },
+      "provider_details": {
+        "confidence": {
+          "task": 0.92
+        },
+        "probabilities": {
+          "task": {
+            "grasp": 0.0,
+            "place": 0.94,
+            "grasp_place": 0.06,
+            "unsupported": 0.0
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 495,
+        "output_tokens": 48
+      },
+      "duration_s": 0.23192285606637597
+    },
+    {
+      "decision_kind": "选择目的容器属性",
+      "state": {
+        "instruction": "把手里物体放到蓝色盒子里",
+        "task": "place",
+        "selection_role": "destination"
+      },
+      "questions": {
+        "kind": {
+          "instructions": "从用户指令中选择放置目的容器（destination）的 kind 属性。只选择明确表达的限制，未限定选 any，不要猜测。要抓取的源物体（source）的颜色、形状和位置不是目的容器属性。",
+          "criteria": {
+            "bin": "有底板、四壁及开放内腔的盒子/物料盒/容器，不是实心长方体",
+            "any": "用户未限定目的容器类别",
+            "unsupported": "其他目的地类别或无法判断"
+          }
+        },
+        "color": {
+          "instructions": "从用户指令中选择放置目的容器（destination）的 color 属性。只选择明确表达的限制，未限定选 any，不要猜测。要抓取的源物体（source）的颜色、形状和位置不是目的容器属性。",
+          "criteria": {
+            "black": "黑色",
+            "red": "红色",
+            "blue": "蓝色",
+            "green": "绿色",
+            "yellow": "黄色",
+            "white": "白色",
+            "orange": "橙色",
+            "gray": "灰色",
+            "any": "没有颜色限定",
+            "unsupported": "其他颜色或无法判断"
+          }
+        },
+        "position": {
+          "instructions": "只选择用于识别放置目的容器（destination）的相对位置限制。源物体的位置不属于目的容器。未描述目的容器位置选 any；只按明确要求选择。否定位置或选项无法表达的位置要求选 unsupported；不是左侧不能推断为右侧。",
+          "criteria": {
+            "left": "左侧",
+            "right": "右侧",
+            "front": "前面/近处",
+            "back": "后面/远处",
+            "any": "用户没有限定目的容器的位置",
+            "unsupported": "用户明确给出位置要求，但不能用单个左、右、前、后表示，例如中间、两者之间、上方、否定位置，或含义不清的位置描述。未描述位置应选 any。"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "kind": "bin",
+        "color": "blue",
+        "position": "any"
+      },
+      "provider_details": {
+        "confidence": {
+          "kind": 0.95,
+          "color": 1.0,
+          "position": 0.92
+        },
+        "probabilities": {
+          "kind": {
+            "bin": 0.97,
+            "any": 0.01,
+            "unsupported": 0.02
+          },
+          "color": {
+            "black": 0.0,
+            "red": 0.0,
+            "blue": 1.0,
+            "green": 0.0,
+            "yellow": 0.0,
+            "white": 0.0,
+            "orange": 0.0,
+            "gray": 0.0,
+            "any": 0.0,
+            "unsupported": 0.0
+          },
+          "position": {
+            "left": 0.0,
+            "right": 0.0,
+            "front": 0.0,
+            "back": 0.0,
+            "any": 0.93,
+            "unsupported": 0.07
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 1105,
+        "output_tokens": 178
+      },
+      "duration_s": 0.27860632608644664
+    },
+    {
+      "decision_kind": "选择目的容器",
+      "state": {
+        "task": "grasp_place",
+        "instruction": "抓取红色方块到蓝色盒子里",
+        "attributes": {
+          "kind": "cube",
+          "color": "red",
+          "position": "any"
+        },
+        "destination_attributes": {
+          "kind": "bin",
+          "color": "blue",
+          "position": "right"
+        },
+        "observed_destinations": [
+          {
+            "id": "blue_left",
+            "kind": "bin",
+            "color": "blue",
+            "position": [
+              0.6,
+              0.2,
+              0.65
+            ]
+          },
+          {
+            "id": "blue_right",
+            "kind": "bin",
+            "color": "blue",
+            "position": [
+              0.6,
+              -0.2,
+              0.65
+            ]
+          }
+        ],
+        "selection_role": "destination",
+        "spatial_convention": "机器人朝 +X；机器人左侧为 +Y，右侧为 -Y。近处 X 较小，远处 X 较大。位置限定在符合目的容器颜色和类别的盒子之间比较。"
+      },
+      "questions": {
+        "destination": {
+          "instructions": "按用户指令和 destination_attributes 选择唯一 RGBD 观测目的容器。只从当前检测为 bin 的实例中选择；实心 box 不是容器。源物体的颜色和位置不能用于选择目的容器。无法唯一确定选 ambiguous，不存在选 missing。",
+          "criteria": {
+            "blue_left": "{\"id\": \"blue_left\", \"kind\": \"bin\", \"color\": \"blue\", \"position\": [0.6, 0.2, 0.65]}",
+            "blue_right": "{\"id\": \"blue_right\", \"kind\": \"bin\", \"color\": \"blue\", \"position\": [0.6, -0.2, 0.65]}",
+            "missing": "没有满足目的容器全部属性的观测盒子。",
+            "ambiguous": "有多个同样符合的观测盒子，不能唯一确定。"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "destination": "blue_right"
+      },
+      "provider_details": {
+        "confidence": {
+          "destination": 0.99
+        },
+        "probabilities": {
+          "destination": {
+            "blue_left": 0.0,
+            "blue_right": 0.99,
+            "missing": 0.0,
+            "ambiguous": 0.01
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 760,
+        "output_tokens": 50
+      },
+      "duration_s": 0.2800066531635821
+    },
+    {
+      "decision_kind": "选择目的容器",
+      "state": {
+        "task": "grasp_place",
+        "instruction": "抓取红色方块到蓝色盒子里",
+        "attributes": {
+          "kind": "cube",
+          "color": "red",
+          "position": "any"
+        },
+        "destination_attributes": {
+          "kind": "bin",
+          "color": "blue",
+          "position": "any"
+        },
+        "observed_destinations": [
+          {
+            "id": "blue_left",
+            "kind": "bin",
+            "color": "blue",
+            "position": [
+              0.6,
+              0.2,
+              0.65
+            ]
+          },
+          {
+            "id": "blue_right",
+            "kind": "bin",
+            "color": "blue",
+            "position": [
+              0.6,
+              -0.2,
+              0.65
+            ]
+          }
+        ],
+        "selection_role": "destination",
+        "spatial_convention": "机器人朝 +X；机器人左侧为 +Y，右侧为 -Y。近处 X 较小，远处 X 较大。位置限定在符合目的容器颜色和类别的盒子之间比较。"
+      },
+      "questions": {
+        "destination": {
+          "instructions": "按用户指令和 destination_attributes 选择唯一 RGBD 观测目的容器。只从当前检测为 bin 的实例中选择；实心 box 不是容器。源物体的颜色和位置不能用于选择目的容器。无法唯一确定选 ambiguous，不存在选 missing。",
+          "criteria": {
+            "blue_left": "{\"id\": \"blue_left\", \"kind\": \"bin\", \"color\": \"blue\", \"position\": [0.6, 0.2, 0.65]}",
+            "blue_right": "{\"id\": \"blue_right\", \"kind\": \"bin\", \"color\": \"blue\", \"position\": [0.6, -0.2, 0.65]}",
+            "missing": "没有满足目的容器全部属性的观测盒子。",
+            "ambiguous": "有多个同样符合的观测盒子，不能唯一确定。"
+          }
+        }
+      },
+      "confidence_policy": "identity_threshold",
+      "output": {
+        "destination": "ambiguous"
+      },
+      "provider_details": {
+        "confidence": {
+          "destination": 1.0
+        },
+        "probabilities": {
+          "destination": {
+            "blue_left": 0.0,
+            "blue_right": 0.0,
+            "missing": 0.0,
+            "ambiguous": 1.0
+          }
+        },
+        "scores": {}
+      },
+      "usage": {
+        "input_tokens": 760,
+        "output_tokens": 51
+      },
+      "duration_s": 0.2489473579917103
+    }
+  ]
+}

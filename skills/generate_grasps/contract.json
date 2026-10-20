@@ -1,0 +1,20 @@
+{
+  "id": "generate_grasps",
+  "description": "仅使用已经分析完成的目标可见点云生成GraspGen候选。views_ready=false时禁止调用；刚移动到观测位姿但尚未分析的新照片不是可用点云。",
+  "requires": {
+    "target_selected": true,
+    "arm_selected": true,
+    "grasps_ready": false,
+    "grasp_completed": false,
+    "views_ready": true,
+    "scene_ready": true
+  },
+  "provides": [
+    "grasps_ready"
+  ],
+  "inputs": [
+    "observation",
+    "target_id",
+    "stage arm and tool profile revision"
+  ]
+}

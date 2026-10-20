@@ -1,0 +1,146 @@
+{
+  "instruction": "抓取左侧黑色方块",
+  "successful_run": {
+    "status": "succeeded",
+    "instruction": "抓取左侧黑色方块",
+    "task": "grasp",
+    "target_id": "black_cube",
+    "arm": "A",
+    "facts": {
+      "observed": true,
+      "target_selected": true,
+      "grasps_ready": true,
+      "scene_ready": true,
+      "arms_evaluated": true,
+      "arm_selected": true,
+      "plan_ready": true,
+      "lifted": true,
+      "verified": true
+    },
+    "error": null,
+    "run_id": "0370aa892e6f4a5597a4cb966f1c4765",
+    "generation": 1,
+    "attributes": {
+      "kind": "cube",
+      "color": "black",
+      "position": "left"
+    },
+    "verification": {
+      "success": true,
+      "checks": {
+        "gripper_holding": true,
+        "object_moved": true,
+        "transform_consistent": true
+      },
+      "measurements": {
+        "closed_fraction": 0.7059414337906195,
+        "object_movement_m": 0.09894532777215015,
+        "object_movement_after_closure_m": 0.09904705251899534,
+        "tcp_movement_after_closure_m": 0.0993657827208076,
+        "position_error_m": 0.00032964121745403344,
+        "rotation_error_deg": 0.03111576312306995
+      },
+      "thresholds": {
+        "closed_fraction_range": [
+          0.05,
+          0.97
+        ],
+        "minimum_movement_m": 0.025,
+        "position_tolerance_m": 0.02,
+        "minimum_object_and_tcp_movement_after_closure_m": 0.025,
+        "rotation_tolerance_deg": 20.0
+      },
+      "predicted_final_object": [
+        [
+          0.9999981367164151,
+          -0.00029434192049214474,
+          0.0019078591485862419,
+          0.4279106460065769
+        ],
+        [
+          0.0002979843019185537,
+          0.9999981331876983,
+          -0.0019091428635953829,
+          0.15006263367653655
+        ],
+        [
+          -0.0019072936461943487,
+          0.0019097078183973758,
+          0.9999963576168645,
+          0.7192434621073074
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "actual_final_object": [
+        [
+          0.9999988424343097,
+          -0.0005380798598681349,
+          0.0014232357882155492,
+          0.42799002135616465
+        ],
+        [
+          0.000540759494839297,
+          0.9999980808259071,
+          -0.0018830623131050118,
+          0.15005196238092502
+        ],
+        [
+          -0.0014222198188727352,
+          0.0018838297616025543,
+          0.9999972142342296,
+          0.7189236981168826
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "metrics": {
+      "decision_count": 13,
+      "jev_total_duration_s": 4.758243676973507,
+      "jev_mean_duration_s": 0.3660187443825774,
+      "run_duration_s": 9.939471960067749,
+      "input_tokens": 99074,
+      "output_tokens": 656
+    }
+  },
+  "skill_sequence": [
+    "observe",
+    "identify_target",
+    "generate_grasps",
+    "build_scene",
+    "evaluate_arms",
+    "choose_arm",
+    "plan_grasp",
+    "execute_grasp",
+    "verify_grasp"
+  ],
+  "internal_stages": [
+    "open_gripper",
+    "approach",
+    "grasp",
+    "close_gripper",
+    "capture_reference",
+    "lift"
+  ],
+  "internal_jev_requests": 0,
+  "reset_during_approach": {
+    "run_id": "9fad39b847f2455b89c87b925f17cb68",
+    "status_after_reset": "idle",
+    "generation_before": 2,
+    "generation_after": 3,
+    "baseline_restored": true,
+    "late_stages_prevented": true,
+    "events_after_reset": 0,
+    "active_commands": [],
+    "physics_elapsed_after_reset_s": 1.0089999999994408
+  }
+}

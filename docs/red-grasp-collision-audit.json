@@ -1,0 +1,241 @@
+{
+  "method": "Exact table-box SDF at recorded TCP goals, original URDF FK and buffered collision spheres",
+  "continuous_bound": "The box SDF is 1-Lipschitz. Subtract each sphere center's angular-speed bound times half the 81-sample angular interval. This bounds clearance throughout the full authored closing range.",
+  "limits": "Only gripper-to-table clearance at requested TCP poses. Does not prove IK success, self/peer-arm clearance, other-object clearance, approach-path feasibility, or physical mesh contact. Envelope overlap is a conservative-model rejection, not proof of physical contact.",
+  "table": {
+    "position": [
+      0.55,
+      0.0,
+      0.56
+    ],
+    "size": [
+      0.7,
+      1.0,
+      0.08
+    ]
+  },
+  "input_sha256": "840b41087d2dd844f26416441e3ab5dd9752b865dd391ab18b6441a27ed7de83",
+  "robot_config_sha256": "d7e627475865271a66bc785258dd59177080eb3a6e106cce26cb4465971421ae",
+  "urdf_sha256": "cad92ac6d4dd94a9651c79b383520efe7fafadaabcd83aff5b17222e7eab0dea",
+  "arms": {
+    "A": {
+      "sphere_count": 135,
+      "sample_count": 81,
+      "driver_limits_rad": [
+        0.0,
+        0.8000000093
+      ],
+      "max_continuous_bound_correction_mm": 1.6991819371272818,
+      "locked": {
+        "negative": 57,
+        "zero_to_10mm": 0,
+        "at_least_10mm": 43,
+        "min_mm": -78.93174236967455,
+        "max_mm": 47.291806338884
+      },
+      "closing_envelope": {
+        "negative": 76,
+        "zero_to_10mm": 24,
+        "at_least_10mm": 0,
+        "min_mm": -83.06356007073376,
+        "max_mm": 6.227777122142196
+      },
+      "sampled_full_closure": {
+        "negative": 58,
+        "zero_to_10mm": 15,
+        "at_least_10mm": 27,
+        "min_mm": -78.93174236967455,
+        "max_mm": 21.507998755576885
+      },
+      "guaranteed_full_closure": {
+        "negative": 59,
+        "zero_to_10mm": 14,
+        "at_least_10mm": 27,
+        "min_mm": -78.93174236967455,
+        "max_mm": 20.52874129440905
+      },
+      "sampled_max_tcp_z_mm": 208.61948994781412,
+      "envelope_max_tcp_z_mm": 223.90019207191875,
+      "guaranteed_safe_but_envelope_rejected_indices": [
+        66,
+        68,
+        99,
+        70,
+        97,
+        18,
+        80,
+        92,
+        95,
+        82,
+        74,
+        91,
+        87,
+        40,
+        76,
+        81,
+        41,
+        93,
+        86,
+        78,
+        84,
+        47,
+        90,
+        85,
+        71,
+        88,
+        72
+      ],
+      "best_clearance_candidate": {
+        "batch_index": 70,
+        "candidate_index": 84,
+        "score": 0.9900802969932556,
+        "locked_mm": 47.291806338884,
+        "envelope_mm": 6.227777122142196,
+        "sampled_full_closure_mm": 21.507998755576885,
+        "guaranteed_full_closure_mm": 20.52874129440905,
+        "tcp_z_mm": 830.1273057194296,
+        "tcp_z_axis_world_z": -0.9999999997562734,
+        "ik_success": false,
+        "position_error_m": 0.13233734667301178,
+        "rotation_error_rad": 0.14939847588539124
+      },
+      "highest_score_guaranteed_safe_candidate": {
+        "batch_index": 1,
+        "candidate_index": 66,
+        "score": 0.9954276084899902,
+        "locked_mm": 47.289625633778954,
+        "envelope_mm": 6.226511837330937,
+        "sampled_full_closure_mm": 21.507648891059308,
+        "guaranteed_full_closure_mm": 20.52839142989147,
+        "tcp_z_mm": 830.1273057194296,
+        "tcp_z_axis_world_z": -0.9999999997562734,
+        "ik_success": false,
+        "position_error_m": 0.13235171139240265,
+        "rotation_error_rad": 0.14935466647148132
+      },
+      "batch_index_36": {
+        "batch_index": 36,
+        "candidate_index": 95,
+        "score": 0.9918871521949768,
+        "locked_mm": 47.28941067572915,
+        "envelope_mm": 6.226388841669282,
+        "sampled_full_closure_mm": 21.5076178577858,
+        "guaranteed_full_closure_mm": 20.528360396617963,
+        "tcp_z_mm": 830.1273057194296,
+        "tcp_z_axis_world_z": -0.9999999997562734,
+        "ik_success": false,
+        "position_error_m": 0.13134326040744781,
+        "rotation_error_rad": 0.15343138575553894
+      }
+    },
+    "B": {
+      "sphere_count": 136,
+      "sample_count": 81,
+      "driver_limits_rad": [
+        0.0,
+        0.8000000093
+      ],
+      "max_continuous_bound_correction_mm": 1.6701656820902397,
+      "locked": {
+        "negative": 57,
+        "zero_to_10mm": 0,
+        "at_least_10mm": 43,
+        "min_mm": -80.91830409895613,
+        "max_mm": 46.86457500753419
+      },
+      "closing_envelope": {
+        "negative": 76,
+        "zero_to_10mm": 24,
+        "at_least_10mm": 0,
+        "min_mm": -81.45889348741292,
+        "max_mm": 5.754118968165043
+      },
+      "sampled_full_closure": {
+        "negative": 58,
+        "zero_to_10mm": 15,
+        "at_least_10mm": 27,
+        "min_mm": -80.91830409895613,
+        "max_mm": 21.08067463411715
+      },
+      "guaranteed_full_closure": {
+        "negative": 59,
+        "zero_to_10mm": 15,
+        "at_least_10mm": 26,
+        "min_mm": -80.91830409895613,
+        "max_mm": 20.055036745379006
+      },
+      "sampled_max_tcp_z_mm": 209.04677001715896,
+      "envelope_max_tcp_z_mm": 224.37385256883903,
+      "guaranteed_safe_but_envelope_rejected_indices": [
+        66,
+        68,
+        99,
+        70,
+        97,
+        80,
+        92,
+        95,
+        82,
+        74,
+        91,
+        87,
+        40,
+        76,
+        81,
+        41,
+        93,
+        86,
+        78,
+        84,
+        47,
+        90,
+        85,
+        71,
+        88,
+        72
+      ],
+      "best_clearance_candidate": {
+        "batch_index": 36,
+        "candidate_index": 95,
+        "score": 0.9918871521949768,
+        "locked_mm": 46.86457500753419,
+        "envelope_mm": 5.754118968165043,
+        "sampled_full_closure_mm": 21.08067463411715,
+        "guaranteed_full_closure_mm": 20.055036745379006,
+        "tcp_z_mm": 830.1273057194296,
+        "tcp_z_axis_world_z": -0.9999999997562734,
+        "ik_success": false,
+        "position_error_m": 6.143906006172983e-08,
+        "rotation_error_rad": 3.729582331857273e-08
+      },
+      "highest_score_guaranteed_safe_candidate": {
+        "batch_index": 1,
+        "candidate_index": 66,
+        "score": 0.9954276084899902,
+        "locked_mm": 46.864354955124675,
+        "envelope_mm": 5.753990878143676,
+        "sampled_full_closure_mm": 21.08063850648393,
+        "guaranteed_full_closure_mm": 20.05500061774579,
+        "tcp_z_mm": 830.1273057194296,
+        "tcp_z_axis_world_z": -0.9999999997562734,
+        "ik_success": false,
+        "position_error_m": 6.664001972467304e-08,
+        "rotation_error_rad": 4.162773592497615e-08
+      },
+      "batch_index_36": {
+        "batch_index": 36,
+        "candidate_index": 95,
+        "score": 0.9918871521949768,
+        "locked_mm": 46.86457500753419,
+        "envelope_mm": 5.754118968165043,
+        "sampled_full_closure_mm": 21.08067463411715,
+        "guaranteed_full_closure_mm": 20.055036745379006,
+        "tcp_z_mm": 830.1273057194296,
+        "tcp_z_axis_world_z": -0.9999999997562734,
+        "ik_success": false,
+        "position_error_m": 6.143906006172983e-08,
+        "rotation_error_rad": 3.729582331857273e-08
+      }
+    }
+  }
+}

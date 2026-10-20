@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "model_validated": true,
+  "joints_rad": {
+    "A": [
+      -0.2892440593691068,
+      0.40529081817347207,
+      0.5505829404424077,
+      -1.6750558675311926,
+      1.4175290352960108,
+      -0.9999999999998728,
+      1.0093430646457093
+    ],
+    "B": [
+      0.0843682937100412,
+      0.43064944107542097,
+      -0.4384531679984391,
+      -1.7336367507968604,
+      -1.1761842929400748,
+      -0.9999999999981083,
+      -0.867024670240365
+    ]
+  },
+  "validation": {
+    "mujoco_version": "3.10.0",
+    "endpoint_clearance_m": {
+      "table": [
+        0.30024038816125104,
+        [
+          "gripL_Link3_L",
+          "table"
+        ]
+      ],
+      "peer": [
+        0.023959763197117595,
+        [
+          "Base_L",
+          "Base_R"
+        ]
+      ],
+      "self": [
+        0.00033429034576053576,
+        [
+          "gripL_Link4_L",
+          "gripL_Link4_R"
+        ]
+      ]
+    },
+    "A_endpoint_B_horizontal_clearance_m": {
+      "table": [
+        0.30024038816125104,
+        [
+          "gripL_Link3_L",
+          "table"
+        ]
+      ],
+      "peer": [
+        0.023959763197117595,
+        [
+          "Base_L",
+          "Base_R"
+        ]
+      ],
+      "self": [
+        0.00033429034576053576,
+        [
+          "gripL_Link4_L",
+          "gripL_Link4_R"
+        ]
+      ]
+    },
+    "mujoco_robot_scene_contacts": 0,
+    "rgbd_views": {
+      "1": {
+        "source_red_pixels": 1161,
+        "destination_green_pixels": 13184,
+        "tabletop_measured_points": 56133,
+        "T_world_camera": [
+          [
+            0.8652307811168769,
+            -0.21937106210577642,
+            0.450834817331652,
+            0.2500000000002619
+          ],
+          [
+            -0.4827926198781627,
+            -0.6070727324208074,
+            0.6311687442691661,
+            -0.4200000000000501
+          ],
+          [
+            0.1352293666296653,
+            -0.7637663482124096,
+            -0.6311687442667144,
+            1.049999999999962
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "2": {
+        "source_red_pixels": 2131,
+        "destination_green_pixels": 7697,
+        "tabletop_measured_points": 57594,
+        "T_world_camera": [
+          [
+            -0.8865733558151427,
+            -0.10361299261365223,
+            0.4508348173337096,
+            0.2500000000000005
+          ],
+          [
+            -0.3987136040139784,
+            0.6653220860863835,
+            -0.6311687442672103,
+            0.42000000000000004
+          ],
+          [
+            -0.2345530787111108,
+            -0.7393313665247172,
+            -0.6311687442671995,
+            1.0499999999999963
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "3": {
+        "source_red_pixels": 1161,
+        "destination_green_pixels": 8046,
+        "tabletop_measured_points": 46247,
+        "T_world_camera": [
+          [
+            0.009406203861933693,
+            -0.8622106423530576,
+            0.5064625667727454,
+            0.11613389134390073
+          ],
+          [
+            -0.9999531081781634,
+            -0.009277058944960614,
+            0.0027780608639683124,
+            0.028640379409888082
+          ],
+          [
+            0.002303209443348775,
+            -0.5064649488271242,
+            -0.8622574736329054,
+            1.07227570530598
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    },
+    "reference_scene": {
+      "table": {
+        "position": [
+          0.55,
+          0.0,
+          0.56
+        ],
+        "size": [
+          0.7,
+          1.0,
+          0.08
+        ]
+      },
+      "objects": [
+        {
+          "id": "source",
+          "kind": "cube",
+          "color": "red",
+          "position": [
+            0.43,
+            0.15,
+            0.625
+          ],
+          "size": [
+            0.05,
+            0.05,
+            0.05
+          ],
+          "yaw_deg": 0.0
+        },
+        {
+          "id": "destination",
+          "kind": "bin",
+          "color": "green",
+          "position": [
+            0.65,
+            -0.15,
+            0.65
+          ],
+          "size": [
+            0.18,
+            0.16,
+            0.1
+          ],
+          "yaw_deg": 0.0,
+          "wall_thickness_m": 0.01,
+          "mass_kg": 0.4
+        }
+      ]
+    },
+    "minimum_clearance_m": {
+      "table": 0.01,
+      "peer": 0.01,
+      "self": 0.0
+    },
+    "scope": "offline endpoint geometry and rendered RGBD; runtime path must be collision planned",
+    "collision_geometry": "shipped planner link-local spheres with world/self buffers",
+    "self_collision_exclusions": "existing marvin_gui_dual.yml self_collision_ignore",
+    "table_exclusions": [
+      "Link_Base",
+      "Link_Stand",
+      "Base_L",
+      "Base_R"
+    ],
+    "environment_truth_in_runtime": false
+  },
+  "source_sha256": {
+    "assets/marvin_urdf/marvin_with_grippers.urdf": "cad92ac6d4dd94a9651c79b383520efe7fafadaabcd83aff5b17222e7eab0dea",
+    "resources/cameras/calibration.json": "910ade9c3dad78002d71389c0746d16668ef852d1dd9fee4ee0f24ba50a914f5",
+    "resources/curobo/marvin_gui_dual.yml": "73199e86daf2d6772f45c4227074158bcf1bc1deb1bee363d51d5810d1b6ce1e",
+    "src/jev_mujoco/model_builder.py": "b82f90fad80c83db412fb5ffb350282efffe6b37c6c02b153b70a8a7517e8c85",
+    "src/jev_mujoco/cameras.py": "a9bcefd6864f14447d153655fc30e429d69303dc3b1224639b757b08e1d5d719",
+    "scripts/calibrate_observation_poses.py": "72bb49b9b94548783024262a3f6fe4c6a8b8ca7a5909063393ed999b54879b79"
+  },
+  "search_seed": 20261009,
+  "provenance": "own robot model/calibration offline camera-pose IK; actual RGBD verification",
+  "startup_joints_rad": {
+    "A": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "B": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  }
+}

@@ -1,0 +1,2597 @@
+--- baseline/src/jev_mujoco/cameras.py
++++ current/src/jev_mujoco/cameras.py
+@@ -0,0 +1,196 @@
++"""Registered RGBD sensor boundary using the public MuJoCo 3.10 API.
++
++Only this adapter reads rendered physics poses. Downstream perception receives
++pixels, RGB optical calibration, and a frozen copy of robot feedback.
++"""
++
++import json
++import threading
++import uuid
++from copy import copy, deepcopy
++from pathlib import Path
++
++import mujoco
++import numpy as np
++
++CALIBRATION_PATH = Path(__file__).resolve().parents[2] / "resources" / "cameras" / "calibration.json"
++CAMERA_NAMES = {camera_id: "rgbd_" + camera_id for camera_id in ("1", "2", "3")}
++# MuJoCo camera: X right, Y up, -Z forward. RGB optical: X right, Y down, +Z forward.
++OPTICAL_TO_MUJOCO = np.diag([1.0, -1.0, -1.0])
++
++
++def load_calibration(path=CALIBRATION_PATH):
++    with Path(path).open(encoding="utf-8") as source:
++        calibration = json.load(source)
++    if set(calibration["cameras"]) != {"1", "2", "3"}:
++        raise ValueError("RGBD calibration must contain cameras 1, 2 and 3")
++    for camera in calibration["cameras"].values():
++        intrinsics = camera["intrinsics"]
++        if any(not np.isfinite(intrinsics[key]) for key in ("fx", "fy", "cx", "cy")):
++            raise ValueError("RGB intrinsics must be finite")
++        if min(intrinsics["fx"], intrinsics["fy"], intrinsics["width"], intrinsics["height"]) <= 0:
++            raise ValueError("RGB focal lengths and dimensions must be positive")
++        transform = np.asarray(camera["T_parent_rgb_m"], dtype=float)
++        if transform.shape != (4, 4) or not np.isfinite(transform).all():
++            raise ValueError("RGB optical pose must be a finite 4 by 4 matrix")
++    return calibration
++
++
++def install_cameras(spec, calibration=None):
++    """Install cameras before compilation; no new bodies/joints or physics edits.
++
++    Wrist extrinsics attach to the URDF flange bodies whose poses already include
++    arm mounting and FK. The historical head matrix is already world/base_link.
++    """
++    calibration = load_calibration() if calibration is None else calibration
++    for camera_id, definition in calibration["cameras"].items():
++        parent_name = definition["parent_body"]
++        parent = spec.worldbody if parent_name == "world" else spec.body(parent_name)
++        if parent is None:
++            raise ValueError(f"missing calibrated camera parent {parent_name}")
++        transform = np.asarray(definition["T_parent_rgb_m"], dtype=float)
++        rotation = transform[:3, :3] @ OPTICAL_TO_MUJOCO
++        quaternion = np.empty(4)
++        mujoco.mju_mat2Quat(quaternion, rotation.reshape(9))
++        intrinsics = definition["intrinsics"]
++        width, height = intrinsics["width"], intrinsics["height"]
++        parent.add_camera(name=CAMERA_NAMES[camera_id], pos=transform[:3, 3], quat=quaternion,
++                          resolution=[width, height], sensor_size=[width, height],
++                          focal_pixel=[intrinsics["fx"], intrinsics["fy"]],
++                          principal_pixel=[width / 2 - intrinsics["cx"], height / 2 - intrinsics["cy"]],
++                          ipd=0)
++        spec.visual.global_.offwidth = max(spec.visual.global_.offwidth, width)
++        spec.visual.global_.offheight = max(spec.visual.global_.offheight, height)
++
++
++def clone_render_model(model):
++    """Public model copy for a GL worker; never shares mutable rendering options."""
++    return copy(model)
++
++
++def camera_pose(model, data, camera_id):
++    index = model.camera(CAMERA_NAMES[str(camera_id)]).id
++    transform = np.eye(4)
++    transform[:3, :3] = data.cam_xmat[index].reshape(3, 3) @ OPTICAL_TO_MUJOCO
++    transform[:3, 3] = data.cam_xpos[index]
++    return transform
++
++
++def _immutable(array):
++    result = np.ascontiguousarray(array).copy()
++    result.flags.writeable = False
++    return result
++
++
++class RgbdRenderer:
++    """One thread owns all Renderer/GL calls and their close lifecycle.
++
++    The caller briefly copies physics data under its lock. This adapter makes
++    another local copy once and renders all three RGB/depth pairs from that frame.
++    """
++
++    def __init__(self, model, calibration=None):
++        self.model = model
++        self.calibration = deepcopy(load_calibration() if calibration is None else calibration)
++        self._data = mujoco.MjData(model)
++        self._renderers = {}
++        self._owner_thread = None
++        self._closed = False
++        self._options = mujoco.MjvOption()
++        self._options.geomgroup[3] = 0  # Robot visual meshes, without duplicate collision hulls.
++        for camera_id in self.calibration["cameras"]:
++            model.camera(CAMERA_NAMES[camera_id])
++
++    def _check_thread(self):
++        current = threading.get_ident()
++        if self._owner_thread is None:
++            self._owner_thread = current
++        elif self._owner_thread != current:
++            raise RuntimeError("RGBD rendering and close must use the owning GL thread")
++
++    def capture(self, data, generation, arms):
++        self._check_thread()
++        if self._closed:
++            raise RuntimeError("RGBD renderer is closed")
++        mujoco.mj_copyData(self._data, self.model, data)
++        mujoco.mj_forward(self.model, self._data)
++        capture_time = float(self._data.time)
++        observation_id = f"rgbd-{generation}-{uuid.uuid4().hex}"
++        telemetry = deepcopy(arms)
++        joints = {arm: np.degrees(feedback["joints_rad"]).tolist() for arm, feedback in telemetry.items()}
++        views = {}
++        for camera_id, definition in self.calibration["cameras"].items():
++            intrinsics = definition["intrinsics"]
++            dimensions = (intrinsics["height"], intrinsics["width"])
++            if dimensions not in self._renderers:
++                self._renderers[dimensions] = mujoco.Renderer(self.model, height=dimensions[0],
++                                                             width=dimensions[1])
++            renderer = self._renderers[dimensions]
++            renderer.disable_depth_rendering()
++            renderer.update_scene(self._data, camera=CAMERA_NAMES[camera_id], scene_option=self._options)
++            rgb = renderer.render().copy()
++            renderer.enable_depth_rendering()
++            try:
++                depth = renderer.render().copy()
++            finally:
++                renderer.disable_depth_rendering()
++            far_m = self.model.vis.map.zfar * self.model.stat.extent
++            valid = np.isfinite(depth) & (depth > 0) & (depth < far_m * .9999)
++            depth[~valid] = 0
++            views[camera_id] = {
++                "camera_id": camera_id, "frame_id": observation_id, "simulation_generation": generation,
++                "capture_time": capture_time, "calibration_id": self.calibration["calibration_id"],
++                "rgb": _immutable(rgb), "depth_m": _immutable(depth), "valid_depth": _immutable(valid),
++                "intrinsics": deepcopy(intrinsics),
++                "T_world_camera": camera_pose(self.model, self._data, camera_id).tolist(),
++                "robot_joints_deg": deepcopy(joints), "registered_to": "rgb",
++            }
++        return {"observation_id": observation_id, "generation": generation, "time": capture_time,
++                "arms": telemetry, "views": views, "source": "rgbd"}
++
++    def close(self):
++        self._check_thread()
++        if self._closed:
++            return
++        self._closed = True
++        for renderer in self._renderers.values():
++            renderer.close()
++        self._renderers.clear()
++
++
++def letterbox_view(view, width=640, height=480):
++    """Pad registered RGBD and masks without scaling or inventing depth samples."""
++    source_height, source_width = view["depth_m"].shape
++    if source_width > width or source_height > height:
++        raise ValueError("registered view is larger than the mapper resolution")
++    top, left = (height - source_height) // 2, (width - source_width) // 2
++    result = dict(view)
++    result["intrinsics"] = {**view["intrinsics"], "cx": view["intrinsics"]["cx"] + left,
++                            "cy": view["intrinsics"]["cy"] + top, "width": width, "height": height}
++    for key in ("rgb", "depth_m", "valid_depth"):
++        source = np.asarray(view[key])
++        shape = (height, width) + source.shape[2:]
++        padded = np.zeros(shape, dtype=source.dtype)
++        padded[top:top + source_height, left:left + source_width] = source
++        result[key] = _immutable(padded)
++    result["instance_masks"] = {}
++    for instance_id, mask in view.get("instance_masks", {}).items():
++        padded = np.zeros((height, width), dtype=bool)
++        padded[top:top + source_height, left:left + source_width] = mask
++        result["instance_masks"][instance_id] = _immutable(padded)
++    return result
++
++
++def deproject_view(view, mask=None):
++    """Visible measured points in world metres; never generates hidden surfaces."""
++    depth = np.asarray(view["depth_m"])
++    valid = np.asarray(view["valid_depth"], dtype=bool) & np.isfinite(depth) & (depth > 0)
++    if mask is not None:
++        valid = valid & np.asarray(mask, dtype=bool)
++    rows, columns = np.nonzero(valid)
++    z = depth[rows, columns]
++    intrinsics = view["intrinsics"]
++    points = np.column_stack(((columns - intrinsics["cx"]) * z / intrinsics["fx"],
++                              (rows - intrinsics["cy"]) * z / intrinsics["fy"], z))
++    transform = np.asarray(view["T_world_camera"], dtype=float)
++    return (points @ transform[:3, :3].T + transform[:3, 3]).astype(np.float32)
+--- baseline/src/jev_mujoco/perception.py
++++ current/src/jev_mujoco/perception.py
+@@ -0,0 +1,468 @@
++"""SAM3 RGB masks, measured RGBD geometry, and explicit unique association.
++
++No simulator object identifiers, editor metadata, or generated primitive clouds
++cross this boundary. Incomplete views remain measured partial surfaces.
++"""
++
++import colorsys
++import math
++import os
++import uuid
++from copy import deepcopy
++from io import BytesIO
++
++import httpx
++import msgpack
++import numpy as np
++from PIL import Image
++from scipy.spatial import ConvexHull, QhullError, cKDTree
++
++from .cameras import deproject_view
++
++SAM3_MODEL_IDENTITY = {
++    "name": "sam3", "source_sha": "5dd401d1c5c1d5c3eedff06d41b77af824517619",
++    "weight_sha256": "9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e",
++}
++MAX_RESPONSE_BYTES = 96 * 1024 * 1024
++MAX_ARRAY_ITEMS = 16_777_216
++CLASS_PROMPTS = {"cube": "cube", "box": "box", "sphere": "sphere", "cylinder": "cylinder", "bin": "open bin"}
++
++
++class PerceptionError(RuntimeError):
++    """Sensor, detector, geometry, or association lacks required evidence."""
++
++
++def _decode_array(value, dtype, rank, unit, frame):
++    expected_keys = {"dtype", "rank", "shape", "unit", "frame", "data"}
++    if not isinstance(value, dict) or set(value) != expected_keys:
++        raise PerceptionError("sam3_invalid_output")
++    if (value["dtype"], value["rank"], value["unit"], value["frame"]) != (dtype, rank, unit, frame):
++        raise PerceptionError("sam3_invalid_output")
++    shape = value["shape"]
++    if not isinstance(shape, list) or len(shape) != rank or any(type(n) is not int or n < 0 for n in shape):
++        raise PerceptionError("sam3_invalid_output")
++    count = math.prod(shape)
++    data = value["data"]
++    if count > MAX_ARRAY_ITEMS or type(data) is not bytes or len(data) != count * np.dtype(dtype).itemsize:
++        raise PerceptionError("sam3_invalid_output")
++    return np.frombuffer(data, dtype=dtype).reshape(shape).copy()
++
++
++class Sam3Client:
++    """Existing pinned base sidecar contract; only the HTTP transport is adapted.
++
++    A request is one unchanged English class prompt and the actual frozen RGB
++    JPEG. The sidecar runs the official model; errors never invoke a substitute.
++    """
++
++    def __init__(self, url=None, timeout_s=180):
++        self.url = url or os.getenv("JEV_SAM3_URL", "http://127.0.0.1:8322")
++        self.timeout_s = float(timeout_s)
++
++    def segment(self, rgb, text, timestamp_us):
++        text = text.strip()
++        if (not isinstance(rgb, np.ndarray) or rgb.dtype != np.uint8 or rgb.ndim != 3 or rgb.shape[2] != 3
++                or min(rgb.shape[:2]) < 1 or max(rgb.shape[:2]) > 4096 or rgb.shape[0] * rgb.shape[1] > 4_194_304
++                or not 1 <= len(text) <= 256 or type(timestamp_us) is not int or not 0 <= timestamp_us <= 2**63 - 1):
++            raise PerceptionError("sam3_invalid_request")
++        image_buffer = BytesIO()
++        Image.fromarray(rgb).save(image_buffer, format="JPEG", quality=95, subsampling=0)
++        payload = {"rgb_jpeg": image_buffer.getvalue(), "text": text, "timestamp_us": timestamp_us}
++        body = msgpack.packb({"operation": "segment_text", "payload": payload}, use_bin_type=True)
++        try:
++            with httpx.stream("POST", self.url, content=body, timeout=self.timeout_s,
++                              headers={"Content-Type": "application/msgpack", "Accept": "application/msgpack"}) as response:
++                if response.status_code != 200 or response.headers.get("content-type", "").strip() != "application/msgpack":
++                    raise PerceptionError("sam3_invalid_output")
++                response_bytes = bytearray()
++                for chunk in response.iter_bytes():
++                    response_bytes.extend(chunk)
++                    if len(response_bytes) > MAX_RESPONSE_BYTES:
++                        raise PerceptionError("sam3_invalid_output")
++        except httpx.HTTPError as error:
++            raise PerceptionError("sam3_service_unavailable") from error
++        try:
++            envelope = msgpack.unpackb(response_bytes, raw=False, strict_map_key=True)
++            if type(envelope) is not dict or type(envelope.get("ok")) is not bool:
++                raise PerceptionError("sam3_invalid_output")
++            if envelope["ok"] is False:
++                if set(envelope) != {"ok", "error"} or not isinstance(envelope["error"], dict):
++                    raise PerceptionError("sam3_invalid_output")
++                code = envelope["error"].get("code")
++                if code == "sam3_no_match":
++                    return []
++                if code not in {"sam3_service_unavailable", "sam3_invalid_request", "sam3_invalid_output",
++                                "sam3_model_identity_mismatch", "sam3_visualization_failed"}:
++                    code = "sam3_invalid_output"
++                raise PerceptionError(code)
++            if set(envelope) != {"ok", "result"}:
++                raise PerceptionError("sam3_invalid_output")
++            result = envelope["result"]
++            if set(result) != {"masks", "boxes", "scores", "selected_index", "model", "timing_us", "timestamp_us"}:
++                raise PerceptionError("sam3_invalid_output")
++            if result["model"] != SAM3_MODEL_IDENTITY:
++                raise PerceptionError("sam3_model_identity_mismatch")
++            masks = _decode_array(result["masks"], "uint8", 3, "mask", "image")
++            boxes = _decode_array(result["boxes"], "float32", 2, "pixel", "image")
++            scores = _decode_array(result["scores"], "float32", 1, "confidence", "model")
++            count = len(masks)
++            selected = result["selected_index"]
++            timing = result["timing_us"]
++            if (not 1 <= count <= 200 or masks.shape[1:] != rgb.shape[:2] or boxes.shape != (count, 4)
++                    or scores.shape != (count,) or not np.isfinite(boxes).all() or not np.isfinite(scores).all()
++                    or not np.isin(masks, [0, 1]).all() or np.any((scores < 0) | (scores > 1))
++                    or type(selected) is not int or not 0 <= selected < count or not masks[selected].any()
++                    or result["timestamp_us"] != timestamp_us or not isinstance(timing, dict)
++                    or set(timing) != {"inference", "total"}
++                    or any(type(value) is not int or value < 0 for value in timing.values())):
++                raise PerceptionError("sam3_invalid_output")
++            return [{"mask": mask.astype(bool), "score": float(score), "label": text}
++                    for mask, score in zip(masks, scores, strict=True) if mask.any()]
++        except PerceptionError:
++            raise
++        except (ValueError, TypeError, KeyError) as error:
++            raise PerceptionError("sam3_invalid_output") from error
++
++
++def _readonly(array):
++    result = np.ascontiguousarray(array).copy()
++    result.flags.writeable = False
++    return result
++
++
++def _validate_capture(capture):
++    try:
++        if set(capture["views"]) != {"1", "2", "3"}:
++            raise PerceptionError("three registered RGBD views are required")
++        calibration_ids = set()
++        for camera_id, view in capture["views"].items():
++            if (view["camera_id"] != camera_id or view["frame_id"] != capture["observation_id"]
++                    or view["simulation_generation"] != capture["generation"] or view["capture_time"] != capture["time"]):
++                raise PerceptionError("RGBD views must use the same captured frame, time and generation")
++            calibration_ids.add(view["calibration_id"])
++            rgb, depth, valid = view["rgb"], view["depth_m"], view["valid_depth"]
++            intrinsics = view["intrinsics"]
++            shape = (intrinsics["height"], intrinsics["width"])
++            transform = np.asarray(view["T_world_camera"], dtype=float)
++            if (rgb.dtype != np.uint8 or rgb.shape != shape + (3,) or depth.shape != shape or valid.shape != shape
++                    or valid.dtype != bool or view.get("registered_to") != "rgb"
++                    or transform.shape != (4, 4) or not np.isfinite(transform).all()
++                    or not np.allclose(transform[3], [0, 0, 0, 1])
++                    or not np.allclose(transform[:3, :3].T @ transform[:3, :3], np.eye(3), atol=1e-5)
++                    or min(intrinsics["fx"], intrinsics["fy"]) <= 0
++                    or any(not np.isfinite(intrinsics[key]) for key in ("fx", "fy", "cx", "cy"))):
++                raise PerceptionError("invalid registered RGBD calibration or array")
++            for arm, feedback in capture["arms"].items():
++                if not np.allclose(view["robot_joints_deg"][arm], np.degrees(feedback["joints_rad"]), atol=1e-6):
++                    raise PerceptionError("RGBD robot feedback does not match captured telemetry")
++        if len(calibration_ids) != 1:
++            raise PerceptionError("RGBD calibration identity mismatch")
++    except (KeyError, TypeError, AttributeError, ValueError) as error:
++        raise PerceptionError("invalid registered RGBD capture") from error
++
++
++def _color(rgb_pixels):
++    median = np.median(rgb_pixels, axis=0) / 255
++    hue, saturation, value = colorsys.rgb_to_hsv(*median)
++    if value < .20:
++        name = "black"
++    elif saturation < .18:
++        name = "white" if value > .75 else "gray"
++    elif hue < .04 or hue >= .94:
++        name = "red"
++    elif hue < .11:
++        name = "orange"
++    elif hue < .19:
++        name = "yellow"
++    elif hue < .46:
++        name = "green"
++    elif hue < .75:
++        name = "blue"
++    else:
++        name = "unknown"
++    feature = median / max(float(median.sum()), .001)
++    return name, feature.tolist(), median.tolist()
++
++
++def _voxel_points(points, resolution=.001):
++    _, indices = np.unique(np.floor(points / resolution).astype(np.int64), axis=0, return_index=True)
++    return np.asarray(points)[np.sort(indices)].astype(np.float32)
++
++
++def _horizontal_box(points):
++    """Minimum-area measured XY rectangle; tie orientation is deterministic."""
++    xy = points[:, :2]
++    angles = [0.0]
++    try:
++        hull = xy[ConvexHull(xy).vertices]
++        edges = np.roll(hull, -1, axis=0) - hull
++        for edge in edges:
++            angle = float(np.arctan2(edge[1], edge[0]))
++            angle = (angle + np.pi / 4) % (np.pi / 2) - np.pi / 4
++            angles.append(angle)
++    except QhullError:
++        pass
++    best = None
++    for angle in angles:
++        rotation = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
++        local = xy @ rotation
++        low, high = local.min(axis=0), local.max(axis=0)
++        area = float(np.prod(high - low))
++        if best is None or area < best[0] - 1e-9 or (abs(area - best[0]) < 1e-9 and abs(angle) < abs(best[1])):
++            best = (area, angle, rotation, low, high)
++    return best[1:]
++
++
++def fit_bin_cavity(points_world_m):
++    """Conservative visible cavity, origin at inner-floor centre, local +Z up.
++
++    A class mask alone is insufficient: measured floor area, positive wall height,
++    and support on all four rim sides must be present. Hidden regions are omitted.
++    """
++    points = np.asarray(points_world_m, dtype=float)
++    if points.ndim != 2 or points.shape[1] != 3 or len(points) < 60 or not np.isfinite(points).all():
++        raise PerceptionError("bin cavity is unobservable")
++    low_z, high_z = np.quantile(points[:, 2], [.10, .90])
++    if high_z - low_z < .015:
++        raise PerceptionError("bin cavity has no measured wall height")
++    floor = points[np.abs(points[:, 2] - low_z) < .004]
++    rim = points[points[:, 2] >= high_z - .004]
++    if len(floor) < 30 or len(rim) < 24:
++        raise PerceptionError("bin cavity floor or rim is unobservable")
++    yaw, rotation, floor_low, floor_high = _horizontal_box(floor)
++    local_rim = rim[:, :2] @ rotation
++    rim_low, rim_high = local_rim.min(axis=0), local_rim.max(axis=0)
++    inner_size = floor_high - floor_low
++    if np.min(inner_size) < .02 or np.any(floor_low < rim_low + .003) or np.any(floor_high > rim_high - .003):
++        raise PerceptionError("bin cavity floor is not bounded by observed walls")
++    for axis in (0, 1):
++        for side in (rim_low[axis], rim_high[axis]):
++            if np.count_nonzero(np.abs(local_rim[:, axis] - side) < .003) < 8:
++                raise PerceptionError("bin cavity requires four observed sides")
++    floor_z = float(np.median(floor[:, 2]))
++    transform = np.eye(4)
++    transform[:2, :2] = rotation
++    transform[:2, 3] = rotation @ ((floor_low + floor_high) / 2)
++    transform[2, 3] = floor_z
++    uncertainty = max(.003, float(np.std(floor[:, 2])) * 3)
++    return {"inner_size_m": [float(inner_size[0]), float(inner_size[1]), float(high_z - floor_z)],
++            "T_world_bin": transform.tolist(), "floor_height_m": floor_z, "uncertainty_m": uncertainty,
++            "estimated": True, "source": "visible_rgbd_floor_and_four_rim_sides", "yaw_rad": yaw}
++
++
++def _estimate_table(points):
++    if len(points) < 100:
++        raise PerceptionError("table_unobservable")
++    # SAM3 restricts these samples to table pixels. Select its horizontal top mode.
++    levels = np.round(points[:, 2] / .004).astype(np.int64)
++    unique, counts = np.unique(levels, return_counts=True)
++    level = unique[np.argmax(counts)]
++    surface = points[np.abs(points[:, 2] - level * .004) <= .006]
++    if len(surface) < 100:
++        raise PerceptionError("table_unobservable")
++    low, high = surface.min(axis=0), surface.max(axis=0)
++    z = float(np.median(surface[:, 2]))
++    return {"position": [float((low[0] + high[0]) / 2), float((low[1] + high[1]) / 2), z],
++            "size": [float(high[0] - low[0]), float(high[1] - low[1]), .006],
++            "surface_height_m": z, "uncertainty_m": max(.003, float(np.std(surface[:, 2])) * 3),
++            "estimated": True, "source": "sam3_mask_and_measured_horizontal_plane",
++            "points_world_m": _readonly(_voxel_points(surface))}
++
++
++def _estimate_object(group, table):
++    points = _voxel_points(np.vstack([entry["points"] for entry in group]))
++    if len(points) < 30:
++        raise PerceptionError("instance_visible_depth_insufficient")
++    kind = group[0]["kind"]
++    pixels = np.vstack([entry["pixels"] for entry in group])
++    color, feature, median_rgb = _color(pixels)
++    yaw, rotation, low_xy, high_xy = _horizontal_box(points)
++    low_z, high_z = float(points[:, 2].min()), float(points[:, 2].max())
++    size = np.array([*(high_xy - low_xy), max(high_z - low_z, .003)])
++    centre_z = (high_z + low_z) / 2
++    assumptions = ["visible_surface_only"]
++    if kind == "cube" and size[2] < min(size[:2]) * .5:
++        size[2] = float(np.mean(size[:2]))
++        centre_z = high_z - size[2] / 2
++        assumptions.append("cube_height_inferred_from_observed_top_width")
++    elif kind in ("box", "cylinder") and .01 <= high_z - table["surface_height_m"] <= .18:
++        size[2] = max(size[2], high_z - table["surface_height_m"])
++        centre_z = high_z - size[2] / 2
++        assumptions.append("height_inferred_with_table_support")
++    transform = np.eye(4)
++    transform[:2, :2] = rotation
++    transform[:2, 3] = rotation @ ((low_xy + high_xy) / 2)
++    transform[2, 3] = centre_z
++    local_points = (points - transform[:3, 3]) @ transform[:3, :3]
++    identifier = "instance-" + uuid.uuid4().hex[:16]
++    result = {"id": identifier, "kind": kind, "color": color, "position": transform[:3, 3].tolist(),
++              "quaternion": [float(np.cos(yaw / 2)), 0., 0., float(np.sin(yaw / 2))],
++              "size": size.tolist(), "T_world_object": transform.tolist(), "estimated": True,
++              "confidence": float(min(entry["score"] for entry in group)), "uncertainty_m": .005,
++              "source": "sam3_rgb_mask_and_registered_depth", "rgb_feature": feature,
++              "color_evidence": {"median_rgb": median_rgb, "source": "masked_rgb"},
++              "points_world_m": _readonly(points), "points_object_m": _readonly(local_points.astype(np.float32)),
++              "coverage": {"observed_surface_only": True, "camera_ids": [entry["camera_id"] for entry in group],
++                           "point_count": len(points), "limitations": assumptions}}
++    if kind == "bin":
++        result["cavity"] = fit_bin_cavity(points)
++    return result
++
++
++def _same_observed_instance(first, second):
++    if first["kind"] != second["kind"] or first["color"] != second["color"]:
++        return False
++    a, b = first["points"], second["points"]
++    size_a, size_b = np.ptp(a, axis=0), np.ptp(b, axis=0)
++    gate = .02 + .5 * max(float(np.linalg.norm(size_a)), float(np.linalg.norm(size_b)))
++    if np.linalg.norm(np.median(a, axis=0) - np.median(b, axis=0)) > gate:
++        return False
++    distances = cKDTree(a).query(b)[0]
++    return float(np.median(distances)) < .015
++
++
++class Perception:
++    """Detector injection bounds network I/O; all fusion uses actual captured data."""
++
++    def __init__(self, detector=None):
++        self.detector = detector if detector is not None else Sam3Client()
++
++    def observe(self, capture, *, instruction=""):
++        _validate_capture(capture)
++        timestamp_us = round(capture["time"] * 1_000_000)
++        all_detections, table_points, views = [], [], {}
++        # Head establishes scene instances; wrists add observed surfaces.
++        for camera_id in ("3", "1", "2"):
++            view = capture["views"][camera_id]
++            detections = []
++            for kind, prompt in CLASS_PROMPTS.items():
++                for detection in self.detector.segment(view["rgb"], prompt, timestamp_us):
++                    score = float(detection["score"])
++                    if not np.isfinite(score) or not 0 <= score <= 1:
++                        raise PerceptionError("invalid detector confidence")
++                    mask = np.asarray(detection["mask"], dtype=bool)
++                    if mask.shape != view["depth_m"].shape:
++                        raise PerceptionError("sam3 mask dimensions do not match registered RGBD")
++                    points = deproject_view(view, mask)
++                    if len(points) < 30:
++                        continue
++                    measured = view["valid_depth"] & np.isfinite(view["depth_m"]) & (view["depth_m"] > 0)
++                    pixels = view["rgb"][mask & measured]
++                    color, _, _ = _color(pixels)
++                    detections.append({"mask": mask, "points": points, "pixels": pixels, "kind": kind,
++                                       "color": color, "score": score, "camera_id": camera_id})
++            # Multiple prompts can return the same official mask. Keep bin
++            # evidence until complementary views have supplied the cavity fit.
++            detections.sort(key=lambda item: (item["kind"] != "bin", -item["score"]))
++            unique = []
++            for detection in detections:
++                duplicate = False
++                for previous in unique:
++                    intersection = np.count_nonzero(detection["mask"] & previous["mask"])
++                    union = np.count_nonzero(detection["mask"] | previous["mask"])
++                    if intersection / max(union, 1) > .65:
++                        duplicate = True
++                        break
++                if not duplicate:
++                    unique.append(detection)
++            occupied = np.zeros(view["depth_m"].shape, dtype=bool)
++            for detection in unique:
++                occupied |= detection["mask"]
++            for detection in self.detector.segment(view["rgb"], "table", timestamp_us):
++                mask = np.asarray(detection["mask"], dtype=bool)
++                if mask.shape != occupied.shape:
++                    raise PerceptionError("sam3 table mask dimensions do not match registered RGBD")
++                table_points.append(deproject_view(view, mask & ~occupied))
++            all_detections.extend(unique)
++            views[camera_id] = {key: deepcopy(value) for key, value in view.items()
++                                if key not in {"rgb", "depth_m", "valid_depth"}}
++            for key in ("rgb", "depth_m", "valid_depth"):
++                views[camera_id][key] = _readonly(view[key])
++            views[camera_id]["instance_masks"] = {}
++        if not table_points:
++            raise PerceptionError("table_unobservable")
++        table = _estimate_table(np.vstack(table_points))
++        groups = []
++        for detection in all_detections:
++            candidates = []
++            for index, group in enumerate(groups):
++                if any(entry["camera_id"] == detection["camera_id"] for entry in group):
++                    continue
++                if any(_same_observed_instance(entry, detection) for entry in group):
++                    candidates.append(index)
++            if len(candidates) > 1:
++                raise PerceptionError("cross_view_instance_ambiguous")
++            if candidates:
++                groups[candidates[0]].append(detection)
++            else:
++                groups.append([detection])
++        objects = []
++        for group in groups:
++            instance = _estimate_object(group, table)
++            objects.append(instance)
++            for entry in group:
++                views[entry["camera_id"]]["instance_masks"][instance["id"]] = _readonly(entry["mask"])
++        return {"observation_id": capture["observation_id"], "generation": capture["generation"],
++                "time": capture["time"], "source": "rgbd", "objects": objects, "table": table,
++                "arms": _robot_feedback(capture["arms"]), "views": views,
++                "detector_model": deepcopy(SAM3_MODEL_IDENTITY)}
++
++    @staticmethod
++    def associate(previous, current):
++        """Old id -> current id only when every requested identity is unique.
++
++        Robot TCP displacement predicts a nearby previously held object. The
++        candidate still needs measured class, RGB feature, and size agreement.
++        """
++        if previous["generation"] != current["generation"]:
++            raise PerceptionError("instance association generation mismatch")
++        mapping = {}
++        for old in previous["objects"]:
++            expected_positions = [np.asarray(old["position"])]
++            for arm, feedback in previous.get("arms", {}).items():
++                if "tcp" not in feedback or feedback.get("gripper_closed_fraction", 0) < .2:
++                    continue
++                if arm not in current.get("arms", {}) or "tcp" not in current["arms"][arm]:
++                    continue
++                old_tcp = np.asarray(feedback["tcp"])
++                if np.linalg.norm(np.asarray(old["position"]) - old_tcp[:3, 3]) <= .2:
++                    new_tcp = np.asarray(current["arms"][arm]["tcp"])
++                    relative = np.linalg.inv(old_tcp) @ np.r_[old["position"], 1]
++                    expected_positions.append((new_tcp @ relative)[:3])
++            candidates = []
++            for new in current["objects"]:
++                if old["kind"] != new["kind"] or old["color"] != new["color"]:
++                    continue
++                if np.linalg.norm(np.asarray(old["rgb_feature"]) - np.asarray(new["rgb_feature"])) > .2:
++                    continue
++                old_size, new_size = np.asarray(old["size"]), np.asarray(new["size"])
++                if np.any(np.abs(old_size - new_size) > np.maximum(old_size * .6, .015)):
++                    continue
++                gate = max(.04, min(.12, float(np.linalg.norm(old_size))))
++                if min(np.linalg.norm(np.asarray(new["position"]) - position) for position in expected_positions) <= gate:
++                    candidates.append(new["id"])
++            if not candidates:
++                raise PerceptionError("instance association missing")
++            if len(candidates) != 1 or candidates[0] in mapping.values():
++                raise PerceptionError("instance association ambiguous")
++            mapping[old["id"]] = candidates[0]
++        return mapping
++
++
++def _robot_feedback(arms):
++    return {arm: {key: deepcopy(value) for key, value in feedback.items()
++                  if key in {"joints_rad", "tcp", "gripper_closed_fraction"}}
++            for arm, feedback in arms.items() if arm in {"A", "B"}}
++
++
++def public_observation(observation):
++    """Text-only allowlist for JEV; no RGB/depth/masks/cloud arrays or private fields."""
++    result = {key: deepcopy(observation[key]) for key in ("observation_id", "generation", "time", "source")}
++    result["arms"] = _robot_feedback(observation["arms"])
++    result["table"] = {key: deepcopy(value) for key, value in observation["table"].items()
++                       if key in {"position", "size", "surface_height_m", "uncertainty_m", "estimated", "source"}}
++    object_keys = {"id", "kind", "color", "position", "quaternion", "size", "T_world_object", "estimated",
++                   "confidence", "uncertainty_m", "source", "coverage", "cavity", "color_evidence"}
++    result["objects"] = [{key: deepcopy(value) for key, value in instance.items() if key in object_keys}
++                         for instance in observation["objects"]]
++    return result
+--- baseline/resources/cameras/calibration.json
++++ current/resources/cameras/calibration.json
+@@ -0,0 +1,1516 @@
++{
++  "schema_version": 1,
++  "calibration_kind": "historical_frozen_rgb_virtual_camera",
++  "translation_units": "meters",
++  "extrinsics_source": "C:\\project\\tianji_base\\extensions\\cameras\\camera-extrinsics\\defaults\\camera_extrinsics.json",
++  "extrinsics_sha256": "2705f84e03687cded0e1f1373bd5933ccdc8edd10cad6e934a19cf0266be2b67",
++  "cameras": {
++    "1": {
++      "camera_id": "1",
++      "role": "right_wrist",
++      "parent_body": "TCP_Link_R",
++      "intrinsics": {
++        "cx": 317.9415584415584,
++        "cy": 235.86363636363635,
++        "fx": 374.025974025974,
++        "fy": 374.025974025974,
++        "width": 640,
++        "height": 480
++      },
++      "distortion": [
++        0.0,
++        0.0,
++        0.0,
++        0.0,
++        0.0
++      ],
++      "T_parent_rgb_m": [
++        [
++          -0.9997204930531767,
++          0.02071581306489101,
++          0.011392579101365818,
++          -0.0011901059103524875
++        ],
++        [
++          -0.023613993016487367,
++          -0.8983341899081219,
++          -0.4386776294455136,
++          0.09237720705946872
++        ],
++        [
++          0.001146779550649013,
++          -0.4388240402840052,
++          0.8985722823265165,
++          0.05135253272235849
++        ],
++        [
++          0.0,
++          0.0,
++          0.0,
++          1.0
++        ]
++      ],
++      "source_path": "/home/guangyu/.cache/tianji-codex/stereo-20260910/configured-live/1-calibration.json",
++      "source_sha256": "e8cd47a5d902ade17d045fbaad7e008a7a173fb4695208b7f8d0bae07604ce8d",
++      "device_identity": {
++        "camera_id": "1",
++        "channel": 8,
++        "calibration_version": "4.32.0000.01",
++        "role": "right_wrist",
++        "identity_basis": "historical_capture_camera_id"
++      },
++      "historical_calibration": {
++        "available": true,
++        "calibration": {
++          "baselines_mm": {
++            "(0, 1)": 24.975426247162428
++          },
++          "channel": 8,
++          "sensors": {
++            "0": {
++              "RealCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.0014623965972070838,
++                    -0.0031420140430011884,
++                    -0.010932883442042237
++                  ],
++                  "Translation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    265.8111443836975,
++                    265.8111443836975
++                  ],
++                  "LensDistortion": [
++                    -0.0004314383620763524,
++                    -0.0005830616022741582,
++                    1.9936105931475865e-05,
++                    -0.0006926204590501756,
++                    0.0020921547910124107
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    270.4900990921554,
++                    323.52321310300556
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005400000140070915,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  640
++                ],
++                "valid": true
++              },
++              "VirtualCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Translation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    273.0111524163569,
++                    255.0
++                  ],
++                  "LensDistortion": [
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    270.99442379182153,
++                    180.0
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005340441130101681,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  360
++                ],
++                "valid": true
++              },
++              "description": "Right"
++            },
++            "1": {
++              "RealCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    -0.0014623941174759236,
++                    -0.0029429814695112336,
++                    -0.008946683792338605
++                  ],
++                  "Translation": [
++                    24.97431854181159,
++                    -0.22339011393168734,
++                    0.07366448651355595
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    265.8547585600416,
++                    265.8547585600416
++                  ],
++                  "LensDistortion": [
++                    -0.0015535047441997427,
++                    0.00014125752858001848,
++                    0.0010607135457716308,
++                    0.0008181959089467456,
++                    0.0018963946933881137
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    272.69254105236143,
++                    318.34593097047417
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005400000140070915,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  640
++                ],
++                "valid": true
++              },
++              "VirtualCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Translation": [
++                    24.975426247162428,
++                    -3.561697649052259e-14,
++                    1.2614909117303341e-14
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    273.0111524163569,
++                    255.0
++                  ],
++                  "LensDistortion": [
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    270.99442379182153,
++                    180.0
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005340441130101681,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  360
++                ],
++                "valid": true
++              },
++              "description": "Left"
++            },
++            "2": {
++              "RealCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    -0.0032197332963905404,
++                    -0.004595779544210625,
++                    -0.011991526641548634
++                  ],
++                  "Translation": [
++                    12.405160282841011,
++                    -0.25305467350735783,
++                    -0.4811899014442782
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    373.48446618198534,
++                    373.48446618198534
++                  ],
++                  "LensDistortion": [
++                    -0.045414029304921416,
++                    0.06107936814263506,
++                    -0.00025864806119308586,
++                    0.0003720262388946341,
++                    -0.035581165506003036
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    319.1777943759673,
++                    232.94699715766944
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.0044999998062849045,
++                  0.0044999998062849045
++                ],
++                "resolution": [
++                  640,
++                  480
++                ],
++                "valid": true
++              },
++              "VirtualCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Translation": [
++                    12.404949265054057,
++                    -0.1026549254672236,
++                    -0.5387742845794445
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    374.025974025974,
++                    374.025974025974
++                  ],
++                  "LensDistortion": [
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    317.9415584415584,
++                    235.86363636363635
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.004331250209361315,
++                  0.004331250209361315
++                ],
++                "resolution": [
++                  640,
++                  480
++                ],
++                "valid": true
++              },
++              "description": "Mono"
++            }
++          },
++          "version": "4.32.0000.01"
++        },
++        "camera_id": "1",
++        "ok": true,
++        "stereo_calibration": {
++          "baseline_m": 0.024975426247162428,
++          "left_intrinsics": {
++            "cx": 270.99442379182153,
++            "cy": 180.0,
++            "fx": 273.0111524163569,
++            "fy": 255.0
++          },
++          "left_resolution": [
++            544,
++            360
++          ],
++          "left_to_rgb": [
++            [
++              1.0,
++              0.0,
++              0.0,
++              -0.012570476982108371
++            ],
++            [
++              0.0,
++              1.0,
++              0.0,
++              -0.00010265492546718799
++            ],
++            [
++              0.0,
++              0.0,
++              1.0,
++              -0.0005387742845794572
++            ],
++            [
++              0.0,
++              0.0,
++              0.0,
++              1.0
++            ]
++          ],
++          "rgb_intrinsics": {
++            "cx": 317.9415584415584,
++            "cy": 235.86363636363635,
++            "fx": 374.025974025974,
++            "fy": 374.025974025974
++          },
++          "rgb_resolution": [
++            640,
++            480
++          ]
++        },
++        "stereo_calibration_available": true,
++        "stereo_calibration_error": ""
++      },
++      "historical_extrinsic": {
++        "schema_version": 1,
++        "cam_id": "right_wrist",
++        "label": "\u53f3\u8155\u76f8\u673a",
++        "arm": "B",
++        "mode": "eye_in_hand",
++        "board": {
++          "dictionary": "auto",
++          "marker_len_mm": 11.25,
++          "square_len_mm": 15.0,
++          "squares_x": 9,
++          "squares_y": 12
++        },
++        "extrinsic_name": "T_flange_cam",
++        "extrinsic": [
++          [
++            -0.9997204930531767,
++            0.02071581306489101,
++            0.011392579101365818,
++            -1.1901059103524876
++          ],
++          [
++            -0.023613993016487367,
++            -0.8983341899081219,
++            -0.4386776294455136,
++            92.37720705946873
++          ],
++          [
++            0.001146779550649013,
++            -0.4388240402840052,
++            0.8985722823265165,
++            51.35253272235849
++          ],
++          [
++            0.0,
++            0.0,
++            0.0,
++            1.0
++          ]
++        ],
++        "residuals": {
++          "rot_deg_max": 0.19074828116127843,
++          "rot_deg_rms": 0.12321032353473745,
++          "trans_mm_max": 2.4881815100295612,
++          "trans_mm_rms": 1.0631323133896855
++        },
++        "n_samples": 10,
++        "saved_at": "2026-07-07T12:33:13+08:00"
++      }
++    },
++    "2": {
++      "camera_id": "2",
++      "role": "left_wrist",
++      "parent_body": "TCP_Link_L",
++      "intrinsics": {
++        "cx": 318.9871794871795,
++        "cy": 243.08974358974362,
++        "fx": 369.2307692307693,
++        "fy": 369.2307692307693,
++        "width": 640,
++        "height": 480
++      },
++      "distortion": [
++        0.0,
++        0.0,
++        0.0,
++        0.0,
++        0.0
++      ],
++      "T_parent_rgb_m": [
++        [
++          0.9991137295648849,
++          0.035408678559817885,
++          0.02275919325446818,
++          -0.002083835079513786
++        ],
++        [
++          -0.04176965091460155,
++          0.9008414249710993,
++          0.43213426538346983,
++          -0.0934308801702364
++        ],
++        [
++          -0.005201120784899649,
++          -0.4327019211173976,
++          0.901522043992212,
++          0.04774827351742707
++        ],
++        [
++          0.0,
++          0.0,
++          0.0,
++          1.0
++        ]
++      ],
++      "source_path": "/home/guangyu/.cache/tianji-codex/stereo-20260910/configured-live/2-calibration.json",
++      "source_sha256": "f1601894fccea7368eb01ae8ad18ca9a8c925fd0941af329d23ee8a596e747d1",
++      "device_identity": {
++        "camera_id": "2",
++        "channel": 8,
++        "calibration_version": "4.32.0000.01",
++        "role": "left_wrist",
++        "identity_basis": "historical_capture_camera_id"
++      },
++      "historical_calibration": {
++        "available": true,
++        "calibration": {
++          "baselines_mm": {
++            "(0, 1)": 25.03433966399756
++          },
++          "channel": 8,
++          "sensors": {
++            "0": {
++              "RealCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    -0.0004628661724382162,
++                    -0.000319954359199939,
++                    -0.01382879494370568
++                  ],
++                  "Translation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    266.4134782641812,
++                    266.4134782641812
++                  ],
++                  "LensDistortion": [
++                    0.0022507811463201377,
++                    -0.001614341041507992,
++                    -0.0003466715802180555,
++                    -0.000593306125436191,
++                    0.0025211390414212396
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    262.20735375749234,
++                    332.04031327812527
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005400000140070915,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  640
++                ],
++                "valid": true
++              },
++              "VirtualCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Translation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    277.65595463138,
++                    255.0
++                  ],
++                  "LensDistortion": [
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    267.38657844990547,
++                    180.0
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005251103080809116,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  360
++                ],
++                "valid": true
++              },
++              "description": "Right"
++            },
++            "1": {
++              "RealCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.0004628696254172466,
++                    0.0009887842982679626,
++                    -0.019219743991773397
++                  ],
++                  "Translation": [
++                    25.029703744702402,
++                    -0.4811181527448137,
++                    -0.024863385354011527
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    266.75348612213367,
++                    266.75348612213367
++                  ],
++                  "LensDistortion": [
++                    0.010271410102105914,
++                    -0.008930039040981138,
++                    0.001147152389931517,
++                    0.0002700461631417585,
++                    0.004897752261384365
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    269.14990458813753,
++                    326.0699279329094
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005400000140070915,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  640
++                ],
++                "valid": true
++              },
++              "VirtualCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Translation": [
++                    25.03433966399756,
++                    -9.18790715574323e-14,
++                    -4.028027911218146e-15
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    277.65595463138,
++                    255.0
++                  ],
++                  "LensDistortion": [
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    267.38657844990547,
++                    180.0
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005251103080809116,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  360
++                ],
++                "valid": true
++              },
++              "description": "Left"
++            },
++            "2": {
++              "RealCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    -0.0033710415914631913,
++                    -0.002341236961003733,
++                    -0.0008174474219223114
++                  ],
++                  "Translation": [
++                    12.591750693690162,
++                    0.09324900677314936,
++                    -0.45973498910110694
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    371.8850100616148,
++                    371.8850100616148
++                  ],
++                  "LensDistortion": [
++                    -0.04682425298629213,
++                    0.06055534481453975,
++                    0.00019238707662771098,
++                    0.00018532312042991128,
++                    -0.03459832030103948
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    319.68973830605256,
++                    240.956615186572
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.0044999998062849045,
++                  0.0044999998062849045
++                ],
++                "resolution": [
++                  640,
++                  480
++                ],
++                "valid": true
++              },
++              "VirtualCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Translation": [
++                    12.590559139764771,
++                    0.10514054073496423,
++                    -0.4888795192012104
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    369.2307692307693,
++                    369.2307692307693
++                  ],
++                  "LensDistortion": [
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    318.9871794871795,
++                    243.08974358974362
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.0043875002302229404,
++                  0.0043875002302229404
++                ],
++                "resolution": [
++                  640,
++                  480
++                ],
++                "valid": true
++              },
++              "description": "Mono"
++            }
++          },
++          "version": "4.32.0000.01"
++        },
++        "camera_id": "2",
++        "ok": true,
++        "stereo_calibration": {
++          "baseline_m": 0.02503433966399756,
++          "left_intrinsics": {
++            "cx": 267.38657844990547,
++            "cy": 180.0,
++            "fx": 277.65595463138,
++            "fy": 255.0
++          },
++          "left_resolution": [
++            544,
++            360
++          ],
++          "left_to_rgb": [
++            [
++              1.0,
++              0.0,
++              0.0,
++              -0.012443780524232789
++            ],
++            [
++              0.0,
++              1.0,
++              0.0,
++              0.00010514054073505612
++            ],
++            [
++              0.0,
++              0.0,
++              1.0,
++              -0.0004888795192012063
++            ],
++            [
++              0.0,
++              0.0,
++              0.0,
++              1.0
++            ]
++          ],
++          "rgb_intrinsics": {
++            "cx": 318.9871794871795,
++            "cy": 243.08974358974362,
++            "fx": 369.2307692307693,
++            "fy": 369.2307692307693
++          },
++          "rgb_resolution": [
++            640,
++            480
++          ]
++        },
++        "stereo_calibration_available": true,
++        "stereo_calibration_error": ""
++      },
++      "historical_extrinsic": {
++        "schema_version": 1,
++        "cam_id": "left_wrist",
++        "label": "\u5de6\u8155\u76f8\u673a",
++        "arm": "A",
++        "mode": "eye_in_hand",
++        "board": {
++          "dictionary": "auto",
++          "marker_len_mm": 11.25,
++          "square_len_mm": 15.0,
++          "squares_x": 9,
++          "squares_y": 12
++        },
++        "extrinsic_name": "T_flange_cam",
++        "extrinsic": [
++          [
++            0.9991137295648849,
++            0.035408678559817885,
++            0.02275919325446818,
++            -2.0838350795137863
++          ],
++          [
++            -0.04176965091460155,
++            0.9008414249710993,
++            0.43213426538346983,
++            -93.4308801702364
++          ],
++          [
++            -0.005201120784899649,
++            -0.4327019211173976,
++            0.901522043992212,
++            47.748273517427066
++          ],
++          [
++            0.0,
++            0.0,
++            0.0,
++            1.0
++          ]
++        ],
++        "residuals": {
++          "rot_deg_max": 0.15041360089105454,
++          "rot_deg_rms": 0.09054630555139175,
++          "trans_mm_max": 0.776747735011211,
++          "trans_mm_rms": 0.45948410656140726
++        },
++        "n_samples": 9,
++        "saved_at": "2026-07-07T12:57:41+08:00"
++      }
++    },
++    "3": {
++      "camera_id": "3",
++      "role": "head",
++      "parent_body": "world",
++      "intrinsics": {
++        "cx": 320.0405405405405,
++        "cy": 194.6351351351351,
++        "fx": 291.8918918918919,
++        "fy": 291.8918918918919,
++        "width": 640,
++        "height": 360
++      },
++      "distortion": [
++        0.0,
++        0.0,
++        0.0,
++        0.0,
++        0.0
++      ],
++      "T_parent_rgb_m": [
++        [
++          0.009406203861934234,
++          -0.8622106423530579,
++          0.5064625667727455,
++          0.11613389134390073
++        ],
++        [
++          -0.999953108178163,
++          -0.009277058944961716,
++          0.0027780608639685735,
++          0.028640379409888082
++        ],
++        [
++          0.0023032094433487194,
++          -0.506464948827124,
++          -0.8622574736329046,
++          1.07227570530598
++        ],
++        [
++          0.0,
++          0.0,
++          0.0,
++          1.0
++        ]
++      ],
++      "source_path": "/home/guangyu/.cache/tianji-codex/grasp-repair-20260906/multiview-depth/3/camera-calibration.json",
++      "source_sha256": "60c06696e0f6925bd0566a6998fa87c7ee607cd95179f552c3ec29b997f84780",
++      "device_identity": {
++        "camera_id": "3",
++        "channel": 8,
++        "calibration_version": "4.31.0001.07",
++        "role": "head",
++        "identity_basis": "historical_capture_camera_id"
++      },
++      "historical_calibration": {
++        "available": true,
++        "calibration": {
++          "baselines_mm": {
++            "(0, 1)": 48.05623708323666
++          },
++          "channel": 8,
++          "sensors": {
++            "0": {
++              "RealCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.001127492768865432,
++                    -0.0008171508857768232,
++                    0.005793899910645643
++                  ],
++                  "Translation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    318.0868501335138,
++                    318.0868501335138
++                  ],
++                  "LensDistortion": [
++                    -0.0052523747990874114,
++                    0.008853026099193409,
++                    0.0007600724546708491,
++                    -0.0019767786660243817,
++                    -4.7986054479943574e-06,
++                    -0.00046466727912644075,
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Model": "ECameraModel.FThethaExt",
++                  "OpticalCenter": [
++                    269.90087398972435,
++                    318.05701163648274
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005400000140070915,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  640
++                ],
++                "valid": true
++              },
++              "VirtualCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Translation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    272.0,
++                    255.0
++                  ],
++                  "LensDistortion": [
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    272.00370370370365,
++                    180.0
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005360294133424759,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  360
++                ],
++                "valid": true
++              },
++              "description": "Right"
++            },
++            "1": {
++              "RealCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    -0.0011274917427939737,
++                    0.0029042397802022165,
++                    -0.0019902290766927724
++                  ],
++                  "Translation": [
++                    48.05593924013762,
++                    -0.09572138264004224,
++                    -0.13951259927670473
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    318.51374626645145,
++                    318.51374626645145
++                  ],
++                  "LensDistortion": [
++                    -0.006843566742253679,
++                    0.012188178943951885,
++                    -0.004114815932145855,
++                    0.00026712047975081636,
++                    0.0007577098163972876,
++                    0.0011480356096985143,
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Model": "ECameraModel.FThethaExt",
++                  "OpticalCenter": [
++                    275.9219118129771,
++                    314.6946155941072
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005400000140070915,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  640
++                ],
++                "valid": true
++              },
++              "VirtualCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Translation": [
++                    48.05623708323666,
++                    -1.4857488069702773e-12,
++                    -1.0066947275788607e-12
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    272.0,
++                    255.0
++                  ],
++                  "LensDistortion": [
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    272.00370370370365,
++                    180.0
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005360294133424759,
++                  0.005400000140070915
++                ],
++                "resolution": [
++                  544,
++                  360
++                ],
++                "valid": true
++              },
++              "description": "Left"
++            },
++            "2": {
++              "RealCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    -0.0010452279030415896,
++                    0.003868873091509276,
++                    -0.015167731040661167
++                  ],
++                  "Translation": [
++                    63.77973537178494,
++                    -1.079598078565902,
++                    -0.4154387563075442
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    277.0822496246647,
++                    277.0822496246647
++                  ],
++                  "LensDistortion": [
++                    -0.044571911216752115,
++                    0.054615935976579474,
++                    -0.00010586669544840633,
++                    -5.9757309773343774e-05,
++                    -0.031337358892921365
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    318.3224973174806,
++                    200.56687488237085
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.006000000052154064,
++                  0.006000000052154064
++                ],
++                "resolution": [
++                  640,
++                  360
++                ],
++                "valid": true
++              },
++              "VirtualCamera": {
++                "extrinsic": {
++                  "Rotation": [
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Translation": [
++                    63.78990209901756,
++                    -0.11180167117179354,
++                    -0.1692809808544321
++                  ],
++                  "Valid": true
++                },
++                "intrinsic": {
++                  "Alpha": 0.0,
++                  "EquiDistance": "ECameraModel.EquiDistance",
++                  "FTanThetha": "ECameraModel.FTanThetha",
++                  "FThetha": "ECameraModel.FThetha",
++                  "FThethaExt": "ECameraModel.FThethaExt",
++                  "FocalLength": [
++                    291.8918918918919,
++                    291.8918918918919
++                  ],
++                  "LensDistortion": [
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0,
++                    0.0
++                  ],
++                  "Model": "ECameraModel.Spline",
++                  "OpticalCenter": [
++                    320.0405405405405,
++                    194.6351351351351
++                  ],
++                  "Rc": [],
++                  "Spline": "ECameraModel.Spline",
++                  "Valid": true
++                },
++                "pixel_size_mm": [
++                  0.005549999885261059,
++                  0.005549999885261059
++                ],
++                "resolution": [
++                  640,
++                  360
++                ],
++                "valid": true
++              },
++              "description": "Mono"
++            }
++          },
++          "version": "4.31.0001.07"
++        },
++        "camera_id": "3",
++        "ok": true,
++        "stereo_calibration": {
++          "baseline_m": 0.04805623708323666,
++          "left_intrinsics": {
++            "cx": 272.00370370370365,
++            "cy": 180.0,
++            "fx": 272.0,
++            "fy": 255.0
++          },
++          "left_resolution": [
++            544,
++            360
++          ],
++          "left_to_rgb": [
++            [
++              1.0,
++              0.0,
++              0.0,
++              0.015733665015780902
++            ],
++            [
++              0.0,
++              1.0,
++              0.0,
++              -0.0001118016711703078
++            ],
++            [
++              0.0,
++              0.0,
++              1.0,
++              -0.00016928098085342542
++            ],
++            [
++              0.0,
++              0.0,
++              0.0,
++              1.0
++            ]
++          ],
++          "rgb_intrinsics": {
++            "cx": 320.0405405405405,
++            "cy": 194.6351351351351,
++            "fx": 291.8918918918919,
++            "fy": 291.8918918918919
++          },
++          "rgb_resolution": [
++            640,
++            360
++          ]
++        },
++        "stereo_calibration_available": true,
++        "stereo_calibration_error": ""
++      },
++      "historical_extrinsic": {
++        "schema_version": 1,
++        "cam_id": "head",
++        "label": "\u5934\u90e8\u76f8\u673a",
++        "arm": "B",
++        "mode": "eye_to_hand",
++        "base_frame": "base_link",
++        "T_world_base": [
++          [
++            1.0,
++            0.0,
++            0.0,
++            0.0
++          ],
++          [
++            0.0,
++            0.0,
++            -1.0,
++            -37.0
++          ],
++          [
++            0.0,
++            1.0,
++            0.0,
++            1121.0
++          ],
++          [
++            0.0,
++            0.0,
++            0.0,
++            1.0
++          ]
++        ],
++        "board": {
++          "dictionary": "auto",
++          "marker_len_mm": 22.5,
++          "square_len_mm": 30.0,
++          "squares_x": 9,
++          "squares_y": 12
++        },
++        "extrinsic_name": "T_base_cam",
++        "extrinsic": [
++          [
++            0.009406203861934234,
++            -0.8622106423530579,
++            0.5064625667727455,
++            116.13389134390073
++          ],
++          [
++            -0.999953108178163,
++            -0.009277058944961716,
++            0.0027780608639685735,
++            28.640379409888084
++          ],
++          [
++            0.0023032094433487194,
++            -0.506464948827124,
++            -0.8622574736329046,
++            1072.27570530598
++          ],
++          [
++            0.0,
++            0.0,
++            0.0,
++            1.0
++          ]
++        ],
++        "matrix": [
++          [
++            0.009406203861934234,
++            -0.8622106423530579,
++            0.5064625667727455,
++            116.13389134390073
++          ],
++          [
++            -0.999953108178163,
++            -0.009277058944961716,
++            0.0027780608639685735,
++            28.640379409888084
++          ],
++          [
++            0.0023032094433487194,
++            -0.506464948827124,
++            -0.8622574736329046,
++            1072.27570530598
++          ],
++          [
++            0.0,
++            0.0,
++            0.0,
++            1.0
++          ]
++        ],
++        "residuals": {
++          "trans_mm_rms": 0.7841893038776984,
++          "trans_mm_max": 1.1912550831149031,
++          "rot_deg_rms": 0.20519280794438646,
++          "rot_deg_max": 0.33202272761407164
++        },
++        "translation_rms_mm": 0.7841893038776984,
++        "rotation_rms_deg": 0.20519280794438646,
++        "quality": {
++          "grade": "excellent",
++          "warnings": [],
++          "translation_rms_mm": 0.7841893038776984,
++          "rotation_rms_deg": 0.20519280794438646,
++          "translation_span_mm": 100.461,
++          "rotation_span_deg": 29.199
++        },
++        "n_samples": 31,
++        "saved_at": "2026-08-26T04:35:38+00:00",
++        "promoted_at": "2026-08-26T04:48:27+00:00"
++      }
++    }
++  },
++  "calibration_id": "historical-rgb-b6a717b114bff14b"
++}
+--- baseline/tests/test_cameras.py
++++ current/tests/test_cameras.py
+@@ -0,0 +1,122 @@
++"""Calibrated public MuJoCo rendering, with independent projection expectations."""
++
++import importlib
++from concurrent.futures import ThreadPoolExecutor
++
++import mujoco
++import numpy as np
++import pytest
++
++
++def cameras_module():
++    assert importlib.util.find_spec("jev_mujoco.cameras") is not None, "RGBD adapter is missing"
++    return importlib.import_module("jev_mujoco.cameras")
++
++
++def small_calibration():
++    intrinsics = {"fx": 60.0, "fy": 55.0, "cx": 33.0, "cy": 47.0, "width": 96, "height": 80}
++    return {"calibration_id": "projection-test", "cameras": {
++        str(index): {"parent_body": "world", "T_parent_rgb_m": np.eye(4).tolist(),
++                     "intrinsics": dict(intrinsics)} for index in (1, 2, 3)}}
++
++
++def test_historical_rgb_calibration_keeps_precision_and_converts_translation_once():
++    calibration = cameras_module().load_calibration()
++    right = calibration["cameras"]["1"]
++    assert right["intrinsics"]["cx"] == 317.9415584415584
++    np.testing.assert_allclose(np.asarray(right["T_parent_rgb_m"])[:3, 3],
++                               [-0.0011901059103524876, 0.09237720705946873, 0.05135253272235849])
++    assert right["T_parent_rgb_m"][0][0] == -0.9997204930531767
++    assert right["source_sha256"] == "e8cd47a5d902ade17d045fbaad7e008a7a173fb4695208b7f8d0bae07604ce8d"
++    head = calibration["cameras"]["3"]
++    assert head["parent_body"] == "world"
++    assert head["T_parent_rgb_m"][2][3] == pytest.approx(1.07227570530598)
++
++
++def test_wrist_uses_captured_fk_and_head_is_already_in_world():
++    cameras = cameras_module()
++    calibration = cameras.load_calibration()
++    spec = mujoco.MjSpec.from_string('''<mujoco><worldbody>
++      <body name="mount" pos="1 2 3" euler="0 0 90">
++       <body name="TCP_Link_R" pos=".1 .2 .3"><joint name="wrist" axis="0 0 1"/>
++        <geom type="sphere" size=".01" mass=".1"/>
++       </body>
++       <body name="TCP_Link_L" pos=".4 .5 .6"/>
++      </body></worldbody></mujoco>''')
++    cameras.install_cameras(spec, calibration)
++    model = spec.compile()
++    data = mujoco.MjData(model)
++    data.qpos[0] = np.pi / 2
++    mujoco.mj_forward(model, data)
++    pose = cameras.camera_pose(model, data, "1")
++    flange = np.eye(4)
++    flange[:3, :3] = data.body("TCP_Link_R").xmat.reshape(3, 3)
++    flange[:3, 3] = [0.8, 2.1, 3.3]
++    np.testing.assert_allclose(pose, flange @ np.asarray(calibration["cameras"]["1"]["T_parent_rgb_m"]),
++                               atol=1e-7)
++    np.testing.assert_allclose(cameras.camera_pose(model, data, "3"),
++                               calibration["cameras"]["3"]["T_parent_rgb_m"], atol=1e-7)
++
++
++def test_real_renderer_off_center_rgb_and_metric_depth_are_aligned_and_immutable():
++    cameras = cameras_module()
++    calibration = small_calibration()
++    spec = mujoco.MjSpec.from_string('''<mujoco><visual><headlight ambient="1 1 1" diffuse="0 0 0"/>
++      </visual><worldbody><geom type="sphere" size=".04" pos=".1 .08 1" rgba="1 0 0 1"/>
++      </worldbody></mujoco>''')
++    cameras.install_cameras(spec, calibration)
++    model = spec.compile()
++    data = mujoco.MjData(model)
++    data.time = 12.5
++    mujoco.mj_forward(model, data)
++    renderer = cameras.RgbdRenderer(cameras.clone_render_model(model), calibration)
++    arms = {"A": {"joints_rad": [0.0] * 7}, "B": {"joints_rad": [0.1] * 7}}
++    try:
++        capture = renderer.capture(data, 7, arms)
++        assert capture["generation"] == 7 and capture["time"] == 12.5
++        assert set(capture["views"]) == {"1", "2", "3"}
++        for view in capture["views"].values():
++            red = (view["rgb"][:, :, 0] > 200) & (view["rgb"][:, :, 1] < 20)
++            rows, columns = np.nonzero(red)
++            assert columns.mean() == pytest.approx(39.0, abs=1.0)
++            assert rows.mean() == pytest.approx(51.4, abs=1.0)
++            assert view["valid_depth"][red].all()
++            assert view["depth_m"][red].min() == pytest.approx(0.96, abs=.015)
++            assert not view["valid_depth"][0, 0]
++            assert view["frame_id"] == capture["observation_id"]
++            assert view["capture_time"] == capture["time"]
++            assert view["simulation_generation"] == capture["generation"]
++            assert not view["rgb"].flags.writeable and not view["depth_m"].flags.writeable
++        arms["A"]["joints_rad"][0] = 9.0
++        assert capture["arms"]["A"]["joints_rad"][0] == 0.0
++        with ThreadPoolExecutor() as executor, pytest.raises(RuntimeError, match="thread"):
++            executor.submit(renderer.capture, data, 7, arms).result()
++    finally:
++        renderer.close()
++
++
++def test_head_letterbox_preserves_invalid_padding_and_changes_principal_point():
++    cameras = cameras_module()
++    view = {"rgb": np.full((360, 640, 3), 20, np.uint8), "depth_m": np.ones((360, 640), np.float32),
++            "valid_depth": np.ones((360, 640), bool), "instance_masks": {"detector-1": np.ones((360, 640), bool)},
++            "intrinsics": {"fx": 291.8918918918919, "fy": 291.8918918918919,
++                           "cx": 320.0405405405405, "cy": 194.6351351351351, "width": 640, "height": 360},
++            "T_world_camera": np.eye(4).tolist()}
++    boxed = cameras.letterbox_view(view)
++    assert boxed["depth_m"].shape == (480, 640)
++    assert boxed["valid_depth"].sum() == 360 * 640
++    assert not boxed["instance_masks"]["detector-1"][:60].any()
++    assert boxed["intrinsics"]["cy"] == pytest.approx(254.6351351351351)
++    assert boxed["intrinsics"]["fy"] == view["intrinsics"]["fy"]
++    assert len(cameras.deproject_view(boxed)) == 360 * 640
++
++
++def test_deprojection_uses_registered_rgb_intrinsics_and_valid_depth_only():
++    cameras = cameras_module()
++    transform = np.eye(4)
++    transform[:3, 3] = [1, 2, 3]
++    view = {"depth_m": np.array([[2., 0., np.nan]], np.float32),
++            "valid_depth": np.array([[True, False, True]]),
++            "intrinsics": {"fx": 4., "fy": 5., "cx": 1., "cy": 0., "width": 3, "height": 1},
++            "T_world_camera": transform.tolist()}
++    np.testing.assert_allclose(cameras.deproject_view(view), [[.5, 2., 5.]])
+--- baseline/tests/test_perception.py
++++ current/tests/test_perception.py
+@@ -0,0 +1,280 @@
++"""Observed geometry/identity regressions; segmentation doubles only replace HTTP inference."""
++
++import importlib
++import threading
++from copy import deepcopy
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from io import BytesIO
++
++import msgpack
++import numpy as np
++import pytest
++from PIL import Image
++
++
++def perception_module():
++    assert importlib.util.find_spec("jev_mujoco.perception") is not None, "RGBD perception is missing"
++    return importlib.import_module("jev_mujoco.perception")
++
++
++def capture_fixture():
++    rgb = np.full((80, 80, 3), 140, np.uint8)
++    depth = np.full((80, 80), .4, np.float32)
++    masks = []
++    for column in (15, 65):
++        mask = np.zeros((80, 80), bool)
++        mask[36:45, column - 4:column + 5] = True
++        rgb[mask] = [220, 20, 20]
++        depth[mask] = .3
++        masks.append(mask)
++    transform = np.diag([1., -1., -1., 1.])
++    transform[2, 3] = 1.
++    views = {camera_id: {
++        "camera_id": camera_id, "frame_id": "capture-one", "capture_time": 2.,
++        "simulation_generation": 3, "calibration_id": "test-k", "registered_to": "rgb",
++        "rgb": rgb.copy(), "depth_m": depth.copy(), "valid_depth": np.ones((80, 80), bool),
++        "intrinsics": {"fx": 100., "fy": 100., "cx": 40., "cy": 40., "width": 80, "height": 80},
++        "T_world_camera": transform.tolist(), "robot_joints_deg": {"A": [0.] * 7, "B": [0.] * 7},
++    } for camera_id in ("1", "2", "3")}
++    # These are deliberately poisoned privileged fields. None is an input to perception.
++    capture = {"observation_id": "capture-one", "generation": 3, "time": 2., "views": views,
++               "arms": {"A": {"joints_rad": [0.] * 7}, "B": {"joints_rad": [0.] * 7}},
++               "objects": [{"id": "SIM_SECRET", "kind": "sphere", "color": "blue"}],
++               "table": {"position": [9., 9., 9.], "size": [8.] * 3}}
++    return capture, masks
++
++
++class FrozenSegmenter:
++    def __init__(self, masks):
++        self.masks = masks
++
++    def segment(self, rgb, text, timestamp_us):
++        if text == "cube":
++            return [{"mask": mask.copy(), "score": .92, "label": "cube"} for mask in self.masks]
++        if text == "table":
++            return [{"mask": ~np.logical_or.reduce(self.masks), "score": .9, "label": "table"}]
++        return []
++
++
++def test_observe_fuses_only_masked_measured_points_and_generates_unique_detector_ids():
++    module = perception_module()
++    capture, masks = capture_fixture()
++    observation = module.Perception(FrozenSegmenter(masks)).observe(capture, instruction="pick red cube")
++    assert observation["source"] == "rgbd" and observation["observation_id"] == "capture-one"
++    assert len(observation["objects"]) == 2
++    identifiers = {obj["id"] for obj in observation["objects"]}
++    assert len(identifiers) == 2 and "SIM_SECRET" not in identifiers
++    for obj in observation["objects"]:
++        assert obj["kind"] == "cube" and obj["color"] == "red" and obj["estimated"] is True
++        assert obj["coverage"]["observed_surface_only"] is True
++        assert set(obj["coverage"]["camera_ids"]) == {"1", "2", "3"}
++        points = np.asarray(obj["points_world_m"])
++        assert points.shape[1] == 3 and len(points) >= 30
++        np.testing.assert_allclose(points[:, 2], .7, atol=1e-7)
++        reconstructed = np.asarray(obj["points_object_m"]) @ np.asarray(obj["T_world_object"])[:3, :3].T
++        reconstructed += np.asarray(obj["T_world_object"])[:3, 3]
++        np.testing.assert_allclose(reconstructed, points, atol=1e-7)
++    assert observation["table"]["surface_height_m"] == pytest.approx(.6, abs=.001)
++    for view in observation["views"].values():
++        assert set(view["instance_masks"]) == identifiers
++    public = module.public_observation(observation)
++    assert "views" not in public and "SIM_SECRET" not in str(public)
++    assert all("points_world_m" not in obj and "points_object_m" not in obj for obj in public["objects"])
++
++
++def test_capture_mismatch_and_detector_failure_never_return_truth():
++    module = perception_module()
++    capture, masks = capture_fixture()
++    capture["views"]["2"]["capture_time"] = 2.01
++    with pytest.raises(module.PerceptionError, match="same captured frame"):
++        module.Perception(FrozenSegmenter(masks)).observe(capture)
++
++    class Offline:
++        def segment(self, *args):
++            raise module.PerceptionError("sam3_service_unavailable")
++
++    capture, _ = capture_fixture()
++    with pytest.raises(module.PerceptionError, match="sam3_service_unavailable"):
++        module.Perception(Offline()).observe(capture)
++
++
++def test_nonfinite_intrinsics_and_detector_confidence_fail_at_sensor_boundary():
++    module = perception_module()
++    capture, masks = capture_fixture()
++    capture["views"]["1"]["intrinsics"]["cx"] = np.nan
++    with pytest.raises(module.PerceptionError, match="calibration"):
++        module.Perception(FrozenSegmenter(masks)).observe(capture)
++    capture, masks = capture_fixture()
++
++    class NonfiniteDetector(FrozenSegmenter):
++        def segment(self, *args):
++            result = super().segment(*args)
++            for detection in result:
++                detection["score"] = np.nan
++            return result
++
++    with pytest.raises(module.PerceptionError, match="confidence"):
++        module.Perception(NonfiniteDetector(masks)).observe(capture)
++
++
++def test_association_predicts_large_carried_motion_from_frozen_robot_feedback():
++    module = perception_module()
++    capture, masks = capture_fixture()
++    perception = module.Perception(FrozenSegmenter(masks))
++    old = perception.observe(capture)
++    old["objects"] = old["objects"][:1]
++    source = old["objects"][0]
++    old_tcp = np.eye(4)
++    old_tcp[:3, 3] = source["position"]
++    old["arms"]["A"].update(tcp=old_tcp.tolist(), gripper_closed_fraction=.9)
++    new = deepcopy(old)
++    new_tcp = old_tcp.copy()
++    new_tcp[:3, 3] += [.45, -.25, .2]
++    new["arms"]["A"]["tcp"] = new_tcp.tolist()
++    new["objects"][0]["position"] = (np.asarray(source["position"]) + [.45, -.25, .2]).tolist()
++    new["objects"][0]["id"] = "fresh-held-instance"
++    assert perception.associate(old, new) == {source["id"]: "fresh-held-instance"}
++
++
++def bin_cloud():
++    x, y = np.meshgrid(np.linspace(-.04, .04, 11), np.linspace(-.05, .05, 11))
++    floor = np.column_stack((x.ravel(), y.ravel(), np.full(x.size, .61)))
++    rim = []
++    for along in np.linspace(-1, 1, 31):
++        rim.extend([[along * .06, -.07, .69], [along * .06, .07, .69],
++                    [-.06, along * .07, .69], [.06, along * .07, .69]])
++    return np.vstack((floor, rim)).astype(np.float32)
++
++
++def test_bin_cavity_requires_visible_floor_and_four_sides_and_uses_floor_origin():
++    module = perception_module()
++    cavity = module.fit_bin_cavity(bin_cloud())
++    np.testing.assert_allclose(np.asarray(cavity["T_world_bin"])[:3, 3], [0., 0., .61], atol=1e-6)
++    np.testing.assert_allclose(cavity["inner_size_m"], [.08, .10, .08], atol=.004)
++    assert cavity["floor_height_m"] == pytest.approx(.61, abs=1e-6)
++    assert cavity["uncertainty_m"] > 0 and cavity["estimated"] is True
++    with pytest.raises(module.PerceptionError, match="cavity"):
++        module.fit_bin_cavity(bin_cloud()[:121])
++    hidden_side = bin_cloud()[bin_cloud()[:, 0] < .055]
++    with pytest.raises(module.PerceptionError, match="cavity"):
++        module.fit_bin_cavity(hidden_side)
++
++
++def test_bin_cavity_can_be_measured_across_complementary_occluded_views():
++    module = perception_module()
++    capture, _ = capture_fixture()
++    points = bin_cloud()
++    floor, rim = points[:121], points[121:]
++    partial_clouds = {
++        "3": np.vstack((floor, rim[(rim[:, 0] < -.055) | (rim[:, 1] < -.065)])),
++        "1": np.vstack((floor, rim[rim[:, 0] > .055])),
++        "2": np.vstack((floor, rim[rim[:, 1] > .065])),
++    }
++    masks = {}
++    for camera_id, cloud in partial_clouds.items():
++        view = capture["views"][camera_id]
++        view["T_world_camera"] = np.eye(4).tolist()
++        view["rgb"][:] = 140
++        view["rgb"][0, 0] = [int(camera_id), 0, 0]
++        view["depth_m"][:] = .8
++        mask = np.zeros((80, 80), bool)
++        columns = np.round(40 + 100 * cloud[:, 0] / cloud[:, 2]).astype(int)
++        rows = np.round(40 + 100 * cloud[:, 1] / cloud[:, 2]).astype(int)
++        view["depth_m"][rows, columns] = cloud[:, 2]
++        mask[rows, columns] = True
++        view["rgb"][mask] = [20, 40, 230]
++        masks[camera_id] = mask
++
++    class ComplementaryMasks:
++        def segment(self, rgb, text, timestamp_us):
++            mask = masks[str(int(rgb[0, 0, 0]))]
++            if text == "open bin":
++                return [{"mask": mask, "score": .9, "label": text}]
++            if text == "table":
++                return [{"mask": ~mask, "score": .9, "label": text}]
++            return []
++
++    observation = module.Perception(ComplementaryMasks()).observe(capture)
++    assert len(observation["objects"]) == 1
++    container = observation["objects"][0]
++    assert container["kind"] == "bin" and container["color"] == "blue"
++    assert set(container["coverage"]["camera_ids"]) == {"1", "2", "3"}
++    assert container["cavity"]["floor_height_m"] == pytest.approx(.61, abs=.001)
++
++
++def test_refresh_association_is_unique_and_rejects_same_color_ambiguity_or_missing():
++    module = perception_module()
++    capture, masks = capture_fixture()
++    perception = module.Perception(FrozenSegmenter(masks))
++    previous = perception.observe(capture)
++    capture["observation_id"] = "capture-two"
++    for view in capture["views"].values():
++        view["frame_id"] = "capture-two"
++    current = perception.observe(capture)
++    mapping = perception.associate(previous, current)
++    assert set(mapping) == {obj["id"] for obj in previous["objects"]}
++    assert len(set(mapping.values())) == 2
++    ambiguous = deepcopy(current)
++    ambiguous["objects"].append({**deepcopy(current["objects"][0]), "id": "duplicate"})
++    with pytest.raises(module.PerceptionError, match="ambiguous"):
++        perception.associate(previous, ambiguous)
++    missing = {**current, "objects": current["objects"][:1]}
++    with pytest.raises(module.PerceptionError, match="missing"):
++        perception.associate(previous, missing)
++
++
++def wire_array(array, unit, frame):
++    return {"dtype": str(array.dtype), "rank": array.ndim, "shape": list(array.shape),
++            "unit": unit, "frame": frame, "data": array.tobytes()}
++
++
++def test_real_http_sam3_transport_decodes_pinned_masks_and_rejects_wrong_identity():
++    module = perception_module()
++    identity = dict(module.SAM3_MODEL_IDENTITY)
++    errors = []
++
++    class Handler(BaseHTTPRequestHandler):
++        def log_message(self, *args):
++            pass
++
++        def do_POST(self):
++            try:
++                request = msgpack.unpackb(self.rfile.read(int(self.headers["Content-Length"])), raw=False)
++                assert set(request) == {"operation", "payload"} and request["operation"] == "segment_text"
++                payload = request["payload"]
++                assert set(payload) == {"rgb_jpeg", "text", "timestamp_us"}
++                assert payload["text"] == "cube" and payload["timestamp_us"] == 2_000_000
++                image = np.asarray(Image.open(BytesIO(payload["rgb_jpeg"])))
++                assert image.shape == (12, 14, 3) and image[0, 0, 0] > 200
++                masks = np.ones((1, 12, 14), np.uint8)
++                result = {"masks": wire_array(masks, "mask", "image"),
++                          "boxes": wire_array(np.array([[0, 0, 14, 12]], np.float32), "pixel", "image"),
++                          "scores": wire_array(np.array([.95], np.float32), "confidence", "model"),
++                          "selected_index": 0, "model": dict(identity),
++                          "timing_us": {"inference": 50, "total": 80}, "timestamp_us": payload["timestamp_us"]}
++                response = msgpack.packb({"ok": True, "result": result}, use_bin_type=True)
++                self.send_response(200)
++                self.send_header("Content-Type", "application/msgpack")
++                self.end_headers()
++                self.wfile.write(response)
++            except Exception as error:  # noqa: BLE001 - propagate server-thread assertion failures to this test.
++                errors.append(error)
++                self.send_error(500)
++
++    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
++    thread = threading.Thread(target=server.serve_forever, daemon=True)
++    thread.start()
++    try:
++        client = module.Sam3Client(f"http://127.0.0.1:{server.server_port}")
++        rgb = np.full((12, 14, 3), [240, 10, 10], np.uint8)
++        detections = client.segment(rgb, " cube ", 2_000_000)
++        assert len(detections) == 1 and detections[0]["mask"].all()
++        assert detections[0]["score"] == pytest.approx(.95) and detections[0]["label"] == "cube"
++        identity["source_sha"] = "wrong"
++        with pytest.raises(module.PerceptionError, match="sam3_model_identity_mismatch"):
++            client.segment(rgb, "cube", 2_000_000)
++        assert not errors
++    finally:
++        server.shutdown()
++        server.server_close()
++        thread.join(timeout=2)

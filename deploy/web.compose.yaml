@@ -1,0 +1,73 @@
+name: tianji-jev-mujoco-web-guangyu
+services:
+  web:
+    image: tianji-jev-mujoco:${JEV_WEB_IMAGE_TAG:-0.4.0-experiments-guangyu}
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+      target: runtime
+    container_name: jev-mujoco-web-guangyu
+    init: true
+    restart: unless-stopped
+    network_mode: host
+    user: "${JEV_UID:-1000}:${JEV_GID:-1000}"
+    environment:
+      OPENAI_CONFIG_FILE: /opt/jev/openai-config/jojo.json
+      JEV_DECISIONS_CONFIG_FILE: /opt/jev/openai-config/decisions.json
+      JEV_EXPERIMENT_DIR: ${JEV_EXPERIMENT_DIR:-/home/guangyu/projects/tianji-experiments}
+    stop_grace_period: 30s
+    tmpfs:
+      - /opt/jev/assets/render_meshes:rw,size=256m,mode=1777
+      - /opt/jev/web/node_modules:rw,exec,size=512m,uid=${JEV_UID:-1000},gid=${JEV_GID:-1000},mode=0755
+    volumes:
+      - type: bind
+        source: ${JEV_EXPERIMENT_DIR:-/home/guangyu/projects/tianji-experiments}
+        target: ${JEV_EXPERIMENT_DIR:-/home/guangyu/projects/tianji-experiments}
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${OPENAI_CONFIG_DIR:-${HOME}/.config/openai-client}
+        target: /opt/jev/openai-config
+        read_only: true
+      - type: bind
+        source: ../.env
+        target: /opt/jev/.env
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../data
+        target: /opt/jev/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../src
+        target: /opt/jev/src
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../skills
+        target: /opt/jev/skills
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../resources
+        target: /opt/jev/resources
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../web
+        target: /opt/jev/web
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8340/', timeout=5); urllib.request.urlopen('http://127.0.0.1:8340/api/state', timeout=5)"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 20s

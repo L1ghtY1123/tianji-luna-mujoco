@@ -1,0 +1,33 @@
+{
+  "sdk_source_commit": "8e734f3ced1df898990bcd92de40abce475907db",
+  "image": "jodell-curobo:0.2.0-guangyu",
+  "image_id": "sha256:b6e5c212a5c7b886e273ac9003a04628dfe1f7bb3a3da083a0e6d891f0b70f42",
+  "gpu": "RTX PRO 6000 Blackwell",
+  "torch": "2.11.0+cu128",
+  "cuda": "12.8",
+  "project_config_only_self_pair_repairs": {
+    "source": "independent read-only reviewer raw authored collision-STL URDF/mimic transform audit",
+    "both_arms_opposing_Link3_pair": {
+      "driver_samples": 801,
+      "driver_interval_rad": [0.0, 0.8000000093],
+      "minimum_mesh_width_axis_separation_mm": 3.504256895381,
+      "projection_speed_bound_m_per_rad": 0.4573231192494,
+      "half_sample_step_rad": 0.0005000000058125,
+      "continuous_separation_lower_bound_mm": 3.275595333098
+    },
+    "both_arms_opposing_Link4_pair": {
+      "driver_samples": 81,
+      "driver_interval_rad": [0.0, 0.8],
+      "minimum_mesh_separating_axis_gap_mm": 4.5093775488677,
+      "endpoint_mesh_gap_mm": 5.974714185655
+    },
+    "retained_checks": ["all finger to peer arm", "all finger to own arm", "all finger to wrist camera", "all finger to world"],
+    "actual_gpu_full_close_regression": "carrying-gpu.json: full_close_driver_position_rad=0.8, full_close_driver_samples_checked=41"
+  },
+  "public_api_limitations": [
+    "Single MotionPlanner.plan_pose does not accept batch finetune_attempts or finetune_dt_scale.",
+    "Native plan_place computes its provisional retreat while attached; execution discards it and uses fresh detached plan_to_pose.",
+    "Native optimizer has no per-link per-obstacle support exception; measured support prefix uses full-world robot optimization plus separate carried-body guard, followed by attached optimization only after actual FK clears soft activation.",
+    "Unknown TSDF is not free. RGBD outer shape estimates do not certify hidden solid interiors."
+  ]
+}

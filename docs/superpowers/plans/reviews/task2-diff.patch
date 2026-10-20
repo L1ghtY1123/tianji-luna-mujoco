@@ -1,0 +1,1906 @@
+--- baseline/src/jev_mujoco/model_builder.py
++++ current/src/jev_mujoco/model_builder.py
+@@ -75,11 +75,11 @@
+             raise ValueError("object id must be 1–64 letters, numbers, underscores or hyphens")
+         if identifier in identifiers:
+             raise ValueError(f"duplicate object id {identifier!r}")
+         identifiers.add(identifier)
+         kind = item.get("kind", "box")
+-        if kind not in ("box", "cube", "sphere", "cylinder"):
++        if kind not in ("box", "cube", "sphere", "cylinder", "bin"):
+             raise ValueError(f"unsupported object kind {kind!r}")
+         size = _vector(item.get("size", [0.04] * 3), "object size", positive=True)
+         if kind in ("cube", "sphere") and not np.allclose(size, size[0]):
+             raise ValueError(f"{kind} size must have equal dimensions")
+         if kind == "cylinder" and not np.isclose(size[0], size[1]):
+@@ -87,15 +87,26 @@
+         color = item.get("color", "gray")
+         color_rgba(color)
+         yaw = float(item.get("yaw_deg", 0))
+         if not np.isfinite(yaw):
+             raise ValueError("yaw_deg must be finite")
+-        result["objects"].append({
++        normalized = {
+             "id": identifier, "kind": kind, "color": color,
+             "position": _vector(item.get("position", [0.45, 0.15, 0.7]), "object position"),
+             "size": size, "yaw_deg": yaw,
+-        })
++        }
++        if kind == "bin":
++            thickness = float(item.get("wall_thickness_m", .01))
++            mass = float(item.get("mass_kg", .4))
++            if not np.isfinite(thickness) or thickness <= 0:
++                raise ValueError("bin wall_thickness_m must be finite and positive")
++            if size[0] <= 2 * thickness or size[1] <= 2 * thickness or size[2] <= thickness:
++                raise ValueError("bin dimensions must leave a nonzero open cavity")
++            if not np.isfinite(mass) or mass <= 0:
++                raise ValueError("bin mass_kg must be finite and positive")
++            normalized.update(wall_thickness_m=thickness, mass_kg=mass)
++        result["objects"].append(normalized)
+     return result
+ 
+ 
+ class ModelBuilder:
+     """Retain staged meshes for the lifetime of all compiled scene models."""
+@@ -229,10 +240,11 @@
+         spec.option.noslip_iterations = 3
+         return spec
+ 
+     def build(self, scene):
+         spec = self._robot.copy()
++        self._objects_by_id = {item["id"]: deepcopy(item) for item in scene["objects"]}
+         table = scene["table"]
+         spec.worldbody.add_geom(name="table", type=mujoco.mjtGeom.mjGEOM_BOX,
+                                 pos=table["position"], size=np.array(table["size"]) / 2,
+                                 rgba=[0.50, 0.53, 0.59, 1], friction=[1, 0.005, 0.0001])
+         spec.worldbody.add_geom(name="ground", type=mujoco.mjtGeom.mjGEOM_PLANE,
+@@ -242,20 +254,42 @@
+             body = spec.worldbody.add_body(name="object_" + item["id"], pos=item["position"],
+                                            quat=[np.cos(yaw), 0, 0, np.sin(yaw)])
+             body.add_freejoint(name="free_" + item["id"])
+             size = np.array(item["size"]) / 2
+             kind = item["kind"]
++            if kind == "bin":
++                width, depth, height = item["size"]
++                thickness = item["wall_thickness_m"]
++                wall_height = height - thickness
++                components = [
++                    ("bottom", [0, 0, (-height + thickness) / 2], [width, depth, thickness]),
++                    ("wall_x_minus", [(-width + thickness) / 2, 0, thickness / 2], [thickness, depth, wall_height]),
++                    ("wall_x_plus", [(width - thickness) / 2, 0, thickness / 2], [thickness, depth, wall_height]),
++                    ("wall_y_minus", [0, (-depth + thickness) / 2, thickness / 2], [width - 2 * thickness, thickness, wall_height]),
++                    ("wall_y_plus", [0, (depth - thickness) / 2, thickness / 2], [width - 2 * thickness, thickness, wall_height]),
++                ]
++                volume = sum(np.prod(dimensions) for _, _, dimensions in components)
++                for component, position, dimensions in components:
++                    body.add_geom(name="object_geom_" + item["id"] + "__" + component,
++                                  type=mujoco.mjtGeom.mjGEOM_BOX, pos=position, size=np.array(dimensions) / 2,
++                                  rgba=color_rgba(item["color"]), mass=item["mass_kg"] * np.prod(dimensions) / volume,
++                                  condim=4, friction=[1.0, 0.01, 0.001], priority=1, solref=[0.003, 1],
++                                  solimp=[0.95, 0.99, 0.001, 0.5, 2])
++                continue
+             geom_type = mujoco.mjtGeom.mjGEOM_BOX
+             if kind == "sphere":
+                 geom_type = mujoco.mjtGeom.mjGEOM_SPHERE
+             elif kind == "cylinder":
+                 geom_type = mujoco.mjtGeom.mjGEOM_CYLINDER
+                 size = [size[0], size[2], 0]
+             body.add_geom(name="object_geom_" + item["id"], type=geom_type, size=size,
+                           rgba=color_rgba(item["color"]), mass=0.08, condim=4,
+                           friction=[1.0, 0.01, 0.001], priority=1, solref=[0.003, 1],
+                           solimp=[0.95, 0.99, 0.001, 0.5, 2])
++        from .cameras import install_cameras
++
++        install_cameras(spec)
+         return spec.compile()
+ 
+     def render_geometries(self, model, data):
+         geometries = []
+         render_directory = ASSET_ROOT / "render_meshes"
+@@ -268,10 +302,20 @@
+             mujoco.mju_mat2Quat(quaternion, data.geom_xmat[index])
+             item = {"id": str(index), "name": model.geom(index).name,
+                     "type": kind, "position": data.geom_xpos[index].tolist(),
+                     "quaternion": quaternion.tolist(), "size": model.geom_size[index].tolist(),
+                     "rgba": model.geom_rgba[index].tolist()}
++            body_name = model.body(int(model.geom_bodyid[index])).name
++            if body_name.startswith("object_"):
++                identifier = body_name.removeprefix("object_")
++                source = self._objects_by_id[identifier]
++                item.update(object_id=identifier, object_kind=source["kind"])
++                if source["kind"] == "bin":
++                    component = item["name"].removeprefix("object_geom_" + identifier + "__")
++                    item.update(component=component, object_size_m=source["size"],
++                                wall_thickness_m=source["wall_thickness_m"],
++                                local_position_m=model.geom_pos[index].tolist())
+             if kind == "mesh":
+                 mesh_id = int(model.geom_dataid[index])
+                 name = model.mesh(mesh_id).name
+                 if name not in self._render_meshes:
+                     vertex_start = model.mesh_vertadr[mesh_id]
+--- baseline/src/jev_mujoco/planning_settings.py
++++ current/src/jev_mujoco/planning_settings.py
+@@ -54,18 +54,41 @@
+     lift_axis: Literal["x", "y", "z"] = setting("z", "Lift 轴", "生成提升位姿的坐标轴。", "grasp")
+     lift_offset_m: float = setting(.1, "Lift 偏移", "仿真默认 world +Z 100 mm；不能为零。",
+                                    "grasp", unit="mm", scale=1000, ge=-.5, le=.5)
+     lift_in_tool_frame: bool = setting(False, "Lift 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "grasp")
+ 
++    place_approach_axis: Literal["x", "y", "z"] = setting("z", "Place approach 轴", "独立于抓取接近轴。", "place")
++    place_approach_offset_m: float = setting(.1, "Place approach 偏移", "默认在放置位姿上方 world +Z 100 mm；不能为零。",
++                                             "place", unit="mm", scale=1000, ge=-.5, le=.5)
++    place_approach_in_tool_frame: bool = setting(False, "Place approach 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
++    place_retreat_axis: Literal["x", "y", "z"] = setting("z", "Place retreat 轴", "释放后撤离的坐标轴。", "place")
++    place_retreat_offset_m: float = setting(.1, "Place retreat 偏移", "默认沿 world +Z 撤离 100 mm；不能为零。",
++                                            "place", unit="mm", scale=1000, ge=-.5, le=.5)
++    place_retreat_in_tool_frame: bool = setting(False, "Place retreat 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
++    place_max_candidates: int = setting(200, "放置预检候选上限", "最多检查本轮实际生成的抓姿候选；不生成额外候选。",
++                                        "place", ge=1, le=200, strict=True)
++    release_margin_m: float = setting(.005, "释放底面额外余量", "计算放置目标时，物体底面高于估计盒底的额外余量。",
++                                       "place", unit="mm", scale=1000, step=1, ge=0, le=.1)
++    place_timeout_s: float = setting(180., "放置／预检总时限", "覆盖放置候选搜索、规划和碰撞复核；超时结果不执行。",
++                                      "place", unit="s", step=30, gt=0, le=1800)
++
+     time_scale: float = setting(3., "时间伸长／补点倍率（三段共用）", "cuRobo 完成后用 q/v/a 做五次 Hermite 补点；默认 3 倍，执行点间隔保持 SDK dt。",
+                                 "execution", unit="倍", step=.1, ge=1, le=10)
+     dwell_approach_s: float = setting(1., "Approach 后停留", "仿真保持关节目标；停留不乘时间伸长倍率。",
+                                      "execution", unit="s", step=.1, ge=0, le=30)
+     dwell_grasp_s: float = setting(2., "夹爪闭合后停留", "停留后记录物体与 TCP 位姿，再执行 Lift。",
+                                   "execution", unit="s", step=.1, ge=0, le=30)
+     dwell_lift_s: float = setting(1., "Lift 后停留", "停留结束后由 JEV 选择验证 skill。",
+                                  "execution", unit="s", step=.1, ge=0, le=30)
++    dwell_place_approach_s: float = setting(1., "放置 approach 后停留", "保持关节目标后进入放置阶段。",
++                                           "execution", unit="s", step=.1, ge=0, le=30)
++    dwell_place_s: float = setting(2., "放置后开爪前停留", "到达放置位姿后保持关节目标，再检查开爪。",
++                                   "execution", unit="s", step=.1, ge=0, le=30)
++    dwell_release_s: float = setting(1., "释放后稳定等待", "开爪后等待，再观测已释放物体与盒内腔。",
++                                     "execution", unit="s", step=.1, ge=0, le=30)
++    dwell_retreat_s: float = setting(1., "撤离后停留", "撤离后等待相机验证物体稳定。",
++                                     "execution", unit="s", step=.1, ge=0, le=30)
+ 
+     @model_validator(mode="after")
+     def validate_relationships(self):
+         if self.trajopt_num_seeds > self.ik_num_seeds:
+             raise ValueError("TrajOpt seeds 不能大于 IK 优化 seeds，否则 SDK 会增加内部 IK seeds")
+@@ -73,10 +96,12 @@
+             raise ValueError("IK 优化 seeds 不能大于 LM seeds，否则 SDK 会增加实际 LM seeds")
+         if self.optimizer_collision_activation_distance_m < self.trajectory_collision_clearance_m:
+             raise ValueError("soft activation 必须不小于 hard clearance")
+         if self.approach_offset_m == 0 or self.lift_offset_m == 0:
+             raise ValueError("Approach / Lift 偏移不能为零")
++        if self.place_approach_offset_m == 0 or self.place_retreat_offset_m == 0:
++            raise ValueError("Place approach / retreat 偏移不能为零")
+         return self
+ 
+     def revision(self):
+         return hashlib.sha256(self.model_dump_json().encode()).hexdigest()[:16]
+ 
+--- baseline/web/src/model.js
++++ current/web/src/model.js
+@@ -16,18 +16,30 @@
+     if (!id) throw new Error('物体 ID 不能为空。');
+     if (ids.has(id)) throw new Error(`物体 ID 重复：${id}`);
+     ids.add(id);
+     const yaw = Number(object.yaw_deg);
+     if (!Number.isFinite(yaw)) throw new Error(`${id} 的偏航角必须为有限数值。`);
+-    return {
++    const normalized = {
+       id,
+       kind: String(object.kind).trim() || 'box',
+       color: String(object.color).trim() || 'blue',
+       position: finiteVector(object.position, `${id} 的位置`),
+       size: finiteVector(object.size, `${id} 的尺寸`, true),
+       yaw_deg: yaw,
+     };
++    if (normalized.kind === 'bin') {
++      const thickness = Number(object.wall_thickness_m ?? .01);
++      const mass = Number(object.mass_kg ?? .4);
++      if (!Number.isFinite(thickness) || thickness <= 0 || normalized.size[0] <= 2 * thickness
++          || normalized.size[1] <= 2 * thickness || normalized.size[2] <= thickness) {
++        throw new Error(`${id} 的物料盒壁厚与外尺寸必须留下非零内腔。`);
++      }
++      if (!Number.isFinite(mass) || mass <= 0) throw new Error(`${id} 的物料盒质量必须为大于零的有限数值。`);
++      normalized.wall_thickness_m = thickness;
++      normalized.mass_kg = mass;
++    }
++    return normalized;
+   });
+   return {
+     objects,
+     table: {
+       position: finiteVector(draft.table.position, '桌面位置'),
+@@ -39,18 +51,23 @@
+ export function sceneFromSnapshot(snapshot) {
+   return {
+     table: { position: [...snapshot.table.position], size: [...snapshot.table.size] },
+     objects: snapshot.objects.map(object => {
+       const [w, x, y, z] = object.quaternion ?? [1, 0, 0, 0];
+-      return {
++      const item = {
+         id: object.id,
+         kind: object.kind,
+         color: object.color,
+         position: [...object.position],
+         size: [...object.size],
+         yaw_deg: Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)) * 180 / Math.PI,
+       };
++      if (object.kind === 'bin') {
++        item.wall_thickness_m = object.wall_thickness_m ?? .01;
++        item.mass_kg = object.mass_kg ?? .4;
++      }
++      return item;
+     }),
+   };
+ }
+ 
+ export function controlsForState({ connected, busy, dirty, confirmed, status, instruction }) {
+--- baseline/web/src/object-drag.js
++++ current/web/src/object-drag.js
+@@ -17,10 +17,15 @@
+ export function objectPreviewPosition(id, livePosition, draft, activeDrag) {
+   if (id && id === activeDrag?.id) return activeDrag.position;
+   const values = draft?.objects.find(object => object.id === id)?.position;
+   const position = values?.map(Number);
+   return position?.length === 3 && position.every(Number.isFinite) ? position : livePosition;
++}
++
++export function editableObjectPosition(id, geometryPosition, snapshot, draft, activeDrag) {
++  const bodyPosition = snapshot.objects?.find(object => object.id === id)?.position ?? geometryPosition;
++  return objectPreviewPosition(id, bodyPosition, draft, activeDrag);
+ }
+ 
+ export function createObjectDrag({ onDragEnd, onDragCancel, onChange = () => {} } = {}) {
+   let enabled = false;
+   let active = null;
+--- baseline/web/src/scene-preview.js
++++ current/web/src/scene-preview.js
+@@ -1,6 +1,7 @@
+ import { objectPreviewPosition } from './object-drag.js';
++import { Quaternion, Vector3 } from 'three';
+ 
+ function finiteVector(values, positive = false) {
+   if (!Array.isArray(values) || values.length !== 3) return null;
+   if (values.some(value => value === '' || value === null)) return null;
+   const numbers = values.map(Number);
+@@ -18,14 +19,34 @@
+ 
+ function differs(current, values) {
+   return values.some((value, index) => Math.abs(value - current[index]) > 1e-7);
+ }
+ 
++function binComponent(component, dimensions, thickness) {
++  if (!dimensions || !Number.isFinite(thickness) || thickness <= 0) return null;
++  const [width, depth, height] = dimensions;
++  if (width <= 2 * thickness || depth <= 2 * thickness || height <= thickness) return null;
++  const wallHeight = height - thickness;
++  if (component === 'bottom') return { position: [0, 0, (-height + thickness) / 2], size: [width, depth, thickness] };
++  if (component === 'wall_x_minus' || component === 'wall_x_plus') {
++    return { position: [(component === 'wall_x_minus' ? -1 : 1) * (width - thickness) / 2, 0, thickness / 2], size: [thickness, depth, wallHeight] };
++  }
++  if (component === 'wall_y_minus' || component === 'wall_y_plus') {
++    return { position: [0, (component === 'wall_y_minus' ? -1 : 1) * (depth - thickness) / 2, thickness / 2], size: [width - 2 * thickness, thickness, wallHeight] };
++  }
++  return null;
++}
++
++function rotatePosition(position, quaternion) {
++  const [w, x, y, z] = quaternion;
++  return new Vector3(...position).applyQuaternion(new Quaternion(x, y, z, w)).toArray();
++}
++
+ // Draft lengths stay in meters. Only editable scene geometry receives preview
+ // transforms; robot poses always come from the live MuJoCo snapshot.
+ export function applyScenePreview(mesh, definition, pose, draft, activeDrag) {
+-  const id = definition.name?.startsWith('object_geom_') ? definition.name.slice('object_geom_'.length) : null;
++  const id = definition.object_id ?? (definition.name?.startsWith('object_geom_') ? definition.name.slice('object_geom_'.length) : null);
+   const edit = definition.name === 'table' ? draft?.table : draft?.objects.find(object => object.id === id);
+   let position = objectPreviewPosition(id, pose.position, draft, activeDrag);
+   let quaternion = pose.quaternion;
+   let scale = [1, 1, 1];
+   if (edit) {
+@@ -35,13 +56,25 @@
+       const halfAngle = yaw * Math.PI / 360;
+       quaternion = [Math.cos(halfAngle), 0, 0, Math.sin(halfAngle)];
+     }
+     const desired = finiteVector(edit.size, true);
+     const original = fullDimensions(definition);
+-    if (desired && original?.every(value => value > 0)) {
++    if (definition.object_kind === 'bin' && definition.local_position_m) {
++      const originalOffset = rotatePosition(definition.local_position_m, pose.quaternion);
++      const center = pose.position.map((value, index) => value - originalOffset[index]);
++      const desiredCenter = objectPreviewPosition(id, center, draft, activeDrag);
++      const component = binComponent(definition.component, desired, Number(edit.wall_thickness_m));
++      const offset = rotatePosition(component?.position ?? definition.local_position_m, quaternion);
++      position = desiredCenter.map((value, index) => value + offset[index]);
++      if (component && original?.every(value => value > 0)) scale = component.size.map((value, index) => value / original[index]);
++    } else if (desired && original?.every(value => value > 0)) {
+       scale = desired.map((value, index) => value / original[index]);
+     }
++  }
++  if (!edit && definition.object_kind === 'bin' && definition.local_position_m && activeDrag?.id === id) {
++    const offset = rotatePosition(definition.local_position_m, quaternion);
++    position = activeDrag.position.map((value, index) => value + offset[index]);
+   }
+   const [w, x, y, z] = quaternion;
+   const rotation = [x, y, z, w];
+   const changed = differs(mesh.position.toArray(), position)
+     || differs(mesh.quaternion.toArray(), rotation) || differs(mesh.scale.toArray(), scale);
+--- baseline/web/src/scene-view.js
++++ current/web/src/scene-view.js
+@@ -1,9 +1,9 @@
+ import * as THREE from 'three';
+ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+ import { createRenderSchedule } from './render-schedule.js';
+-import { createDragProjection, createObjectDrag } from './object-drag.js';
++import { createDragProjection, createObjectDrag, editableObjectPosition } from './object-drag.js';
+ import { applyScenePreview } from './scene-preview.js';
+ 
+ function geometryFor(item, mesh) {
+   const size = item.size ?? [0.05, 0.05, 0.05];
+   if (item.type === 'mesh') {
+@@ -156,21 +156,22 @@
+ 
+   canvas.addEventListener('pointerdown', event => {
+     if (!interactionEnabled || drag.active || event.button !== 0 || event.isPrimary === false) return;
+     const object = pickObject(event);
+     if (!object) return;
+-    const depth = -object.position.clone().applyMatrix4(camera.matrixWorldInverse).z;
++    const id = object.userData.objectId;
++    const position = editableObjectPosition(id, object.position.toArray(), lastSnapshot, draft, drag.active);
++    const depth = -new THREE.Vector3(...position).applyMatrix4(camera.matrixWorldInverse).z;
+     const project = createDragProjection({
+-      position: object.position.toArray(), ray: raycaster.ray, vertical: event.shiftKey,
++      position, ray: raycaster.ray, vertical: event.shiftKey,
+       screenY: event.clientY, metersPerPixel: 2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / canvas.getBoundingClientRect().height,
+     });
+     if (!project) return;
+     stopPointerEvent(event);
+-    const id = object.userData.objectId;
+     selectedId = id;
+     hoveredId = id;
+-    if (!drag.begin(id, object.position.toArray(), lastSnapshot.generation)) return;
++    if (!drag.begin(id, position, lastSnapshot.generation)) return;
+     pointerDrag = { pointerId: event.pointerId, project };
+     canvas.setPointerCapture(event.pointerId);
+     onSelect?.(id);
+     onDragStart?.(id);
+   }, { capture: true });
+@@ -227,12 +228,12 @@
+       const rgba = item.rgba ?? [0.62, 0.69, 0.77, 1];
+       const color = new THREE.Color().setRGB(rgba[0], rgba[1], rgba[2], THREE.SRGBColorSpace);
+       const material = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.12, transparent: rgba[3] < 1, opacity: rgba[3], side: item.type === 'plane' ? THREE.DoubleSide : THREE.FrontSide });
+       const object = new THREE.Mesh(geometry, material);
+       object.name = String(item.id);
+-      object.userData.objectId = item.name?.startsWith('object_geom_') ? item.name.slice('object_geom_'.length) : null;
+-      object.userData.definition = { name: item.name, type: item.type, size: item.size };
++      object.userData.objectId = item.object_id ?? (item.name?.startsWith('object_geom_') ? item.name.slice('object_geom_'.length) : null);
++      object.userData.definition = item;
+       applyScenePreview(object, item, item, null);
+       return object;
+     }));
+     if (sequence !== manifestSequence) {
+       for (const object of meshes) { object.geometry.dispose(); object.material.dispose(); }
+--- baseline/web/src/planning-settings.js
++++ current/web/src/planning-settings.js
+@@ -1,10 +1,11 @@
+ const GROUPS = {
+   shared: ['共享 IK 参数', '机械臂评估与 plan_grasp_batch 共用 IK 参数。IK 优化 seeds 与 LM 初始解 seeds 分别控制优化起点数和初始解生成预算；random seed 是复现随机序列的编号，不是搜索数量。'],
+   planner: ['plan_grasp_batch', 'TrajOpt seeds 是轨迹优化的初始轨迹数量。它与 IK 优化 seeds、LM 初始解 seeds 属于三个不同阶段的搜索预算。'],
+   grasp: ['抓取几何与候选', '设置抓取候选和接近、抓取、提升的几何条件。'],
+-  execution: ['执行时间', 'time_scale 统一作用于接近、抓取、提升三段轨迹；数值越大，执行越慢。'],
++  place: ['放置几何与预检', '放置接近与撤离使用独立参数。默认沿 world +Z 100 mm；释放余量、候选预算和总时限属于项目配置。'],
++  execution: ['执行时间', 'time_scale 统一作用于抓取与放置轨迹；数值越大，执行越慢。停留时间不乘倍率。'],
+ };
+ 
+ export function displayPlanningValue(value, field) {
+   if (typeof value !== 'number') return String(value);
+   if (!Number.isFinite(value)) return '';
+@@ -86,10 +87,11 @@
+         inputs.set(name, input);
+         label.append(input);
+         if (field.description) label.append(element('p', 'planning-field-note', field.description));
+         fields.append(label);
+       }
++      if (!fields.children.length) continue;
+       section.append(fields);
+       groups.push(section);
+     }
+     container.replaceChildren(...groups);
+     revision = latest.revision;
+--- baseline/web/src/main.js
++++ current/web/src/main.js
+@@ -1,255 +1,276 @@
+-import './styles.css';
+-import { request } from './api.js';
++import './styles.css';
++import { request } from './api.js';
+ import { buildScene, controlsForState, formatJson, sceneFromSnapshot, mergeEvents, performanceSummary, candidateCount } from './model.js';
+-import { createSceneView } from './scene-view.js';
+-import { createTraceList } from './trace.js';
++import { createSceneView } from './scene-view.js';
++import { createTraceList } from './trace.js';
+ import { createTaskClock } from './task-clock.js';
+ import { createPlanningSettingsEditor } from './planning-settings.js';
+-
+-const byId = id => document.getElementById(id);
+-const renderTrace = createTraceList(byId('trace-list'), byId('event-count'));
+-const taskClock = createTaskClock();
++import { createCameraPanel } from './camera-panel.js';
++
++const byId = id => document.getElementById(id);
++const renderTrace = createTraceList(byId('trace-list'), byId('event-count'));
++const taskClock = createTaskClock();
+ const state = { connected: false, busy: false, dirty: false, dragging: false, planningLoading: false, snapshot: null, run: {}, events: [], draft: null, selectedId: null, manifestRevision: null, operation: 0, lastServerTime: 0, receivedAt: 0 };
+ const planningEditor = createPlanningSettingsEditor(byId('planning-groups'), { document, onChange: renderControls });
+-const colorValues = { red: '#ed6a66', blue: '#648af0', green: '#62b893', yellow: '#dec267', orange: '#dd9b5f', gray: '#929ba6', white: '#dddfe6', black: '#45515c' };
+-const kindNames = { box: '长方体', cube: '立方体', sphere: '球体', cylinder: '圆柱体' };
+-let view = null;
+-let manifestLoading = false;
+-let manifestWanted = false;
++const cameraPanel = createCameraPanel(byId('camera-grid'), byId('camera-status'), {
++  document, request, schedule: setTimeout, cancel: clearTimeout,
++  isVisible: () => document.visibilityState !== 'hidden' && byId('camera-panel').open !== false,
++});
++cameraPanel.start();
++const colorValues = { red: '#ed6a66', blue: '#648af0', green: '#62b893', yellow: '#dec267', orange: '#dd9b5f', gray: '#929ba6', white: '#dddfe6', black: '#45515c' };
++const kindNames = { box: '长方体', cube: '立方体', sphere: '球体', cylinder: '圆柱体', bin: '开放物料盒' };
++let view = null;
++let manifestLoading = false;
++let manifestWanted = false;
+ let lastRunError = null;
+ let serverInstanceId = null;
+ let serverReloading = false;
+-
++
+ function errorMessage(error) {
+   const message = error instanceof Error ? error.message : String(error);
+   try {
+     const details = JSON.parse(message);
+     if (Array.isArray(details)) return details.map(item => `${(item.loc ?? []).filter(part => part !== 'body').join(' / ')}：${item.msg ?? '参数无效'}`).join('\n');
+   } catch { /* Plain backend error codes are handled below. */ }
+   const hints = {
+-    confirm_scene_first: '请先点击「重力稳定」，再「确认场景」。',
+-    run_already_active: '任务正在运行。请等待完成，或点击 Reset 取消。',
+-    run_active_reset_first: '任务正在运行。请点击 Reset 后再编辑场景。',
+-    stale_start_after_reset: '场景已经重置或修改，请确认当前场景后重新开始。',
+-    task_not_implemented: '当前仅支持抓取。请修改为抓取指令后重试。',
+-    TYPESAFE_API_KEY_not_configured: '请在后端 .env 中配置 TYPESAFE_API_KEY，然后重启服务。',
++    confirm_scene_first: '请先点击「重力稳定」，再「确认场景」。',
++    run_already_active: '任务正在运行。请等待完成，或点击 Reset 取消。',
++    run_active_reset_first: '任务正在运行。请点击 Reset 后再编辑场景。',
++    stale_start_after_reset: '场景已经重置或修改，请确认当前场景后重新开始。',
++    task_not_implemented: '任务类型未受支持。请使用抓取、放置或抓取并放置指令。',
++    place_requires_verified_holding: '单独放置需要本次后端会话中已验证的持物状态。请先完成抓取；Reset 或场景重建后需重新抓取。',
++    TYPESAFE_API_KEY_not_configured: '请在后端 .env 中配置 TYPESAFE_API_KEY，然后重启服务。',
+     low_confidence: 'JEV 对当前选择的置信度不足。展开对应 JEV 决策，查看具体选项和置信度。',
+     skill_contract_not_satisfied: 'JEV 选择的 skill 当前不满足执行条件，任务已停止。展开“步骤失败”记录，查看所选 skill 和未满足的条件。',
+     no_reachable_arm: 'JEV 未选择可执行的机械臂。展开选臂记录，查看选择结果和两臂 IK 证据。',
+     arm_already_attempted: '该机械臂本轮已尝试规划，任务已停止；每臂最多尝试一次。展开选臂与规划无解记录，查看 JEV 的选择和失败证据。',
+-    grasp_verification_failed: '抓取未通过物理验证。展开运行事实查看结果，可 Reset 后调整场景重试。',
+-    target_missing: '未找到匹配的场景物体。请核对颜色、类型和指令。',
+-    target_ambiguous: '目标不唯一。请修改物体属性或给出更明确的指令。',
+-    scene_moved_since_planning: '物体在规划后移动。请 Reset，等待场景稳定后重试。',
+-    algorithm_request_pending: '后台算法调用尚未返回，请等待后再开始新任务。Reset 和场景编辑仍可使用。',
++    grasp_verification_failed: '抓取未通过相机与夹爪反馈验证。展开运行事实查看结果，可 Reset 后调整场景重试。',
++    place_verification_failed: '放置未通过相机与夹爪反馈验证。展开运行事实查看物体和盒内腔的观测证据。',
++    target_missing: '未找到匹配的场景物体。请核对颜色、类型和指令。',
++    target_ambiguous: '目标不唯一。请修改物体属性或给出更明确的指令。',
++    scene_moved_since_planning: '物体在规划后移动。请 Reset，等待场景稳定后重试。',
++    algorithm_request_pending: '后台算法调用尚未返回，请等待后再开始新任务。Reset 和场景编辑仍可使用。',
+     plan_grasp_timeout: '抓取规划超过总时限，任务已停止，迟到结果不会执行。',
++    plan_place_timeout: '放置规划超过总时限，任务已停止，迟到结果不会执行。',
+     planning_settings_changed: '算法参数已被其他页面修改。请重新读取参数，检查后再应用或开始任务。',
+-  };
+-  const hint = hints[message.split(':')[0]];
+-  return hint ? `${hint}（${message}）` : message;
+-}
+-
+-function showError(error) {
+-  byId('error-message').textContent = errorMessage(error);
+-  byId('error-banner').hidden = false;
+-}
+-
+-function element(tag, className, text) {
+-  const node = document.createElement(tag);
+-  if (className) node.className = className;
+-  if (text !== undefined) node.textContent = text;
+-  return node;
+-}
+-
+-function markDirty() { state.dirty = true; view?.setDraft(state.draft); renderControls(); }
+-
+-function inputField(label, value, onChange, options = {}) {
+-  const wrapper = element('label', 'input-field');
+-  wrapper.append(element('span', '', label));
+-  let input;
+-  if (options.choices) {
+-    input = element('select');
+-    const choices = { ...options.choices };
+-    if (!(value in choices)) choices[value] = value;
+-    for (const [key, name] of Object.entries(choices)) {
+-      const option = element('option', '', name);
+-      option.value = key;
+-      input.append(option);
+-    }
+-  } else {
+-    input = element('input');
+-    input.type = options.text ? 'text' : 'number';
+-    if (!options.text) { input.step = options.step ?? '0.01'; input.inputMode = 'decimal'; }
+-  }
+-  const scale = options.scale ?? 1;
+-  input.value = typeof value === 'number' ? (Number.isFinite(value) ? Number((value * scale).toFixed(4)) : '') : value;
+-  input.addEventListener('input', () => {
+-    let changedValue = input.value;
+-    if (!options.text && !options.choices) {
+-      const number = input.value.trim() === '' ? NaN : Number(input.value);
+-      changedValue = Number.isFinite(number) ? number / scale : NaN;
+-    }
+-    onChange(changedValue);
+-    markDirty();
+-  });
+-  wrapper.append(input);
+-  return wrapper;
+-}
+-
+-function vectorFields(parent, title, values, onChange) {
+-  parent.append(element('div', 'field-heading', title));
+-  const row = element('div', 'vector-fields');
+-  ['X', 'Y', 'Z'].forEach((axis, index) => row.append(inputField(axis, values[index], value => onChange(index, value), { scale: 1000, step: '1' })));
+-  parent.append(row);
+-  return row;
+-}
+-
+-function renderEditor() {
+-  if (!state.draft) return;
+-  byId('object-count').textContent = state.draft.objects.length;
+-  if (!state.draft.objects.some(object => object.id === state.selectedId)) state.selectedId = state.draft.objects[0]?.id ?? null;
+-  const rows = state.draft.objects.map(object => {
+-    const row = element('button', `object-row ${object.id === state.selectedId ? 'selected' : ''}`);
+-    row.type = 'button';
+-    const swatch = element('span', 'object-swatch');
+-    swatch.style.background = colorValues[object.color] ?? '#8596aa';
+-    const description = element('span', 'object-description');
+-    description.append(element('strong', '', object.id), element('small', '', `${kindNames[object.kind] ?? object.kind} · ${object.color}`));
+-    row.append(swatch, description, element('span', 'row-arrow', '›'));
+-    row.addEventListener('click', () => { state.selectedId = object.id; renderEditor(); renderControls(); });
+-    return row;
+-  });
+-  byId('object-list').replaceChildren(...(rows.length ? rows : [element('div', 'empty-small', '场景中暂无物体，点击添加。')]));
+-  const editor = byId('object-editor');
+-  editor.replaceChildren();
+-  const selected = state.draft.objects.find(object => object.id === state.selectedId);
+-  if (selected) {
+-    const title = element('div', 'selected-heading');
+-    title.append(element('span', '', selected.id));
+-    const remove = element('button', 'text-button danger', '移除');
+-    remove.type = 'button';
+-    remove.addEventListener('click', () => { state.draft.objects = state.draft.objects.filter(object => object.id !== selected.id); markDirty(); renderEditor(); });
+-    title.append(remove);
+-    editor.append(title);
+-    const metadata = element('div', 'metadata-fields');
+-    metadata.append(inputField('类型', selected.kind, value => { selected.kind = value; }, { choices: kindNames }));
+-    metadata.append(inputField('颜色', selected.color, value => { selected.color = value; }, { choices: { red: '红色', blue: '蓝色', green: '绿色', yellow: '黄色', orange: '橙色', gray: '灰色', white: '白色', black: '黑色' } }));
+-    editor.append(metadata);
+-    vectorFields(editor, '位置 / mm', selected.position, (index, value) => { selected.position[index] = value; });
+-    editor.append(inputField('偏航角 yaw / °', selected.yaw_deg, value => { selected.yaw_deg = value; }, { step: '5' }));
+-    const sizeFields = vectorFields(editor, '尺寸 / mm', selected.size, (index, value) => {
+-      const axes = selected.kind === 'cube' || selected.kind === 'sphere' ? [0, 1, 2]
+-        : selected.kind === 'cylinder' && index < 2 ? [0, 1] : [index];
+-      for (const axis of axes) {
+-        selected.size[axis] = value;
+-        if (axis !== index) {
+-          // Update linked dimensions in place so holding a spin button keeps focus.
+-          sizeFields.children[axis].children[1].value = Number.isFinite(value) ? Number((value * 1000).toFixed(4)) : '';
+-        }
+-      }
+-    });
+-  }
+-  const tableFields = byId('table-fields');
+-  tableFields.replaceChildren();
+-  vectorFields(tableFields, '桌面中心 / mm', state.draft.table.position, (index, value) => { state.draft.table.position[index] = value; });
+-  vectorFields(tableFields, '桌面尺寸 / mm', state.draft.table.size, (index, value) => { state.draft.table.size[index] = value; });
+-}
+-
+-function replaceDraft(snapshot) {
+-  if (!snapshot?.objects || !snapshot?.table) return;
+-  state.draft = sceneFromSnapshot(snapshot);
+-  state.dirty = false;
+-  view?.setDraft(null);
+-  renderEditor();
+-}
+-
+-function renderControls() {
+-  const inputs = { connected: state.connected, busy: state.busy, dirty: state.dirty, confirmed: state.snapshot?.confirmed, status: state.run.status, instruction: byId('instruction').value };
+-  const controls = controlsForState({ ...inputs, busy: state.busy || state.dragging });
+-  // Lock the form during a drag without cancelling the drag itself.
+-  view?.setInteraction({ enabled: !controlsForState(inputs).editDisabled, selectedId: state.selectedId });
+-  byId('scene-fields').disabled = controls.editDisabled;
+-  byId('apply-scene').disabled = controls.editDisabled || !state.dirty;
+-  byId('settle').disabled = controls.editDisabled || state.dirty;
+-  byId('confirm').disabled = controls.confirmDisabled;
++  };
++  const hint = hints[message.split(':')[0]];
++  return hint ? `${hint}（${message}）` : message;
++}
++
++function showError(error) {
++  byId('error-message').textContent = errorMessage(error);
++  byId('error-banner').hidden = false;
++}
++
++function element(tag, className, text) {
++  const node = document.createElement(tag);
++  if (className) node.className = className;
++  if (text !== undefined) node.textContent = text;
++  return node;
++}
++
++function markDirty() { state.dirty = true; view?.setDraft(state.draft); renderControls(); }
++
++function inputField(label, value, onChange, options = {}) {
++  const wrapper = element('label', 'input-field');
++  wrapper.append(element('span', '', label));
++  let input;
++  if (options.choices) {
++    input = element('select');
++    const choices = { ...options.choices };
++    if (!(value in choices)) choices[value] = value;
++    for (const [key, name] of Object.entries(choices)) {
++      const option = element('option', '', name);
++      option.value = key;
++      input.append(option);
++    }
++  } else {
++    input = element('input');
++    input.type = options.text ? 'text' : 'number';
++    if (!options.text) { input.step = options.step ?? '0.01'; input.inputMode = 'decimal'; }
++  }
++  const scale = options.scale ?? 1;
++  input.value = typeof value === 'number' ? (Number.isFinite(value) ? Number((value * scale).toFixed(4)) : '') : value;
++  input.addEventListener('input', () => {
++    let changedValue = input.value;
++    if (!options.text && !options.choices) {
++      const number = input.value.trim() === '' ? NaN : Number(input.value);
++      changedValue = Number.isFinite(number) ? number / scale : NaN;
++    }
++    onChange(changedValue);
++    markDirty();
++  });
++  wrapper.append(input);
++  return wrapper;
++}
++
++function vectorFields(parent, title, values, onChange, axes = ['X', 'Y', 'Z']) {
++  parent.append(element('div', 'field-heading', title));
++  const row = element('div', 'vector-fields');
++  axes.forEach((axis, index) => row.append(inputField(axis, values[index], value => onChange(index, value), { scale: 1000, step: '1' })));
++  parent.append(row);
++  return row;
++}
++
++function renderEditor() {
++  if (!state.draft) return;
++  byId('object-count').textContent = state.draft.objects.length;
++  if (!state.draft.objects.some(object => object.id === state.selectedId)) state.selectedId = state.draft.objects[0]?.id ?? null;
++  const rows = state.draft.objects.map(object => {
++    const row = element('button', `object-row ${object.id === state.selectedId ? 'selected' : ''}`);
++    row.type = 'button';
++    const swatch = element('span', 'object-swatch');
++    swatch.style.background = colorValues[object.color] ?? '#8596aa';
++    const description = element('span', 'object-description');
++    description.append(element('strong', '', object.id), element('small', '', `${kindNames[object.kind] ?? object.kind} · ${object.color}`));
++    row.append(swatch, description, element('span', 'row-arrow', '›'));
++    row.addEventListener('click', () => { state.selectedId = object.id; renderEditor(); renderControls(); });
++    return row;
++  });
++  byId('object-list').replaceChildren(...(rows.length ? rows : [element('div', 'empty-small', '场景中暂无物体，点击添加。')]));
++  const editor = byId('object-editor');
++  editor.replaceChildren();
++  const selected = state.draft.objects.find(object => object.id === state.selectedId);
++  if (selected) {
++    const title = element('div', 'selected-heading');
++    title.append(element('span', '', selected.id));
++    const remove = element('button', 'text-button danger', '移除');
++    remove.type = 'button';
++    remove.addEventListener('click', () => { state.draft.objects = state.draft.objects.filter(object => object.id !== selected.id); markDirty(); renderEditor(); });
++    title.append(remove);
++    editor.append(title);
++    const metadata = element('div', 'metadata-fields');
++    metadata.append(inputField('类型', selected.kind, value => {
++      selected.kind = value;
++      if (value === 'bin') {
++        selected.wall_thickness_m ??= .01;
++        selected.mass_kg ??= .4;
++      }
++      renderEditor();
++    }, { choices: kindNames }));
++    metadata.append(inputField('颜色', selected.color, value => { selected.color = value; }, { choices: { red: '红色', blue: '蓝色', green: '绿色', yellow: '黄色', orange: '橙色', gray: '灰色', white: '白色', black: '黑色' } }));
++    editor.append(metadata);
++    vectorFields(editor, '位置 / mm', selected.position, (index, value) => { selected.position[index] = value; });
++    editor.append(inputField('偏航角 yaw / °', selected.yaw_deg, value => { selected.yaw_deg = value; }, { step: '5' }));
++    const sizeFields = vectorFields(editor, selected.kind === 'bin' ? '外尺寸 / mm' : '尺寸 / mm', selected.size, (index, value) => {
++      const axes = selected.kind === 'cube' || selected.kind === 'sphere' ? [0, 1, 2]
++        : selected.kind === 'cylinder' && index < 2 ? [0, 1] : [index];
++      for (const axis of axes) {
++        selected.size[axis] = value;
++        if (axis !== index) {
++          // Update linked dimensions in place so holding a spin button keeps focus.
++          sizeFields.children[axis].children[1].value = Number.isFinite(value) ? Number((value * 1000).toFixed(4)) : '';
++        }
++      }
++    }, selected.kind === 'bin' ? ['外长 X', '外宽 Y', '外高 Z'] : ['X', 'Y', 'Z']);
++    if (selected.kind === 'bin') {
++      editor.append(inputField('壁厚 / mm', selected.wall_thickness_m, value => { selected.wall_thickness_m = value; }, { scale: 1000, step: '1' }));
++      editor.append(inputField('质量 / kg', selected.mass_kg, value => { selected.mass_kg = value; }, { step: '.01' }));
++      editor.append(element('p', 'field-note', '顶部开放，底板与四壁组成一个刚体；物料盒受重力。外长、外宽必须大于两倍壁厚，外高必须大于壁厚。'));
++    }
++  }
++  const tableFields = byId('table-fields');
++  tableFields.replaceChildren();
++  vectorFields(tableFields, '桌面中心 / mm', state.draft.table.position, (index, value) => { state.draft.table.position[index] = value; });
++  vectorFields(tableFields, '桌面尺寸 / mm', state.draft.table.size, (index, value) => { state.draft.table.size[index] = value; });
++}
++
++function replaceDraft(snapshot) {
++  if (!snapshot?.objects || !snapshot?.table) return;
++  state.draft = sceneFromSnapshot(snapshot);
++  state.dirty = false;
++  view?.setDraft(null);
++  renderEditor();
++}
++
++function renderControls() {
++  const inputs = { connected: state.connected, busy: state.busy, dirty: state.dirty, confirmed: state.snapshot?.confirmed, status: state.run.status, instruction: byId('instruction').value };
++  const controls = controlsForState({ ...inputs, busy: state.busy || state.dragging });
++  // Lock the form during a drag without cancelling the drag itself.
++  view?.setInteraction({ enabled: !controlsForState(inputs).editDisabled, selectedId: state.selectedId });
++  byId('scene-fields').disabled = controls.editDisabled;
++  byId('apply-scene').disabled = controls.editDisabled || !state.dirty;
++  byId('settle').disabled = controls.editDisabled || state.dirty;
++  byId('confirm').disabled = controls.confirmDisabled;
+   byId('start').disabled = controls.startDisabled || Boolean(state.run.algorithm_pending) || state.planningLoading || !planningEditor.ready || planningEditor.dirty;
+-  byId('reset').disabled = controls.resetDisabled;
+-  byId('instruction').disabled = controls.editDisabled;
++  byId('reset').disabled = controls.resetDisabled;
++  byId('instruction').disabled = controls.editDisabled;
+   byId('refresh-health').disabled = state.busy;
+   const planningLocked = controls.editDisabled || state.planningLoading || Boolean(state.run.algorithm_pending);
+   const planningActive = state.run.status === 'running' || Boolean(state.run.algorithm_pending);
+   if (planningActive && !planningEditor.advancedLocked) planningEditor.setAdvancedLocked(true);
+   byId('planning-fields').disabled = planningLocked || !planningEditor.ready;
+   byId('toggle-advanced-planning').disabled = planningLocked || !planningEditor.ready;
+   byId('toggle-advanced-planning').textContent = planningEditor.advancedLocked ? '解锁高级参数' : '锁定高级参数';
+   byId('toggle-advanced-planning').ariaPressed = String(!planningEditor.advancedLocked);
+-  byId('advanced-planning-status').textContent = planningActive ? '任务运行中或后台算法尚未结束，所有参数暂不可编辑；高级参数已锁定。' : planningEditor.advancedLocked ? '高级参数已锁定：共享 IK、plan_grasp_batch 和抓取几何只读。执行时间仍可编辑。' : '高级参数已解锁。修改后仍需应用；重新锁定会保留参数草稿。';
++  byId('advanced-planning-status').textContent = planningActive ? '任务运行中或后台算法尚未结束，所有参数暂不可编辑；高级参数已锁定。' : planningEditor.advancedLocked ? '高级参数已锁定：共享 IK、规划、抓取与放置几何只读。执行时间仍可编辑。' : '高级参数已解锁。修改后仍需应用；重新锁定会保留参数草稿。';
+   byId('apply-planning').disabled = planningLocked || !planningEditor.ready || !planningEditor.dirty || planningEditor.conflict;
+   byId('reload-planning').disabled = planningLocked;
+   byId('planning-status').textContent = state.planningLoading ? '正在读取算法参数…' : !planningEditor.ready ? '算法参数尚未加载；读取成功后才能开始任务。' : planningEditor.conflict ? '其他页面已更新算法参数。草稿已保留；请重新读取并检查后再修改。' : planningEditor.dirty ? '参数有未应用修改。点击「应用算法参数」后才能开始任务。' : '算法参数已应用。Reset 保留这些参数。';
+-  const confirmed = state.snapshot?.confirmed && !state.dirty;
+-  byId('scene-badge').textContent = !state.connected ? '待连接' : state.dirty ? '有未应用修改' : confirmed ? '已确认' : '待确认';
+-  byId('scene-badge').classList.toggle('confirmed', Boolean(confirmed));
+-  byId('scene-note').textContent = state.dirty ? '当前显示待应用的场景。可继续拖动或修改数值，完成后点击「应用场景修改」。' : confirmed ? '初始场景已确认。Reset 将恢复此物理基线。' : '拖动和数值修改都需先应用，再等待重力稳定并确认场景。';
+-  byId('start-hint').textContent = state.dragging ? '正在预览物体位置；松手后仍需点击「应用场景修改」。' : state.busy ? '请求处理中，物理仿真持续运行…' : state.run.status === 'running' ? '任务运行中，可用 Reset 取消并恢复场景。' : state.run.algorithm_pending ? '后台算法尚未返回，暂不能开始新任务；仍可 Reset 或编辑场景。' : !planningEditor.ready || state.planningLoading ? '等待算法参数读取完成。' : planningEditor.dirty ? '高级算法参数有未应用修改，请先处理参数草稿。' : state.dirty ? '请应用修改并重新确认场景。' : !state.snapshot?.confirmed ? '先确认场景，再开始抓取任务。' : 'JEV 将选择 target、skill 和执行臂。';
+-}
+-
+-function renderRunDetails() {
+-  const running = state.run.status === 'running';
+-  const step = running ? state.run.current_step : state.run.failed_step;
+-  const failure = state.run.error;
+-  const pending = !running && Boolean(state.run.algorithm_pending);
+-  byId('run-details').hidden = !running && !step && !failure && !pending;
+-  byId('run-details').classList.toggle('has-error', Boolean(failure));
+-  const decisionNames = { bind_task: 'JEV 选择任务', bind_attributes: 'JEV 选择物体属性', choose_skill: 'JEV 选择下一 skill' };
+-  const stepName = decisionNames[step?.skill] ?? step?.skill;
+-  byId('run-step').textContent = stepName ? `${running ? '当前步骤' : '失败步骤'}：${stepName}` : running ? '任务处理中' : '任务状态';
+-  let seconds = step?.duration_s;
+-  if (running && Number.isFinite(step?.started_at) && state.lastServerTime) {
+-    seconds = Math.max(0, state.lastServerTime - step.started_at + (performance.now() - state.receivedAt) / 1000);
+-  }
+-  byId('run-step-timing').hidden = !Number.isFinite(seconds);
+-  byId('run-step-timing').textContent = Number.isFinite(seconds)
+-    ? `${running ? '已等待' : '步骤耗时'} ${seconds.toFixed(1)} s${Number.isFinite(step?.timeout_s) ? ` · 总时限 ${step.timeout_s} s` : ''}` : '';
++  const confirmed = state.snapshot?.confirmed && !state.dirty;
++  byId('scene-badge').textContent = !state.connected ? '待连接' : state.dirty ? '有未应用修改' : confirmed ? '已确认' : '待确认';
++  byId('scene-badge').classList.toggle('confirmed', Boolean(confirmed));
++  byId('scene-note').textContent = state.dirty ? '当前显示待应用的场景。可继续拖动或修改数值，完成后点击「应用场景修改」。' : confirmed ? '初始场景已确认。Reset 将恢复此物理基线。' : '拖动和数值修改都需先应用，再等待重力稳定并确认场景。';
++  byId('start-hint').textContent = state.dragging ? '正在预览物体位置；松手后仍需点击「应用场景修改」。' : state.busy ? '请求处理中，物理仿真持续运行…' : state.run.status === 'running' ? '任务运行中，可用 Reset 取消并恢复场景。' : state.run.algorithm_pending ? '后台算法尚未返回，暂不能开始新任务；仍可 Reset 或编辑场景。' : !planningEditor.ready || state.planningLoading ? '等待算法参数读取完成。' : planningEditor.dirty ? '高级算法参数有未应用修改，请先处理参数草稿。' : state.dirty ? '请应用修改并重新确认场景。' : !state.snapshot?.confirmed ? '先确认场景，再开始任务。' : 'JEV 将选择源物体、目标物料盒、skill 和执行臂。单独放置需已有已验证持物状态。';
++}
++
++function renderRunDetails() {
++  const running = state.run.status === 'running';
++  const step = running ? state.run.current_step : state.run.failed_step;
++  const failure = state.run.error;
++  const pending = !running && Boolean(state.run.algorithm_pending);
++  byId('run-details').hidden = !running && !step && !failure && !pending;
++  byId('run-details').classList.toggle('has-error', Boolean(failure));
++  const decisionNames = { bind_task: 'JEV 选择任务', bind_attributes: 'JEV 选择物体属性', choose_skill: 'JEV 选择下一 skill' };
++  const stepName = decisionNames[step?.skill] ?? step?.skill;
++  byId('run-step').textContent = stepName ? `${running ? '当前步骤' : '失败步骤'}：${stepName}` : running ? '任务处理中' : '任务状态';
++  let seconds = step?.duration_s;
++  if (running && Number.isFinite(step?.started_at) && state.lastServerTime) {
++    seconds = Math.max(0, state.lastServerTime - step.started_at + (performance.now() - state.receivedAt) / 1000);
++  }
++  byId('run-step-timing').hidden = !Number.isFinite(seconds);
++  byId('run-step-timing').textContent = Number.isFinite(seconds)
++    ? `${running ? '已等待' : '步骤耗时'} ${seconds.toFixed(1)} s${Number.isFinite(step?.timeout_s) ? ` · 总时限 ${step.timeout_s} s` : ''}` : '';
+   byId('run-candidate').hidden = !Number.isFinite(step?.batch_index);
+   const ikStep = step?.skill === 'evaluate_arms';
+   const candidates = ikStep ? `候选 ${candidateCount(step.candidate_indices) ?? '—'} 个`
+     : `候选编号 ${(step?.candidate_indices ?? []).join(', ')}`;
+   byId('run-candidate').textContent = Number.isFinite(step?.batch_index)
+     ? `${ikStep ? 'Batched IK 批次' : '规划批次'} ${step.batch_index} / ${step.batch_count ?? '—'} · ${candidates} · Arm ${step.arm ?? '—'}${Number.isFinite(step.success_count) ? ` · 成功 ${step.success_count} 个` : ''}` : '';
+-  byId('run-last-error').hidden = !running || !step?.last_error;
++  byId('run-last-error').hidden = !running || !step?.last_error;
+   byId('run-last-error').textContent = step?.last_error ? `上一批次结果：${step.last_error}` : '';
+-  byId('run-failure').hidden = !failure;
+-  byId('run-failure').textContent = failure ? errorMessage(failure) : '';
+-  byId('algorithm-pending').hidden = !pending;
+-}
+-
+-function setConnection(connected) {
+-  state.connected = connected;
+-  byId('connection').classList.toggle('online', connected);
+-  byId('connection').replaceChildren(element('i'), document.createTextNode(connected ? '实时连接' : '连接中断 · 重连中'));
+-  renderControls();
+-}
+-
+-async function refreshManifest() {
+-  if (!view) return;
+-  if (manifestLoading) { manifestWanted = true; return; }
+-  manifestLoading = true;
+-  try {
+-    const manifest = await request('/api/manifest');
+-    await view.loadManifest(manifest);
+-    state.manifestRevision = manifest.revision;
+-    byId('viewport-loading').hidden = true;
+-  } catch (error) {
+-    showError(`场景显示失败：${error.message}。请确认后端资源服务可访问后刷新页面。`);
+-  } finally {
+-    manifestLoading = false;
+-    if (manifestWanted) { manifestWanted = false; void refreshManifest(); }
+-  }
+-}
+-
++  byId('run-failure').hidden = !failure;
++  byId('run-failure').textContent = failure ? errorMessage(failure) : '';
++  byId('algorithm-pending').hidden = !pending;
++}
++
++function setConnection(connected) {
++  state.connected = connected;
++  byId('connection').classList.toggle('online', connected);
++  byId('connection').replaceChildren(element('i'), document.createTextNode(connected ? '实时连接' : '连接中断 · 重连中'));
++  renderControls();
++}
++
++async function refreshManifest() {
++  if (!view) return;
++  if (manifestLoading) { manifestWanted = true; return; }
++  manifestLoading = true;
++  try {
++    const manifest = await request('/api/manifest');
++    await view.loadManifest(manifest);
++    state.manifestRevision = manifest.revision;
++    byId('viewport-loading').hidden = true;
++  } catch (error) {
++    showError(`场景显示失败：${error.message}。请确认后端资源服务可访问后刷新页面。`);
++  } finally {
++    manifestLoading = false;
++    if (manifestWanted) { manifestWanted = false; void refreshManifest(); }
++  }
++}
++
+ function applyState(payload) {
+   const snapshot = payload?.simulation;
+   if (!snapshot || serverReloading) return;
+   const instanceId = payload.server_instance_id;
+   if (typeof instanceId === 'string' && instanceId) {
+@@ -260,120 +281,122 @@
+       return;
+     }
+     serverInstanceId = instanceId;
+   }
+   if (snapshot.generation < (state.snapshot?.generation ?? 0)) return;
+-  if (Number.isFinite(payload.server_time) && payload.server_time < state.lastServerTime) return;
+-  if (Number.isFinite(payload.server_time)) {
+-    state.lastServerTime = payload.server_time;
+-    state.receivedAt = performance.now();
+-  }
+-  const previousGeneration = state.snapshot?.generation;
+-  state.snapshot = snapshot;
+-  state.run = payload.run ?? {};
+-  if (!state.draft || (!state.dirty && snapshot.generation !== previousGeneration)) replaceDraft(snapshot);
+-  const names = { idle: snapshot.confirmed ? '场景就绪' : '等待确认', running: '任务运行中', succeeded: '抓取成功', success: '抓取成功', completed: '任务完成', failed: '任务失败', error: '任务出错', cancelled: '任务已取消', unsupported: '暂不支持此任务' };
+-  byId('run-status').textContent = names[state.run.status] ?? state.run.status ?? '等待场景';
+-  byId('run-dot').className = `run-dot ${state.run.status === 'running' ? 'active' : ''} ${['failed', 'error'].includes(state.run.status) ? 'failed' : ''}`;
+-  byId('task-value').textContent = ({ grasp: '抓取', place: '放置', grasp_place: '抓取并放置', unsupported: '不支持' })[state.run.task] ?? state.run.task ?? '—';
+-  byId('target-value').textContent = state.run.target_id ?? '—';
+-  byId('arm-value').textContent = state.run.arm ? `Arm ${state.run.arm}` : '—';
+-  if (state.run.error && state.run.error !== lastRunError) showError(state.run.error);
+-  lastRunError = state.run.error;
+-  if (snapshot.physics_error) showError(`物理仿真出错：${snapshot.physics_error}。请检查后端日志并重启仿真。`);
++  if (Number.isFinite(payload.server_time) && payload.server_time < state.lastServerTime) return;
++  if (Number.isFinite(payload.server_time)) {
++    state.lastServerTime = payload.server_time;
++    state.receivedAt = performance.now();
++  }
++  const previousGeneration = state.snapshot?.generation;
++  state.snapshot = snapshot;
++  cameraPanel.setGeneration(snapshot.generation);
++  state.run = payload.run ?? {};
++  if (!state.draft || (!state.dirty && snapshot.generation !== previousGeneration)) replaceDraft(snapshot);
++  const names = { idle: snapshot.confirmed ? '场景就绪' : '等待确认', running: '任务运行中', succeeded: '任务成功', success: '任务成功', completed: '任务完成', failed: '任务失败', error: '任务出错', cancelled: '任务已取消', unsupported: '暂不支持此任务' };
++  byId('run-status').textContent = names[state.run.status] ?? state.run.status ?? '等待场景';
++  byId('run-dot').className = `run-dot ${state.run.status === 'running' ? 'active' : ''} ${['failed', 'error'].includes(state.run.status) ? 'failed' : ''}`;
++  byId('task-value').textContent = ({ grasp: '抓取', place: '放置', grasp_place: '抓取并放置', unsupported: '不支持' })[state.run.task] ?? state.run.task ?? '—';
++  byId('target-value').textContent = state.run.target_id ?? '—';
++  byId('destination-value').textContent = state.run.destination_id ?? '—';
++  byId('arm-value').textContent = state.run.arm ? `Arm ${state.run.arm}` : '—';
++  if (state.run.error && state.run.error !== lastRunError) showError(state.run.error);
++  lastRunError = state.run.error;
++  if (snapshot.physics_error) showError(`物理仿真出错：${snapshot.physics_error}。请检查后端日志并重启仿真。`);
+   state.events = mergeEvents(state.events, payload.events, payload.events_mode);
+   planningEditor.sync(payload.planning_settings);
+-  taskClock.sync(state.run, state.events, payload.server_time);
+-  renderTaskClock();
+-  renderTrace(state.events);
+-  const facts = state.run.facts;
+-  const metrics = state.run.metrics;
+-  byId('performance-summary').hidden = !metrics;
+-  if (metrics) {
+-    const summary = performanceSummary(metrics);
+-    byId('metric-count').textContent = summary.count;
+-    byId('metric-mean').textContent = summary.mean;
+-    byId('metric-total').textContent = summary.total;
+-    byId('metric-run').textContent = summary.run;
+-  }
+-  byId('facts-section').hidden = !metrics && (!facts || !Object.keys(facts).length);
++  taskClock.sync(state.run, state.events, payload.server_time);
++  renderTaskClock();
++  renderTrace(state.events);
++  const facts = state.run.facts;
++  const metrics = state.run.metrics;
++  byId('performance-summary').hidden = !metrics;
++  if (metrics) {
++    const summary = performanceSummary(metrics);
++    byId('metric-count').textContent = summary.count;
++    byId('metric-mean').textContent = summary.mean;
++    byId('metric-total').textContent = summary.total;
++    byId('metric-run').textContent = summary.run;
++  }
++  byId('facts-section').hidden = !metrics && (!facts || !Object.keys(facts).length);
+   byId('facts-content').textContent = formatJson(metrics ? { facts: facts ?? {}, metrics } : facts);
+   byId('run-planning-settings').hidden = !state.run.planning_settings;
+   byId('run-planning-settings-content').textContent = state.run.planning_settings
+     ? formatJson({ revision: state.run.settings_revision, settings: state.run.planning_settings }) : '';
+-  view?.setTable(snapshot.table);
+-  view?.update(snapshot);
+-  if (snapshot.manifest_revision !== undefined && snapshot.manifest_revision !== state.manifestRevision && !manifestLoading) void refreshManifest();
+-  renderControls();
+-}
+-
+-function renderTaskClock() {
+-  byId('sim-time').textContent = taskClock.elapsedSeconds().toFixed(2);
+-  renderRunDetails();
+-}
+-
+-async function refreshState(operation = state.operation) {
+-  const payload = await request('/api/state');
+-  if (operation !== state.operation) return null;
+-  setConnection(true);
+-  applyState(payload);
+-  return payload;
+-}
+-
+-async function perform(path, body = {}, options = {}) {
+-  const operation = ++state.operation;
+-  let requestSucceeded = false;
+-  state.busy = true;
+-  byId('error-banner').hidden = true;
+-  renderControls();
+-  try {
+-    const result = await request(path, body);
+-    requestSucceeded = true;
+-    if (operation !== state.operation) return null;
++  view?.setTable(snapshot.table);
++  view?.update(snapshot);
++  if (snapshot.manifest_revision !== undefined && snapshot.manifest_revision !== state.manifestRevision && !manifestLoading) void refreshManifest();
++  renderControls();
++}
++
++function renderTaskClock() {
++  byId('sim-time').textContent = taskClock.elapsedSeconds().toFixed(2);
++  renderRunDetails();
++}
++
++async function refreshState(operation = state.operation) {
++  const payload = await request('/api/state');
++  if (operation !== state.operation) return null;
++  setConnection(true);
++  applyState(payload);
++  return payload;
++}
++
++async function perform(path, body = {}, options = {}) {
++  const operation = ++state.operation;
++  let requestSucceeded = false;
++  state.busy = true;
++  byId('error-banner').hidden = true;
++  renderControls();
++  try {
++    const result = await request(path, body);
++    requestSucceeded = true;
++    if (operation !== state.operation) return null;
+     options.afterSuccess?.(result);
+-    // Scene endpoints return the accepted snapshot. Use it even if the
+-    // subsequent state refresh fails, so Reset cannot leave a stale preview.
+-    if (options.refreshDraft && result.objects && result.table) {
+-      applyState({ simulation: result, run: { status: 'idle', algorithm_pending: state.run.algorithm_pending }, events: [] });
+-      replaceDraft(state.snapshot);
+-    }
+-    const payload = await refreshState(operation);
+-    if (operation !== state.operation) return null;
+-    if (options.refreshDraft) replaceDraft(state.snapshot);
+-    if (options.manifest) await refreshManifest();
+-    return payload;
+-  } catch (error) {
+-    if (operation === state.operation) {
+-      showError(error);
++    // Scene endpoints return the accepted snapshot. Use it even if the
++    // subsequent state refresh fails, so Reset cannot leave a stale preview.
++    if (options.refreshDraft && result.objects && result.table) {
++      applyState({ simulation: result, run: { status: 'idle', algorithm_pending: state.run.algorithm_pending }, events: [] });
++      replaceDraft(state.snapshot);
++    }
++    const payload = await refreshState(operation);
++    if (operation !== state.operation) return null;
++    if (options.refreshDraft) replaceDraft(state.snapshot);
++    if (options.manifest) await refreshManifest();
++    return payload;
++  } catch (error) {
++    if (operation === state.operation) {
++      showError(error);
+       if (!requestSucceeded) options.onError?.(error);
+-    }
+-    return null;
+-  } finally {
+-    if (operation === state.operation) { state.busy = false; renderControls(); }
+-  }
+-}
+-
++    }
++    return null;
++  } finally {
++    if (operation === state.operation) { state.busy = false; renderControls(); }
++  }
++}
++
+ async function refreshHealth() {
+-  try {
+-    const payload = await request('/api/health');
+-    const health = payload.services ?? payload;
+-    const entries = Object.entries(health).filter(([name]) => !['time', 'timestamp', 'status', 'ok'].includes(name));
+-    byId('services').replaceChildren(...entries.map(([name, info]) => {
+-      const row = element('div', 'service-row');
+-      const value = typeof info === 'object' && info !== null ? info : { status: info };
+-      const status = value.ready ?? value.status ?? value.ok ?? value.healthy ?? value.available ?? value.configured;
+-      const healthy = status === true || ['ok', 'ready', 'healthy', 'online', 'available', 'configured'].includes(status);
+-      const label = healthy ? '可用' : status === false ? '未就绪' : typeof status === 'string' ? status : '查看详情';
+-      const badge = element('span', `service-state ${healthy ? 'healthy' : ''}`, label);
+-      const details = element('details', 'service-details');
+-      const summary = element('summary');
+-      summary.append(element('span', '', name), badge);
+-      details.append(summary, element('pre', '', formatJson(info)));
+-      row.append(details);
+-      return row;
+-    }));
+-  } catch (error) { byId('services').replaceChildren(element('span', 'service-error', `服务检测失败：${error.message}`)); }
++  try {
++    const payload = await request('/api/health');
++    const health = payload.services ?? payload;
++    const entries = Object.entries(health).filter(([name]) => !['time', 'timestamp', 'status', 'ok'].includes(name));
++    byId('services').replaceChildren(...entries.map(([name, info]) => {
++      const row = element('div', 'service-row');
++      const value = typeof info === 'object' && info !== null ? info : { status: info };
++      const status = value.ready ?? value.status ?? value.ok ?? value.healthy ?? value.available ?? value.configured;
++      const healthy = status === true || ['ok', 'ready', 'healthy', 'online', 'available', 'configured'].includes(status);
++      const label = healthy ? '可用' : status === false ? '未就绪' : typeof status === 'string' ? status : '查看详情';
++      const badge = element('span', `service-state ${healthy ? 'healthy' : ''}`, label);
++      const details = element('details', 'service-details');
++      const summary = element('summary');
++      summary.append(element('span', '', name), badge);
++      details.append(summary, element('pre', '', formatJson(info)));
++      row.append(details);
++      return row;
++    }));
++  } catch (error) { byId('services').replaceChildren(element('span', 'service-error', `服务检测失败：${error.message}`)); }
+ }
+ 
+ async function refreshPlanningSettings(discardDraft = false) {
+   state.planningLoading = true;
+   renderControls();
+@@ -386,25 +409,25 @@
+   } finally {
+     state.planningLoading = false;
+     renderControls();
+   }
+ }
+-
+-function connectSocket() {
+-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+-  const socket = new WebSocket(`${protocol}//${location.host}/ws`);
+-  socket.addEventListener('open', () => { setConnection(true); });
+-  socket.addEventListener('message', event => {
+-    try { applyState(JSON.parse(event.data)); } catch (error) { showError(`实时数据处理失败：${error.message}`); }
+-  });
+-  socket.addEventListener('close', () => { setConnection(false); setTimeout(connectSocket, 2000); });
+-  socket.addEventListener('error', () => socket.close());
+-}
+-
+-byId('dismiss-error').addEventListener('click', () => { byId('error-banner').hidden = true; });
+-byId('instruction').addEventListener('input', renderControls);
+-byId('home-view').addEventListener('click', () => view?.home());
++
++function connectSocket() {
++  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
++  const socket = new WebSocket(`${protocol}//${location.host}/ws`);
++  socket.addEventListener('open', () => { setConnection(true); });
++  socket.addEventListener('message', event => {
++    try { applyState(JSON.parse(event.data)); } catch (error) { showError(`实时数据处理失败：${error.message}`); }
++  });
++  socket.addEventListener('close', () => { setConnection(false); setTimeout(connectSocket, 2000); });
++  socket.addEventListener('error', () => socket.close());
++}
++
++byId('dismiss-error').addEventListener('click', () => { byId('error-banner').hidden = true; });
++byId('instruction').addEventListener('input', renderControls);
++byId('home-view').addEventListener('click', () => view?.home());
+ byId('refresh-health').addEventListener('click', () => void refreshHealth());
+ byId('toggle-advanced-planning').addEventListener('click', () => {
+   if (byId('toggle-advanced-planning').disabled) return;
+   planningEditor.setAdvancedLocked(!planningEditor.advancedLocked);
+   renderControls();
+@@ -419,65 +442,65 @@
+       afterSuccess: result => planningEditor.accept(result),
+       onError: error => { if (error.message.startsWith('planning_settings_changed')) planningEditor.markConflict(); },
+     });
+   } catch (error) { showError(error); }
+ });
+-byId('add-object').addEventListener('click', () => {
+-  if (!state.draft) return;
+-  let number = 1;
+-  while (state.draft.objects.some(object => object.id === `object_${number}`)) number += 1;
+-  const table = state.draft.table;
+-  const object = { id: `object_${number}`, kind: 'box', color: 'blue', position: [Number(table.position[0]), Number(table.position[1]), Number(table.position[2]) + Number(table.size[2]) / 2 + 0.15], size: [0.06, 0.06, 0.08], yaw_deg: 0 };
+-  state.draft.objects.push(object);
+-  state.selectedId = object.id;
+-  markDirty();
+-  renderEditor();
+-});
+-byId('apply-scene').addEventListener('click', () => {
+-  try { void perform('/api/scene', buildScene(state.draft), { refreshDraft: true, manifest: true }); } catch (error) { showError(error); }
+-});
+-byId('settle').addEventListener('click', () => void perform('/api/settle', {}, { refreshDraft: true }));
+-byId('confirm').addEventListener('click', () => void perform('/api/confirm', {}, { refreshDraft: true }));
+-byId('reset').addEventListener('click', () => {
+-  view?.cancelInteraction();
+-  void perform('/api/reset', {}, { refreshDraft: true, manifest: true, afterSuccess: () => { taskClock.reset(); renderTaskClock(); } });
+-});
++byId('add-object').addEventListener('click', () => {
++  if (!state.draft) return;
++  let number = 1;
++  while (state.draft.objects.some(object => object.id === `object_${number}`)) number += 1;
++  const table = state.draft.table;
++  const object = { id: `object_${number}`, kind: 'box', color: 'blue', position: [Number(table.position[0]), Number(table.position[1]), Number(table.position[2]) + Number(table.size[2]) / 2 + 0.15], size: [0.06, 0.06, 0.08], yaw_deg: 0 };
++  state.draft.objects.push(object);
++  state.selectedId = object.id;
++  markDirty();
++  renderEditor();
++});
++byId('apply-scene').addEventListener('click', () => {
++  try { void perform('/api/scene', buildScene(state.draft), { refreshDraft: true, manifest: true }); } catch (error) { showError(error); }
++});
++byId('settle').addEventListener('click', () => void perform('/api/settle', {}, { refreshDraft: true }));
++byId('confirm').addEventListener('click', () => void perform('/api/confirm', {}, { refreshDraft: true }));
++byId('reset').addEventListener('click', () => {
++  view?.cancelInteraction();
++  void perform('/api/reset', {}, { refreshDraft: true, manifest: true, afterSuccess: () => { taskClock.reset(); renderTaskClock(); } });
++});
+ byId('start').addEventListener('click', () => {
+   if (byId('start').disabled) return;
+   planningEditor.setAdvancedLocked(true);
+   taskClock.onStart();
+-  renderTaskClock();
++  renderTaskClock();
+   void perform('/api/start', { instruction: byId('instruction').value.trim(), generation: state.snapshot.generation, settings_revision: planningEditor.revision }, {
+-    onError: () => { taskClock.cancelPending(); renderTaskClock(); },
+-  });
+-});
+-
+-function finishDrag() {
+-  state.dragging = false;
+-  renderControls();
+-}
+-
+-try { view = createSceneView(byId('viewport'), {
+-  onSelect(id) { state.selectedId = id; renderEditor(); },
+-  onDragStart() { state.dragging = true; renderControls(); },
+-  onDragEnd(id, position) {
+-    const object = state.draft.objects.find(item => item.id === id);
+-    if (object) {
+-      object.position = [...position];
+-      markDirty();
+-      renderEditor();
+-    }
+-    finishDrag();
+-  },
+-  onDragCancel: finishDrag,
+-}); } catch (error) {
+-  byId('viewport-loading').replaceChildren(element('strong', '', '无法创建 3D 视图'), element('span', '', '请启用浏览器硬件加速，并使用支持 WebGL 2 的浏览器。'));
+-  showError(`WebGL 初始化失败：${error.message}`);
+-}
+-void refreshState().catch(error => { setConnection(false); showError(`无法连接后端：${error.message}。请检查服务是否启动。`); });
+-void refreshManifest();
++    onError: () => { taskClock.cancelPending(); renderTaskClock(); },
++  });
++});
++
++function finishDrag() {
++  state.dragging = false;
++  renderControls();
++}
++
++try { view = createSceneView(byId('viewport'), {
++  onSelect(id) { state.selectedId = id; renderEditor(); },
++  onDragStart() { state.dragging = true; renderControls(); },
++  onDragEnd(id, position) {
++    const object = state.draft.objects.find(item => item.id === id);
++    if (object) {
++      object.position = [...position];
++      markDirty();
++      renderEditor();
++    }
++    finishDrag();
++  },
++  onDragCancel: finishDrag,
++}); } catch (error) {
++  byId('viewport-loading').replaceChildren(element('strong', '', '无法创建 3D 视图'), element('span', '', '请启用浏览器硬件加速，并使用支持 WebGL 2 的浏览器。'));
++  showError(`WebGL 初始化失败：${error.message}`);
++}
++void refreshState().catch(error => { setConnection(false); showError(`无法连接后端：${error.message}。请检查服务是否启动。`); });
++void refreshManifest();
+ void refreshHealth();
+ void refreshPlanningSettings();
+-connectSocket();
+-setInterval(() => { if (!state.connected) void refreshState().catch(() => {}); }, 5000);
+-setInterval(() => void refreshHealth(), 15000);
+-setInterval(renderTaskClock, 100);
++connectSocket();
++setInterval(() => { if (!state.connected) void refreshState().catch(() => {}); }, 5000);
++setInterval(() => void refreshHealth(), 15000);
++setInterval(renderTaskClock, 100);
+--- baseline/web/src/styles.css
++++ current/web/src/styles.css
+@@ -5,14 +5,15 @@
+ .scene-column{display:flex;flex-direction:column;min-width:0}.viewport-shell{position:relative;border:1px solid #2c414f;border-radius:13px;overflow:hidden;min-height:440px;height:calc(100vh - 460px);background:#101923}.viewport-topbar{position:absolute;top:0;left:0;right:0;display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;padding:16px 18px;pointer-events:none;z-index:2;background:linear-gradient(#101923e8,transparent)}.viewport-topbar>div{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.viewport-topbar strong{font-size:24px;letter-spacing:.4px}.live-dot{width:6px;height:6px;background:#71dfc2;border-radius:50%;box-shadow:0 0 9px #71dfc24d}.viewport-subtitle{font-size:20px;color:#8298aa;margin-left:3px}.sim-clock{font:20px/1.5 Consolas,monospace;color:#7192a5}.sim-clock b{font-size:20px;color:#b9d2e0;font-weight:500;min-width:48px;text-align:right}#viewport{position:absolute;inset:0}#viewport canvas{display:block;width:100%;height:100%}.viewport-bottom{position:absolute;bottom:0;left:0;right:0;display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;padding:14px 17px;background:linear-gradient(transparent,#0f1824ed);pointer-events:none;font-size:20px;letter-spacing:.4px;color:#7793a5}.view-button{min-height:44px;line-height:1.4;pointer-events:auto;border:1px solid #334b5a;border-radius:5px;padding:5px 8px;background:#14232ded;color:#a4c5d3;font-size:20px}.axis-legend{position:absolute;bottom:88px;right:20px;display:flex;gap:12px;align-items:center;pointer-events:none;font:20px/1.5 Consolas,monospace;color:#546f84}.axis-x{color:#df8882}.axis-y{color:#8bc598}.axis-z{color:#78a9e1}.viewport-loading{position:absolute;inset:0;padding:24px;text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:#101923d9;z-index:3;color:#adcadb}.viewport-loading strong{font-size:24px;font-weight:500}.viewport-loading span{font-size:20px;color:#668298}.loader{width:27px;height:27px;border:2px solid #263e4c;border-top-color:#71dfc2;border-radius:50%;animation:spin 1.2s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.run-strip{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;padding:12px 4px;gap:10px}.run-strip>div{display:flex;flex-wrap:wrap;align-items:center;gap:7px}.run-strip strong{font-size:20px;font-weight:550}.run-dot{display:inline-block;width:5px;height:5px;background:#5d788b;border-radius:50%}.run-dot.active{background:#71dfc2;box-shadow:0 0 6px #71dfc277}.run-dot.failed{background:#eb8881}.run-facts{font-size:20px;overflow-wrap:anywhere;gap:12px!important;color:#668296}.run-facts b{color:#a2bbc9;margin-left:5px;font-weight:500}.instruction-panel{padding:18px 20px;background:var(--panel);border:1px solid var(--border);border-radius:13px}.instruction-heading{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:13px}.instruction-heading .eyebrow{margin-bottom:6px}.instruction-heading h2{font-size:24px}.task-catalog{font-size:20px;display:flex;flex-wrap:wrap;gap:8px;color:#536e82;align-items:center}.task-catalog .catalog-active{background:#1c3932;color:#8cdac4;padding:4px 8px;border-radius:4px}textarea{width:100%;resize:vertical;min-height:84px;max-height:240px;border:1px solid #304554;border-radius:7px;background:#0c1721;color:#d3e1e9;padding:10px 13px;font-size:20px;line-height:1.5}textarea::placeholder{color:#506d81}.instruction-actions{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;margin-top:12px;gap:12px}.instruction-actions p{flex:1 1 220px;min-width:0;font-size:20px;color:#7591a4;line-height:1.5}.instruction-actions>div{display:flex;flex-wrap:wrap;gap:8px;margin-left:auto}.start-button{min-width:150px;display:flex;justify-content:space-between;gap:12px}
+ .trace-panel{min-height:620px;height:calc(100vh - 144px);display:flex;flex-direction:column;overflow-y:auto}.count-badge{display:grid;place-items:center;min-width:40px;height:40px;padding:0 7px;border-radius:6px;background:#223544;color:#85b0c2;font:20px/1.5 Consolas,monospace}.trace-panel .panel-description{margin-bottom:17px}.trace-list{flex:1;min-height:220px;overflow-y:auto;padding-right:3px;scrollbar-width:thin;scrollbar-color:#344b5a transparent}.trace-empty{display:flex;flex-direction:column;align-items:center;text-align:center;margin:60px 12px 20px}.trace-empty-icon{width:49px;height:49px;display:grid;place-items:center;background:#192b39;border:1px solid #2c4657;border-radius:13px;font-size:23px;color:#698ca0;margin-bottom:20px}.trace-empty strong{font-size:24px;font-weight:500;color:#98b2c4}.trace-empty p{font-size:20px;line-height:1.5;color:#617f95;margin-top:10px;max-width:100%}.trace-card{margin-bottom:8px;border:1px solid #2c414f;border-radius:8px;background:#142330;overflow:hidden}.trace-summary{padding:12px 9px;display:flex;align-items:flex-start;gap:9px;list-style:none}.trace-summary::-webkit-details-marker{display:none}.trace-number{font:20px/1.6 Consolas,monospace;color:#6cc7b4;background:#213b39;border:1px solid #31534c;border-radius:4px;padding:1px 4px}.trace-title{min-width:0;flex:1}.trace-title>strong{font-size:20px;line-height:1.5;overflow-wrap:anywhere;font-weight:500;display:block}.trace-meta{font:20px/1.5 Consolas,monospace;overflow-wrap:anywhere;color:#6f92a5;display:flex;gap:7px;flex-wrap:wrap;margin-top:4px}.trace-kind{color:#7aaebd}.confidence{color:#87bea9}.trace-chevron{color:#698798;font-size:20px}.trace-card[open] .trace-chevron{transform:rotate(180deg)}.trace-content{padding:0 10px 12px}.trace-data{border-top:1px solid #2a4050;padding:9px 0 0;margin-top:9px}.trace-data summary{font-size:20px;overflow-wrap:anywhere;color:#91bdc7;list-style-position:inside}.trace-data pre{background:#0a151f;border:1px solid #243947;padding:10px;margin-top:9px;border-radius:5px;color:#a0b8c6;max-height:360px;overflow:auto;font-size:20px}.trace-value-note{font-size:20px;color:#608697;margin-top:10px;word-break:break-word}.trace-error{border-color:#76524f}.trace-error .trace-number{color:#f3b1a6;background:#4c3330;border-color:#79534b}.trace-footer{border-top:1px solid var(--border);padding-top:15px;margin-top:17px;color:#577f91;display:flex;align-items:center;gap:7px;font-size:20px}.trace-footer .tiny-dot{width:4px;height:4px;color:#659d8b}.facts-section{border-top:1px solid var(--border);margin-top:15px;padding-top:13px;color:#8bb3c0;font-size:20px}.facts-section pre{margin-top:10px;max-height:260px;overflow-y:auto;color:#87a2b5;font-size:20px}.error-banner{margin:12px 20px 0;display:flex;overflow-wrap:anywhere;align-items:center;gap:20px;padding:12px 15px;color:#efc0b8;border:1px solid #764f47;border-radius:7px;background:#402c28;font-size:20px;line-height:1.7}.error-banner button{margin-left:auto;background:transparent;border:0;color:#efc0b8;font-size:20px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+ .performance-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px 15px;padding:13px;margin-bottom:15px;border:1px solid #2c414f;background:#142630;border-radius:8px}.performance-summary>div{display:flex;flex-direction:column;gap:6px;overflow-wrap:anywhere}.performance-summary span{color:#7698a9;font-size:20px}.performance-summary strong{color:#a8e0d0;font:24px/1.3 Consolas,monospace;font-weight:500}
+ @media(min-width:1700px){.workspace{grid-template-columns:360px minmax(700px,1fr) 400px;padding:24px;gap:20px}.editor-panel,.trace-panel{padding:23px 20px}.editor-panel{max-height:calc(100vh - 152px)}.viewport-shell{min-height:550px}.trace-panel{height:calc(100vh - 152px)}}
+ @media(max-width:1371px){.workspace{grid-template-columns:340px minmax(0,1fr);gap:16px;padding:16px}.trace-panel{grid-column:1/-1;height:auto;min-height:360px;max-height:none}.trace-empty{margin:24px}.trace-list{max-height:640px}.trace-panel .panel-description{margin-bottom:12px}.viewport-shell{height:520px}.editor-panel{padding:20px 17px;max-height:none}.run-facts{gap:10px!important}}
+-@media(max-width:950px){.app-header{padding:16px}.brand h1{font-size:28px}.header-status{width:100%;margin-left:0}.workspace{display:flex;flex-direction:column;padding:14px;gap:16px}.scene-column{width:100%;order:0}.editor-panel{width:100%;order:1;max-height:none}.trace-panel{width:100%;order:2;min-height:360px}.viewport-shell{height:500px;min-height:440px}.run-strip{align-items:flex-start}.instruction-panel{padding:18px}.object-list{max-height:300px}.error-banner{margin:14px}}
++@media(max-width:950px){.app-header{padding:16px}.brand h1{font-size:28px}.header-status{width:100%;margin-left:0}.workspace{display:flex;flex-direction:column;padding:14px;gap:16px}.scene-column{width:100%;order:0}.editor-panel{width:100%;order:1;max-height:none}.trace-panel{width:100%;order:2;min-height:360px}.viewport-shell{height:500px;min-height:440px}.run-strip{align-items:flex-start}.instruction-panel{padding:18px}.object-list{max-height:300px}.error-banner{margin:14px}}
+ @media(max-width:600px){.brand{min-width:0;flex:1}.brand h1{font-size:24px}.version{overflow-wrap:anywhere}.viewport-topbar{padding:14px;gap:8px}.viewport-topbar>div{width:100%}.viewport-topbar .sim-clock{gap:8px}.viewport-bottom{padding:12px;align-items:flex-start}.viewport-bottom>span{flex-basis:100%}.axis-legend{bottom:160px;right:14px}.instruction-heading{align-items:flex-start}.instruction-actions{flex-direction:column;align-items:stretch}.instruction-actions p{flex:auto}.instruction-actions>div{margin-left:0;justify-content:flex-end}.task-catalog{width:100%}.performance-summary{grid-template-columns:1fr}.viewport-loading{padding:18px}}
+ @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}.loader{animation:none}}
+-.drag-help{margin:12px 4px 0;color:#9ab6c6;font-size:20px;line-height:1.6;overflow-wrap:anywhere}
++.drag-help{margin:12px 4px 0;color:#9ab6c6;font-size:20px;line-height:1.6;overflow-wrap:anywhere}
+ .run-details{border:1px solid #355261;border-radius:8px;background:#152633;padding:14px 16px;margin:0 0 14px;font-size:20px;line-height:1.5;overflow-wrap:anywhere}.run-details strong{display:block;font-size:20px;color:#c1d7e2}.run-details p{margin-top:7px;font-size:20px}.run-details.has-error{border-color:#986057;background:#302327}.run-warning{color:#e6bc7b}.run-failure,.trace-event-error{color:#f1b6aa}.trace-event-error,.trace-event-note{font-size:20px;line-height:1.5;margin-top:7px;overflow-wrap:anywhere}.trace-event-note{color:#b8c8d2}.trace-warning{border-color:#866c41}.trace-warning .trace-number{color:#e6bc7b;background:#453a29;border-color:#866c41}.error-banner{position:sticky;top:12px;z-index:10}
+ .planning-panel{margin-top:14px;padding:18px 20px;background:var(--panel);border:1px solid var(--border);border-radius:13px;font-size:20px;overflow-wrap:anywhere}.planning-panel>summary{list-style-position:inside;line-height:1.6}.planning-panel>summary strong{font-size:24px;color:#c6ddd8}.planning-panel>summary span{display:block;font-size:20px;color:#93aebb;margin-top:6px}.planning-intro{margin-top:16px;color:#a1b6c5;font-size:20px}.planning-group{border-top:1px solid var(--border);padding-top:18px;margin-top:20px}.planning-group h3{font-size:24px;margin:0 0 8px;font-weight:600;color:#c2d7e1}.planning-group-note,.planning-field-note{font-size:20px;color:#90a9b9;line-height:1.6}.planning-group-note{margin-bottom:16px}.planning-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px}.planning-field>span{color:#b8ccd9}.planning-field-note{margin-top:3px}.planning-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;margin-top:16px}.planning-actions .button{white-space:normal;text-align:center}.planning-panel .facts-section pre{max-height:420px}@media(max-width:1100px){.planning-grid{grid-template-columns:1fr}}@media(max-width:600px){.planning-panel{padding:16px}.planning-actions .button{width:100%}}
+ .planning-lock{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:16px;padding:14px;border:1px solid #3c5969;border-radius:8px;background:#152633;font-size:20px;color:#b8ccd9}.planning-lock p{flex:1 1 260px}.planning-lock .button{white-space:normal}.planning-field input:disabled,.planning-field select:disabled{color:#a6bac8;background:#17232d;border-style:dashed;cursor:not-allowed;opacity:1}
+ .trace-kind{font-size:20px;border:1px solid #435665;border-radius:4px;padding:1px 6px}.trace-kind-jev{color:#a0eed3;border-color:#477d6d;background:#1b3b34}.trace-kind-skill{color:#efd29b;border-color:#786744;background:#383225}.trace-kind-algorithm{color:#a7d5f7;border-color:#486e8a;background:#223546}.trace-kind-system{color:#bdc7d0;background:#26313b}
+ .view-actions{display:flex;flex-wrap:wrap;gap:8px}.view-actions a{display:inline-flex;align-items:center;text-decoration:none}.view-actions a:focus-visible{outline:2px solid var(--mint);outline-offset:3px}
++.camera-panel{margin-top:14px;padding:18px 20px;background:var(--panel);border:1px solid var(--border);border-radius:13px;font-size:20px;overflow-wrap:anywhere}.camera-panel>summary{list-style-position:inside;line-height:1.6}.camera-panel>summary strong{font-size:24px;color:#c6ddd8}.camera-panel>summary span{display:block;font-size:20px;color:#93aebb;margin-top:6px}.camera-note{margin-top:14px;color:#a1b6c5;font-size:20px}.camera-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:16px;margin-top:16px}.camera-card{min-width:0;border:1px solid var(--border);border-radius:8px;padding:12px;background:#0d1721}.camera-card h3{margin:0 0 10px;font-size:24px;font-weight:600}.camera-images{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.camera-images figure{min-width:0;margin:0}.camera-images img{display:block;width:100%;height:auto;min-height:80px;object-fit:contain;background:#080e15;border-radius:5px}.camera-images figcaption{font-size:20px;color:#a1b6c5;margin-top:6px}.camera-frame{font:20px/1.5 Consolas,monospace;color:#90a9b9;margin-top:10px;overflow-wrap:anywhere}@media(max-width:600px){.camera-panel{padding:16px}.camera-grid{grid-template-columns:1fr}}
+--- baseline/web/src/camera-panel.js
++++ current/web/src/camera-panel.js
+@@ -0,0 +1,94 @@
++// Cached sensor frames are display-only. This panel never requests scene truth
++// or starts a fresh capture, and serial polling cannot pile up render requests.
++export function createCameraPanel(container, status, {
++  document: ownerDocument = globalThis.document,
++  request,
++  schedule = globalThis.setTimeout,
++  cancel = globalThis.clearTimeout,
++  isVisible = () => ownerDocument.visibilityState !== 'hidden',
++} = {}) {
++  let running = false;
++  let timer = null;
++  let inFlight = null;
++  let generation = 0;
++  let observationId = null;
++
++  function element(tag, className, text) {
++    const node = ownerDocument.createElement(tag);
++    if (className) node.className = className;
++    if (text !== undefined) node.textContent = text;
++    return node;
++  }
++
++  function next(delay = 2000) {
++    if (!running) return;
++    if (timer !== null) cancel(timer);
++    timer = schedule(() => { timer = null; void refresh(); }, delay);
++  }
++
++  function render(payload) {
++    if (!Number.isInteger(payload?.generation) || !Array.isArray(payload.cameras)) throw new Error('相机响应结构不完整。');
++    if (payload.generation < generation) return;
++    if (!payload.cameras.length) {
++      container.replaceChildren();
++      observationId = null;
++      status.textContent = '等待三路 RGBD 相机采集。';
++      return;
++    }
++    if (payload.cameras.length !== 3 || !payload.observation_id || !Number.isFinite(payload.time)) throw new Error('三路相机捕获信息不完整。');
++    const ids = new Set();
++    for (const camera of payload.cameras) {
++      const id = String(camera.id);
++      if (!['1', '2', '3'].includes(id) || ids.has(id) || typeof camera.frame_id !== 'string' || !camera.frame_id) throw new Error('相机帧标识无效。');
++      ids.add(id);
++      if (camera.rgb_url !== `/api/cameras/${id}/rgb` || camera.depth_url !== `/api/cameras/${id}/depth`) throw new Error('相机预览地址无效。');
++    }
++    if (payload.observation_id === observationId && payload.generation === generation) return;
++    const cards = payload.cameras.map(camera => {
++      const card = element('article', 'camera-card');
++      card.append(element('h3', '', camera.label ?? `相机 ${camera.id}`));
++      const images = element('div', 'camera-images');
++      for (const [kind, label] of [['rgb', 'RGB'], ['depth', '深度伪彩']]) {
++        const figure = element('figure');
++        const image = element('img');
++        image.src = `${camera[`${kind}_url`]}?frame_id=${encodeURIComponent(camera.frame_id)}`;
++        image.alt = `${camera.label ?? `相机 ${camera.id}`} ${label}`;
++        image.decoding = 'async';
++        figure.append(image, element('figcaption', '', label));
++        images.append(figure);
++      }
++      card.append(images, element('p', 'camera-frame', `帧 ${camera.frame_id}`));
++      return card;
++    });
++    container.replaceChildren(...cards);
++    generation = payload.generation;
++    observationId = payload.observation_id;
++    status.textContent = `观测 ${observationId} · 场景 ${generation} · 仿真时间 ${payload.time.toFixed(2)} s`;
++  }
++
++  function refresh() {
++    if (inFlight) return inFlight;
++    if (timer !== null) { cancel(timer); timer = null; }
++    if (!isVisible()) { next(); return Promise.resolve(); }
++    inFlight = (async () => {
++      try { render(await request('/api/cameras')); }
++      catch (error) { status.textContent = `相机预览读取失败：${error.message}`; }
++      finally { inFlight = null; next(); }
++    })();
++    return inFlight;
++  }
++
++  return {
++    refresh,
++    start() { if (!running) { running = true; next(0); } },
++    stop() { running = false; if (timer !== null) { cancel(timer); timer = null; } },
++    setGeneration(value) {
++      if (Number.isInteger(value) && value > generation) {
++        generation = value;
++        observationId = null;
++        container.replaceChildren();
++        status.textContent = '等待当前场景的三路 RGBD 相机采集。';
++      }
++    },
++  };
++}
+--- baseline/web/index.html
++++ current/web/index.html
+@@ -0,0 +1,70 @@
++<!doctype html>
++<html lang="zh-CN">
++  <head>
++    <meta charset="UTF-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <meta name="theme-color" content="#0c121a" />
++    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230c121a'/%3E%3Cpath d='M7 10h18M16 10v15M10 19l6-9 6 9' stroke='%2364e0c0' stroke-width='2.5' fill='none'/%3E%3C/svg%3E" />
++    <title>tiainji · JEV MuJoCo 工作台</title>
++  </head>
++  <body>
++    <header class="app-header">
++      <div class="brand-mark" aria-hidden="true">T</div>
++      <div class="brand"><h1>tiainji <span> / </span> JEV 工作台</h1><p>双臂抓取与放置 · MuJoCo 物理仿真</p></div>
++      <div class="header-status"><span id="connection" class="status-pill"><i></i>连接中</span><span class="version">SIMULATION / 01</span></div>
++    </header>
++    <div id="error-banner" class="error-banner" role="alert" hidden><span id="error-message"></span><button id="dismiss-error" aria-label="关闭错误提示">×</button></div>
++    <main class="workspace">
++      <aside class="panel editor-panel">
++        <div class="panel-heading"><div><span class="eyebrow">01 / SCENE</span><h2>场景编辑</h2></div><span id="scene-badge" class="subtle-badge">待连接</span></div>
++        <p class="panel-description">位置和尺寸使用毫米（mm），角度使用度（°）。修改即时预览，点击「应用场景修改」后再等待重力稳定并确认。</p>
++        <fieldset id="scene-fields" disabled>
++          <div class="section-label"><span>场景物体 <b id="object-count">0</b></span><button id="add-object" class="text-button" type="button">＋ 添加</button></div>
++          <div id="object-list" class="object-list"><div class="empty-small">正在读取场景…</div></div>
++          <div id="object-editor" class="object-editor"></div>
++          <details class="table-editor"><summary>固定桌面 <span>位置与尺寸</span></summary><div id="table-fields"></div><p class="field-note">桌面保持固定，不受重力移动。</p></details>
++          <button id="apply-scene" type="button" class="button secondary full-width">应用场景修改</button>
++        </fieldset>
++        <div class="scene-actions"><button id="settle" class="button secondary" disabled>↓ 重力稳定</button><button id="confirm" class="button primary" disabled>✓ 确认场景</button></div>
++        <p id="scene-note" class="helper-text">确认后可开始任务，Reset 将恢复该物理基线。</p>
++        <div class="service-section"><div class="section-label">服务状态 <button id="refresh-health" class="text-button">刷新</button></div><div id="services" class="services"><span class="muted">等待后端…</span></div></div>
++      </aside>
++
++      <section class="scene-column">
++        <div class="viewport-shell">
++          <div class="viewport-topbar"><div><span class="live-dot"></span><strong>MuJoCo</strong><span class="viewport-subtitle">物理场景</span></div><div class="sim-clock" title="从开始任务计时，任务结束时停止，Reset 后归零"><span>任务用时</span><b id="sim-time">0.00</b><span>s</span></div></div>
++          <div id="viewport" aria-label="MuJoCo 三维物理仿真场景"></div>
++          <div id="viewport-loading" class="viewport-loading"><div class="loader"></div><strong>连接物理场景</strong><span>正在读取 MuJoCo 几何与实时位姿</span></div>
++          <div class="viewport-bottom"><span>空白处旋转 · 右键平移 · 滚轮缩放</span><div class="view-actions"><a class="view-button" href="/collision-spheres.html" target="_blank" rel="noopener" aria-label="在新页面查看当前开夹爪规划碰撞球">碰撞球查看 ↗</a><button id="home-view" class="view-button" aria-label="恢复默认视角">⌖ 默认视角</button></div></div>
++          <div class="axis-legend"><span class="axis-x">X</span><span class="axis-y">Y</span><span class="axis-z">Z↑</span><span>mm</span></div>
++        </div>
++        <p class="drag-help">左键拖动位置 · Shift＋拖动调高度 · Esc 取消本次拖动 · 修改后需应用场景</p>
++        <details class="camera-panel" id="camera-panel" open>
++          <summary><strong>三路 RGBD 相机</strong><span>右腕 B · 左腕 A · 头部</span></summary>
++          <p class="camera-note">显示最近一次同帧采集的 RGB 与注册深度。深度使用伪彩预览；隐藏页面或折叠面板后暂停刷新。</p>
++          <p id="camera-status" class="helper-text" role="status">等待三路 RGBD 相机采集。</p>
++          <div id="camera-grid" class="camera-grid"></div>
++        </details>
++        <details class="planning-panel" id="planning-panel">
++          <summary><strong>高级算法与执行参数</strong><span>共享 IK · 规划 · 抓取 · 放置 · 时间倍率</span></summary>
++          <p class="planning-intro">参数来自后端的同一份配置。高级参数默认锁定，需手动解锁后修改；执行时间可直接调整。修改后需应用，下一次任务才使用。碰撞间距、抓取几何和执行时间采用项目配置。</p>
++          <div class="planning-lock"><p id="advanced-planning-status" role="status">高级参数默认锁定。</p><button id="toggle-advanced-planning" type="button" class="button secondary" aria-controls="planning-groups" aria-describedby="advanced-planning-status" aria-pressed="false" disabled>解锁高级参数</button></div>
++          <fieldset id="planning-fields" disabled><div id="planning-groups"></div></fieldset>
++          <p id="planning-status" class="helper-text" role="status">正在读取算法参数…</p>
++          <div class="planning-actions"><button id="reload-planning" class="button secondary" disabled>重新读取（丢弃参数草稿）</button><button id="apply-planning" class="button primary" disabled>应用算法参数</button></div>
++          <details id="run-planning-settings" class="facts-section" hidden><summary>本次任务实际参数（API 原始单位）</summary><pre id="run-planning-settings-content"></pre></details>
++        </details>
++        <div class="run-strip"><div><span class="run-dot" id="run-dot"></span><strong id="run-status">等待场景</strong></div><div class="run-facts"><span>任务 <b id="task-value">—</b></span><span>源物体 <b id="target-value">—</b></span><span>物料盒 <b id="destination-value">—</b></span><span>机械臂 <b id="arm-value">—</b></span></div></div>
++        <section id="run-details" class="run-details" aria-label="当前任务步骤与错误" hidden>
++          <strong id="run-step"></strong><p id="run-step-timing" hidden></p><p id="run-candidate" hidden></p>
++          <p id="run-last-error" class="run-warning" hidden></p><p id="run-failure" class="run-failure" role="alert" hidden></p>
++          <p id="algorithm-pending" class="run-warning" hidden>后台算法调用尚未返回。结果不会触发后续动作；返回前不能开始新任务，仍可 Reset 或编辑场景。</p>
++        </section>
++        <section class="instruction-panel"><div class="instruction-heading"><div><span class="eyebrow">02 / TASK</span><h2>告诉机器人做什么</h2></div><div class="task-catalog"><span class="catalog-active">抓取</span><span>抓取并放置</span><span title="需要当前会话已有已验证持物状态">放置</span></div></div><label class="sr-only" for="instruction">任务指令</label><textarea id="instruction" rows="2" placeholder="例如：抓取红色方块到蓝色盒子里" maxlength="200"></textarea><div class="instruction-actions"><p id="start-hint">先确认场景，再开始任务。单独放置需已有已验证持物状态。</p><div><button id="reset" class="button secondary" disabled>↺ Reset</button><button id="start" class="button primary start-button" disabled>开始任务 <span>↗</span></button></div></div></section>
++      </section>
++
++      <aside class="panel trace-panel"><div class="panel-heading"><div><span class="eyebrow">03 / RUN LOG</span><h2>运行记录</h2></div><span id="event-count" class="count-badge" title="全部运行事件数量">0</span></div><p class="panel-description">仅「JEV 决策」表示模型调用；其余记录分别标注 skill 执行、算法计算或系统事件。问题由程序提供，JEV 返回选择。</p><div id="performance-summary" class="performance-summary" aria-label="JEV 性能摘要" hidden><div><span>JEV 调用数</span><strong id="metric-count">—</strong></div><div><span>平均 JEV 耗时</span><strong id="metric-mean">—</strong></div><div><span>JEV 总耗时</span><strong id="metric-total">—</strong></div><div><span>整轮运行耗时</span><strong id="metric-run">—</strong></div></div><div id="trace-list" class="trace-list"><div class="trace-empty"><div class="trace-empty-icon">⌘</div><strong>等待第一条指令</strong><p>任务开始后，这里按时间记录 JEV 决策、skill 执行、算法计算和系统事件。</p></div></div><details id="facts-section" class="facts-section" hidden><summary>运行事实 / 验证结果 / 性能指标</summary><pre id="facts-content"></pre></details><div class="trace-footer"><span class="tiny-dot"></span>仅展示实际返回的数据</div></aside>
++    </main>
++    <script type="module" src="/src/main.js"></script>
++  </body>
++</html>
+--- baseline/tests/test_bins.py
++++ current/tests/test_bins.py
+@@ -0,0 +1,94 @@
++"""Open-bin construction and contact checks use real MuJoCo geometry."""
++import mujoco
++import numpy as np
++import pytest
++
++from jev_mujoco.model_builder import ModelBuilder, normalize_scene
++
++
++def bin_scene(**changes):
++    item = {"id": "blue_bin", "kind": "bin", "color": "blue",
++            "position": [.55, .15, .85], "size": [.24, .18, .12], "yaw_deg": 0,
++            "wall_thickness_m": .01, "mass_kg": .4}
++    return normalize_scene({"objects": [{**item, **changes}]})
++
++
++def test_bin_normalization_preserves_dimensions_and_supplies_physical_defaults():
++    scene = normalize_scene({"objects": [{"id": "bin", "kind": "bin", "size": [.24, .18, .12]}]})
++    assert scene["objects"][0]["wall_thickness_m"] == .01
++    assert scene["objects"][0]["mass_kg"] == .4
++    assert scene["objects"][0]["size"] == [.24, .18, .12]
++
++
++@pytest.mark.parametrize("changes", [
++    {"wall_thickness_m": 0}, {"wall_thickness_m": -.001},
++    {"wall_thickness_m": .09}, {"wall_thickness_m": float("nan")},
++    {"size": [.24, .18, .01]}, {"mass_kg": 0}, {"mass_kg": float("inf")},
++])
++def test_bin_rejects_empty_cavity_or_invalid_physical_values(changes):
++    with pytest.raises(ValueError, match="bin"):
++        bin_scene(**changes)
++
++
++@pytest.fixture(scope="module")
++def builder():
++    instance = ModelBuilder()
++    yield instance
++    instance.close()
++
++
++def test_bin_has_one_free_body_and_five_nonoverlapping_collision_boxes(builder):
++    model = builder.build(bin_scene())
++    body = model.body("object_blue_bin")
++    indices = np.flatnonzero(model.geom_bodyid == body.id)
++    assert len(indices) == 5
++    assert model.body_jntnum[body.id] == 1
++    assert model.jnt_type[model.body_jntadr[body.id]] == mujoco.mjtJoint.mjJNT_FREE
++    assert model.body_mass[body.id] == pytest.approx(.4)
++    assert {model.geom(index).name for index in indices} == {
++        "object_geom_blue_bin__bottom", "object_geom_blue_bin__wall_x_minus",
++        "object_geom_blue_bin__wall_x_plus", "object_geom_blue_bin__wall_y_minus",
++        "object_geom_blue_bin__wall_y_plus",
++    }
++    assert np.all(model.geom_contype[indices] != 0)
++    # A point in the middle of the cavity must lie outside every solid box.
++    point = np.array([0., 0., .01])
++    assert all(np.any(np.abs(point - model.geom_pos[index]) > model.geom_size[index])
++               for index in indices)
++    data = mujoco.MjData(model)
++    mujoco.mj_forward(model, data)
++    manifest = builder.render_geometries(model, data)
++    parts = [item for item in manifest if item.get("object_id") == "blue_bin"]
++    assert len(parts) == 5
++    assert all(item["object_kind"] == "bin" and item["wall_thickness_m"] == .01 for item in parts)
++    assert {item["component"] for item in parts} == {"bottom", "wall_x_minus", "wall_x_plus", "wall_y_minus", "wall_y_plus"}
++
++
++def test_scene_model_contains_all_three_calibrated_sensor_cameras(builder):
++    model = builder.build(bin_scene())
++    assert model.ncam == 3
++    assert {model.camera(index).name for index in range(model.ncam)} == {"rgbd_1", "rgbd_2", "rgbd_3"}
++
++
++def test_solid_box_keeps_its_original_single_geom_and_mass(builder):
++    scene = normalize_scene({"objects": [{"id": "solid", "kind": "box", "size": [.24, .18, .12]}]})
++    model = builder.build(scene)
++    body = model.body("object_solid")
++    assert len(np.flatnonzero(model.geom_bodyid == body.id)) == 1
++    assert model.geom("object_geom_solid").size.tolist() == [.12, .09, .06]
++    assert model.body_mass[body.id] == pytest.approx(.08)
++
++
++def test_bin_falls_onto_table_and_object_falls_through_open_top_onto_floor(builder):
++    scene = bin_scene(position=[.55, .15, .74])
++    scene["objects"].append({"id": "ball", "kind": "sphere", "color": "red", "position": [.55, .15, .91],
++                             "size": [.03, .03, .03], "yaw_deg": 0})
++    model = builder.build(scene)
++    data = mujoco.MjData(model)
++    for _ in range(2000):
++        mujoco.mj_step(model, data)
++    bin_center = data.xpos[model.body("object_blue_bin").id]
++    ball_center = data.xpos[model.body("object_ball").id]
++    assert bin_center[2] == pytest.approx(.66, abs=.003)
++    assert ball_center[2] == pytest.approx(.625, abs=.003)
++    assert ball_center[2] < bin_center[2] + .06 - .03
+--- baseline/tests/test_place_settings.py
++++ current/tests/test_place_settings.py
+@@ -0,0 +1,43 @@
++import json
++
++import pytest
++from pydantic import ValidationError
++
++from jev_mujoco.planning_settings import PlanningSettings, load_settings, save_settings
++
++
++def test_place_defaults_are_independent_of_existing_grasp_settings():
++    settings = PlanningSettings()
++    assert (settings.approach_axis, settings.approach_offset_m, settings.approach_in_tool_frame) == ("z", -.1, True)
++    assert (settings.lift_axis, settings.lift_offset_m, settings.lift_in_tool_frame) == ("z", .1, False)
++    assert (settings.place_approach_axis, settings.place_approach_offset_m, settings.place_approach_in_tool_frame) == ("z", .1, False)
++    assert (settings.place_retreat_axis, settings.place_retreat_offset_m, settings.place_retreat_in_tool_frame) == ("z", .1, False)
++    assert settings.release_margin_m == .005
++    assert settings.place_timeout_s == 180
++    assert settings.place_max_candidates == 200
++    assert [settings.dwell_place_approach_s, settings.dwell_place_s, settings.dwell_release_s, settings.dwell_retreat_s] == [1, 2, 1, 1]
++
++
++@pytest.mark.parametrize("changes", [
++    {"place_approach_offset_m": 0}, {"place_retreat_offset_m": 0},
++    {"place_approach_axis": "w"}, {"release_margin_m": -.001},
++    {"place_timeout_s": 0}, {"place_max_candidates": 201}, {"place_max_candidates": 1.5},
++    {"dwell_release_s": -1}, {"dwell_place_s": float("nan")},
++])
++def test_invalid_place_settings_are_rejected(changes):
++    with pytest.raises(ValidationError):
++        PlanningSettings(**changes)
++
++
++def test_old_saved_values_gain_place_defaults_and_new_values_change_revision(tmp_path):
++    path = tmp_path / "planning-settings.json"
++    path.write_text(json.dumps({"approach_offset_m": -.08, "time_scale": 4}), encoding="utf-8")
++    migrated = load_settings(path)
++    assert migrated.approach_offset_m == -.08
++    assert migrated.place_approach_offset_m == .1
++    changed = PlanningSettings(**{**migrated.model_dump(), "place_approach_offset_m": .15})
++    assert changed.revision() != migrated.revision()
++    save_settings(path, changed)
++    assert load_settings(path) == changed
++    assert PlanningSettings.model_json_schema()["properties"]["release_margin_m"]["group"] == "place"
++    assert PlanningSettings.model_json_schema()["properties"]["dwell_release_s"]["group"] == "execution"
+--- baseline/web/tests/bin-editor.test.js
++++ current/web/tests/bin-editor.test.js
+@@ -0,0 +1,58 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { BoxGeometry, Mesh, Vector3 } from 'three';
++import { buildScene, sceneFromSnapshot } from '../src/model.js';
++import { applyScenePreview } from '../src/scene-preview.js';
++import * as drag from '../src/object-drag.js';
++
++const bin = { id: 'bin__blue', kind: 'bin', color: 'blue', position: [.5, .2, .66],
++  size: [.24, .18, .12], yaw_deg: 0, wall_thickness_m: .01, mass_kg: .4 };
++const table = { position: [.55, 0, .56], size: [.7, 1, .08] };
++
++test('bin scene payload and snapshot conversion preserve wall thickness and mass', () => {
++  const value = sceneFromSnapshot({ table, objects: [{ ...bin, quaternion: [1, 0, 0, 0] }] });
++  assert.equal(value.objects[0].wall_thickness_m, .01);
++  assert.equal(value.objects[0].mass_kg, .4);
++  assert.deepEqual(buildScene(value).objects[0], bin);
++});
++
++for (const changes of [{ wall_thickness_m: 0 }, { wall_thickness_m: .09 }, { size: [.24, .18, .01] }, { mass_kg: 0 }]) {
++  test(`invalid bin cavity or mass ${JSON.stringify(changes)} cannot be applied`, () => {
++    assert.throws(() => buildScene({ table, objects: [{ ...bin, ...changes }] }), /物料盒/);
++  });
++}
++
++test('all bin pieces share the object center while wall thickness, dimensions and yaw preview independently', () => {
++  const definition = { name: 'object_geom_bin__blue__wall_x_plus', object_id: 'bin__blue', object_kind: 'bin',
++    component: 'wall_x_plus', type: 'box', size: [.005, .09, .055], local_position_m: [.115, 0, .005] };
++  const mesh = new Mesh(new BoxGeometry(.01, .18, .11));
++  const pose = { position: [.615, .2, .665], quaternion: [1, 0, 0, 0] };
++  const draft = { objects: [{ ...bin, position: [.6, .3, .7], size: [.3, .22, .16], wall_thickness_m: .02, yaw_deg: 90 }] };
++  applyScenePreview(mesh, definition, pose, draft);
++  assert.ok(mesh.position.distanceTo(new Vector3(.6, .44, .71)) < 1e-10);
++  assert.deepEqual(mesh.scale.toArray(), [2, .22 / .18, .14 / .11]);
++  assert.ok(mesh.localToWorld(new Vector3(.005, 0, 0)).distanceTo(new Vector3(.6, .45, .71)) < 1e-10);
++  applyScenePreview(mesh, definition, pose, draft, { id: 'bin__blue', position: [.7, .4, .8] });
++  assert.ok(mesh.position.distanceTo(new Vector3(.7, .54, .81)) < 1e-10);
++  applyScenePreview(mesh, definition, pose, null);
++  assert.deepEqual(mesh.position.toArray(), pose.position);
++  assert.deepEqual(mesh.scale.toArray(), [1, 1, 1]);
++});
++
++test('grabbing a bin wall starts dragging its rigid body center rather than the wall center', () => {
++  assert.equal(typeof drag.editableObjectPosition, 'function');
++  const snapshot = { objects: [bin] };
++  assert.deepEqual(drag.editableObjectPosition(bin.id, [.615, .2, .665], snapshot, null), [.5, .2, .66]);
++  assert.deepEqual(drag.editableObjectPosition(bin.id, [.615, .2, .665], snapshot,
++    { objects: [{ ...bin, position: [.6, .3, .7] }] }), [.6, .3, .7]);
++});
++
++test('dragging an applied bin without a dirty draft preserves each component offset', () => {
++  const definition = { name: 'object_geom_bin__blue__wall_x_plus', object_id: 'bin__blue', object_kind: 'bin',
++    component: 'wall_x_plus', type: 'box', size: [.005, .09, .055], local_position_m: [.115, 0, .005] };
++  const mesh = new Mesh(new BoxGeometry(.01, .18, .11));
++  applyScenePreview(mesh, definition, { position: [.615, .2, .665], quaternion: [1, 0, 0, 0] }, null,
++    { id: 'bin__blue', position: [.7, .4, .8] });
++  assert.ok(mesh.position.distanceTo(new Vector3(.815, .4, .805)) < 1e-10);
++  assert.deepEqual(mesh.scale.toArray(), [1, 1, 1]);
++});
+--- baseline/web/tests/camera-panel.test.js
++++ current/web/tests/camera-panel.test.js
+@@ -0,0 +1,92 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++
++import { createCameraPanel } from '../src/camera-panel.js';
++
++function harness() {
++  function node(tagName) {
++    return { tagName, children: [], textContent: '', open: true, listeners: {},
++      append(...children) { this.children.push(...children); },
++      replaceChildren(...children) { this.children = children; },
++      addEventListener(kind, callback) { this.listeners[kind] = callback; },
++    };
++  }
++  const container = node('div');
++  const status = node('p');
++  const document = { createElement: node, visibilityState: 'visible' };
++  const requests = [];
++  const timers = [];
++  const panel = createCameraPanel(container, status, {
++    document, request(path) { return new Promise((resolve, reject) => requests.push({ path, resolve, reject })); },
++    schedule(callback, delay) { const timer = { callback, delay }; timers.push(timer); return timer; },
++    cancel(timer) { timer.cancelled = true; },
++    isVisible: () => document.visibilityState !== 'hidden' && container.open,
++  });
++  function descendants(parent) { return parent.children.flatMap(child => [child, ...descendants(child)]); }
++  return { panel, container, status, document, requests, timers,
++    images() { return descendants(container).filter(child => child.tagName === 'img'); },
++  };
++}
++
++function capture(generation = 1, observationId = 'rgbd-1') {
++  return { observation_id: observationId, generation, time: 10.25,
++    cameras: ['1', '2', '3'].map(id => ({ id, label: `相机 ${id}`, frame_id: `${observationId}-${id}`,
++      rgb_url: `/api/cameras/${id}/rgb`, depth_url: `/api/cameras/${id}/depth` })) };
++}
++
++test('camera panel displays the three registered RGB and depth frames using read-only local URLs', async () => {
++  const ui = harness();
++  const pending = ui.panel.refresh();
++  assert.equal(ui.requests[0].path, '/api/cameras');
++  ui.requests[0].resolve(capture());
++  await pending;
++  assert.equal(ui.images().length, 6);
++  assert.ok(ui.images().every(image => image.src.startsWith('/api/cameras/') && image.src.includes('frame_id=')));
++  assert.match(ui.status.textContent, /rgbd-1/);
++  assert.match(ui.status.textContent, /10.25/);
++});
++
++test('camera polling waits two seconds after completion, never overlaps and pauses when hidden or collapsed', async () => {
++  const ui = harness();
++  ui.panel.start();
++  ui.timers[0].callback();
++  const pending = ui.panel.refresh();
++  assert.equal(ui.requests.length, 1);
++  ui.requests[0].resolve(capture());
++  await pending;
++  assert.equal(ui.timers.at(-1).delay, 2000);
++  ui.document.visibilityState = 'hidden';
++  ui.timers.at(-1).callback();
++  assert.equal(ui.requests.length, 1);
++  ui.document.visibilityState = 'visible';
++  ui.container.open = false;
++  ui.timers.at(-1).callback();
++  assert.equal(ui.requests.length, 1);
++  ui.panel.stop();
++  assert.equal(ui.timers.at(-1).cancelled, true);
++});
++
++test('a reset rejects older camera generations and empty cached captures stay explicitly unavailable', async () => {
++  const ui = harness();
++  const pending = ui.panel.refresh();
++  ui.panel.setGeneration(2);
++  ui.requests[0].resolve(capture(1));
++  await pending;
++  assert.equal(ui.images().length, 0);
++  const next = ui.panel.refresh();
++  ui.requests[1].resolve({ observation_id: null, generation: 2, time: 0, cameras: [] });
++  await next;
++  assert.equal(ui.images().length, 0);
++  assert.match(ui.status.textContent, /等待/);
++});
++
++test('invalid remote frame URLs cannot populate the sensor preview', async () => {
++  const ui = harness();
++  const pending = ui.panel.refresh();
++  const invalid = capture();
++  invalid.cameras[0].rgb_url = 'https://example.invalid/truth.png';
++  ui.requests[0].resolve(invalid);
++  await pending;
++  assert.equal(ui.images().length, 0);
++  assert.match(ui.status.textContent, /相机预览读取失败/);
++});
+--- baseline/web/tests/main-flow.test.js
++++ current/web/tests/main-flow.test.js
+@@ -4,10 +4,11 @@
+ import vm from 'node:vm';
+ import * as model from '../src/model.js';
+ import { createTaskClock } from '../src/task-clock.js';
+ import { createPlanningSettingsEditor } from '../src/planning-settings.js';
+ import { planningPayload, planningSettings } from './planning-fixture.js';
++import { createCameraPanel } from '../src/camera-panel.js';
+ 
+ // Execute the real page entry point with DOM and network boundaries replaced.
+ // No browser, GPU service, or physical scene is touched by these ordering tests.
+ const source = (await readFile(new URL('../src/main.js', import.meta.url), 'utf8'))
+   .replace(/^import .*;\r?\n/gm, '');
+@@ -63,10 +64,11 @@
+     document: { getElementById: getElement, createElement: element, createTextNode: text => text },
+     createSceneView: (container, callbacks) => { dragCallbacks = callbacks; return view; },
+     createTraceList: () => () => {},
+     createTaskClock: () => createTaskClock({ now: () => timeMs }),
+     createPlanningSettingsEditor,
++    createCameraPanel,
+     performance: { now: () => timeMs },
+     location: { protocol: 'http:', host: 'test.invalid', reload() { reloadCount += 1; } },
+     WebSocket: class {
+       constructor() { this.listeners = {}; socket = this; }
+       addEventListener(kind, listener) { this.listeners[kind] = listener; }
+@@ -76,10 +78,11 @@
+       if (path === '/api/health') return Promise.resolve({});
+       return new Promise((resolve, reject) => pending.push({ path, body, resolve, reject }));
+     },
+     setInterval(callback, milliseconds) { intervals.set(milliseconds, callback); },
+     setTimeout() {},
++    clearTimeout() {},
+   });
+   vm.runInContext(source, context, { filename: 'main.js' });
+ 
+   function takeRequest(path) {
+     const index = pending.findIndex(request => request.path === path);
+@@ -125,10 +128,19 @@
+     inputTable(vectorIndex, axis, value) { edit(vectorInput('table-fields', vectorIndex, axis), value); },
+     inputYaw(value) {
+       const field = getElement('object-editor').children.find(child => child.className === 'input-field');
+       edit(field.children.find(child => child.tagName === 'input'), value);
+     },
++    metadataInput(label) {
++      const fields = getElement('object-editor').children.find(child => child.className === 'metadata-fields');
++      return fields.children.find(child => child.children[0]?.textContent === label)?.children[1];
++    },
++    inputMetadata(label, value) { edit(this.metadataInput(label), value); },
++    scalarInput(label) {
++      return getElement('object-editor').children.find(child => child.className === 'input-field' && child.children[0]?.textContent === label)?.children[1];
++    },
++    inputScalar(label, value) { edit(this.scalarInput(label), value); },
+     planningInput(name) {
+       function find(node) {
+         if (node.name === name) return node;
+         for (const child of node.children) { const result = find(child); if (result) return result; }
+       }
+@@ -144,10 +156,49 @@
+ 
+ const sceneObjects = [
+   { id: 'black_cube', kind: 'cube', color: 'black', position: [.4, .15, .62], size: [.04, .04, .04], quaternion: [1, 0, 0, 0] },
+   { id: 'red_box', kind: 'box', color: 'red', position: [.5, -.15, .63], size: [.05, .04, .06], quaternion: [1, 0, 0, 0] },
+ ];
++
++test('bin controls edit external dimensions, wall thickness and mass in a shared local draft', async () => {
++  const bin = { ...sceneObjects[1], id: 'blue_bin', kind: 'bin', size: [.24, .18, .12], wall_thickness_m: .01, mass_kg: .4 };
++  const ui = await page(snapshot({ objects: [bin] }));
++  assert.equal(ui.scalarInput('壁厚 / mm')?.value, 10);
++  assert.equal(ui.scalarInput('壁厚 / mm').step, '1');
++  ui.inputSize(0, '250');
++  ui.inputScalar('壁厚 / mm', '12');
++  ui.inputScalar('质量 / kg', '.5');
++  assert.deepEqual(ui.view.draft.objects[0].size, [.25, .18, .12]);
++  assert.equal(ui.view.draft.objects[0].wall_thickness_m, .012);
++  assert.deepEqual(ui.requests(), []);
++  ui.click('apply-scene');
++  const sent = ui.takeRequest('/api/scene').body.objects[0];
++  assert.equal(sent.wall_thickness_m, .012);
++  assert.equal(sent.mass_kg, .5);
++});
++
++test('switching a solid box to a bin supplies usable independent cavity controls', async () => {
++  const ui = await page(snapshot({ objects: [sceneObjects[1]] }));
++  ui.inputMetadata('类型', 'bin');
++  assert.equal(ui.scalarInput('壁厚 / mm')?.value, 10);
++  assert.deepEqual(ui.view.draft.objects[0].size, [.05, .04, .06]);
++  ui.inputMetadata('类型', 'box');
++  assert.equal(ui.scalarInput('壁厚 / mm'), undefined);
++});
++
++test('place-only tasks explain the need for verified session holding and display the destination independently', async () => {
++  const ui = await page(snapshot({ run: { status: 'failed', task: 'place', target_id: 'source_track',
++    destination_id: 'bin_track', error: 'place_requires_verified_holding' } }));
++  assert.match(ui.element('error-message').textContent, /已验证.*持物/);
++  assert.equal(ui.element('target-value').textContent, 'source_track');
++  assert.equal(ui.element('destination-value').textContent, 'bin_track');
++});
++
++test('a successful grasp-place run uses a task-wide success label', async () => {
++  const ui = await page(snapshot({ run: { status: 'succeeded', task: 'grasp_place' } }));
++  assert.equal(ui.element('run-status').textContent, '任务成功');
++});
+ 
+ test('object and table lengths display millimeters with one millimeter arrows', async () => {
+   const ui = await page(snapshot({ objects: sceneObjects }));
+   for (const [section, vectorIndex, expected] of [
+     ['object-editor', 0, [400, 150, 620]],
+--- baseline/web/tests/planning-settings.test.js
++++ current/web/tests/planning-settings.test.js
+@@ -133,5 +133,24 @@
+   const settings = { ...planningSettings, ik_rotation_threshold_rad: .05 };
+   ui.settings.load(planningPayload(settings));
+   ui.change('time_scale', '2');
+   assert.equal(ui.settings.read().ik_rotation_threshold_rad, .05);
+ });
++
++test('the separate place group starts locked, converts millimeters and preserves grasp geometry', () => {
++  const ui = editor();
++  const payload = planningPayload();
++  payload.schema = { properties: { ...payload.schema.properties,
++    place_approach_offset_m: { type: 'number', title: 'Place approach 偏移', group: 'place', display_scale: 1000, unit: 'mm', minimum: -.5, maximum: .5 },
++    place_approach_in_tool_frame: { type: 'boolean', title: 'Place tool frame', group: 'place' },
++    dwell_release_s: { type: 'number', title: '释放后稳定等待', group: 'execution', minimum: 0, maximum: 30 },
++  } };
++  payload.settings = { ...payload.settings, place_approach_offset_m: .1, place_approach_in_tool_frame: false, dwell_release_s: 1 };
++  ui.settings.load(payload);
++  assert.equal(ui.input('place_approach_offset_m')?.value, '100');
++  assert.equal(ui.input('place_approach_offset_m').disabled, true);
++  assert.equal(ui.input('dwell_release_s').disabled, false);
++  ui.settings.setAdvancedLocked(false);
++  ui.change('place_approach_offset_m', '150');
++  assert.equal(ui.settings.read().place_approach_offset_m, .15);
++  assert.equal(ui.settings.read().approach_distance_m, .1);
++});

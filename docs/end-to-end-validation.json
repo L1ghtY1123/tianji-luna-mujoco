@@ -1,0 +1,231 @@
+{
+  "date": "2026-09-28",
+  "trials": [
+    {
+      "status": "succeeded",
+      "instruction": "抓取左侧黑色方块",
+      "task": "grasp",
+      "target_id": "black_cube",
+      "arm": "A",
+      "facts": {
+        "observed": true,
+        "target_selected": true,
+        "scene_ready": true,
+        "grasps_ready": true,
+        "arms_evaluated": true,
+        "arm_selected": true,
+        "plan_ready": true,
+        "approached": true,
+        "at_grasp": true,
+        "gripper_closed": true,
+        "lifted": true,
+        "verified": true
+      },
+      "error": null,
+      "run_id": "f5ff6cb150814b838e8059fa2d27ce27",
+      "generation": 1,
+      "attributes": {
+        "kind": "cube",
+        "color": "black",
+        "position": "left"
+      },
+      "verification": {
+        "success": true,
+        "checks": {
+          "gripper_holding": true,
+          "object_moved": true,
+          "transform_consistent": true
+        },
+        "measurements": {
+          "closed_fraction": 0.7059118651504173,
+          "object_movement_m": 0.09891510565147218,
+          "position_error_m": 0.00036869852722158045,
+          "rotation_error_deg": 0.12455438472786144
+        },
+        "thresholds": {
+          "closed_fraction_range": [
+            0.05,
+            0.97
+          ],
+          "minimum_movement_m": 0.025,
+          "position_tolerance_m": 0.02,
+          "rotation_tolerance_deg": 20.0
+        },
+        "predicted_final_object": [
+          [
+            0.9999977504792794,
+            -0.00019965741817897287,
+            0.002111675472705891,
+            0.42790386648334716
+          ],
+          [
+            0.00020352747443232934,
+            0.9999983000048535,
+            -0.001832638528385365,
+            0.15005168888847303
+          ],
+          [
+            -0.0021113059829907985,
+            0.0018330641898027973,
+            0.9999960911237243,
+            0.719238595681933
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "actual_final_object": [
+          [
+            0.9999996219376482,
+            -0.0008684518795714488,
+            4.377088544218096e-05,
+            0.42803336958132865
+          ],
+          [
+            0.0008685286056312983,
+            0.9999980306543065,
+            -0.0017844734704886784,
+            0.1500259301156409
+          ],
+          [
+            -4.2221069902685e-05,
+            0.0017845108121125443,
+            0.9999984068680009,
+            0.7188943515284449
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "metrics": {
+        "decision_count": 16,
+        "jev_mean_duration_s": 0.3950556866257102,
+        "jev_total_duration_s": 6.320890986011364,
+        "run_duration_s": 11.578936100006104
+      }
+    },
+    {
+      "status": "succeeded",
+      "instruction": "抓取右侧黑色方块",
+      "task": "grasp",
+      "target_id": "black_cube",
+      "arm": "B",
+      "facts": {
+        "observed": true,
+        "target_selected": true,
+        "grasps_ready": true,
+        "scene_ready": true,
+        "arms_evaluated": true,
+        "arm_selected": true,
+        "plan_ready": true,
+        "approached": true,
+        "at_grasp": true,
+        "gripper_closed": true,
+        "lifted": true,
+        "verified": true
+      },
+      "error": null,
+      "run_id": "1e27f92975dd45e4b42ebff4e5e281f3",
+      "generation": 2,
+      "attributes": {
+        "kind": "cube",
+        "color": "black",
+        "position": "right"
+      },
+      "verification": {
+        "success": true,
+        "checks": {
+          "gripper_holding": true,
+          "object_moved": true,
+          "transform_consistent": true
+        },
+        "measurements": {
+          "closed_fraction": 0.7060441438317712,
+          "object_movement_m": 0.098388324519998,
+          "object_movement_after_closure_m": 0.0983641780852606,
+          "tcp_movement_after_closure_m": 0.0986601349236544,
+          "position_error_m": 0.0003858407819868608,
+          "rotation_error_deg": 0.32821114685621555
+        },
+        "thresholds": {
+          "closed_fraction_range": [
+            0.05,
+            0.97
+          ],
+          "minimum_movement_m": 0.025,
+          "position_tolerance_m": 0.02,
+          "minimum_object_and_tcp_movement_after_closure_m": 0.025,
+          "rotation_tolerance_deg": 20.0
+        },
+        "predicted_final_object": [
+          [
+            0.9999717653922675,
+            0.00044374660803115127,
+            -0.007501433677630616,
+            0.430062105752884
+          ],
+          [
+            -0.00043848114728503606,
+            0.9999996563706289,
+            0.0007035573240721975,
+            -0.2002133048556568
+          ],
+          [
+            0.007501743301093789,
+            -0.0007002482221618853,
+            0.99997161634712,
+            0.7186826659290253
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "actual_final_object": [
+          [
+            0.999912340742889,
+            0.0005783093577917894,
+            -0.013227864089145704,
+            0.43030924571060325
+          ],
+          [
+            -0.0005693100998741185,
+            0.9999996039593272,
+            0.0006840812789639887,
+            -0.20020746989259955
+          ],
+          [
+            0.013228254460978642,
+            -0.0006764905562815592,
+            0.9999122739742924,
+            0.7183864212606363
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "metrics": {
+        "decision_count": 16,
+        "jev_total_duration_s": 6.329387322941329,
+        "jev_mean_duration_s": 0.3955867076838331,
+        "run_duration_s": 17.270702600479126,
+        "input_tokens": 114755,
+        "output_tokens": 763
+      }
+    }
+  ],
+  "note": "Two measured example trials; not a general success-rate benchmark."
+}

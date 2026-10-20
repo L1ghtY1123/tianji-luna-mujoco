@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0c121a" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230c121a'/%3E%3Cpath d='M7 10h18M16 10v15M10 19l6-9 6 9' stroke='%2364e0c0' stroke-width='2.5' fill='none'/%3E%3C/svg%3E" />
+    <title>Tianji · JEV MuJoCo 工作台</title>
+  </head>
+  <body class="workbench-page">
+    <header class="app-header">
+      <div class="brand-mark" aria-hidden="true">T</div>
+      <div class="brand"><h1>Tianji <span>/</span> JEV 工作台</h1></div>
+      <nav class="header-actions" aria-label="工作台操作">
+        <button id="toggle-scene-editor" class="button secondary" aria-controls="editor-panel" aria-expanded="true">收起场景</button>
+        <button id="open-planning" class="button secondary" aria-haspopup="dialog">参数设置</button>
+        <a class="button secondary" href="/replay.html">实验回放 ↗</a>
+      </nav>
+      <span id="connection" class="status-pill"><i></i>连接中</span>
+    </header>
+    <main class="workspace" id="workspace">
+      <aside class="panel editor-panel" id="editor-panel">
+        <div class="panel-heading"><h2>场景编辑</h2><span id="scene-badge" class="subtle-badge">待连接</span></div>
+        <p class="panel-description">位置 / 尺寸 mm · 角度 °。修改后应用，再稳定并确认。</p>
+        <fieldset id="scene-fields" disabled>
+          <div class="section-label"><span>场景物体 <b id="object-count">0</b></span><button id="add-object" class="text-button" type="button">＋ 添加</button></div>
+          <div id="object-list" class="object-list"><div class="empty-small">正在读取场景…</div></div>
+          <div id="object-editor" class="object-editor"></div>
+          <details class="table-editor"><summary>固定桌面 <span>位置与尺寸</span></summary><div id="table-fields"></div><p class="field-note">桌面保持固定，不受重力移动。</p></details>
+          <div class="scene-edit-actions"><button id="apply-scene" type="button" class="button secondary">应用场景修改</button><button id="cancel-scene" type="button" class="button secondary" disabled>取消修改</button></div>
+        </fieldset>
+        <div class="scene-actions"><button id="settle" class="button secondary" disabled>↓ 重力稳定</button><button id="confirm" class="button primary" disabled>✓ 确认场景</button></div>
+        <p id="scene-note" class="helper-text">确认后可开始任务，Reset 将恢复该物理基线。</p>
+        <div class="service-section"><div class="section-label">服务状态 <button id="refresh-health" class="text-button">刷新</button></div><div id="services" class="services"><span class="muted">等待后端…</span></div></div>
+      </aside>
+      <section class="scene-column" aria-label="场景与任务">
+        <section class="viewer-panel">
+          <div class="viewer-tabs" role="tablist" aria-label="中央视图">
+            <button id="view-tab-scene" role="tab" aria-selected="true" aria-controls="viewport-shell">三维场景</button>
+            <button id="view-tab-cameras" role="tab" aria-selected="false" aria-controls="camera-panel" tabindex="-1">三路相机</button>
+            <button id="view-tab-pointcloud" role="tab" aria-selected="false" aria-controls="pointcloud-panel" tabindex="-1">点云诊断</button>
+          </div>
+          <div class="viewer-content" id="viewer-content">
+            <div class="viewport-shell" id="viewport-shell" role="tabpanel" aria-label="三维场景">
+              <div class="viewport-topbar"><div><span class="live-dot"></span><strong>MuJoCo</strong></div><div class="sim-clock" title="任务开始计时，结束冻结，Reset 归零"><span>任务用时</span><b id="sim-time">0.00</b><span>s</span></div></div>
+              <div id="viewport" aria-label="MuJoCo 三维物理仿真场景"></div>
+              <div id="viewport-loading" class="viewport-loading"><div class="loader"></div><strong>连接物理场景</strong><span>正在读取 MuJoCo 几何与实时位姿</span></div>
+              <div class="viewport-bottom"><div class="view-actions"><button id="hide-pointcloud" class="view-button" type="button" hidden>隐藏点云</button><a class="view-button" href="/collision-spheres.html" target="_blank" rel="noopener">碰撞球 ↗</a><a class="view-button" href="/workspaces.html" target="_blank" rel="noopener">工作空间 ↗</a><button id="toggle-tcp-frames" class="view-button" type="button" aria-pressed="false" title="A/B 两指前端中心；红 X、绿 Y、蓝 Z。相对安装端沿局部 Z 为 185 mm。">显示 TCP 坐标系</button><button id="home-view" class="view-button" aria-label="恢复默认视角">⌖ 默认视角</button><details class="view-help"><summary class="view-button">操作说明</summary><p>空白处旋转 · 右键平移 · 滚轮缩放。左键拖动物体，Shift＋拖动调高度，Esc 取消；修改后需应用场景。</p></details></div></div>
+              <div class="axis-legend"><span class="axis-x">X</span><span class="axis-y">Y</span><span class="axis-z">Z↑</span><span>mm</span></div>
+            </div>
+            <details class="camera-panel" id="camera-panel" role="tabpanel" aria-label="三路相机" hidden>
+              <summary class="sr-only">三路 RGBD 相机</summary>
+              <div class="camera-toolbar"><label>画面来源 <select id="camera-mode"><option value="preview">实时 RGB 预览</option><option value="task">最近任务观察 RGBD</option></select></label><p class="sim-clock">任务用时 <b id="camera-task-time">0.00</b> s</p></div>
+              <p class="camera-note">左腕 — 头部 — 右腕 · 实时预览目标 2 fps</p>
+              <div id="camera-grid" class="camera-grid"></div>
+              <p id="camera-status" class="helper-text" role="status">等待三路 RGBD 相机采集。</p>
+            </details>
+            <details class="pointcloud-panel" id="pointcloud-panel" role="tabpanel" aria-label="点云诊断" hidden>
+              <summary class="sr-only">原始 RGBD 点云与碰撞场景</summary>
+              <p class="pointcloud-note">选择原始 RGBD 点云或 TSDF / ESDF 碰撞场景，点击“显示点云”叠加最近建图快照。可隐藏仿真物体，仅保留机器人与测量叠层。</p>
+              <p id="pointcloud-status" class="helper-text" role="status">等待观察节点完成点云建图。</p>
+              <div id="pointcloud-content"></div>
+            </details>
+          </div>
+        </section>
+        <section class="instruction-panel" aria-labelledby="task-heading">
+          <div class="instruction-heading"><h2 id="task-heading">TASK <span>任务指令</span></h2><div class="run-strip"><span class="run-dot" id="run-dot"></span><strong id="run-status">等待场景</strong></div></div>
+          <label class="sr-only" for="instruction">任务指令</label>
+          <textarea id="instruction" rows="2" placeholder="例如：抓取红色方块到蓝色盒子里" maxlength="200"></textarea>
+          <div class="experiment-controls">
+            <label class="experiment-name">实验名称<input id="experiment-name" type="text" maxlength="120" placeholder="可选，便于查找" /></label>
+            <label>保存方式<select id="experiment-save-mode"><option value="auto" selected>自动保存</option><option value="ask">完成后决定</option><option value="none">不保存</option></select></label>
+            <label class="record-video"><input id="record-video" type="checkbox" checked /><span id="record-video-label">录制视频</span></label>
+          </div>
+          <div class="instruction-actions"><p id="start-hint">先确认场景，再开始任务。</p><div><button id="reset" class="button secondary" disabled>↺ Reset</button><button id="start" class="button primary start-button" disabled>开始任务 ↗</button></div></div>
+        </section>
+      </section>
+      <aside class="panel trace-panel" aria-label="运行记录">
+        <div class="panel-heading"><h2>运行记录</h2><span id="event-count" class="count-badge" title="全部运行事件数量">0</span></div>
+        <section id="error-banner" class="error-banner" role="alert" hidden><div class="error-heading"><span id="error-message"></span><button id="dismiss-error" type="button" aria-label="关闭错误提示">×</button></div><details id="error-disclosure"><summary>查看详情</summary><pre id="error-details"></pre></details></section>
+        <div class="trace-scroll">
+          <section id="experiment-result" class="experiment-result" hidden><p id="experiment-status" role="status"></p><a id="experiment-replay" href="/replay.html">查看本次实验 ↗</a></section>
+          <div class="run-facts"><span>任务 <b id="task-value">—</b></span><span>源物体 <b id="target-value">—</b></span><span>物料盒 <b id="destination-value">—</b></span><span>机械臂 <b id="arm-value">—</b></span></div>
+          <section id="run-details" class="run-details" aria-label="当前任务步骤与错误" hidden>
+            <strong id="run-step"></strong><p id="run-step-timing" hidden></p><p id="run-candidate" hidden></p>
+            <p id="run-last-error" class="run-warning" hidden></p><p id="run-failure" class="run-failure" role="alert" hidden></p>
+            <p id="algorithm-pending" class="run-warning" hidden>后台算法调用尚未返回。结果不会触发后续动作；返回前不能开始新任务，仍可 Reset 或编辑场景。</p>
+          </section>
+          <section id="task-object-list" class="object-list" aria-label="目标清单" hidden></section>
+          <details class="log-guide"><summary>记录说明与性能</summary><p class="panel-description">仅「JEV 决策」表示模型调用；其余为 skill 执行、算法计算或系统事件。</p><div id="performance-summary" class="performance-summary" aria-label="JEV 性能摘要" hidden><div><span>JEV 调用数</span><strong id="metric-count">—</strong></div><div><span>平均耗时</span><strong id="metric-mean">—</strong></div><div><span>累计耗时</span><strong id="metric-total">—</strong></div><div><span>整轮耗时</span><strong id="metric-run">—</strong></div></div></details>
+          <div id="trace-list" class="trace-list"><div class="trace-empty"><strong>等待第一条指令</strong><p>运行事件按时间记录于此。</p></div></div>
+          <details id="facts-section" class="facts-section" hidden><summary>运行事实 / 验证 / 性能</summary><pre id="facts-content"></pre></details>
+        </div>
+      </aside>
+    </main>
+    <dialog id="planning-dialog" class="planning-dialog" aria-labelledby="planning-title">
+      <section class="planning-panel" id="planning-panel">
+        <div class="dialog-heading"><h2 id="planning-title">算法与执行参数</h2><button id="close-planning" class="button secondary" aria-label="关闭参数设置">关闭 ×</button></div>
+        <p class="planning-intro">当前值来自后端。修改后需应用，下一次任务使用；项目默认仅作参考。</p>
+        <div class="planning-tabs" aria-label="参数分类"><button id="planning-tab-common" aria-pressed="true">常用</button><button id="planning-tab-experimental" aria-pressed="false">实验调参</button><button id="planning-tab-system" aria-pressed="false">系统只读</button></div>
+        <div class="planning-lock"><p id="advanced-planning-status" role="status">实验调参默认锁定。</p><button id="toggle-advanced-planning" type="button" class="button secondary" aria-controls="planning-groups" aria-describedby="advanced-planning-status" aria-pressed="false" disabled>解锁高级参数</button></div>
+        <div class="planning-scroll"><fieldset id="planning-fields" disabled><div id="planning-groups"></div></fieldset><details id="run-planning-settings" class="facts-section" hidden><summary>本次任务实际参数（API 原始单位）</summary><pre id="run-planning-settings-content"></pre></details></div>
+        <p id="planning-error" class="planning-error" role="alert" hidden></p>
+        <div class="planning-footer"><p id="planning-status" class="helper-text" role="status">正在读取算法参数…</p><div class="planning-actions"><button id="reload-planning" class="button secondary" disabled>重新读取</button><button id="apply-planning" class="button primary" disabled>应用算法参数</button></div></div>
+      </section>
+    </dialog>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

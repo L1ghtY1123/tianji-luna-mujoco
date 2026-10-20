@@ -1,0 +1,188 @@
+{
+  "sdk": "8e734f3ced1df898990bcd92de40abce475907db",
+  "support_departure_prefix_optimizer_attachment": false,
+  "support_departure_prefix_body_guarded": true,
+  "continuation_optimizer_attachment": true,
+  "support_prefix_end_gap_m": 0.03299997538018751,
+  "required_optimizer_clearance_m": 0.03,
+  "tilted_fixture": true,
+  "support_frame": {
+    "arm": "A",
+    "link_name": "jev_support_axis_A",
+    "parent_link_name": "TCP_Link_L",
+    "fixed_transform": [
+      0.0,
+      0.0,
+      0.0,
+      0.6589949823314428,
+      0.6590688459462339,
+      -0.2560747138346087,
+      0.2564753604142199
+    ],
+    "T_tool_frame": [
+      [
+        0.7372922608698385,
+        -0.675573683455214,
+        0.0005659365657541547,
+        0.0
+      ],
+      [
+        0.0004902189632633948,
+        -0.00030270839300912893,
+        -0.9999998340264846,
+        0.0
+      ],
+      [
+        0.6755737426416232,
+        0.7372924159316865,
+        0.00010799447524538415,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "normal_world": [
+      0.0004999999150000217,
+      -0.000299999949000013,
+      0.9999998300000434
+    ]
+  },
+  "user_goal_position_m": [
+    0.282040221452713,
+    0.8102114539146423,
+    1.2209968328475953
+  ],
+  "user_goal_normal_projection_m": 0.10000108299981743,
+  "native_point_count": 81,
+  "support_proof": {
+    "policy": "project_observed_support_departure_with_fk_error_bounds",
+    "plane": {
+      "schema_version": 1,
+      "surface_id": "semantic_table_forbidden",
+      "normal_xyz": [
+        0.0004999999150000217,
+        -0.000299999949000013,
+        0.9999998300000434
+      ],
+      "offset_m": -1.1010215078103576,
+      "height_m": 1.101021694983998,
+      "contact_offset_m": -1.1010215078103578,
+      "inlier_count": 144,
+      "source_inliers_sha256": "9edf2daf2c4dd05ce54e6689c912ad408fe63bbeb5c3535c620b888e433d5b41",
+      "observed_polygon_xy_m": [
+        [
+          0.40036333437185456,
+          0.5783180258542608
+        ],
+        [
+          0.5303633343718546,
+          0.5783180258542608
+        ],
+        [
+          0.5303633343718546,
+          0.708318025854261
+        ],
+        [
+          0.40036333437185456,
+          0.708318025854261
+        ]
+      ],
+      "classification_tolerance_m": 0.001,
+      "replacement_cuboid": {
+        "pose": [
+          0.46536333437185456,
+          0.6433180258542609,
+          1.0810350087245681,
+          1,
+          0,
+          0,
+          0
+        ],
+        "dims": [
+          0.14,
+          0.14,
+          0.04
+        ]
+      },
+      "classification": "background_only_observed_plane_inliers",
+      "revision": "ffe9f946c6e4eefdfed09f78bfa41a4c4b15fc2c09be31edf48ca8ba22f330a9"
+    },
+    "departure_complete": true,
+    "failure_reason": null,
+    "exempt_sample_count": 32,
+    "coverage": "observed_polygon_only",
+    "lateral_tolerance_m": 5e-05,
+    "rotation_tolerance_rad": 0.005,
+    "corner_nondescent_numerical_tolerance_m": 1e-06,
+    "footprint_rotation_margin_m": 0.0014073857821052685,
+    "contact_max_lateral_departure_m": 1.6261551666800823e-06,
+    "contact_max_rotation_departure_rad": 0.0029771007935566205,
+    "contact_min_estimated_corner_plane_distance_m": -2.220446049250313e-16,
+    "strict_vendor_policy": {
+      "policy": "observed_plane_normal_departure",
+      "plane": {
+        "schema_version": 1,
+        "surface_id": "semantic_table_forbidden",
+        "normal_xyz": [
+          0.0004999999150000217,
+          -0.000299999949000013,
+          0.9999998300000434
+        ],
+        "offset_m": -1.1010215078103576,
+        "height_m": 1.101021694983998,
+        "contact_offset_m": -1.1010215078103578,
+        "inlier_count": 144,
+        "source_inliers_sha256": "9edf2daf2c4dd05ce54e6689c912ad408fe63bbeb5c3535c620b888e433d5b41",
+        "observed_polygon_xy_m": [
+          [
+            0.40036333437185456,
+            0.5783180258542608
+          ],
+          [
+            0.5303633343718546,
+            0.5783180258542608
+          ],
+          [
+            0.5303633343718546,
+            0.708318025854261
+          ],
+          [
+            0.40036333437185456,
+            0.708318025854261
+          ]
+        ],
+        "classification_tolerance_m": 0.001,
+        "replacement_cuboid": {
+          "pose": [
+            0.46536333437185456,
+            0.6433180258542609,
+            1.0810350087245681,
+            1,
+            0,
+            0,
+            0
+          ],
+          "dims": [
+            0.14,
+            0.14,
+            0.04
+          ]
+        },
+        "classification": "background_only_observed_plane_inliers",
+        "revision": "ffe9f946c6e4eefdfed09f78bfa41a4c4b15fc2c09be31edf48ca8ba22f330a9"
+      },
+      "exempt_sample_count": 4,
+      "departure_complete": true,
+      "failure_reason": "support_departure_requires_nonpenetrating_monotonic_normal_motion",
+      "motion_tolerance_m": 1e-06,
+      "coverage": "observed_polygon_only"
+    },
+    "max_lateral_departure_m": 0.002842502654514122,
+    "max_rotation_departure_rad": 0.004738502375575641,
+    "min_estimated_corner_plane_distance_m": -2.220446049250313e-16
+  }
+}

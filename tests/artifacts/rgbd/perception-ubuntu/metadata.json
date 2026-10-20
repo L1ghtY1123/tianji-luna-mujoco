@@ -1,0 +1,64 @@
+{
+  "observation_id": "rgbd-2-6d1b0e7d501a41a9b11735aa7406f116",
+  "generation": 2,
+  "captured_simulation_time_s": 0.5400000000000004,
+  "sam3_model": {
+    "name": "sam3",
+    "source_sha": "5dd401d1c5c1d5c3eedff06d41b77af824517619",
+    "weight_sha256": "9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e"
+  },
+  "model_identity_validation": "Sam3Client checks pinned model identity in each nonempty inference result",
+  "calibration_id": "historical-rgb-b6a717b114bff14b",
+  "calibration_sha256": "910ade9c3dad78002d71389c0746d16668ef852d1dd9fee4ee0f24ba50a914f5",
+  "extrinsics_sha256": "2705f84e03687cded0e1f1373bd5933ccdc8edd10cad6e934a19cf0266be2b67",
+  "files": {
+    "calibration-snapshot.json": {
+      "sha256": "910ade9c3dad78002d71389c0746d16668ef852d1dd9fee4ee0f24ba50a914f5",
+      "size_bytes": 45411
+    },
+    "camera-1.png": {
+      "sha256": "f7bd2a56ee13aee056019dc0314f21f7bd7f970b05fe060a15864a6b8145f34f",
+      "size_bytes": 27924
+    },
+    "camera-2.png": {
+      "sha256": "f57d82ab3cd724616189e2eaf48f0fc2438bf986aea62445d31e6625205377ec",
+      "size_bytes": 28058
+    },
+    "camera-3.png": {
+      "sha256": "926e9a6520beb381902c6db6a94dfd2e8eb6405426fa4d78c6893943731f5e49",
+      "size_bytes": 9259
+    },
+    "independent-oracle.json": {
+      "sha256": "798092f8e2d8a5f9ab347d3c7482c97e83bd8a3590165a4578ac0e072475a9ac",
+      "size_bytes": 2122
+    },
+    "independent-score.json": {
+      "sha256": "5071b90be1ba2f0976af54a5805b3b2f12e6d5c50ad09d660f993457f429fc95",
+      "size_bytes": 434
+    },
+    "registered-rgbd.npz": {
+      "sha256": "0824215fd66940ab87a839a02bbf7889f2d1b468d09baab16023693e0f98ce1c",
+      "size_bytes": 1480943
+    },
+    "result.json": {
+      "sha256": "13a2487be14605c57194348671e51359f3777ef3d4c888f9c996f265a33d07e5",
+      "size_bytes": 19932
+    },
+    "sam3-masks.npz": {
+      "sha256": "9c1ea302dbb45334080c320e1bfc1bd92a27c550eb59964a1fd7b7397b455805",
+      "size_bytes": 5086
+    }
+  },
+  "container_images": {
+    "web": {
+      "tag": "tianji-jev-mujoco:0.3.0-rgbd-guangyu",
+      "image_id": "sha256:4c723802683fd563dbb15b9265dbd1507727726eced2dfe33a9434f0b536cdf1",
+      "user": "1003:1004"
+    },
+    "sam3": {
+      "tag": "jodell-sam3:0.2.0-guangyu",
+      "image_id": "sha256:185489379ad9db87ad9bab9d6fe66def14c2af7f13902c3f52bc6eeac6844fb0"
+    }
+  },
+  "renderer_backend": "OSMesa"
+}

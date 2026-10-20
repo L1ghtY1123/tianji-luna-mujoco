@@ -1,0 +1,18 @@
+{
+  "id": "identify_destination",
+  "description": "校验并绑定由外层 JEV 选择的目的区域及路线，确认实测底面；分区在首次 plan_place 使用三相机几何建立。",
+  "requires": {
+    "needs_place": true,
+    "observed": true,
+    "destination_selected": false
+  },
+  "provides": [
+    "destination_selected",
+    "destination_ready"
+  ],
+  "inputs": [
+    "destination_id",
+    "route_destinations",
+    "observation"
+  ]
+}

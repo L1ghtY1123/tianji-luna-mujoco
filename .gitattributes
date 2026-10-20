@@ -1,0 +1,11 @@
+* text=auto
+*.sh text eol=lf
+# Workspace fingerprints include the exact bytes of robot assets/configuration.
+assets/** -text
+resources/** -text
+vendor/** -text
+*.stl binary
+*.STL binary
+*.npz binary
+*.png binary
+*.jpg binary

@@ -1,0 +1,821 @@
+[
+  {
+    "run_id": "e5811583f07e4f79bbcbb68492a7057b",
+    "instruction": "抓取黑色方块",
+    "status": "succeeded",
+    "arm": "A",
+    "metrics": {
+      "decision_count": 13,
+      "jev_total_duration_s": 4.516508189961314,
+      "jev_mean_duration_s": 0.3474237069201011,
+      "run_duration_s": 10.749161005020142,
+      "input_tokens": 98945,
+      "output_tokens": 658
+    },
+    "skill_durations_s": {
+      "observe": 0.0006741799879819155,
+      "identify_target": 0.27931836002971977,
+      "build_scene": 0.16861680895090103,
+      "generate_grasps": 0.1068885549902916,
+      "evaluate_arms": 0.061083988985046744,
+      "choose_arm": 0.3440788969746791,
+      "plan_grasp": 1.1016666510258801,
+      "execute_grasp": 4.751515249954537,
+      "verify_grasp": 0.000821024994365871
+    },
+    "arm_evaluations": {
+      "A": {
+        "tested_count": 100,
+        "reachable_count": 39,
+        "shown_to_jev_count": 3,
+        "orientation_deg": 180,
+        "shown_grasp_scores": [
+          0.9913679957389832,
+          0.9912784695625305,
+          0.9909108281135559
+        ]
+      },
+      "B": {
+        "tested_count": 100,
+        "reachable_count": 34,
+        "shown_to_jev_count": 3,
+        "orientation_deg": 0,
+        "shown_grasp_scores": [
+          0.9913679957389832,
+          0.9912784695625305,
+          0.9909108281135559
+        ]
+      }
+    },
+    "arm_question": "根据两臂实际 IK 可达候选、关节距离和质量选择执行臂；A 是左臂，B 是右臂。不能选择没有可达候选的臂。",
+    "arm_output": {
+      "arm": "A"
+    },
+    "arm_provider_details": {
+      "confidence": {
+        "arm": 0.52
+      },
+      "probabilities": {
+        "arm": {
+          "B": 0.12,
+          "none": 0.19,
+          "A": 0.6900000000000001
+        }
+      },
+      "scores": {}
+    },
+    "sequence": [
+      {
+        "id": 1,
+        "kind": "run_start",
+        "title": "开始任务",
+        "time": 1790579201.4725993,
+        "output": null
+      },
+      {
+        "id": 2,
+        "kind": "jev",
+        "title": "选择任务",
+        "time": 1790579202.3470936,
+        "output": {
+          "task": "grasp"
+        }
+      },
+      {
+        "id": 3,
+        "kind": "jev",
+        "title": "选择物体属性",
+        "time": 1790579202.5841465,
+        "output": {
+          "kind": "cube",
+          "color": "black",
+          "position": "any"
+        }
+      },
+      {
+        "id": 4,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579202.8816066,
+        "output": {
+          "skill": "observe"
+        }
+      },
+      {
+        "id": 5,
+        "kind": "skill_start",
+        "title": "observe",
+        "time": 1790579202.8820632,
+        "output": null
+      },
+      {
+        "id": 6,
+        "kind": "skill_complete",
+        "title": "observe",
+        "time": 1790579202.882782,
+        "output": null
+      },
+      {
+        "id": 7,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579203.155673,
+        "output": {
+          "skill": "identify_target"
+        }
+      },
+      {
+        "id": 8,
+        "kind": "skill_start",
+        "title": "identify_target",
+        "time": 1790579203.1564703,
+        "output": null
+      },
+      {
+        "id": 9,
+        "kind": "jev",
+        "title": "选择目标物体",
+        "time": 1790579203.4352036,
+        "output": {
+          "target": "black_cube"
+        }
+      },
+      {
+        "id": 10,
+        "kind": "skill_complete",
+        "title": "identify_target",
+        "time": 1790579203.4358604,
+        "output": null
+      },
+      {
+        "id": 11,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579203.7099912,
+        "output": {
+          "skill": "build_scene"
+        }
+      },
+      {
+        "id": 12,
+        "kind": "skill_start",
+        "title": "build_scene",
+        "time": 1790579203.7106197,
+        "output": null
+      },
+      {
+        "id": 13,
+        "kind": "skill_complete",
+        "title": "build_scene",
+        "time": 1790579203.8792934,
+        "output": null
+      },
+      {
+        "id": 14,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579204.1500695,
+        "output": {
+          "skill": "generate_grasps"
+        }
+      },
+      {
+        "id": 15,
+        "kind": "skill_start",
+        "title": "generate_grasps",
+        "time": 1790579204.1508908,
+        "output": null
+      },
+      {
+        "id": 16,
+        "kind": "skill_complete",
+        "title": "generate_grasps",
+        "time": 1790579204.2578366,
+        "output": null
+      },
+      {
+        "id": 17,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579204.515684,
+        "output": {
+          "skill": "evaluate_arms"
+        }
+      },
+      {
+        "id": 18,
+        "kind": "skill_start",
+        "title": "evaluate_arms",
+        "time": 1790579204.5167153,
+        "output": null
+      },
+      {
+        "id": 19,
+        "kind": "skill_complete",
+        "title": "evaluate_arms",
+        "time": 1790579204.5782347,
+        "output": null
+      },
+      {
+        "id": 20,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579204.8661544,
+        "output": {
+          "skill": "choose_arm"
+        }
+      },
+      {
+        "id": 21,
+        "kind": "skill_start",
+        "title": "choose_arm",
+        "time": 1790579204.8684864,
+        "output": null
+      },
+      {
+        "id": 22,
+        "kind": "jev",
+        "title": "选择执行臂",
+        "time": 1790579205.2115676,
+        "output": {
+          "arm": "A"
+        }
+      },
+      {
+        "id": 23,
+        "kind": "skill_complete",
+        "title": "choose_arm",
+        "time": 1790579205.212633,
+        "output": null
+      },
+      {
+        "id": 24,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579205.4936352,
+        "output": {
+          "skill": "plan_grasp"
+        }
+      },
+      {
+        "id": 25,
+        "kind": "skill_start",
+        "title": "plan_grasp",
+        "time": 1790579205.4945397,
+        "output": null
+      },
+      {
+        "id": 26,
+        "kind": "skill_complete",
+        "title": "plan_grasp",
+        "time": 1790579206.5963001,
+        "output": null
+      },
+      {
+        "id": 27,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579207.0517402,
+        "output": {
+          "skill": "execute_grasp"
+        }
+      },
+      {
+        "id": 28,
+        "kind": "skill_start",
+        "title": "execute_grasp",
+        "time": 1790579207.0528142,
+        "output": null
+      },
+      {
+        "id": 29,
+        "kind": "execution_stage_start",
+        "title": "打开夹爪",
+        "time": 1790579207.05373,
+        "output": null
+      },
+      {
+        "id": 30,
+        "kind": "execution_stage_complete",
+        "title": "打开夹爪",
+        "time": 1790579207.5572004,
+        "output": null
+      },
+      {
+        "id": 31,
+        "kind": "execution_stage_start",
+        "title": "执行接近轨迹",
+        "time": 1790579207.5574315,
+        "output": null
+      },
+      {
+        "id": 32,
+        "kind": "execution_stage_complete",
+        "title": "执行接近轨迹",
+        "time": 1790579209.6379287,
+        "output": null
+      },
+      {
+        "id": 33,
+        "kind": "execution_stage_start",
+        "title": "执行抓取轨迹",
+        "time": 1790579209.6381714,
+        "output": null
+      },
+      {
+        "id": 34,
+        "kind": "execution_stage_complete",
+        "title": "执行抓取轨迹",
+        "time": 1790579210.2212515,
+        "output": null
+      },
+      {
+        "id": 35,
+        "kind": "execution_stage_start",
+        "title": "闭合夹爪",
+        "time": 1790579210.2214918,
+        "output": null
+      },
+      {
+        "id": 36,
+        "kind": "execution_stage_complete",
+        "title": "闭合夹爪",
+        "time": 1790579210.7218862,
+        "output": null
+      },
+      {
+        "id": 37,
+        "kind": "execution_stage_start",
+        "title": "记录闭合后的物体与 TCP 位姿",
+        "time": 1790579210.7220967,
+        "output": null
+      },
+      {
+        "id": 38,
+        "kind": "execution_stage_complete",
+        "title": "记录闭合后的物体与 TCP 位姿",
+        "time": 1790579210.7223253,
+        "output": null
+      },
+      {
+        "id": 39,
+        "kind": "execution_stage_start",
+        "title": "执行提升轨迹",
+        "time": 1790579210.7224631,
+        "output": null
+      },
+      {
+        "id": 40,
+        "kind": "execution_stage_complete",
+        "title": "执行提升轨迹",
+        "time": 1790579211.8040445,
+        "output": null
+      },
+      {
+        "id": 41,
+        "kind": "skill_complete",
+        "title": "execute_grasp",
+        "time": 1790579211.804392,
+        "output": null
+      },
+      {
+        "id": 42,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579212.218781,
+        "output": {
+          "skill": "verify_grasp"
+        }
+      },
+      {
+        "id": 43,
+        "kind": "skill_start",
+        "title": "verify_grasp",
+        "time": 1790579212.2204719,
+        "output": null
+      },
+      {
+        "id": 44,
+        "kind": "skill_complete",
+        "title": "verify_grasp",
+        "time": 1790579212.2215836,
+        "output": null
+      },
+      {
+        "id": 45,
+        "kind": "run_end",
+        "title": "任务结束",
+        "time": 1790579212.221771,
+        "output": null
+      }
+    ]
+  },
+  {
+    "run_id": "fcbf701adaee4c63be451cfa1c382e8f",
+    "instruction": "抓取蓝色圆柱体",
+    "status": "succeeded",
+    "arm": "B",
+    "metrics": {
+      "decision_count": 13,
+      "jev_total_duration_s": 5.040813061001245,
+      "jev_mean_duration_s": 0.3877548508462496,
+      "run_duration_s": 15.580651760101318,
+      "input_tokens": 89196,
+      "output_tokens": 662
+    },
+    "skill_durations_s": {
+      "observe": 0.0005802739760838449,
+      "identify_target": 0.2673210090142675,
+      "build_scene": 0.13348870404297486,
+      "generate_grasps": 0.09168181498534977,
+      "evaluate_arms": 3.772413081023842,
+      "choose_arm": 0.28730548097519204,
+      "plan_grasp": 1.103038671950344,
+      "execute_grasp": 5.405011788010597,
+      "verify_grasp": 0.00044535199413076043
+    },
+    "arm_evaluations": {
+      "A": {
+        "tested_count": 100,
+        "reachable_count": 1,
+        "shown_to_jev_count": 1,
+        "orientation_deg": 180,
+        "shown_grasp_scores": [
+          0.9788938164710999
+        ]
+      },
+      "B": {
+        "tested_count": 100,
+        "reachable_count": 2,
+        "shown_to_jev_count": 2,
+        "orientation_deg": 0,
+        "shown_grasp_scores": [
+          0.9790422320365906,
+          0.9788938164710999
+        ]
+      }
+    },
+    "arm_question": "根据两臂实际 IK 可达候选、关节距离和质量选择执行臂；A 是左臂，B 是右臂。不能选择没有可达候选的臂。",
+    "arm_output": {
+      "arm": "B"
+    },
+    "arm_provider_details": {
+      "confidence": {
+        "arm": 0.52
+      },
+      "probabilities": {
+        "arm": {
+          "A": 0.17,
+          "B": 0.68,
+          "none": 0.15
+        }
+      },
+      "scores": {}
+    },
+    "sequence": [
+      {
+        "id": 1,
+        "kind": "run_start",
+        "title": "开始任务",
+        "time": 1790579434.9219463,
+        "output": null
+      },
+      {
+        "id": 2,
+        "kind": "jev",
+        "title": "选择任务",
+        "time": 1790579435.797847,
+        "output": {
+          "task": "grasp"
+        }
+      },
+      {
+        "id": 3,
+        "kind": "jev",
+        "title": "选择物体属性",
+        "time": 1790579436.053869,
+        "output": {
+          "kind": "cylinder",
+          "color": "blue",
+          "position": "any"
+        }
+      },
+      {
+        "id": 4,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579436.3236423,
+        "output": {
+          "skill": "observe"
+        }
+      },
+      {
+        "id": 5,
+        "kind": "skill_start",
+        "title": "observe",
+        "time": 1790579436.3244984,
+        "output": null
+      },
+      {
+        "id": 6,
+        "kind": "skill_complete",
+        "title": "observe",
+        "time": 1790579436.3251753,
+        "output": null
+      },
+      {
+        "id": 7,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579436.5835044,
+        "output": {
+          "skill": "identify_target"
+        }
+      },
+      {
+        "id": 8,
+        "kind": "skill_start",
+        "title": "identify_target",
+        "time": 1790579436.5841887,
+        "output": null
+      },
+      {
+        "id": 9,
+        "kind": "jev",
+        "title": "选择目标物体",
+        "time": 1790579436.8507483,
+        "output": {
+          "target": "blue_cylinder"
+        }
+      },
+      {
+        "id": 10,
+        "kind": "skill_complete",
+        "title": "identify_target",
+        "time": 1790579436.8515625,
+        "output": null
+      },
+      {
+        "id": 11,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579437.115015,
+        "output": {
+          "skill": "build_scene"
+        }
+      },
+      {
+        "id": 12,
+        "kind": "skill_start",
+        "title": "build_scene",
+        "time": 1790579437.1158702,
+        "output": null
+      },
+      {
+        "id": 13,
+        "kind": "skill_complete",
+        "title": "build_scene",
+        "time": 1790579437.2494495,
+        "output": null
+      },
+      {
+        "id": 14,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579437.600441,
+        "output": {
+          "skill": "generate_grasps"
+        }
+      },
+      {
+        "id": 15,
+        "kind": "skill_start",
+        "title": "generate_grasps",
+        "time": 1790579437.6011903,
+        "output": null
+      },
+      {
+        "id": 16,
+        "kind": "skill_complete",
+        "title": "generate_grasps",
+        "time": 1790579437.6929336,
+        "output": null
+      },
+      {
+        "id": 17,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579437.9622498,
+        "output": {
+          "skill": "evaluate_arms"
+        }
+      },
+      {
+        "id": 18,
+        "kind": "skill_start",
+        "title": "evaluate_arms",
+        "time": 1790579437.9630828,
+        "output": null
+      },
+      {
+        "id": 19,
+        "kind": "skill_complete",
+        "title": "evaluate_arms",
+        "time": 1790579441.735557,
+        "output": null
+      },
+      {
+        "id": 20,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579442.137968,
+        "output": {
+          "skill": "choose_arm"
+        }
+      },
+      {
+        "id": 21,
+        "kind": "skill_start",
+        "title": "choose_arm",
+        "time": 1790579442.1394038,
+        "output": null
+      },
+      {
+        "id": 22,
+        "kind": "jev",
+        "title": "选择执行臂",
+        "time": 1790579442.430458,
+        "output": {
+          "arm": "B"
+        }
+      },
+      {
+        "id": 23,
+        "kind": "skill_complete",
+        "title": "choose_arm",
+        "time": 1790579442.431097,
+        "output": null
+      },
+      {
+        "id": 24,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579442.7127972,
+        "output": {
+          "skill": "plan_grasp"
+        }
+      },
+      {
+        "id": 25,
+        "kind": "skill_start",
+        "title": "plan_grasp",
+        "time": 1790579442.7137134,
+        "output": null
+      },
+      {
+        "id": 26,
+        "kind": "skill_complete",
+        "title": "plan_grasp",
+        "time": 1790579443.8168523,
+        "output": null
+      },
+      {
+        "id": 27,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579444.238102,
+        "output": {
+          "skill": "execute_grasp"
+        }
+      },
+      {
+        "id": 28,
+        "kind": "skill_start",
+        "title": "execute_grasp",
+        "time": 1790579444.239286,
+        "output": null
+      },
+      {
+        "id": 29,
+        "kind": "execution_stage_start",
+        "title": "打开夹爪",
+        "time": 1790579444.2406874,
+        "output": null
+      },
+      {
+        "id": 30,
+        "kind": "execution_stage_complete",
+        "title": "打开夹爪",
+        "time": 1790579444.7415645,
+        "output": null
+      },
+      {
+        "id": 31,
+        "kind": "execution_stage_start",
+        "title": "执行接近轨迹",
+        "time": 1790579444.7419958,
+        "output": null
+      },
+      {
+        "id": 32,
+        "kind": "execution_stage_complete",
+        "title": "执行接近轨迹",
+        "time": 1790579446.9732535,
+        "output": null
+      },
+      {
+        "id": 33,
+        "kind": "execution_stage_start",
+        "title": "执行抓取轨迹",
+        "time": 1790579446.9777155,
+        "output": null
+      },
+      {
+        "id": 34,
+        "kind": "execution_stage_complete",
+        "title": "执行抓取轨迹",
+        "time": 1790579448.0600505,
+        "output": null
+      },
+      {
+        "id": 35,
+        "kind": "execution_stage_start",
+        "title": "闭合夹爪",
+        "time": 1790579448.0603857,
+        "output": null
+      },
+      {
+        "id": 36,
+        "kind": "execution_stage_complete",
+        "title": "闭合夹爪",
+        "time": 1790579448.5610178,
+        "output": null
+      },
+      {
+        "id": 37,
+        "kind": "execution_stage_start",
+        "title": "记录闭合后的物体与 TCP 位姿",
+        "time": 1790579448.5612934,
+        "output": null
+      },
+      {
+        "id": 38,
+        "kind": "execution_stage_complete",
+        "title": "记录闭合后的物体与 TCP 位姿",
+        "time": 1790579448.5615535,
+        "output": null
+      },
+      {
+        "id": 39,
+        "kind": "execution_stage_start",
+        "title": "执行提升轨迹",
+        "time": 1790579448.5618272,
+        "output": null
+      },
+      {
+        "id": 40,
+        "kind": "execution_stage_complete",
+        "title": "执行提升轨迹",
+        "time": 1790579449.6439795,
+        "output": null
+      },
+      {
+        "id": 41,
+        "kind": "skill_complete",
+        "title": "execute_grasp",
+        "time": 1790579449.6443942,
+        "output": null
+      },
+      {
+        "id": 42,
+        "kind": "jev",
+        "title": "选择技能",
+        "time": 1790579450.5009327,
+        "output": {
+          "skill": "verify_grasp"
+        }
+      },
+      {
+        "id": 43,
+        "kind": "skill_start",
+        "title": "verify_grasp",
+        "time": 1790579450.501982,
+        "output": null
+      },
+      {
+        "id": 44,
+        "kind": "skill_complete",
+        "title": "verify_grasp",
+        "time": 1790579450.502481,
+        "output": null
+      },
+      {
+        "id": 45,
+        "kind": "run_end",
+        "title": "任务结束",
+        "time": 1790579450.502606,
+        "output": null
+      }
+    ]
+  }
+]

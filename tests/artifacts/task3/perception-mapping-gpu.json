@@ -1,0 +1,27 @@
+{
+  "sdk": "8e734f3ced1df898990bcd92de40abce475907db",
+  "mapper": "public_curobo_perception_Mapper",
+  "source": "registered_rgbd",
+  "layer_count": 3,
+  "selected_surface_height_m": 0.7599999904632568,
+  "non_target_layer_enabled": true,
+  "released_source_layer_enabled": true,
+  "held_mapper_driver_position_rad": 0.55,
+  "released_mapper_driver_position_rad": 0.0,
+  "mapper_reconfigured_for_actual_gripper": true,
+  "measured_gripper_mask_sphere_motion_m": 0.03810929176482013,
+  "wall_time_s": 14.777873900020495,
+  "timings_ms": {
+    "depth_filter_projection": 1778.1063569709659,
+    "table": 9.339739102870226,
+    "table_crop": 5.053247092291713,
+    "isolated_surfaces": 13.613075017929077,
+    "instances": 6654.901623958722,
+    "background": 833.6656589526683,
+    "preview_rgb": 0.012363074347376823,
+    "build_total": 9294.717793120071,
+    "mapper_setup": 290.0179289281368,
+    "background_fusion_esdf": 540.7474930398166,
+    "background_preview": 0.23593101650476456
+  }
+}

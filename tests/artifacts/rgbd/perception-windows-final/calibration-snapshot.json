@@ -1,0 +1,1516 @@
+{
+  "schema_version": 1,
+  "calibration_kind": "historical_frozen_rgb_virtual_camera",
+  "translation_units": "meters",
+  "extrinsics_source": "C:\\project\\tianji_base\\extensions\\cameras\\camera-extrinsics\\defaults\\camera_extrinsics.json",
+  "extrinsics_sha256": "2705f84e03687cded0e1f1373bd5933ccdc8edd10cad6e934a19cf0266be2b67",
+  "cameras": {
+    "1": {
+      "camera_id": "1",
+      "role": "right_wrist",
+      "parent_body": "TCP_Link_R",
+      "intrinsics": {
+        "cx": 317.9415584415584,
+        "cy": 235.86363636363635,
+        "fx": 374.025974025974,
+        "fy": 374.025974025974,
+        "width": 640,
+        "height": 480
+      },
+      "distortion": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "T_parent_rgb_m": [
+        [
+          -0.9997204930531767,
+          0.02071581306489101,
+          0.011392579101365818,
+          -0.0011901059103524875
+        ],
+        [
+          -0.023613993016487367,
+          -0.8983341899081219,
+          -0.4386776294455136,
+          0.09237720705946872
+        ],
+        [
+          0.001146779550649013,
+          -0.4388240402840052,
+          0.8985722823265165,
+          0.05135253272235849
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "source_path": "/home/guangyu/.cache/tianji-codex/stereo-20260910/configured-live/1-calibration.json",
+      "source_sha256": "e8cd47a5d902ade17d045fbaad7e008a7a173fb4695208b7f8d0bae07604ce8d",
+      "device_identity": {
+        "camera_id": "1",
+        "channel": 8,
+        "calibration_version": "4.32.0000.01",
+        "role": "right_wrist",
+        "identity_basis": "historical_capture_camera_id"
+      },
+      "historical_calibration": {
+        "available": true,
+        "calibration": {
+          "baselines_mm": {
+            "(0, 1)": 24.975426247162428
+          },
+          "channel": 8,
+          "sensors": {
+            "0": {
+              "RealCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.0014623965972070838,
+                    -0.0031420140430011884,
+                    -0.010932883442042237
+                  ],
+                  "Translation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    265.8111443836975,
+                    265.8111443836975
+                  ],
+                  "LensDistortion": [
+                    -0.0004314383620763524,
+                    -0.0005830616022741582,
+                    1.9936105931475865e-05,
+                    -0.0006926204590501756,
+                    0.0020921547910124107
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    270.4900990921554,
+                    323.52321310300556
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005400000140070915,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  640
+                ],
+                "valid": true
+              },
+              "VirtualCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Translation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    273.0111524163569,
+                    255.0
+                  ],
+                  "LensDistortion": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    270.99442379182153,
+                    180.0
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005340441130101681,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  360
+                ],
+                "valid": true
+              },
+              "description": "Right"
+            },
+            "1": {
+              "RealCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    -0.0014623941174759236,
+                    -0.0029429814695112336,
+                    -0.008946683792338605
+                  ],
+                  "Translation": [
+                    24.97431854181159,
+                    -0.22339011393168734,
+                    0.07366448651355595
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    265.8547585600416,
+                    265.8547585600416
+                  ],
+                  "LensDistortion": [
+                    -0.0015535047441997427,
+                    0.00014125752858001848,
+                    0.0010607135457716308,
+                    0.0008181959089467456,
+                    0.0018963946933881137
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    272.69254105236143,
+                    318.34593097047417
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005400000140070915,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  640
+                ],
+                "valid": true
+              },
+              "VirtualCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Translation": [
+                    24.975426247162428,
+                    -3.561697649052259e-14,
+                    1.2614909117303341e-14
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    273.0111524163569,
+                    255.0
+                  ],
+                  "LensDistortion": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    270.99442379182153,
+                    180.0
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005340441130101681,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  360
+                ],
+                "valid": true
+              },
+              "description": "Left"
+            },
+            "2": {
+              "RealCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    -0.0032197332963905404,
+                    -0.004595779544210625,
+                    -0.011991526641548634
+                  ],
+                  "Translation": [
+                    12.405160282841011,
+                    -0.25305467350735783,
+                    -0.4811899014442782
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    373.48446618198534,
+                    373.48446618198534
+                  ],
+                  "LensDistortion": [
+                    -0.045414029304921416,
+                    0.06107936814263506,
+                    -0.00025864806119308586,
+                    0.0003720262388946341,
+                    -0.035581165506003036
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    319.1777943759673,
+                    232.94699715766944
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.0044999998062849045,
+                  0.0044999998062849045
+                ],
+                "resolution": [
+                  640,
+                  480
+                ],
+                "valid": true
+              },
+              "VirtualCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Translation": [
+                    12.404949265054057,
+                    -0.1026549254672236,
+                    -0.5387742845794445
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    374.025974025974,
+                    374.025974025974
+                  ],
+                  "LensDistortion": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    317.9415584415584,
+                    235.86363636363635
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.004331250209361315,
+                  0.004331250209361315
+                ],
+                "resolution": [
+                  640,
+                  480
+                ],
+                "valid": true
+              },
+              "description": "Mono"
+            }
+          },
+          "version": "4.32.0000.01"
+        },
+        "camera_id": "1",
+        "ok": true,
+        "stereo_calibration": {
+          "baseline_m": 0.024975426247162428,
+          "left_intrinsics": {
+            "cx": 270.99442379182153,
+            "cy": 180.0,
+            "fx": 273.0111524163569,
+            "fy": 255.0
+          },
+          "left_resolution": [
+            544,
+            360
+          ],
+          "left_to_rgb": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              -0.012570476982108371
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              -0.00010265492546718799
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              -0.0005387742845794572
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "rgb_intrinsics": {
+            "cx": 317.9415584415584,
+            "cy": 235.86363636363635,
+            "fx": 374.025974025974,
+            "fy": 374.025974025974
+          },
+          "rgb_resolution": [
+            640,
+            480
+          ]
+        },
+        "stereo_calibration_available": true,
+        "stereo_calibration_error": ""
+      },
+      "historical_extrinsic": {
+        "schema_version": 1,
+        "cam_id": "right_wrist",
+        "label": "\u53f3\u8155\u76f8\u673a",
+        "arm": "B",
+        "mode": "eye_in_hand",
+        "board": {
+          "dictionary": "auto",
+          "marker_len_mm": 11.25,
+          "square_len_mm": 15.0,
+          "squares_x": 9,
+          "squares_y": 12
+        },
+        "extrinsic_name": "T_flange_cam",
+        "extrinsic": [
+          [
+            -0.9997204930531767,
+            0.02071581306489101,
+            0.011392579101365818,
+            -1.1901059103524876
+          ],
+          [
+            -0.023613993016487367,
+            -0.8983341899081219,
+            -0.4386776294455136,
+            92.37720705946873
+          ],
+          [
+            0.001146779550649013,
+            -0.4388240402840052,
+            0.8985722823265165,
+            51.35253272235849
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "residuals": {
+          "rot_deg_max": 0.19074828116127843,
+          "rot_deg_rms": 0.12321032353473745,
+          "trans_mm_max": 2.4881815100295612,
+          "trans_mm_rms": 1.0631323133896855
+        },
+        "n_samples": 10,
+        "saved_at": "2026-07-07T12:33:13+08:00"
+      }
+    },
+    "2": {
+      "camera_id": "2",
+      "role": "left_wrist",
+      "parent_body": "TCP_Link_L",
+      "intrinsics": {
+        "cx": 318.9871794871795,
+        "cy": 243.08974358974362,
+        "fx": 369.2307692307693,
+        "fy": 369.2307692307693,
+        "width": 640,
+        "height": 480
+      },
+      "distortion": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "T_parent_rgb_m": [
+        [
+          0.9991137295648849,
+          0.035408678559817885,
+          0.02275919325446818,
+          -0.002083835079513786
+        ],
+        [
+          -0.04176965091460155,
+          0.9008414249710993,
+          0.43213426538346983,
+          -0.0934308801702364
+        ],
+        [
+          -0.005201120784899649,
+          -0.4327019211173976,
+          0.901522043992212,
+          0.04774827351742707
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "source_path": "/home/guangyu/.cache/tianji-codex/stereo-20260910/configured-live/2-calibration.json",
+      "source_sha256": "f1601894fccea7368eb01ae8ad18ca9a8c925fd0941af329d23ee8a596e747d1",
+      "device_identity": {
+        "camera_id": "2",
+        "channel": 8,
+        "calibration_version": "4.32.0000.01",
+        "role": "left_wrist",
+        "identity_basis": "historical_capture_camera_id"
+      },
+      "historical_calibration": {
+        "available": true,
+        "calibration": {
+          "baselines_mm": {
+            "(0, 1)": 25.03433966399756
+          },
+          "channel": 8,
+          "sensors": {
+            "0": {
+              "RealCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    -0.0004628661724382162,
+                    -0.000319954359199939,
+                    -0.01382879494370568
+                  ],
+                  "Translation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    266.4134782641812,
+                    266.4134782641812
+                  ],
+                  "LensDistortion": [
+                    0.0022507811463201377,
+                    -0.001614341041507992,
+                    -0.0003466715802180555,
+                    -0.000593306125436191,
+                    0.0025211390414212396
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    262.20735375749234,
+                    332.04031327812527
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005400000140070915,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  640
+                ],
+                "valid": true
+              },
+              "VirtualCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Translation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    277.65595463138,
+                    255.0
+                  ],
+                  "LensDistortion": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    267.38657844990547,
+                    180.0
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005251103080809116,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  360
+                ],
+                "valid": true
+              },
+              "description": "Right"
+            },
+            "1": {
+              "RealCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.0004628696254172466,
+                    0.0009887842982679626,
+                    -0.019219743991773397
+                  ],
+                  "Translation": [
+                    25.029703744702402,
+                    -0.4811181527448137,
+                    -0.024863385354011527
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    266.75348612213367,
+                    266.75348612213367
+                  ],
+                  "LensDistortion": [
+                    0.010271410102105914,
+                    -0.008930039040981138,
+                    0.001147152389931517,
+                    0.0002700461631417585,
+                    0.004897752261384365
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    269.14990458813753,
+                    326.0699279329094
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005400000140070915,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  640
+                ],
+                "valid": true
+              },
+              "VirtualCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Translation": [
+                    25.03433966399756,
+                    -9.18790715574323e-14,
+                    -4.028027911218146e-15
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    277.65595463138,
+                    255.0
+                  ],
+                  "LensDistortion": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    267.38657844990547,
+                    180.0
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005251103080809116,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  360
+                ],
+                "valid": true
+              },
+              "description": "Left"
+            },
+            "2": {
+              "RealCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    -0.0033710415914631913,
+                    -0.002341236961003733,
+                    -0.0008174474219223114
+                  ],
+                  "Translation": [
+                    12.591750693690162,
+                    0.09324900677314936,
+                    -0.45973498910110694
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    371.8850100616148,
+                    371.8850100616148
+                  ],
+                  "LensDistortion": [
+                    -0.04682425298629213,
+                    0.06055534481453975,
+                    0.00019238707662771098,
+                    0.00018532312042991128,
+                    -0.03459832030103948
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    319.68973830605256,
+                    240.956615186572
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.0044999998062849045,
+                  0.0044999998062849045
+                ],
+                "resolution": [
+                  640,
+                  480
+                ],
+                "valid": true
+              },
+              "VirtualCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Translation": [
+                    12.590559139764771,
+                    0.10514054073496423,
+                    -0.4888795192012104
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    369.2307692307693,
+                    369.2307692307693
+                  ],
+                  "LensDistortion": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    318.9871794871795,
+                    243.08974358974362
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.0043875002302229404,
+                  0.0043875002302229404
+                ],
+                "resolution": [
+                  640,
+                  480
+                ],
+                "valid": true
+              },
+              "description": "Mono"
+            }
+          },
+          "version": "4.32.0000.01"
+        },
+        "camera_id": "2",
+        "ok": true,
+        "stereo_calibration": {
+          "baseline_m": 0.02503433966399756,
+          "left_intrinsics": {
+            "cx": 267.38657844990547,
+            "cy": 180.0,
+            "fx": 277.65595463138,
+            "fy": 255.0
+          },
+          "left_resolution": [
+            544,
+            360
+          ],
+          "left_to_rgb": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              -0.012443780524232789
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.00010514054073505612
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              -0.0004888795192012063
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "rgb_intrinsics": {
+            "cx": 318.9871794871795,
+            "cy": 243.08974358974362,
+            "fx": 369.2307692307693,
+            "fy": 369.2307692307693
+          },
+          "rgb_resolution": [
+            640,
+            480
+          ]
+        },
+        "stereo_calibration_available": true,
+        "stereo_calibration_error": ""
+      },
+      "historical_extrinsic": {
+        "schema_version": 1,
+        "cam_id": "left_wrist",
+        "label": "\u5de6\u8155\u76f8\u673a",
+        "arm": "A",
+        "mode": "eye_in_hand",
+        "board": {
+          "dictionary": "auto",
+          "marker_len_mm": 11.25,
+          "square_len_mm": 15.0,
+          "squares_x": 9,
+          "squares_y": 12
+        },
+        "extrinsic_name": "T_flange_cam",
+        "extrinsic": [
+          [
+            0.9991137295648849,
+            0.035408678559817885,
+            0.02275919325446818,
+            -2.0838350795137863
+          ],
+          [
+            -0.04176965091460155,
+            0.9008414249710993,
+            0.43213426538346983,
+            -93.4308801702364
+          ],
+          [
+            -0.005201120784899649,
+            -0.4327019211173976,
+            0.901522043992212,
+            47.748273517427066
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "residuals": {
+          "rot_deg_max": 0.15041360089105454,
+          "rot_deg_rms": 0.09054630555139175,
+          "trans_mm_max": 0.776747735011211,
+          "trans_mm_rms": 0.45948410656140726
+        },
+        "n_samples": 9,
+        "saved_at": "2026-07-07T12:57:41+08:00"
+      }
+    },
+    "3": {
+      "camera_id": "3",
+      "role": "head",
+      "parent_body": "world",
+      "intrinsics": {
+        "cx": 320.0405405405405,
+        "cy": 194.6351351351351,
+        "fx": 291.8918918918919,
+        "fy": 291.8918918918919,
+        "width": 640,
+        "height": 360
+      },
+      "distortion": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "T_parent_rgb_m": [
+        [
+          0.009406203861934234,
+          -0.8622106423530579,
+          0.5064625667727455,
+          0.11613389134390073
+        ],
+        [
+          -0.999953108178163,
+          -0.009277058944961716,
+          0.0027780608639685735,
+          0.028640379409888082
+        ],
+        [
+          0.0023032094433487194,
+          -0.506464948827124,
+          -0.8622574736329046,
+          1.07227570530598
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "source_path": "/home/guangyu/.cache/tianji-codex/grasp-repair-20260906/multiview-depth/3/camera-calibration.json",
+      "source_sha256": "60c06696e0f6925bd0566a6998fa87c7ee607cd95179f552c3ec29b997f84780",
+      "device_identity": {
+        "camera_id": "3",
+        "channel": 8,
+        "calibration_version": "4.31.0001.07",
+        "role": "head",
+        "identity_basis": "historical_capture_camera_id"
+      },
+      "historical_calibration": {
+        "available": true,
+        "calibration": {
+          "baselines_mm": {
+            "(0, 1)": 48.05623708323666
+          },
+          "channel": 8,
+          "sensors": {
+            "0": {
+              "RealCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.001127492768865432,
+                    -0.0008171508857768232,
+                    0.005793899910645643
+                  ],
+                  "Translation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    318.0868501335138,
+                    318.0868501335138
+                  ],
+                  "LensDistortion": [
+                    -0.0052523747990874114,
+                    0.008853026099193409,
+                    0.0007600724546708491,
+                    -0.0019767786660243817,
+                    -4.7986054479943574e-06,
+                    -0.00046466727912644075,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Model": "ECameraModel.FThethaExt",
+                  "OpticalCenter": [
+                    269.90087398972435,
+                    318.05701163648274
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005400000140070915,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  640
+                ],
+                "valid": true
+              },
+              "VirtualCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Translation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    272.0,
+                    255.0
+                  ],
+                  "LensDistortion": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    272.00370370370365,
+                    180.0
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005360294133424759,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  360
+                ],
+                "valid": true
+              },
+              "description": "Right"
+            },
+            "1": {
+              "RealCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    -0.0011274917427939737,
+                    0.0029042397802022165,
+                    -0.0019902290766927724
+                  ],
+                  "Translation": [
+                    48.05593924013762,
+                    -0.09572138264004224,
+                    -0.13951259927670473
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    318.51374626645145,
+                    318.51374626645145
+                  ],
+                  "LensDistortion": [
+                    -0.006843566742253679,
+                    0.012188178943951885,
+                    -0.004114815932145855,
+                    0.00026712047975081636,
+                    0.0007577098163972876,
+                    0.0011480356096985143,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Model": "ECameraModel.FThethaExt",
+                  "OpticalCenter": [
+                    275.9219118129771,
+                    314.6946155941072
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005400000140070915,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  640
+                ],
+                "valid": true
+              },
+              "VirtualCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Translation": [
+                    48.05623708323666,
+                    -1.4857488069702773e-12,
+                    -1.0066947275788607e-12
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    272.0,
+                    255.0
+                  ],
+                  "LensDistortion": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    272.00370370370365,
+                    180.0
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005360294133424759,
+                  0.005400000140070915
+                ],
+                "resolution": [
+                  544,
+                  360
+                ],
+                "valid": true
+              },
+              "description": "Left"
+            },
+            "2": {
+              "RealCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    -0.0010452279030415896,
+                    0.003868873091509276,
+                    -0.015167731040661167
+                  ],
+                  "Translation": [
+                    63.77973537178494,
+                    -1.079598078565902,
+                    -0.4154387563075442
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    277.0822496246647,
+                    277.0822496246647
+                  ],
+                  "LensDistortion": [
+                    -0.044571911216752115,
+                    0.054615935976579474,
+                    -0.00010586669544840633,
+                    -5.9757309773343774e-05,
+                    -0.031337358892921365
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    318.3224973174806,
+                    200.56687488237085
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.006000000052154064,
+                  0.006000000052154064
+                ],
+                "resolution": [
+                  640,
+                  360
+                ],
+                "valid": true
+              },
+              "VirtualCamera": {
+                "extrinsic": {
+                  "Rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Translation": [
+                    63.78990209901756,
+                    -0.11180167117179354,
+                    -0.1692809808544321
+                  ],
+                  "Valid": true
+                },
+                "intrinsic": {
+                  "Alpha": 0.0,
+                  "EquiDistance": "ECameraModel.EquiDistance",
+                  "FTanThetha": "ECameraModel.FTanThetha",
+                  "FThetha": "ECameraModel.FThetha",
+                  "FThethaExt": "ECameraModel.FThethaExt",
+                  "FocalLength": [
+                    291.8918918918919,
+                    291.8918918918919
+                  ],
+                  "LensDistortion": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "Model": "ECameraModel.Spline",
+                  "OpticalCenter": [
+                    320.0405405405405,
+                    194.6351351351351
+                  ],
+                  "Rc": [],
+                  "Spline": "ECameraModel.Spline",
+                  "Valid": true
+                },
+                "pixel_size_mm": [
+                  0.005549999885261059,
+                  0.005549999885261059
+                ],
+                "resolution": [
+                  640,
+                  360
+                ],
+                "valid": true
+              },
+              "description": "Mono"
+            }
+          },
+          "version": "4.31.0001.07"
+        },
+        "camera_id": "3",
+        "ok": true,
+        "stereo_calibration": {
+          "baseline_m": 0.04805623708323666,
+          "left_intrinsics": {
+            "cx": 272.00370370370365,
+            "cy": 180.0,
+            "fx": 272.0,
+            "fy": 255.0
+          },
+          "left_resolution": [
+            544,
+            360
+          ],
+          "left_to_rgb": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.015733665015780902
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              -0.0001118016711703078
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              -0.00016928098085342542
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "rgb_intrinsics": {
+            "cx": 320.0405405405405,
+            "cy": 194.6351351351351,
+            "fx": 291.8918918918919,
+            "fy": 291.8918918918919
+          },
+          "rgb_resolution": [
+            640,
+            360
+          ]
+        },
+        "stereo_calibration_available": true,
+        "stereo_calibration_error": ""
+      },
+      "historical_extrinsic": {
+        "schema_version": 1,
+        "cam_id": "head",
+        "label": "\u5934\u90e8\u76f8\u673a",
+        "arm": "B",
+        "mode": "eye_to_hand",
+        "base_frame": "base_link",
+        "T_world_base": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            -37.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0,
+            1121.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "board": {
+          "dictionary": "auto",
+          "marker_len_mm": 22.5,
+          "square_len_mm": 30.0,
+          "squares_x": 9,
+          "squares_y": 12
+        },
+        "extrinsic_name": "T_base_cam",
+        "extrinsic": [
+          [
+            0.009406203861934234,
+            -0.8622106423530579,
+            0.5064625667727455,
+            116.13389134390073
+          ],
+          [
+            -0.999953108178163,
+            -0.009277058944961716,
+            0.0027780608639685735,
+            28.640379409888084
+          ],
+          [
+            0.0023032094433487194,
+            -0.506464948827124,
+            -0.8622574736329046,
+            1072.27570530598
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "matrix": [
+          [
+            0.009406203861934234,
+            -0.8622106423530579,
+            0.5064625667727455,
+            116.13389134390073
+          ],
+          [
+            -0.999953108178163,
+            -0.009277058944961716,
+            0.0027780608639685735,
+            28.640379409888084
+          ],
+          [
+            0.0023032094433487194,
+            -0.506464948827124,
+            -0.8622574736329046,
+            1072.27570530598
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "residuals": {
+          "trans_mm_rms": 0.7841893038776984,
+          "trans_mm_max": 1.1912550831149031,
+          "rot_deg_rms": 0.20519280794438646,
+          "rot_deg_max": 0.33202272761407164
+        },
+        "translation_rms_mm": 0.7841893038776984,
+        "rotation_rms_deg": 0.20519280794438646,
+        "quality": {
+          "grade": "excellent",
+          "warnings": [],
+          "translation_rms_mm": 0.7841893038776984,
+          "rotation_rms_deg": 0.20519280794438646,
+          "translation_span_mm": 100.461,
+          "rotation_span_deg": 29.199
+        },
+        "n_samples": 31,
+        "saved_at": "2026-08-26T04:35:38+00:00",
+        "promoted_at": "2026-08-26T04:48:27+00:00"
+      }
+    }
+  },
+  "calibration_id": "historical-rgb-b6a717b114bff14b"
+}

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>实验回放 · Tianji JEV</title>
+    <link rel="stylesheet" href="/src/replay.css" />
+  </head>
+  <body>
+    <header class="replay-header">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">TJ</span><div><h1>实验回放</h1><p>TIANJI / JEV · 从记录还原每次执行</p></div></div>
+      <a class="button" href="/">返回工作台</a>
+    </header>
+    <div id="page-error" class="notice error" role="alert" hidden></div>
+    <div id="page-notice" class="notice" role="status" hidden></div>
+    <main class="replay-workspace">
+      <aside class="experiment-sidebar panel" aria-label="实验列表">
+        <div class="section-heading"><h2>实验记录</h2><button id="refresh-list" class="button">刷新</button></div>
+        <label class="search-label" for="experiment-search">搜索名称或指令</label>
+        <input id="experiment-search" type="search" placeholder="筛选实验…" />
+        <p id="experiment-count" class="muted" aria-live="polite">正在读取实验…</p>
+        <div id="experiment-list" class="experiment-list"></div>
+        <details class="storage-details"><summary>存储位置</summary><p id="experiment-root" class="muted"></p></details>
+      </aside>
+      <section class="replay-main">
+        <div id="empty-selection" class="panel empty-state"><h2>选择一条实验记录</h2><p>查看同步视频、实际执行顺序与原始数据。</p></div>
+        <div id="experiment-content" hidden>
+          <section class="experiment-summary panel">
+            <div class="section-heading"><h2 id="experiment-title">实验</h2><span id="retention-badge" class="badge"></span></div>
+            <p id="experiment-instruction"></p>
+            <p id="experiment-meta" class="muted"></p>
+            <section id="replay-object-list" class="object-list" hidden></section>
+            <p id="experiment-errors" class="inline-error" hidden></p>
+            <form id="rename-form" class="name-form"><label for="experiment-name">实验名称</label><input id="experiment-name" maxlength="200" placeholder="未命名实验" /><button id="save-experiment" class="button primary" type="submit">保存名称</button><button id="discard-experiment" class="button danger" type="button" hidden>删除实验</button></form>
+            <div class="export-links"><a id="review-export" class="button" download>下载审阅 ZIP</a><a id="full-export" class="button" download>下载完整 ZIP</a><span class="muted">审阅包含视频与 JSON；大型数组和采样文件见完整包。</span></div>
+          </section>
+          <section class="replay-view panel">
+            <div class="tabs" role="tablist" aria-label="回放视图">
+              <button id="tab-video" role="tab" aria-controls="view-video" aria-selected="true" data-view="video">视频</button>
+              <button id="tab-observations" role="tab" aria-controls="view-observations" aria-selected="false" data-view="observations" tabindex="-1">观测图</button>
+              <button id="tab-graph" role="tab" aria-controls="view-graph" aria-selected="false" data-view="graph" tabindex="-1">执行图</button>
+              <button id="tab-data" role="tab" aria-controls="view-data" aria-selected="false" data-view="data" tabindex="-1">数据</button>
+            </div>
+            <div class="timeline">
+              <div class="timeline-actions"><button id="play-pause" class="button" disabled>播放</button><output id="playback-time" aria-label="当前任务时间">00:00:00.000</output><span class="muted">/</span><output id="playback-duration">00:00:00.000</output><label class="speed-label">速度 <select id="playback-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label></div>
+              <input id="playback-seek" type="range" min="0" max="0" step="0.001" value="0" aria-label="任务时间轴（秒）" />
+              <p id="video-status" class="muted" role="status"></p>
+            </div>
+            <section id="view-video" class="tab-view" role="tabpanel" aria-labelledby="tab-video">
+              <div class="video-grid">
+                <figure class="video-card"><figcaption><strong>主场景</strong><span id="scene-time" class="video-time">00:00:00.000</span></figcaption><div class="video-frame"><video id="scene-video" preload="metadata" muted playsinline aria-label="主场景录制视频"></video><p id="scene-video-message" class="video-message">尚未载入视频</p></div><p id="scene-video-status" class="muted"></p></figure>
+                <figure class="video-card cameras-card"><figcaption><strong>三相机 · 左腕 / 头部 / 右腕</strong><span id="cameras-time" class="video-time">00:00:00.000</span></figcaption><div class="video-frame"><video id="cameras-video" preload="metadata" muted playsinline aria-label="三相机水平拼接录制视频"></video><p id="cameras-video-message" class="video-message">尚未载入视频</p></div><p id="cameras-video-status" class="muted"></p></figure>
+              </div>
+              <p class="view-note muted">两路视频共用任务时间轴。录制采样时刻、缺帧和编码详情可在「数据」中的 video-metadata.json 查看。</p>
+            </section>
+            <section id="view-observations" class="tab-view" role="tabpanel" aria-labelledby="tab-observations" hidden>
+              <div class="section-heading"><h2>任务观测 · 归档标注图</h2><span id="observation-count" class="badge">0 帧</span></div>
+              <p class="view-note muted">初始分析使用头部，相机按实际归档显示。每项保留当时的标注版本；未分析图不使用后续标签。</p>
+              <label class="search-label" for="observation-select">选择观测帧 / 标注版本</label>
+              <div class="observation-controls"><select id="observation-select" disabled aria-label="选择观测帧与标注版本"></select><button id="observation-seek" class="button" disabled>定位任务时间</button></div>
+              <p id="observation-meta" class="view-note muted" aria-live="polite">本次实验未保存观测标注图。</p>
+              <div id="observation-cameras" class="observation-grid"></div>
+              <div id="observation-artifacts" class="artifact-links"></div>
+            </section>
+            <section id="view-graph" class="tab-view" role="tabpanel" aria-labelledby="tab-graph" hidden>
+              <div class="graph-toolbar"><p class="muted">阶段从左到右，换行后继续。点击节点看证据，展开查看每次调用。拖动画布平移，滚轮缩放；「适合画布」查看完整路线。</p><div class="actions"><a id="standalone-graph" class="button" target="_blank" rel="noopener">独立查看 ↗</a><button id="export-svg" class="button">导出 SVG</button><button id="export-png" class="button">导出 PNG</button></div></div>
+              <div class="graph-controls actions"><button id="graph-zoom-in" class="button" aria-label="放大执行图">＋ 放大</button><button id="graph-zoom-out" class="button" aria-label="缩小执行图">− 缩小</button><button id="graph-fit" class="button">适合画布</button><button id="graph-reset" class="button">100% / 重置</button></div>
+              <p id="graph-warning" class="inline-warning" hidden></p>
+              <div class="graph-layout"><div id="execution-graph" class="execution-graph" aria-label="实际执行图画布"></div><aside class="node-details"><div class="section-heading"><h2 id="node-title">节点详情</h2><span id="detail-event-count" class="badge">0</span></div><p id="node-meta" class="muted">选择左侧节点查看记录。</p><button id="seek-node" class="button" hidden>定位视频</button><div id="node-artifacts" class="artifact-links"></div><div id="node-trace" class="trace-list"></div></aside></div>
+            </section>
+            <section id="view-data" class="tab-view" role="tabpanel" aria-labelledby="tab-data" hidden>
+              <p class="muted">点击 JSON 文件预览；数组保留原始精度，以 NPZ 文件引用，可单独下载。</p>
+              <div class="data-layout"><div><label class="search-label" for="file-search">筛选文件</label><input id="file-search" type="search" placeholder="例如 artifacts、npz…" /><div id="file-list" class="file-list"></div></div><section class="file-preview"><div class="section-heading"><h2 id="file-title">数据预览</h2><a id="file-download" class="button" download hidden>下载原文件</a></div><div id="array-references" class="artifact-links"></div><pre id="file-content">选择一个 JSON 文件查看。</pre></section></div>
+            </section>
+          </section>
+        </div>
+      </section>
+    </main>
+    <dialog id="observation-dialog" class="observation-dialog" aria-labelledby="observation-image-title">
+      <div class="section-heading"><h2 id="observation-image-title">观测图</h2><button id="observation-close" class="button">关闭</button></div>
+      <p id="observation-image-meta" class="muted"></p>
+      <div class="observation-image-controls actions"><button id="observation-annotated" class="button" aria-pressed="true">标注图</button><button id="observation-raw" class="button" aria-pressed="false">原始 RGB</button><button id="observation-zoom-out" class="button" aria-label="缩小观测图">− 缩小</button><output id="observation-zoom-label">100%</output><button id="observation-zoom-in" class="button" aria-label="放大观测图">＋ 放大</button><button id="observation-zoom-fit" class="button">适合宽度</button><a id="observation-open-file" class="button" target="_blank" rel="noopener">打开归档图 ↗</a></div>
+      <p id="observation-image-status" class="muted" role="status"></p>
+      <div class="observation-image-viewport"><img id="observation-image" alt="所选观测图" /></div>
+    </dialog>
+    <dialog id="discard-dialog"><form method="dialog"><h2>删除所选实验？</h2><p id="discard-name"></p><p>该实验会从列表移入实验存储目录的 .trash 回收区，包含视频与原始数据。文件继续保留，可从本地回收区恢复。</p><div class="actions"><button class="button" value="cancel">保留记录</button><button class="button danger" value="discard">确认移入回收区</button></div></form></dialog>
+    <script type="module" src="/src/replay.js"></script>
+  </body>
+</html>

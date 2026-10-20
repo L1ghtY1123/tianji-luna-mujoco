@@ -1,0 +1,15 @@
+{
+  "id": "verify_grasp",
+  "description": "提升后直接读取当前夹爪反馈，稳定且未到空夹闭合位置为held，到空夹位置为empty，反馈缺失/不稳定为unknown。不采图、不调用视觉或attachment；unknown后由JEV决定是否重新检查反馈。",
+  "requires": {
+    "lifted": true,
+    "verified": false
+  },
+  "provides": [
+    "verified"
+  ],
+  "inputs": [
+    "当前夹爪关节反馈",
+    "holding"
+  ]
+}

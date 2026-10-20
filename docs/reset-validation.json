@@ -1,0 +1,11 @@
+{
+  "reset_passed": true,
+  "late_jev_result_cannot_restore_run": true,
+  "arm_restore_error_rad": {
+    "A": 0.0,
+    "B": 0.0
+  },
+  "physics_time_after_reset": 2.1949999999998693,
+  "physics_time_two_seconds_later": 4.218999999999744,
+  "confirmed": true
+}

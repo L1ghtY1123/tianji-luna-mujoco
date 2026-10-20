@@ -1,0 +1,432 @@
+{
+  "sdk": "8e734f3ced1df898990bcd92de40abce475907db",
+  "input": "688 measured RGBD points plus separately estimated volume",
+  "pose_limitation": "nominal solved candidate TCP; not a postclosure measured held pose",
+  "arm_configuration": "zero joints for relative own-hand geometry; no task planning/execution",
+  "arms": {
+    "A": {
+      "bounds_tool_m": {
+        "min_m": [
+          -0.02324985050393899,
+          -0.018874459612719385,
+          0.17140532050503865
+        ],
+        "max_m": [
+          0.01767587313947125,
+          0.020470317989322417,
+          0.21107574649961058
+        ]
+      },
+      "driver_results": {
+        "0.0": {
+          "TCP_Link_L": {
+            "minimum_sphere_gap_m": 0.11859238014761181,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Base": {
+            "minimum_sphere_gap_m": 0.04203143517070605,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link1_L": {
+            "minimum_sphere_gap_m": 0.07138267321770247,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link1_R": {
+            "minimum_sphere_gap_m": 0.07035249599371284,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link2_L": {
+            "minimum_sphere_gap_m": 0.05284938506974021,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link2_R": {
+            "minimum_sphere_gap_m": 0.04885770308937225,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link3_L": {
+            "minimum_sphere_gap_m": 0.013048837228346776,
+            "currently_exempted": true,
+            "actual_pad_link": true
+          },
+          "gripL_Link3_R": {
+            "minimum_sphere_gap_m": 0.007737688158036434,
+            "currently_exempted": true,
+            "actual_pad_link": true
+          },
+          "gripL_Link4_L": {
+            "minimum_sphere_gap_m": 0.036224149083113055,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link4_R": {
+            "minimum_sphere_gap_m": 0.03397670852623892,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          }
+        },
+        "0.55": {
+          "TCP_Link_L": {
+            "minimum_sphere_gap_m": 0.11859238014761181,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Base": {
+            "minimum_sphere_gap_m": 0.04203143517070605,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link1_L": {
+            "minimum_sphere_gap_m": 0.06557175588315635,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link1_R": {
+            "minimum_sphere_gap_m": 0.06335035104606007,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link2_L": {
+            "minimum_sphere_gap_m": 0.01852561119151834,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link2_R": {
+            "minimum_sphere_gap_m": 0.014839343970234453,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link3_L": {
+            "minimum_sphere_gap_m": -0.01563979000375924,
+            "currently_exempted": true,
+            "actual_pad_link": true,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": 0.0009544350365436466,
+              "positive_gap_proves_separation": true,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripL_Link3_R": {
+            "minimum_sphere_gap_m": -0.01931875532002855,
+            "currently_exempted": true,
+            "actual_pad_link": true,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": -0.0037199419094882183,
+              "positive_gap_proves_separation": false,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripL_Link4_L": {
+            "minimum_sphere_gap_m": 0.004921353660901625,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link4_R": {
+            "minimum_sphere_gap_m": 0.0037957310338490903,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          }
+        },
+        "0.8": {
+          "TCP_Link_L": {
+            "minimum_sphere_gap_m": 0.11859238014761181,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Base": {
+            "minimum_sphere_gap_m": 0.04203143517070605,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link1_L": {
+            "minimum_sphere_gap_m": 0.058746958588541065,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link1_R": {
+            "minimum_sphere_gap_m": 0.056565194876398814,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link2_L": {
+            "minimum_sphere_gap_m": 0.005819009675134618,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link2_R": {
+            "minimum_sphere_gap_m": 0.0030377926774206275,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripL_Link3_L": {
+            "minimum_sphere_gap_m": -0.027781285339452996,
+            "currently_exempted": true,
+            "actual_pad_link": true,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": -0.016123245953398778,
+              "positive_gap_proves_separation": false,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripL_Link3_R": {
+            "minimum_sphere_gap_m": -0.02971441819486073,
+            "currently_exempted": true,
+            "actual_pad_link": true,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": -0.020725343618648445,
+              "positive_gap_proves_separation": false,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripL_Link4_L": {
+            "minimum_sphere_gap_m": -0.00451408588831544,
+            "currently_exempted": true,
+            "actual_pad_link": false,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": 0.006392480870721445,
+              "positive_gap_proves_separation": true,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripL_Link4_R": {
+            "minimum_sphere_gap_m": -0.0021567531756661006,
+            "currently_exempted": true,
+            "actual_pad_link": false,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": 0.009332233667269735,
+              "positive_gap_proves_separation": true,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          }
+        }
+      }
+    },
+    "B": {
+      "bounds_tool_m": {
+        "min_m": [
+          -0.015726165863809954,
+          -0.02541341054829116,
+          0.16116268188547067
+        ],
+        "max_m": [
+          0.02672574029890948,
+          0.027859850613684345,
+          0.2162248117341798
+        ]
+      },
+      "driver_results": {
+        "0.0": {
+          "TCP_Link_R": {
+            "minimum_sphere_gap_m": 0.10838099437990517,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Base": {
+            "minimum_sphere_gap_m": 0.03165734702922812,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link1_L": {
+            "minimum_sphere_gap_m": 0.0594995401769569,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link1_R": {
+            "minimum_sphere_gap_m": 0.061717352986888074,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link2_L": {
+            "minimum_sphere_gap_m": 0.039429325489631725,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link2_R": {
+            "minimum_sphere_gap_m": 0.04799981743577532,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link3_L": {
+            "minimum_sphere_gap_m": 0.0032552569559977373,
+            "currently_exempted": true,
+            "actual_pad_link": true
+          },
+          "gripR_Link3_R": {
+            "minimum_sphere_gap_m": 0.01424769461953665,
+            "currently_exempted": true,
+            "actual_pad_link": true
+          },
+          "gripR_Link4_L": {
+            "minimum_sphere_gap_m": 0.023632432362254957,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link4_R": {
+            "minimum_sphere_gap_m": 0.02706210838632407,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          }
+        },
+        "0.55": {
+          "TCP_Link_R": {
+            "minimum_sphere_gap_m": 0.10838099437990517,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Base": {
+            "minimum_sphere_gap_m": 0.03165734702922812,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link1_L": {
+            "minimum_sphere_gap_m": 0.05248714171565494,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link1_R": {
+            "minimum_sphere_gap_m": 0.05732247580623709,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link2_L": {
+            "minimum_sphere_gap_m": 0.004726146196715693,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link2_R": {
+            "minimum_sphere_gap_m": 0.013174828744253513,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link3_L": {
+            "minimum_sphere_gap_m": -0.026059555852782353,
+            "currently_exempted": true,
+            "actual_pad_link": true,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": -0.007930923001033527,
+              "positive_gap_proves_separation": false,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripR_Link3_R": {
+            "minimum_sphere_gap_m": -0.015990991498237715,
+            "currently_exempted": true,
+            "actual_pad_link": true,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": 0.004299307632827167,
+              "positive_gap_proves_separation": true,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripR_Link4_L": {
+            "minimum_sphere_gap_m": -0.008942110911833445,
+            "currently_exempted": true,
+            "actual_pad_link": false,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": 0.005102575261482181,
+              "positive_gap_proves_separation": true,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripR_Link4_R": {
+            "minimum_sphere_gap_m": -0.001742176998647496,
+            "currently_exempted": true,
+            "actual_pad_link": false,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": 0.015252875137465337,
+              "positive_gap_proves_separation": true,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          }
+        },
+        "0.8": {
+          "TCP_Link_R": {
+            "minimum_sphere_gap_m": 0.10838099437990517,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Base": {
+            "minimum_sphere_gap_m": 0.03165734702922812,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link1_L": {
+            "minimum_sphere_gap_m": 0.04565907330332243,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link1_R": {
+            "minimum_sphere_gap_m": 0.05044610360609414,
+            "currently_exempted": true,
+            "actual_pad_link": false
+          },
+          "gripR_Link2_L": {
+            "minimum_sphere_gap_m": -0.008197487716948539,
+            "currently_exempted": true,
+            "actual_pad_link": false,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": 0.009420511741056847,
+              "positive_gap_proves_separation": true,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripR_Link2_R": {
+            "minimum_sphere_gap_m": -0.0012937896440139152,
+            "currently_exempted": true,
+            "actual_pad_link": false,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": 0.0182693811290128,
+              "positive_gap_proves_separation": true,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripR_Link3_L": {
+            "minimum_sphere_gap_m": -0.033723430603876246,
+            "currently_exempted": true,
+            "actual_pad_link": true,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": -0.024865657289761978,
+              "positive_gap_proves_separation": false,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripR_Link3_R": {
+            "minimum_sphere_gap_m": -0.028568692489294598,
+            "currently_exempted": true,
+            "actual_pad_link": true,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": -0.01283829134954379,
+              "positive_gap_proves_separation": false,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripR_Link4_L": {
+            "minimum_sphere_gap_m": -0.016142435935225446,
+            "currently_exempted": true,
+            "actual_pad_link": false,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": -0.0030831155663553766,
+              "positive_gap_proves_separation": false,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          },
+          "gripR_Link4_R": {
+            "minimum_sphere_gap_m": -0.012264443427555765,
+            "currently_exempted": true,
+            "actual_pad_link": false,
+            "mesh_diagnostic": {
+              "mesh_projection_gap_m": -0.0004206002673442233,
+              "positive_gap_proves_separation": false,
+              "source": "raw_collision_STL_and_RGBD_prior_vertices_in_TCP_frame"
+            }
+          }
+        }
+      }
+    }
+  }
+}

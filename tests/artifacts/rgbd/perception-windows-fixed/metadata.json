@@ -1,0 +1,48 @@
+{
+  "observation_id": "rgbd-2-2945cf6931aa472e84654017beef58fc",
+  "generation": 2,
+  "captured_simulation_time_s": 0.7660000000000006,
+  "sam3_model": {
+    "name": "sam3",
+    "source_sha": "5dd401d1c5c1d5c3eedff06d41b77af824517619",
+    "weight_sha256": "9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e"
+  },
+  "model_identity_validation": "Sam3Client checks pinned model identity in each nonempty inference result",
+  "calibration_id": "historical-rgb-b6a717b114bff14b",
+  "calibration_sha256": "910ade9c3dad78002d71389c0746d16668ef852d1dd9fee4ee0f24ba50a914f5",
+  "extrinsics_sha256": "2705f84e03687cded0e1f1373bd5933ccdc8edd10cad6e934a19cf0266be2b67",
+  "files": {
+    "calibration-snapshot.json": {
+      "sha256": "910ade9c3dad78002d71389c0746d16668ef852d1dd9fee4ee0f24ba50a914f5",
+      "size_bytes": 45411
+    },
+    "camera-1.png": {
+      "sha256": "3b7bd7a8272b9c485145125de0fe87721557a4cddaf60db1f0cdf5ef3f2b28ba",
+      "size_bytes": 26656
+    },
+    "camera-2.png": {
+      "sha256": "84323f3ffb5d9b6f39294da316a97d0220ac444b2b92732c7d5e67e190e1be4f",
+      "size_bytes": 26906
+    },
+    "camera-3.png": {
+      "sha256": "d7fb23725a33d88a80241e3e0be01de124846831213cc861917eeb76278d9889",
+      "size_bytes": 8843
+    },
+    "independent-oracle.json": {
+      "sha256": "38eb45212a064a7546bf44861e9f53384e2fd2cfbad2f794491cbaa25c12b167",
+      "size_bytes": 2236
+    },
+    "registered-rgbd.npz": {
+      "sha256": "55545c08585b79f931a4d3ec658eea749d986554aea250e5255f70b3fd4c950c",
+      "size_bytes": 1479619
+    },
+    "result.json": {
+      "sha256": "ad111b8ea625216294e635a7abb3fca44385f0cfee95ec4ec6120ce1ac0f4d11",
+      "size_bytes": 20544
+    },
+    "sam3-masks.npz": {
+      "sha256": "866696f91428fd10d9348d04afd9cd304614f939e7af2f145a2e345eb37cd4a2",
+      "size_bytes": 5068
+    }
+  }
+}

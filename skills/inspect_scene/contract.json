@@ -1,0 +1,7 @@
+{
+  "id": "inspect_scene",
+  "description": "对当前已分析图像调用一次OpenAI，仅以semantics解释既有实例的类别、关系与可见性；不分配或修改ID。同一帧/掩码已有结果（包括服务错误）时不可再次调用。",
+  "requires": {"observed": true, "visual_available": true},
+  "provides": ["scene_inspected"],
+  "inputs": ["purpose: semantics", "instruction", "observation", "visual_call_budget"]
+}

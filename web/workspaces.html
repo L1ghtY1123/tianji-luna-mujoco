@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0c121a" />
+    <link rel="icon" href="data:," />
+    <title>Tianji · 双臂工作空间</title>
+  </head>
+  <body class="sphere-page workspace-view-page">
+    <header class="app-header">
+      <div class="brand-mark" aria-hidden="true">T</div>
+      <div class="brand"><h1>双臂工作空间</h1><p>左右单臂独立计算 · 1 cm 网格 · 只读查看</p></div>
+      <a class="button secondary sphere-back" href="/">返回工作台</a>
+    </header>
+    <main class="sphere-workspace">
+      <section class="sphere-toolbar" aria-label="工作空间查看控制">
+        <div class="sphere-summary"><strong id="workspace-count">正在读取工作空间…</strong><span id="workspace-status" role="status" aria-live="polite">连接中</span></div>
+        <div class="sphere-actions"><button id="toggle-follow" class="button secondary" type="button" aria-pressed="false">暂停跟随</button><button id="refresh-workspaces" class="button secondary" type="button">刷新视图</button></div>
+        <div class="sphere-display-options">
+          <label class="workspace-left"><input id="show-A" type="checkbox" checked />左臂工作空间</label>
+          <label class="workspace-right"><input id="show-B" type="checkbox" checked />右臂工作空间</label>
+          <label><input id="show-meshes" type="checkbox" checked />显示机器人与场景</label>
+          <label class="sphere-opacity-label" for="workspace-opacity">工作空间不透明度 <output id="workspace-opacity-value" for="workspace-opacity">22%</output><input id="workspace-opacity" type="range" min="5" max="70" value="22" step="1" /></label>
+        </div>
+      </section>
+      <section class="viewport-shell sphere-viewport">
+        <div id="viewport" aria-label="左右臂工作空间三维视图"></div>
+        <div id="workspace-loading" class="viewport-loading"><div class="loader"></div><strong>读取离线工作空间</strong><span>正在加载工作空间边界和机器人模型</span></div>
+        <div class="viewport-bottom"><span>左键旋转 · 右键平移 · 滚轮缩放</span><button id="home-view" class="view-button" type="button">⌖ 默认视角</button></div>
+        <div class="axis-legend"><span class="axis-x">X</span><span class="axis-y">Y</span><span class="axis-z">Z↑</span></div>
+      </section>
+      <footer class="sphere-notes"><p>蓝色为左臂、橙色为右臂。显示选臂所用的实际网格边界，工作空间固定在机器人基座上，不随当前关节姿态变化。</p><p>范围按夹持参考点计算，工具朝向自由；保留本臂、立柱和头部相机，忽略另一臂与环境。具体抓姿及运动路径仍需规划验证。</p></footer>
+    </main>
+    <script type="module" src="/src/workspace-page.js"></script>
+  </body>
+</html>
