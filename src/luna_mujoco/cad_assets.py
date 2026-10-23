@@ -16,14 +16,18 @@ def cad_asset(asset_id):
     """Return a copy of declared dimensions, provenance and collision approximation."""
     if not isinstance(asset_id, str) or asset_id not in _manifest()["assets"]:
         raise ValueError(f"unknown CAD asset {asset_id!r}")
-    return deepcopy(_manifest()["assets"][asset_id])
+    record = deepcopy(_manifest()["assets"][asset_id])
+    if asset_id == 'pink_wrapped':
+        record['simulation_geometry'] = 'cad_bounds_box'
+        record['label'] = '粉色长方体（CAD 去凸条后包围盒）'
+    return record
 
 
 def cad_catalog():
     """Public UI catalog; dimensions are native CAD metres, not editable scale."""
     return {"assets": [{key: record[key] for key in
                         ("id", "label", "size_m", "default_color", "demo_mass_kg")}
-                       for record in deepcopy(_manifest()["assets"]).values()]}
+                       for record in (cad_asset(key) for key in _manifest()['assets'])]}
 
 
 def workpiece_height_prior(asset_id):

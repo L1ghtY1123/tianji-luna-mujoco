@@ -73,7 +73,7 @@ class DemoRunner(UnpackWorkflow, Runner):
     def task_budgets(self, context):
         # The program can process any frozen count; observation cost scales with it.
         targets = len((self.demo_task or {}).get('transport_ids', []))
-        captures_per_target = 5 if self.unpack_task else 4
+        captures_per_target = 8 if self.unpack_task else 4
         return {"normal": {"used": context.get("normal_capture_count", 0), "limit": 1 + captures_per_target * targets},
             "recovery": {"used": context.get("recovery_capture_count", 0), "limit": 0},
             "decision_limit": 0}
@@ -599,6 +599,16 @@ class DemoRunner(UnpackWorkflow, Runner):
             self.sync_result_evidence(context, "post_place")
             after = await self.call_algorithm(self.algorithms.verify_release, capture, binding,
                 context["visual_inventory_reference"], self.state["instruction"])
+            if self.unpack_task and after.get('observation_assessment', {}).get('needs_observation'):
+                self.emit('visual_transfer_result', 'Decisions：放置核验需要补充观测', after)
+                # User order: lift, Decisions, then confirmed local obstacle.
+                # An unresolved visual result must not publish pink geometry.
+                capture = await self.supplement_result_observation(context, after['observation_assessment'], 'verify_place')
+                validate_release_capture(capture, binding)
+                context.update(post_place_capture=capture, latest_capture=capture)
+                self.record_observation(capture, 'post_place')
+                after = await self.call_algorithm(self.algorithms.verify_release, capture, binding,
+                    context['visual_inventory_reference'], self.state['instruction'])
             self.check_generation()
             current = build_release_binding(self.state, {**context, "holding": carried},
                                             self.task_progress, self.run_id, result)
@@ -649,11 +659,12 @@ class DemoRunner(UnpackWorkflow, Runner):
             if confirmed and (self.unpack_task or set(self.task_progress.completed_ids) != set(self.demo_task["transport_ids"])):
                 if not carried:
                     raise ValueError("release_geometry_missing")
-                context["scene"] = await self.call_algorithm(
-                    self.algorithms.publish_released_object, context["scene"], target,
-                    carried["grasp_support_reference"]["T_world_tcp_at_grasp"],
-                    context["release_tcp"], capture["observation_id"],
-                    support_floor_z_m=context["observation"]["table"]["surface_height_m"])
+                if not self.unpack_task:
+                    context["scene"] = await self.call_algorithm(
+                        self.algorithms.publish_released_object, context["scene"], target,
+                        carried["grasp_support_reference"]["T_world_tcp_at_grasp"],
+                        context["release_tcp"], capture["observation_id"],
+                        support_floor_z_m=context["observation"]["table"]["surface_height_m"])
                 if self.unpack_task:
                     area = {**self.region, 'floor_z_m': context['observation']['table']['surface_height_m']}
                     local = await self.call_algorithm(self.algorithms.publish_local_object,
@@ -663,7 +674,8 @@ class DemoRunner(UnpackWorkflow, Runner):
                 self.state["facts"]["scene_available"] = True
                 self.emit("retained_scene_updated", "保留地图并更新已释放物体", {
                     "scene_token": context["scene"]["scene_token"], "target_id": target,
-                    "source": "release_feedback_rigid_prediction", "rgbd_remapped": False})
+                    "source": "verified_release_rgbd_local_object" if self.unpack_task else
+                        "release_feedback_rigid_prediction", "rgbd_remapped": False})
             return result
         return await super().execute(skill, context, arguments)
 

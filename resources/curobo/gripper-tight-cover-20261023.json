@@ -1,0 +1,615 @@
+{
+  "source": "subdivision_of_certified_palm_box_cells",
+  "links": {
+    "gripL_Base": {
+      "link": "gripL_Base",
+      "source": "authored_urdf_collision_box",
+      "size_m": [
+        0.076,
+        0.092,
+        0.098
+      ],
+      "origin_xyz_m": [
+        0.0,
+        0.003362,
+        0.04855
+      ],
+      "origin_rpy_rad": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "divisions": [
+        2,
+        2,
+        3
+      ],
+      "numerical_padding_m": 1e-07,
+      "sphere_count": 12,
+      "radius_m": 0.03401153598523558,
+      "cells": [
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            0.04900000000000001
+          ]
+        }
+      ],
+      "proof": "Each sphere contains all eight vertices of its convex cell; cells tile the entire box.",
+      "parent_spheres": [
+        {
+          "center": [
+            -0.019,
+            -0.019638,
+            0.01588333333333334
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            -0.019,
+            -0.019638,
+            0.04855000000000001
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            -0.019,
+            -0.019638,
+            0.08121666666666669
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            -0.019,
+            0.026362,
+            0.01588333333333334
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            -0.019,
+            0.026362,
+            0.04855000000000001
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            -0.019,
+            0.026362,
+            0.08121666666666669
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            -0.019638,
+            0.01588333333333334
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            -0.019638,
+            0.04855000000000001
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            -0.019638,
+            0.08121666666666669
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            0.026362,
+            0.01588333333333334
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            0.026362,
+            0.04855000000000001
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            0.026362,
+            0.08121666666666669
+          ],
+          "radius": 0.03401153598523558
+        }
+      ],
+      "child_count": 96,
+      "child_radius_m": 0.01700576799261779,
+      "containment_margin_m": 5.000000000143778e-08
+    },
+    "gripR_Base": {
+      "link": "gripR_Base",
+      "source": "authored_urdf_collision_box",
+      "size_m": [
+        0.076,
+        0.092,
+        0.098
+      ],
+      "origin_xyz_m": [
+        0.0,
+        0.003362,
+        0.04855
+      ],
+      "origin_rpy_rad": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "divisions": [
+        2,
+        2,
+        3
+      ],
+      "numerical_padding_m": 1e-07,
+      "sphere_count": 12,
+      "radius_m": 0.03401153598523558,
+      "cells": [
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            0.04900000000000001
+          ]
+        }
+      ],
+      "proof": "Each sphere contains all eight vertices of its convex cell; cells tile the entire box.",
+      "parent_spheres": [
+        {
+          "center": [
+            -0.019,
+            -0.019638,
+            0.01588333333333334
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            -0.019,
+            -0.019638,
+            0.04855000000000001
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            -0.019,
+            -0.019638,
+            0.08121666666666669
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            -0.019,
+            0.026362,
+            0.01588333333333334
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            -0.019,
+            0.026362,
+            0.04855000000000001
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            -0.019,
+            0.026362,
+            0.08121666666666669
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            -0.019638,
+            0.01588333333333334
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            -0.019638,
+            0.04855000000000001
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            -0.019638,
+            0.08121666666666669
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            0.026362,
+            0.01588333333333334
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            0.026362,
+            0.04855000000000001
+          ],
+          "radius": 0.03401153598523558
+        },
+        {
+          "center": [
+            0.019,
+            0.026362,
+            0.08121666666666669
+          ],
+          "radius": 0.03401153598523558
+        }
+      ],
+      "child_count": 96,
+      "child_radius_m": 0.01700576799261779,
+      "containment_margin_m": 5.000000000143778e-08
+    }
+  },
+  "previous_world_buffers": {
+    "gripL_Link2_L": 0.005,
+    "gripL_Link2_R": 0.005,
+    "gripR_Link2_L": 0.005,
+    "gripR_Link2_R": 0.005,
+    "gripL_Base": 0.01,
+    "gripR_Base": 0.01,
+    "Link5_L": 0.005,
+    "Link7_L": 0.003,
+    "Link5_R": 0.005,
+    "Link7_R": 0.003,
+    "TCP_Link_L": 0.0,
+    "TCP_Link_R": 0.0
+  },
+  "previous_self_buffers": {
+    "Base_L": 0.0,
+    "Base_R": 0.0,
+    "Link1_L": 0.0,
+    "Link1_R": 0.0,
+    "Link2_L": 0.0,
+    "Link2_R": 0.0,
+    "Link3_L": 0.0,
+    "Link3_R": 0.0,
+    "Link4_L": 0.0,
+    "Link4_R": 0.0,
+    "Link5_L": -0.005,
+    "Link5_R": -0.005,
+    "Link6_L": 0.0,
+    "Link6_R": 0.0,
+    "Link7_L": -0.003,
+    "Link7_R": -0.003,
+    "TCP_Link_L": 0.0,
+    "TCP_Link_R": 0.0,
+    "Link_Base": 0.0,
+    "Link_Stand": 0.0,
+    "gripL_Base": -0.01,
+    "gripL_Link1_L": 0.0,
+    "gripL_Link1_R": 0.0,
+    "gripL_Link2_L": -0.005,
+    "gripL_Link2_R": -0.005,
+    "gripL_Link3_L": 0.0,
+    "gripL_Link3_R": 0.0,
+    "gripL_Link4_L": 0.0,
+    "gripL_Link4_R": 0.0,
+    "gripR_Base": -0.01,
+    "gripR_Link1_L": 0.0,
+    "gripR_Link1_R": 0.0,
+    "gripR_Link2_L": -0.005,
+    "gripR_Link2_R": -0.005,
+    "gripR_Link3_L": 0.0,
+    "gripR_Link3_R": 0.0,
+    "gripR_Link4_L": 0.0,
+    "gripR_Link4_R": 0.0
+  },
+  "robot_sphere_count": 533,
+  "workspace_compatibility": "every new self-collision sphere is contained in an old one; all other collision geometry, transforms and exclusions unchanged; old reachable cells remain valid, previously unreachable cells are conservatively unchanged",
+  "previous_config_sha256": "8e03e5136f817be7ed49f9a95e66fa9ccc6c38e867d247741cd146eb2dc75385",
+  "config_sha256": "6aae69c87395ab76fcd0cc63140c157b8b91077cf9a1ca766e3ff81cf1db77e6",
+  "previous_model_fingerprint": "f7c0bb5c2fd57e6c578e1df4eba626ad34b9461a5f38df472257210ce9a87bce",
+  "model_fingerprint": "ffcc4dbd8cdd0af21eb124fabc53297acc4fe6420521ec08fcaf4f5e84332347"
+}

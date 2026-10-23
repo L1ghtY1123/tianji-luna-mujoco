@@ -120,7 +120,11 @@ def normalize_scene(scene):
         asset = cad_asset(item.get("asset_id")) if kind == "cad" else None
         size = _vector(item.get("size", asset["size_m"] if asset else [.04]*3), "object size", positive=True)
         if asset and not np.allclose(size, asset["size_m"], rtol=0, atol=1e-9):
-            raise ValueError("CAD size must equal the native asset size")
+            previous = np.ptp(asset['source']['bounds_mm'], axis=0) * .001
+            if asset['id'] == 'pink_wrapped' and asset.get('preprocessing') and np.allclose(size, previous, rtol=0, atol=1e-9):
+                size = asset['size_m']
+            else:
+                raise ValueError("CAD size must equal the native asset size")
         if kind in ("cube", "sphere") and not np.allclose(size, size[0]):
             raise ValueError(f"{kind} size must have equal dimensions")
         cross_section = item.get("cross_section")
@@ -399,6 +403,8 @@ class ModelBuilder:
             # settles the same geometry without changing contact/servo gains.
             spec.option.disableflags |= mujoco.mjtDisableBit.mjDSBL_NATIVECCD
         for asset_id, record in cad_records.items():
+            if record.get('simulation_geometry') == 'cad_bounds_box':
+                continue
             for label, mesh in [("visual", record["visual"]),
                                 *[(str(i), part) for i, part in enumerate(record["collision"])]]:
                 spec.add_mesh(name=f"cad_{asset_id}_{label}", file=str(_mesh_path(mesh["path"])),
@@ -430,6 +436,14 @@ class ModelBuilder:
             kind = item["kind"]
             if kind == "cad":
                 record = cad_records[item["asset_id"]]
+                if record.get('simulation_geometry') == 'cad_bounds_box':
+                    # The CAD is already centered on its local AABB. This is
+                    # the same tight box in RGB and physics, with no padding.
+                    body.add_geom(name='object_geom_' + item['id'], type=mujoco.mjtGeom.mjGEOM_BOX,
+                        size=np.asarray(record['size_m']) / 2, rgba=color_rgba(item['color']),
+                        mass=item['mass_kg'], condim=4, friction=[1., .01, .001], priority=1,
+                        solref=[.003, 1], solimp=[.95, .99, .001, .5, 2])
+                    continue
                 body.add_geom(name="object_visual_" + item["id"], type=mujoco.mjtGeom.mjGEOM_MESH,
                               meshname=f"cad_{item['asset_id']}_visual", rgba=color_rgba(item["color"]),
                               mass=0, contype=0, conaffinity=0)

@@ -830,6 +830,8 @@ class Algorithms:
     def plan_retreat(self, observation, arm, scene, goal, *, planning_settings=None):
         settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
         payload = self._motion_request(observation, arm, scene, goal, settings)
+        payload.update(departure_axis=settings['place_retreat_axis'],
+                       departure_in_tool_frame=settings['place_retreat_in_tool_frame'])
         response = self.request("/tools/plan_to_pose", payload)
         if response.get("scene_token") != scene["scene_token"] or response.get("attached") is not False:
             raise AlgorithmError("retreat requires a detached current scene")

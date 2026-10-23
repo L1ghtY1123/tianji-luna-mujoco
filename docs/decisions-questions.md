@@ -6,11 +6,11 @@
 
 按2026-10-22当前源函数整理，供审查实际模型输入与判定边界。这里说明已实现协议，不代表本次模型、GPU、部署或完整机器人任务已通过验收。历史实验的题目与回答不能自动迁移为新协议成功。
 
-当前拆包主线：初始清单一次Decisions；每次合格生命周期观测一次joint `associate_inventory`；桌面释放一次请求内的 `place_result` 与 `workpiece_still_held`；拆包结果一次 `unpack_result`；右盒投放一次 `current_item_added`。每个请求都包含该次CURRENT的camera 1/2/3完整原RGB；注释、裁剪、INITIAL和BEFORE只是附加输入，不替代三张原图。camera 1为右腕、2为左腕、3为头部；机器人左右不等于图片左右。同一对象在多视图或细节图中只算一次。
+当前拆包主线：初始清单一次Decisions；每次合格生命周期观测一次joint `associate_inventory`；桌面释放同请求判断 `place_result` 与 `workpiece_still_held`；拆包同请求判断 `unpack_result` 与 `wrapper_removed`；右盒投放判断 `current_item_added`；这三个结果节点都同请求加入 `observation_sufficient`，不足时最多一次补充观测后再核验。每个请求都包含该次CURRENT的camera 1/2/3完整原RGB；注释、裁剪、INITIAL和BEFORE只是附加输入，不替代三张原图。camera 1为右腕、2为左腕、3为头部；机器人左右不等于图片左右。同一对象在多视图或细节图中只算一次。
 
 当前结果/候选外观条件使用官方predicate：probability≥0.8为yes，≤0.2为no，中间unknown。ID、可见性类别、清单遗漏等分类保留choice及confidence≥0.8。两种数值含义不同；不使用choice probabilities绕过confidence。原始wire回答保留，错误题数、name、type、数值或选项被拒绝。生命周期兼容字段confidence在新结果中保存predicate概率，confidence_rule明确标识，不是模型另返的置信度。历史单题choice存档按旧规则读；当前请求严格匹配predicate类型。
 
-粉色泡棉包裹黑件是用户先验；一次完成一个工序。粉输入原ID与初始显示编号永久不变；拆包确认后黑产物建立独立ID，process记录输入/输出关系。右盒随机投放后的当前几何使用collection，不逐成员视觉重认。结果观察不运行SAM或建图；只有双臂观测位姿建立当前2cm TSDF/ESDF，运动碰撞阈值为1cm。这些几何数值不是要求RGB判定的毫米精度门。
+粉色泡棉包裹黑件是用户先验；一次完成一个工序。粉输入原ID与初始显示编号永久不变；拆包确认后黑产物建立独立ID，process记录输入/输出关系。右盒随机投放后的当前几何使用collection，不逐成员视觉重认。Decisions确认放置后可用同次RGBD分割建立活动工件局部障碍；只有双臂观测位姿建立全局2cm TSDF/ESDF，运动碰撞阈值为1cm。这些几何数值不是要求RGB判定的毫米精度门。
 
 ## 1. 初始清单：initialize_inventory
 
@@ -52,23 +52,17 @@
 
 这一回退仍遵守generic完整性与几何门，不等价于qualified路径的not_reassessed。INITIAL粉图只用于仍包裹的原输入；不得把黑件套回粉ID或要求已完成集合逐成员识别。
 
-## 4. 桌面释放：verify_place
+## 4. verify_place
 
-合法持物、attachment、实际释放反馈和撤离完成后，在当前位置采新三RGB核验当前粉件。实际TCP反馈结合抓取时实测物体参考与attachment几何，数值校验释放XY及物体包络在固定共享区；release_position_check明确标注为开爪时刚体推导，不是释放后物体实测位姿，也不证明视觉成功。单次Decisions发送初始全部实体、活动ID、工序/生命周期记录、INITIAL三RGB/注释和CURRENT三RGB/区域图，同一请求用两个独立predicate：place_result判断主桌上可见独立粉件，workpiece_still_held判断粉件仍被手指夹持；前者概率≥0.8且后者≤0.2才通过，不要求从RGB看清底部物理接触；不再要求模型重算公制XY或把高起轮廓装进桌面投影。概率≥0.8确认、≤0.2否定、中间unknown；原始probability不叫choice confidence。源盒粉件、机器人部件不计。INITIAL是历史，先历史后当前，头部当前图最后，三视角融合；动作记录和仿真真值不能代替当前像素。成功只推进table_released，不完成工序；不SAM、不建图。旧非拆包路径仍使用choice place_result及最后一次的demo_unlisted_pink，不能把旧choice响应塞给当前predicate请求。
+撤离完成后采当前三RGB，单次Decisions联合判断place_result（桌面独立粉件）、workpiece_still_held（仍被夹持）、observation_sufficient（当前证据是否足够确认或否定这些条件）。前两项分别须yes/no，充分性须yes；概率≥0.8为yes、≤0.2为no，其余unknown。释放XY由实际前端反馈数值核验，不能拿动作历史替代当前像素。证据不足时沿最近的保留场景回固定观测位姿，采新三图再核验一次；没有确认放置成功前不建立粉件局部碰撞。仍不足停止。明确失败不重复观察。全过程绑定原始持物、释放与场景更新链；成功仅推进table_released。确认后刷新局部粉件障碍，首次桌面及背景地图复用。
 
-实现：`demo_transfer_verification.release_position_check/release_result_payload/verify_release_result`。当前分别判断“CURRENT主桌可见独立粉件”和“粉件仍被夹持”，前者须≥0.8、后者须≤0.2；不混入底部物理接触可见性。开爪前反馈数值检查区域；此估计不等于释放后RGBD重新测量位置。当前图仍须支持放置状态。
+## 5. verify_unpack
 
-## 5. 拆包：verify_unpack
+mock VLA后，当前三RGB合并一次Decisions，判断unpack_result（主桌独立黑件）、wrapper_removed（活动粉件已经拆出黑件）、observation_sufficient（当前证据充分性）。BEFORE是本工序已验证的桌面粉件图；其他粉件仍在左盒不影响结果，不要求跨外观身份匹配。黑件可见时以同次RGBD测量并加入局部障碍，移除过时活动粉件层；无可用深度/不可见时按用户指定不创建黑件障碍，移除过时层后回位。无论当前结果如何，都必须双臂回固定观测位姿，采新三RGBD并重新联合Decisions。三项均yes后，以当前实测点云核对指定执行臂工作空间；通过才创建独立黑件ID，保留工序输入/产物关联。最多两次判断、一次回位；仍缺证据或不可达则停止。随后observe_scene分析当前清单，build_scene重建全局2cm TSDF/ESDF，复用首次桌面cuboid后才能抓取。
 
-mock VLA完成后在当前自然位姿采一份新三RGB，校验该工序已确认桌面释放的BEFORE三RGB、target/owner/generation、反馈、binding、请求与图片哈希；恰有一个活动输入。一次Decisions结合BEFORE三RGB、CURRENT三RGB与主桌辅助图，用predicate unpack_result检查当前主桌出现独立黑件。三视角共同判断，盒内已完成黑件和机器人部件不计；看不清不能以动作执行记录代替。概率≥0.8确认、≤0.2否定、中间unknown。成功创建独立product ID，process关联原粉输入与黑产物；粉件原ID/编号保留为consumed，不要求视觉证明粉黑外观同一。当前结果帧及真实BEFORE图片均归档。确认后才沿保留地图回双臂观测位姿，下一次抓取前另作Decisions/SAM/建图；本结果节点不SAM、不建图。消费者重算原始概率与执行链；历史单题choice记录保留其原confidence规则，旧多题或错误线格式不能冒充当前响应。
+## 6. verify_drop
 
-实现：`demo_lifecycle_perception.unpack_result_questions/verify_unpacking`。当前唯一事实：“CURRENT主桌上出现独立黑件”；黑件盒内历史成员不计。
-
-## 6. 右盒投放：verify_drop
-
-合法持物、attachment运输、实际开爪后，一次Decisions接收CURRENT三RGB、BEFORE三RGB及同盒辅助区域图。predicate current_item_added检查指定机器人右盒中当前可辨至少N+1个黑件，N仅为此前确认完成数，初始0来自用户场景先验。概率≥0.8确认、≤0.2否定、中间unknown；不另问in_right_bin、手指分离或旧黑件身份。多视图同件计一次，允许接触但须可分辨，机器人/桌面/盒外工件不计。动作历史和历史数量不证明当前数量。BEFORE仅为历史对照，不要求证明遮挡后曾为空。看不清或遮挡无法区分数量时不推进。成功完成独立产物及process，保留原始回答、计数、反馈链，不SAM、不建图。辅助盒区来自最新已发布占据与CAD壳边界，并按各帧标定投影，不取仿真真值。
-
-实现：`demo_lifecycle_perception.verify_right_bin_drop/drop_result_evidence`。当前唯一事实：“CURRENT指定右盒至少有N+1个可分辨黑件”。
+实际attachment运输、开爪后，单次Decisions联合CURRENT三RGB、BEFORE三RGB及同盒局部放大图，判断current_item_added（本次右盒新增黑件）和observation_sufficient。须两项yes；新增主体或轮廓可以证明增加，不要求随机堆叠后逐个数清N+1，不重认盒内个体ID，旧件移动或历史数量不证明增加。证据不足时，先发布明确标为动作推导、尚未视觉确认的盒内保守包络，再回固定观测位姿采新三图核验一次；不重建全局地图。仍不足不计完成。确认后才完成产物及工序，保留released_in_bin_and_visible_addition语义，并更新确认后的动作包络供回位。
 
 ## 7. 仍可调用的非拆包兼容节点
 
@@ -90,3 +84,15 @@ API依据：[OpenAI Decisions指南](https://developers.openai.com/api/docs/guid
 
 
 本次放置请求另含measured_gripper_state：当前capture实测夹爪角度、限位、open_confirmed、观测ID与来源。开爪不证明位置；CURRENT RGB仍须确认桌面粉件。workpiece_still_held明确检查物理接触挂持，而非二维画面位于两指之间。当前三视图顺序1、2、3（头部最后）。桌面可改色，不再以灰色为前提。
+
+
+
+## 2026-10-23 当前碰撞与补充观测规则
+
+粉件先在原始毫米坐标X=-24处裁去负X侧凸条，再按剩余主体建立紧致长方体，外观及MuJoCo接触同为79.542675×62.787369×110mm。原文件保留，去凸条派生STL及裁切记录单独归档；场景实例仍以新包围盒中心定位，yaw和重力保持。黑件与蓝盒仍是CAD。规划全局地图仍来自真实RGBD；局部物体包围体使用实测点、支撑面和显式尺寸先验，XY余量5mm，与2cm体素分辨率及10mm轨迹净距是三个不同参数。
+
+左右掌座各用96个较小球完整覆盖原物理盒，替代12个过大的球；去掉掌座与中间手指连杆重复世界膨胀。对称性、盒内连续覆盖和新球被旧球包含有可复算证明，见resources/curobo/gripper-tight-cover-20261023.json。附件仍默认24球、最多31球，允许与同侧全部9个夹爪link相交，仍检查相机、前臂、另一臂及环境。旧工作空间仅复用原可达格：碰撞几何缩小不使原可达见证失效，不新增可达结论。cuRobo SDK内部没有修改。
+
+结果核验共用observation_requirements：根据当前任务的明确条件判断证据充分性，而非相机数量。清楚看到失败也属于证据充分；遮挡、相关区域出画、身份不明或视角矛盾属于不足。当前接入桌面放置、VLA拆包、右盒投放三个结果节点。三相机始终合并一个请求；补充机制最多一次固定双臂观测位姿与新采图，并再次核验，仍不充分则停止。不是任意视角搜索；初始/抓前清单身份流程保持原约束，不冒充已接入所有视觉节点。视觉不能判断公制可达性，VLA黑件需另以测得点云核对指定执行臂工作空间。
+
+严格顺序：松爪、detach、lift → Decisions确认放置 → 同次RGBD的粉件局部障碍 → VLA移动。lift之前没有结果观测和局部建障；沿轴lift使用官方ToolPoseCriteria.linear_motion与plan_pose，规划后恢复默认criterion，包括失败分支。局部更新不触发全局TSDF/ESDF重建。正常采图预算为1+每件8次上限，包含有界补充，不是每件必采8次。

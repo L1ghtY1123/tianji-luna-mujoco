@@ -3028,7 +3028,7 @@
       "label": "粉色包裹",
       "default_color": "pink",
       "size_m": [
-        0.1110853500366211,
+        0.07954267501831055,
         0.06278736877441407,
         0.11
       ],
@@ -3059,64 +3059,101 @@
         "watertight": false,
         "winding_consistent": false
       },
-      "frame": "source axes retained; subtract source AABB center then multiply by 0.001; +Z upright",
+      "frame": "source axes retained; subtract trimmed AABB center then multiply by 0.001; +Z upright",
       "visual": {
         "path": "pink_wrapped/visual.stl",
-        "sha256": "930eb363366a8cbc2392f36e1454836ef3d84f4c45d2da78b8ee6aba4fde37b8",
-        "triangles": 10924
+        "sha256": "2f7d4066ccf896dae3be7fc83b2a4fd8ba2a5aab4f0dffada52e1fb6c1e1fd71",
+        "triangles": 9069
       },
       "collision": [
         {
           "path": "pink_wrapped/collision-00.stl",
-          "sha256": "531611081b6e2bdb074ae878e7215243ee8780de3e7bc47eb17d4eeb287597e1",
+          "sha256": "d98a12d569b1ccdaeb5272e04ebfa927cfcbf2f63ba34dee54a96eeda5c706a9",
           "volume_m3": 5.582841523442817e-05,
           "vertices": 180
         },
         {
           "path": "pink_wrapped/collision-01.stl",
-          "sha256": "42990266fcc57428aee34e1af8c85c8f253bc48d8a1fb39a1f16af9feaf7816d",
+          "sha256": "0273d92b3c70d3a3e33b63e1f78795c5a4524dd9116fd7c550a0dcfa1adbc461",
           "volume_m3": 5.599476570874093e-05,
           "vertices": 186
         },
         {
           "path": "pink_wrapped/collision-02.stl",
-          "sha256": "be51e302683671255e0ae2dc489f4da2689e7f555826df4398279d85a01a73cc",
-          "volume_m3": 6.344728799659171e-05,
-          "vertices": 174
+          "sha256": "36b4d5833cf67826de2e534bed3222c5cdccc5de53678fe78f68b2065c525dbc",
+          "volume_m3": 5.6633757209726586e-05,
+          "vertices": 202
         },
         {
           "path": "pink_wrapped/collision-03.stl",
-          "sha256": "375f69778910ed0e07652849388bfcb8fb5a2e4a1240d3ea1592b5eab1a4f813",
-          "volume_m3": 6.756032635184791e-05,
-          "vertices": 182
+          "sha256": "17fc8f00872a6c34da47e88679fd6fb003eaf810463963029e1fd00642166e6c",
+          "volume_m3": 5.717911764755405e-05,
+          "vertices": 202
         },
         {
           "path": "pink_wrapped/collision-04.stl",
-          "sha256": "ac7afe1029d4352adf1761d272620ee1c3a25636ed62efb20895004e1da70dd0",
-          "volume_m3": 6.62230627424576e-05,
-          "vertices": 195
+          "sha256": "da83647834f58e044172337f4a3e0b481db8e77ca56a318695a0342a08bcbc45",
+          "volume_m3": 5.762179029075514e-05,
+          "vertices": 206
         },
         {
           "path": "pink_wrapped/collision-05.stl",
-          "sha256": "0b1c0735e779a821746400f73a64f5689becf30a00a798fbe18afd5b025e8369",
-          "volume_m3": 5.71686876334186e-05,
+          "sha256": "d9556f098bc960d3f2600e5a5c0c2695bf886c57d7e315ad9d6496bce76ce6eb",
+          "volume_m3": 5.7168687633418615e-05,
           "vertices": 171
         },
         {
           "path": "pink_wrapped/collision-06.stl",
-          "sha256": "3213cf81988727b4b840e34d0fb2b42eae95a05b7c151e82183f6cb5b30b9d6d",
-          "volume_m3": 5.741323151901875e-05,
+          "sha256": "a661eb043e0228c49b607f15b32b0a1e481f26854b9ab50d2f4035c954be52b3",
+          "volume_m3": 5.741323151901874e-05,
           "vertices": 163
         },
         {
           "path": "pink_wrapped/collision-07.stl",
-          "sha256": "ac46205d5118484b4c472f3f441c0b47617b0d9a3a44fe50e4e9d05fe66a2336",
-          "volume_m3": 4.295103553170342e-05,
+          "sha256": "efc84a849ba44098a2eb5a5c5109b001156e9dad57d985c4a1208f0e4c87bd3a",
+          "volume_m3": 4.295103553170343e-05,
           "vertices": 231
         }
       ],
       "collision_approximation": "eight axial convex bands; concavities/threads locally filled",
-      "inertia_basis": "uniform density of convex pieces; mass split by piece volume to explicit total mass"
+      "inertia_basis": "uniform density of convex pieces; mass split by piece volume to explicit total mass",
+      "preprocessing": {
+        "operation": "remove_negative_x_side_tab_then_tight_aabb",
+        "plane_source_mm": {
+          "normal": [
+            1,
+            0,
+            0
+          ],
+          "origin": [
+            -24.0,
+            0,
+            0
+          ]
+        },
+        "trimmed_source": {
+          "path": "pink_wrapped/trimmed-source-mm.stl",
+          "sha256": "a8a5b271f250a0c1df34756f23a63d8072a6ea8d8ed2a925e58803b9ebc4cdc3"
+        },
+        "processed_bounds_mm": [
+          [
+            -24.0,
+            -31.39368438720703,
+            0.0
+          ],
+          [
+            55.54267501831055,
+            31.39368438720703,
+            110.0
+          ]
+        ],
+        "aabb_center_mm": [
+          15.771337509155273,
+          0.0,
+          55.0
+        ],
+        "original_source_preserved": true
+      }
     },
     "black_core": {
       "id": "black_core",
@@ -3216,7 +3253,7 @@
   },
   "generator": {
     "script": "scripts/build_cad_assets.py",
-    "script_sha256": "953bcedcdbbe9522f59cb252edf12509b9d9bcafb7a3284b331a6edef9354054",
+    "script_sha256": "190a8dd2fcc31fa62611077fd179f1b180ede4967d7001bb359a10cbd7e0b858",
     "trimesh_version": "4.12.2",
     "scipy_version": "1.18.1",
     "converter": {

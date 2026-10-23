@@ -365,20 +365,33 @@ class DemoAlgorithms(Algorithms):
         result = self.request("/perception/update", payload)
         return {**scene, **result}
 
-    def publish_local_object(self, scene, capture, target_id, work_area, appearance):
+    def measure_local_object(self, capture, work_area, appearance):
         from .local_object_obstacle import measure_object_obstacle
 
-        if capture['generation'] != scene['generation']:
-            raise ValueError('local_object_capture_stale')
-        cameras = ['3', '2', '1'] if appearance == 'unpacked' else ['3']
+        cameras = ['3', '2', '1']
         for camera_id in cameras:
             try:
                 measured = measure_object_obstacle(capture, self.perception.detector, work_area,
                                                     appearance, camera_id=camera_id)
-                break
+                return measured
             except ValueError as error:
                 if str(error) != 'local_object_depth_missing' or camera_id == cameras[-1]:
                     raise
+
+    def measured_object_workspace(self, measurement, arm):
+        points = np.asarray(measurement['points_world_m'], float)
+        if points.ndim != 2 or points.shape[1] != 3 or len(points) < 30 or not np.isfinite(points).all():
+            raise ValueError('local_object_depth_missing')
+        center = ((points.min(axis=0) + points.max(axis=0)) / 2).tolist()
+        result = self.workspace_lookup(arm, [center])[0]
+        return {**result, 'arm': arm, 'observation_id': measurement['observation_id'],
+            'source': 'current_rgbd_object_center_and_offline_workspace',
+            'scope': 'position_workspace_only_grasp_pose_and_path_not_yet_planned'}
+
+    def publish_local_object(self, scene, capture, target_id, work_area, appearance):
+        if capture['generation'] != scene['generation']:
+            raise ValueError('local_object_capture_stale')
+        measured = self.measure_local_object(capture, work_area, appearance)
         result = self.request('/perception/update', {
             'scene_token': scene['scene_token'], 'generation': scene['generation'],
             'operation': 'local_object', 'exclusion_state': 'released', 'target_id': target_id,
@@ -405,7 +418,7 @@ class DemoAlgorithms(Algorithms):
         if (lower.shape != (3,) or upper.shape != (3,) or not np.isfinite([lower, upper]).all()
                 or not (upper > lower).all() or not isinstance(target_id, str) or not target_id
                 or not isinstance(action_id, str) or not action_id
-                or source not in {"mock_vla", "verified_drop_action_bounds"}):
+                or source not in {"mock_vla", "verified_drop_action_bounds", "drop_release_action_bounds"}):
             raise ValueError("invalid action envelope bounds or provenance")
         result = self.request("/perception/update", {
             "scene_token": scene["scene_token"], "generation": scene["generation"],

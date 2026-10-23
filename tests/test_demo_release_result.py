@@ -66,6 +66,9 @@ async def test_confirmed_unpack_table_release_retains_private_capture_and_compac
     class LocalObstacleVision(DemoVision):
         def publish_local_object(self, scene, capture, target, area, appearance):
             assert target == 'pink-1' and appearance == 'wrapped'
+            assert self.release_calls == 1, 'publish only after Decisions'
+            assert runner.state['facts']['place_execution_completed'], 'lift must finish first'
+            assert runner.current_lifecycle()['phase'] == 'table_released'
             return {'scene': scene, 'measurement': {'observation_id': capture['observation_id']}}
 
     class InspectUnpackRelease(DemoRunner):
@@ -333,12 +336,13 @@ def test_unpack_table_release_questions_name_the_visible_wrapper_not_the_hidden_
     assert 'VLA unpacking follows successful table placement' in task_context['interpretation']
     assert 'even if the release action was recorded' in context
     for question in wrapped['questions']:
-        assert 'separate pink workpiece' in question['instructions']
+        if question['name'] != 'observation_sufficient':
+            assert 'separate pink workpiece' in question['instructions']
         assert 'foam' not in question['instructions'] and 'wrapped' not in question['instructions']
         assert 'material' not in question['instructions']
         assert 'elliptical-cylinder' not in question['instructions']
     assert 'foam material' not in wrapped['questions'][0]['instructions']
-    assert [q['name'] for q in wrapped['questions']] == ['place_result', 'workpiece_still_held']
+    assert [q['name'] for q in wrapped['questions']] == ['place_result', 'workpiece_still_held', 'observation_sufficient']
     assert [q['name'] for q in legacy['questions']] == ['place_result']
     assert wrapped['questions'][0]['type'] == 'predicate'
     assert legacy['questions'][0]['type'] == 'choice'

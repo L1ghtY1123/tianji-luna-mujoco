@@ -154,6 +154,26 @@ def test_height_completion_preserves_scene_workspace_bounds():
     assert captured["candidate"].bounds is mapper.bounds
 
 
+@pytest.mark.parametrize('appearance,asset,axis', [('wrapped', 'pink_wrapped', 2),
+    ('unpacked', 'black_core', 0), ('unpacked', 'black_core', 2)])
+def test_current_cad_height_prior_passes_through_real_mapping_boundary(appearance, asset, axis):
+    from luna_mujoco.cad_assets import cad_asset
+
+    snapshot = completed_black_observation()
+    instance = snapshot['objects'][0]
+    height = cad_asset(asset)['size_m'][axis]
+    instance.update(color='pink' if appearance == 'wrapped' else 'black', current_appearance=appearance,
+        appearance_revision=0 if appearance == 'wrapped' else 1,
+        lifecycle_phase='wrapped_source' if appearance == 'wrapped' else 'unpacked_confirmed')
+    instance['points_world_m'][:, 2] = .6 + height
+    complete_source_height(instance, support_z_m=.6,
+        support_source='measured_bin_floor' if appearance == 'wrapped' else 'cached_measured_table_plane',
+        observation_id=snapshot['observation_id'], height_prior_m=height)
+    captured, _ = build_demo_snapshot(snapshot)
+    model = captured['candidate'].scene_model['cuboid']['semantic_instance::seen-red::height_completion']
+    assert model['dims'][2] == pytest.approx(height, abs=1e-7)
+
+
 def test_build_scene_accepts_current_wrapped_pink_ten_cm_prior():
     snapshot = completed_black_observation()
     instance = snapshot['objects'][0]

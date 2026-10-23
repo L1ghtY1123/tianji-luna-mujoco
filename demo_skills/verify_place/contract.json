@@ -1,6 +1,6 @@
 {
   "id": "verify_place",
-  "description": "合法持物、attachment、实际释放反馈和撤离完成后，在当前位置采新三RGB核验当前粉件。实际TCP反馈结合抓取时实测物体参考与attachment几何，数值校验释放XY及物体包络在固定共享区；release_position_check明确标注为开爪时刚体推导，不是释放后物体实测位姿，也不证明视觉成功。单次Decisions发送初始全部实体、活动ID、工序/生命周期记录、当前实测夹爪角度及开闭限位、INITIAL三RGB/注释和CURRENT三RGB/区域图，同一请求用两个独立predicate：place_result判断主桌上可见独立粉件，workpiece_still_held判断粉件仍被手指夹持；前者概率≥0.8且后者≤0.2才通过，不要求从RGB看清底部物理接触；不再要求模型重算公制XY或把高起轮廓装进桌面投影。概率≥0.8确认、≤0.2否定、中间unknown；原始probability不叫choice confidence。源盒粉件、机器人部件不计。INITIAL是历史，先历史后当前，头部当前图最后，三视角融合；动作记录和仿真真值不能代替当前像素。成功只推进table_released，不完成工序；视觉确认后以同帧头部SAM3/RGBD更新当前物体局部障碍，背景地图不重建，深度不足则停止后续运动。旧非拆包路径仍使用choice place_result及最后一次的demo_unlisted_pink，不能把旧choice响应塞给当前predicate请求。",
+  "description": "撤离完成后采当前三RGB，单次Decisions联合判断place_result（桌面独立粉件）、workpiece_still_held（仍被夹持）、observation_sufficient（当前证据是否足够确认或否定这些条件）。前两项分别须yes/no，充分性须yes；概率≥0.8为yes、≤0.2为no，其余unknown。释放XY由实际前端反馈数值核验，不能拿动作历史替代当前像素。证据不足时沿最近的保留场景回固定观测位姿，采新三图再核验一次；没有确认放置成功前不建立粉件局部碰撞。仍不足停止。明确失败不重复观察。全过程绑定原始持物、释放与场景更新链；成功仅推进table_released。确认后刷新局部粉件障碍，首次桌面及背景地图复用。",
   "requires": {
     "needs_place": true,
     "released": true,

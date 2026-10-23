@@ -39,10 +39,11 @@ def test_measured_attachment_false_collision_is_removed_without_shrinking_attach
 
 def test_current_model_changes_only_four_link4_and_two_certified_base_lists():
     from replay_transfer_spheres import rebuild
+    from test_gripper_base_coverage import original_palm_cover
 
     previous = yaml.safe_load(rebuild(ROOT / "data/next-revision-audit-20261012/spheres",
                                      recipe_name="recipe-v6.json"))
-    current = yaml.safe_load(CONFIG.read_bytes())
+    current = original_palm_cover(yaml.safe_load(CONFIG.read_bytes()))
     before = previous["robot_cfg"]["kinematics"].pop("collision_spheres")
     after = current["robot_cfg"]["kinematics"].pop("collision_spheres")
     assert previous == current
@@ -168,7 +169,11 @@ def test_closed_gripper_retains_link4_world_spheres_and_exact_owner_touch_pairs(
     for hand in "LR":
         for side in "LR":
             link = f"grip{hand}_Link4_{side}"
-            assert kin["collision_spheres"][link] == config["robot_cfg"]["kinematics"]["collision_spheres"][link]
+            # Feedback locking already adds 1 nm on both hands to bound
+            # open-stop normalization. Attachment must preserve that geometry.
+            expected_spheres = array(config["robot_cfg"]["kinematics"]["collision_spheres"][link])
+            expected_spheres[:, 3] += 1e-9
+            np.testing.assert_array_equal(array(kin["collision_spheres"][link]), expected_spheres)
             assert len(kin["collision_spheres"][link]) == 14
             assert link in kin["collision_link_names"]
             assert (attached_link in kin["self_collision_ignore"].get(link, [])) == (hand == "L")

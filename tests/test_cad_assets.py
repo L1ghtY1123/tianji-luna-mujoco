@@ -21,7 +21,7 @@ def test_cad_normalization_uses_native_dimensions_and_has_no_object_count_limit(
     assert len(scene["objects"]) == 35
     item = scene["objects"][0]
     assert item["asset_id"] == "pink_wrapped"
-    np.testing.assert_allclose(item["size"], [.1110853500366211, .06278736877441406, .11])
+    np.testing.assert_allclose(item["size"], [.07954267501831055, .06278736877441406, .11])
     assert item["color"] == "#4080c0" and item["mass_kg"] == .5
     with pytest.raises(ValueError, match="asset"):
         normalize_scene({"objects": [cad_item("missing")]})
@@ -87,7 +87,7 @@ def test_blue_cad_collision_preserves_cavity_and_bottom():
         builder.close()
 
 
-def test_cad_sources_and_generated_meshes_are_fingerprinted_without_visual_repairs():
+def test_cad_sources_and_generated_meshes_are_fingerprinted_with_explicit_pink_trim():
     import hashlib
     import json
 
@@ -108,7 +108,12 @@ def test_cad_sources_and_generated_meshes_are_fingerprinted_without_visual_repai
             continue
         raw = trimesh.load(CAD_ROOT / record["source"]["path"], force="mesh", process=False)
         visual = trimesh.load(CAD_ROOT / record["visual"]["path"], force="mesh", process=False)
-        expected = (raw.triangles - np.array(record["source"]["aabb_center_mm"]))*.001
+        if asset_id == 'pink_wrapped':
+            processed = record['preprocessing']['trimmed_source']
+            assert hashlib.sha256((CAD_ROOT/processed['path']).read_bytes()).hexdigest() == processed['sha256']
+            raw = trimesh.load(CAD_ROOT/processed['path'], force='mesh', process=False)
+            assert raw.bounds[0, 0] == pytest.approx(-24.)
+        expected = (raw.triangles - np.array(record.get("preprocessing", record["source"])["aabb_center_mm"]))*.001
         assert len(visual.faces) == len(raw.faces)
         np.testing.assert_allclose(visual.triangles, expected, atol=1e-8, rtol=0)
 

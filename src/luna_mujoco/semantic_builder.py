@@ -99,7 +99,9 @@ def _color_preview(views, geometries, integration):
 
 
 def _authorized_demo_height(completion, identifier, observation_id):
-    """Authorize the upright prior from current identity, never mock geometry."""
+    """Authorize catalog/legacy height from current identity, never mock geometry."""
+    from .cad_assets import cad_asset
+
     height = completion.get('height_prior_m')
     context = completion.get('instance_context')
     # Preserve the original 100 mm contract for captures without lifecycle data.
@@ -110,6 +112,19 @@ def _authorized_demo_height(completion, identifier, observation_id):
             or completion.get('observation_id') != observation_id
             or type(context.get('appearance_revision')) is not int):
         return False
+    source = completion.get('height_prior_source')
+    if source == 'user_cad_asset:pink_wrapped':
+        return (height == cad_asset('pink_wrapped')['size_m'][2]
+                and context.get('color') == 'pink' and context.get('current_appearance') == 'wrapped'
+                and context['appearance_revision'] == 0)
+    black_axes = {'user_cad_asset:black_core': 2,
+                  'user_cad_asset:black_core:flat_local_x_vertical': 0}
+    if source in black_axes:
+        return (height == cad_asset('black_core')['size_m'][black_axes[source]]
+                and context.get('color') == 'black' and context.get('current_appearance') == 'unpacked'
+                and context['appearance_revision'] > 0
+                and context.get('lifecycle_phase') == 'unpacked_confirmed'
+                and completion.get('support_source') == 'cached_measured_table_plane')
     if height == .10:
         return (context.get('color') == 'pink' and context.get('current_appearance') == 'wrapped'
                 and context['appearance_revision'] == 0

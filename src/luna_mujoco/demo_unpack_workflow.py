@@ -189,6 +189,20 @@ class UnpackWorkflow:
             self.set_observation_stage(observation)
         return observation
 
+    async def supplement_result_observation(self, context, assessment, purpose):
+        """One explicit, task-requested view change; never rebuild a global map here."""
+        self.emit('supplemental_observation', '证据不足：补充观测后重新核验', {
+            'purpose': purpose, 'assessment': copy.deepcopy(assessment),
+            'method': 'configured_dual_observation_pose', 'maximum_supplements': 1,
+            'scene_token': context['scene']['scene_token'], 'global_remap': False})
+        context['use_retained_scene_for_return'] = True
+        await self.move_to_observe(context)
+        self.state['facts']['observation_pose_ready'] = True
+        capture = context.pop('fine_capture')
+        if capture['observation_id'] == assessment.get('observation_id'):
+            raise ValueError('supplemental_observation_requires_new_capture')
+        return capture
+
     async def execute_unpack(self, skill, context):
         method = getattr(self, '_' + skill)
         return await method(context)
@@ -262,24 +276,58 @@ class UnpackWorkflow:
                 capture, target_id=target, lifecycle=copy.deepcopy(lifecycle),
                 action_evidence=copy.deepcopy(lifecycle['mock_action']), owner_id=self.run_id, work_area=work_area,
                 table_release_capture=before, table_release_reference=copy.deepcopy(reference), active_target_ids=active_ids)
-            self.emit('visual_unpack_result', 'Decisions：桌面黑件是否可见', result)
+            self.emit('visual_unpack_result', 'Decisions：拆包结果与观测充分性', result)
             if attempt == 1:
                 break
-            if result['success']:
-                local = await self.call_algorithm(self.algorithms.publish_local_object,
-                    context['scene'], capture, target, work_area, 'unpacked')
-                context['scene'] = local['scene']
-                self.emit('local_object_obstacle', '黑件可见：加入实测局部障碍后回观测位姿', local['measurement'])
-            else:
+            local = None
+            visible = result.get('visual_evidence', {}).get('judgments', {}).get('unpack_result') == 'yes'
+            if visible or result['success']:
+                try:
+                    local = await self.call_algorithm(self.algorithms.publish_local_object,
+                        context['scene'], capture, target, work_area, 'unpacked')
+                except ValueError as error:
+                    if str(error) != 'local_object_depth_missing':
+                        raise
+                    result['observation_assessment'] = {**result.get('observation_assessment', {}),
+                        'observation_id': capture['observation_id'], 'needs_observation': True,
+                        'missing_evidence': ['current_object_depth'], 'status': 'unknown'}
+                if local:
+                    context['scene'] = local['scene']
+                    self.emit('local_object_obstacle', '黑件可见：加入实测局部障碍后回观测位姿', local['measurement'])
+            if local is None:
                 context['scene'] = await self.call_algorithm(self.algorithms.omit_unpack_obstacle,
                     context['scene'], target, lifecycle['mock_action']['action_id'])
             self.emit('unpack_observation_return', '拆包后双臂回观测位姿，准备重新建立全局场景',
                 {'target_id': target, 'scene_token': context['scene']['scene_token'],
-                 'black_obstacle_measured': result['success']})
-            context['use_retained_scene_for_return'] = True
-            await self.move_to_observe(context)
-            capture = context.pop('fine_capture')
-            self.state['facts']['observation_pose_ready'] = True
+                 'black_obstacle_measured': local is not None})
+            assessment = result.get('observation_assessment', {})
+            if assessment.get('needs_observation'):
+                capture = await self.supplement_result_observation(context, assessment, 'verify_unpack')
+            else:
+                context['use_retained_scene_for_return'] = True
+                await self.move_to_observe(context)
+                capture = context.pop('fine_capture')
+                self.state['facts']['observation_pose_ready'] = True
+        if result['success']:
+            try:
+                measured = await self.call_algorithm(self.algorithms.measure_local_object,
+                    capture, work_area, 'unpacked')
+            except ValueError as error:
+                if str(error) != 'local_object_depth_missing':
+                    raise
+                result.update(success=False, status='unknown', reason='unpack_depth_unconfirmed_after_observation')
+                result['observation_assessment'].update(needs_observation=True,
+                    missing_evidence=['current_object_depth'], status='unknown', supplement_exhausted=True)
+            else:
+                workspace = await self.call_algorithm(self.algorithms.measured_object_workspace,
+                    measured, lifecycle['to_right_bin_arm'])
+                result['workspace_evidence'] = workspace
+                result['visual_evidence']['workspace_evidence'] = workspace
+                self.emit('unpack_workspace_checked', '实测黑件位置与执行臂工作空间核对', workspace)
+                if not workspace['reachable']:
+                    result.update(success=False, status='failure', reason='unpacked_object_outside_execution_workspace')
+        if result.get('observation_assessment', {}).get('needs_observation'):
+            result['observation_assessment']['supplement_exhausted'] = True
         if result['success']:
             product = create_product(self.demo_task, target, result, capture, owner_id=self.run_id)
             self.task_progress.register_product(product)
@@ -411,6 +459,19 @@ class UnpackWorkflow:
             capture, target_id=target, lifecycle=copy.deepcopy(lifecycle),
             action_evidence=copy.deepcopy(lifecycle['drop_action']), reference=reference, owner_id=self.run_id)
         self.emit('visual_drop_result', 'Decisions 核验本次黑件进入右盒', result)
+        if result.get('observation_assessment', {}).get('needs_observation'):
+            occupied = reference['drop_bin_region']
+            bounds = {'minimum_world_m': occupied['minimum_world_m'],
+                'maximum_world_m': (np.asarray(occupied['maximum_world_m']) + [0, 0, .02]).tolist()}
+            context['scene'] = await self.call_algorithm(self.algorithms.publish_action_envelope,
+                context['scene'], target, bounds, lifecycle['drop_action']['action_id'],
+                source='drop_release_action_bounds')
+            capture = await self.supplement_result_observation(context, result['observation_assessment'], 'verify_drop')
+            self.record_observation(capture, 'post_place')
+            result = await self.call_algorithm(self.verify_right_bin_drop,
+                capture, target_id=target, lifecycle=copy.deepcopy(lifecycle),
+                action_evidence=copy.deepcopy(lifecycle['drop_action']), reference=reference, owner_id=self.run_id)
+            self.emit('visual_drop_result', 'Decisions：补充观测后核验入盒', result)
         if result['success']:
             evidence = result['visual_evidence']
             release = self.task_progress.records[target]['visual_release']

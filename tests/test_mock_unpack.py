@@ -126,8 +126,10 @@ def test_recording_snapshot_binds_manifest_revision_to_actual_shape(simulation):
 
     with simulation._condition:
         first = simulation.recording_snapshot()
-        old_urls = {row["mesh_url"] for row in first["geometry_update"]["geometry_manifest"]["geometries"]
-                    if row.get("asset_id") == "pink_wrapped"}
+        pink_rows = [row for row in first['geometry_update']['geometry_manifest']['geometries']
+                     if row.get('asset_id') == 'pink_wrapped']
+        assert pink_rows and all(row['type'] == 'box' for row in pink_rows)
+        old_urls = {row['mesh_url'] for row in pink_rows if 'mesh_url' in row}
         old_bytes = {url: Path(url.removeprefix("/")).read_bytes() for url in old_urls}
         receipt = simulation.mock_unpack(AREA, generation=simulation._generation)
         second = simulation.recording_snapshot(first["manifest_revision"])

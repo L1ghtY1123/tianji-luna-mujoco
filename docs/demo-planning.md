@@ -224,3 +224,8 @@ Evidence: data/v8-place-diagnostic. This frozen test is not an executed transfer
 2026-10-22 官方抓取调用及GPU剖析核对：锁定commit 8e734f3的公开BatchMotionPlanner.plan_grasp没有外部IK解参数；当前请求只传目标矩阵，未复用前序batched IK关节解。官方Stage1实际执行完整plan_pose，然后执行approach/grasp/lift，不能把Stage1描述成仅IK或廉价预检。官方getting_started/motion_planning.py抓取示例采用单问题多goalset选择，当前批处理为B个独立问题、每个goalset=1；两种工作量不可混为同一benchmark。同镜像运行未修改官方grasp示例成功。冻结4候选GPU剖析：self CUDA约6.894秒，主要场景运动碰撞kernel5.295秒、另一场景碰撞kernel1.027秒（约92%，不叠加嵌套NVTX区间）；不是开爪扫掠检查。仅在隔离诊断进程中禁用98个CAD mesh障碍，4候选耗时由完整世界warm9.10秒降至2.05秒，恢复完整世界11.64秒；随机状态自然推进，此实验只用于定位碰撞表示的计算代价，不证明禁用后轨迹安全。诊断轨迹没有执行，生产碰撞世界和1cm阈值未改变。证据data/planner-cprofile.txt、data/mesh-cost-profile.txt、data/official-grasp-example.log。本轮skill行为无变化，不能宣称性能修复已完成。
 
 2026-10-23 current drop target: finger-front X stays at the robot-near half center; Y is inset toward robot Y=0 by 32% of the complete cavity Y span, if that point remains inside the measured cavity. Otherwise retain the near-half center. This selects an allowed endpoint within the user region; it adds no carried-cloud projection constraint. Preserve actual lift orientation, attached plan_pose and 10 mm collision checks.
+
+
+粉件保持抓取旋转，夹爪前端对准固定共享区域中心XY=[0.50160,0.11646]m，无分区。Z根据attachment、当前夹爪与世界碰撞选择接近10mm间隙的高度。直接调用官方plan_grasp的接近/放下两阶段，不使用plan_place_batch；两段均闭爪attachment。第三段按全开夹爪、detach规划，使用官方plan_pose配合ToolPoseCriteria.linear_motion，沿高级设置撤离轴lift，避免自由绕弯扫过刚释放的物体。只检查当前闭合与全开端点，不检查开爪扫掠，不加2mm终点上限。
+
+执行已验证的带物接近、放下轨迹。松爪前检查实际关节、夹爪、attachment、目标区域与10mm碰撞阈值；开爪确认、detach、阶段等待后沿设定轴lift。这里不采结果图、不分割或建立粉件局部障碍。lift完成后由verify_place调用Decisions；只有放置已确认才用同次RGBD建立粉件局部障碍，之后才能移动到VLA位姿。顺序不可提前。

@@ -81,6 +81,16 @@ def clipped(mesh, normal, origin):
     return trimesh.intersections.slice_mesh_plane(mesh, normal, origin, cap=False)
 
 
+def trim_pink_side_tab(raw):
+    """User-requested removal of the negative-X tab; keep the full-height body.
+
+    Source units are mm. The body above/below the tab starts at X >= -23.74;
+    X=-24 therefore preserves it while removing the projecting strip. The
+    original non-watertight STL remains unchanged and separately fingerprinted.
+    """
+    return clipped(raw, [1, 0, 0], [-24., 0, 0])
+
+
 def bin_hulls(mesh):
     """Partition the CAD surface before convexification; never hull the cavity.
 
@@ -160,9 +170,10 @@ def cavity_section(mesh, z):
 
 
 def build(node, module, temporary, asset_ids=None):
-    for name, expected in CONVERTER_HASHES.items():
-        if digest(module.parent / name) != expected:
-            raise ValueError(f"unexpected occt-import-js 0.0.23 runtime: {name}")
+    if asset_ids is None or 'blue_box' in asset_ids:
+        for name, expected in CONVERTER_HASHES.items():
+            if digest(module.parent / name) != expected:
+                raise ValueError(f"unexpected occt-import-js 0.0.23 runtime: {name}")
     # A replacement asset must not rewrite unrelated meshes or their metadata.
     records = (json.loads((ASSETS / "manifest.json").read_text(encoding="utf-8"))["assets"]
                if asset_ids is not None else {})
@@ -172,8 +183,9 @@ def build(node, module, temporary, asset_ids=None):
         raw = (step_mesh(source, node, module, temporary) if source.suffix == ".step"
                else trimesh.load(source, force="mesh", process=False))
         raw.merge_vertices()
-        center = raw.bounds.mean(axis=0)
-        mesh = raw.copy()
+        processed = trim_pink_side_tab(raw) if asset_id == 'pink_wrapped' else raw
+        center = processed.bounds.mean(axis=0)
+        mesh = processed.copy()
         mesh.vertices = (mesh.vertices - center) * .001
         directory = ASSETS / asset_id
         directory.mkdir(parents=True, exist_ok=True)
@@ -194,7 +206,7 @@ def build(node, module, temporary, asset_ids=None):
             "mass_basis": "explicit demo approximation; not CAD material density",
             "source": {"path": source.relative_to(ASSETS).as_posix(), "sha256": digest(source),
                        "units": "mm", "unit_evidence": "STEP SI_UNIT or STL authored header",
-                       "bounds_mm": raw.bounds.tolist(), "aabb_center_mm": center.tolist(),
+                       "bounds_mm": raw.bounds.tolist(), "aabb_center_mm": raw.bounds.mean(axis=0).tolist(),
                        "watertight": raw.is_watertight, "winding_consistent": raw.is_winding_consistent},
             "frame": "source axes retained; subtract source AABB center then multiply by 0.001; +Z upright",
             "visual": {"path": visual.relative_to(ASSETS).as_posix(), "sha256": digest(visual),
@@ -204,6 +216,18 @@ def build(node, module, temporary, asset_ids=None):
                 if asset_id == "blue_box" else "eight axial convex bands; concavities/threads locally filled"),
             "inertia_basis": "uniform density of convex pieces; mass split by piece volume to explicit total mass",
         }
+        if asset_id == 'pink_wrapped':
+            trimmed = directory / 'trimmed-source-mm.stl'
+            processed.export(trimmed)
+            records[asset_id]['preprocessing'] = {
+                'operation': 'remove_negative_x_side_tab_then_tight_aabb',
+                'plane_source_mm': {'normal': [1, 0, 0], 'origin': [-24., 0, 0]},
+                'trimmed_source': {'path': trimmed.relative_to(ASSETS).as_posix(), 'sha256': digest(trimmed)},
+                'processed_bounds_mm': processed.bounds.tolist(),
+                'aabb_center_mm': center.tolist(),
+                'original_source_preserved': True,
+            }
+            records[asset_id]['frame'] = 'source axes retained; subtract trimmed AABB center then multiply by 0.001; +Z upright'
         if asset_id == "blue_box":
             records[asset_id]["cavity_floor_z_m"] = -.0675
             records[asset_id]["cavity_axis"] = "+Z"
@@ -223,7 +247,7 @@ def build(node, module, temporary, asset_ids=None):
                                   "files_sha256": CONVERTER_HASHES,
                                   "linear_deflection_mm": .1, "angular_deflection_rad": .15},
                     "sdk_modified": False}}
-    (ASSETS / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False)+"\n", encoding="utf-8")
+    (ASSETS / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False)+"\n", encoding="utf-8", newline="\n")
     print(json.dumps({key: {"size_m": value["size_m"], "hulls": len(value["collision"])}
                       for key, value in records.items()}, indent=2))
 
@@ -236,5 +260,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     work = ROOT / "data/cad-build"
     work.mkdir(parents=True, exist_ok=True)
-    module_path = args.occt_module or converter(work / "converter")
+    needs_step = args.asset is None or 'blue_box' in args.asset
+    module_path = args.occt_module or (converter(work / "converter") if needs_step else work / 'unused-step-module')
     build(args.node, module_path.resolve(), work, args.asset)

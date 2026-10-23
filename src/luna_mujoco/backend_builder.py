@@ -8,6 +8,7 @@ import hashlib
 import logging
 import sys
 import time
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
@@ -307,6 +308,18 @@ def support_departure_criteria(criteria_type, request, non_terminal_scale):
     return criteria
 
 
+@contextmanager
+def linear_retreat_criteria(backend, axis, in_tool_frame):
+    """Official tool-pose criterion for the open-hand lift; restore on failure."""
+    criteria_type = backend._tool_pose_criteria_type
+    try:
+        criteria = criteria_type.linear_motion(axis=axis, project_distance_to_goal=in_tool_frame)
+        backend.motion_planner.update_tool_pose_criteria({backend.tool_frame: criteria})
+        yield
+    finally:
+        backend.motion_planner.update_tool_pose_criteria({backend.tool_frame: criteria_type()})
+
+
 class ValidatedSingleBackend(_NativeCuroboBackend):
     def warmup(self):
         return self.motion_planner.warmup(enable_graph=True,
@@ -437,7 +450,11 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
         self.motion_planner.last_pose_result = None
         try:
             try:
-                result = super().plan_to_pose_native(request)
+                departure = getattr(self, 'release_departure', None)
+                scope = linear_retreat_criteria(self, *departure) if departure else nullcontext()
+                # The native runtime owns the GPU lock while calling here.
+                with scope:
+                    result = super().plan_to_pose_native(request)
             except CuroboToolError as error:
                 # The pinned wrapper uses one code for an SDK exception and a
                 # valid unsuccessful result. Only the latter permits another yaw.

@@ -13,6 +13,7 @@ from .decision_conditions import condition, parse_answers, result_answers
 from .demo_bin_geometry import validate_published_bin_components
 from .demo_process import completed_product_collection
 from .observation_labels import project_placement_regions
+from .observation_requirements import assessment, sufficiency_question
 from .visual_api import VisualAPI, VisualInventoryError
 from .visual_inventory import image_part
 
@@ -65,7 +66,7 @@ def lifecycle_entities(entities, task):
                       height_prior_m=workpiece_height_prior('black_core' if unpacked else 'pink_wrapped'),
                       segmentation_query={'kind': 'object', 'color': color, 'prompt': color + ' object'},
                       segmentation_prompts=([ 'black object', 'black unpacked object', 'black rectangular object']
-                          if unpacked else ['pink object', 'pink foam wrapped object', 'elliptical pink object']))
+                          if unpacked else ['pink object', 'pink foam wrapped object', 'pink rectangular object']))
     collection = completed_product_collection(task)
     if collection:
         current[collection['id']] = collection
@@ -263,11 +264,17 @@ def unpack_verification_capture(capture):
 def unpack_result_questions():
     return [condition('unpack_result', 'In the CURRENT views, a black workpiece is visible on the main '
         'tabletop, outside both blue bins. It may be partly occluded by an open gripper; judge its exposed '
-        'body using the views together. Black robot components and workpieces inside a blue bin do not count.')]
+        'body using the views together. Black robot components and workpieces inside a blue bin do not count.'),
+        condition('wrapper_removed', 'Compared with BEFORE, the active pink wrapped workpiece on the main '
+            'table has been unpacked: its black inner workpiece is exposed as a separate object, no longer '
+            'enclosed by the pink wrapper. Pink wrappers or other pink workpieces may remain elsewhere. '
+            'Use the visible change and single active process; do not demand matching pink/black visual '
+            'identity or infer success solely from the VLA action record.'), sufficiency_question()]
 
 
 def unpack_result_evidence(body, minimum_confidence):
-    return result_answers(body, 'unpack_result', minimum_confidence)
+    selected = [row for row in body.get('answers', []) if row.get('name') == 'unpack_result']
+    return result_answers({'answers': selected}, 'unpack_result', minimum_confidence)
 
 
 def unpack_result_context():
@@ -286,6 +293,11 @@ def unpack_result_context():
                       'necessarily a rectangular block. A workpiece near or partly behind an open gripper '
                       'still counts if its exposed body is distinguishable from the robot. Do not require '
                       'a visible air gap between the workpiece and fingers.',
+        'required_outcome': 'The pink foam has been removed and its black inner workpiece is separately '
+            'on the main tabletop. The assigned execution arm must also reach its measured location; '
+            'that geometric requirement is checked separately with calibrated RGBD and the robot workspace. '
+            'Do not guess metric reachability from RGB. Report insufficient observation when the visual '
+            'requirements cannot be confirmed or ruled out; the controller will obtain a new view and reconfirm.',
     }
 
 
@@ -329,9 +341,10 @@ def verify_unpacking(client, capture, *, target_id, lifecycle, action_evidence, 
                'questions': questions}
 
     def parse(body, evidence):
-        parse_answers(body, questions, client.minimum_confidence)
+        judgments, _ = parse_answers(body, questions, client.minimum_confidence)
         views = unpack_result_evidence(body, client.minimum_confidence)
-        success = views['judgments'] == {'unpack_result': 'yes'}
+        observation = assessment(judgments, {'unpack_result': 'yes', 'wrapper_removed': 'yes'}, capture['observation_id'])
+        success = observation['status'] == 'confirmed'
         visual = {**evidence, **views, 'status': 'confirmed' if success else 'unknown',
                   'target_id': target_id, 'action_id': action_evidence['action_id'],
                   'identity_source': 'verified_single_active_execution_chain', 'visibility_source': 'openai_decisions',
@@ -341,12 +354,13 @@ def verify_unpacking(client, capture, *, target_id, lifecycle, action_evidence, 
                   'table_release_request_hash': table['request_hash'], 'table_release_binding_id': table['binding_id'],
                   'table_release_reference': deepcopy(table_release_reference),
                   'verification_capture': deepcopy(verification_capture),
-                  'work_area_zoom': deepcopy(zoom)}
+                  'work_area_zoom': deepcopy(zoom), 'observation_assessment': observation}
         return {**evidence, 'success': success, 'status': visual['status'], 'target_id': target_id,
                 'generation': capture['generation'], 'appearance': 'unpacked' if success else lifecycle['appearance'],
                 'appearance_revision': lifecycle['appearance_revision'] + int(success),
                 'action_id': action_evidence['action_id'], 'visual_evidence': visual,
                 'verification_capture': deepcopy(verification_capture),
+                'observation_assessment': observation,
                 'response': deepcopy(body), 'geometry_updated': False}
 
     return VisualAPI.request(client, payload, capture, 'verify_unpacking', parse)
@@ -448,7 +462,8 @@ def _drop_bin_zooms(capture, reference, destination):
 
 def drop_result_evidence(body, minimum_confidence):
     """One fused visual addition result covers presence and delivery progress."""
-    result = result_answers(body, 'current_item_added', minimum_confidence)
+    result = result_answers({'answers': [row for row in body.get('answers', [])
+        if row.get('name') == 'current_item_added']}, 'current_item_added', minimum_confidence)
     judgments = result['judgments']
     confirmed = judgments['current_item_added'] == 'yes'
     return {**result,
@@ -517,13 +532,15 @@ def verify_right_bin_drop(client, capture, *, target_id, lifecycle, action_evide
                         'Exclude robot parts, shadows, and objects on the table or outside this bin. '
                         'If occlusion leaves no positive visual evidence of addition, remain uncertain. '
                         'Historical counts and action records alone do not prove arrival. '
-                        'No exact pose or identity of individual dropped pieces is required.')]
+                        'No exact pose or identity of individual dropped pieces is required.'), sufficiency_question()]
     payload = {'model': 'gpt-6-luna', 'input': [{'role': 'user', 'content': content}], 'questions': questions}
 
     def parse(body, evidence):
-        parse_answers(body, questions, client.minimum_confidence)
+        judgments, _ = parse_answers(body, questions, client.minimum_confidence)
         result = drop_result_evidence(body, client.minimum_confidence)
-        success = result['status'] == 'at_destination'
+        observation = assessment(judgments, {'current_item_added': 'yes'}, capture['observation_id'])
+        success = observation['status'] == 'confirmed'
+        result['status'] = 'at_destination' if success else 'unknown'
         visual = {**evidence, **result, 'target_id': target_id,
                   'destination_id': destination, 'release_feedback_id': action_evidence['release_feedback_id'],
                   'action_id': action_evidence['action_id'], 'before_observation_id': reference['observation_id'],
@@ -531,9 +548,10 @@ def verify_right_bin_drop(client, capture, *, target_id, lifecycle, action_evide
                   'completion_semantics': 'released_in_bin_and_visible_addition',
                   'delivery_count': deepcopy(delivery_count), 'already_completed_task_ids': list(prior_ids),
                   'bin_region_geometry': deepcopy(reference.get('drop_bin_region')),
-                  'bin_region_zooms': bin_zooms}
+                  'bin_region_zooms': bin_zooms, 'observation_assessment': observation}
         return {**evidence, 'success': success, 'status': 'confirmed' if success else 'unknown',
                 'target_id': target_id, 'generation': capture['generation'], 'visual_evidence': visual,
+                'observation_assessment': observation,
                 'response': deepcopy(body), 'geometry_updated': False}
 
     return VisualAPI.request(client, payload, capture, 'verify_right_bin_drop', parse)

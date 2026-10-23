@@ -18,12 +18,14 @@ def object_bounds(points, lower_xy, upper_xy, floor, height):
     points = points[valid]
     if not len(points):
         raise ValueError('local_object_depth_missing')
-    lower, upper = points.min(axis=0) - .02, points.max(axis=0) + .02
+    # Local RGBD cuboids are independent of the 2 cm global voxel resolution.
+    # Padding is measurement allowance; path clearance adds a separate 10 mm.
+    lower, upper = points.min(axis=0) - .005, points.max(axis=0) + .005
     lower[2] = floor
     upper[2] = max(float(upper[2]), floor + height + .01)
     return {'minimum_world_m': lower.tolist(), 'maximum_world_m': upper.tolist(),
             'point_count': len(points), 'height_prior_m': height,
-            'support_floor_z_m': floor, 'padding_m': .02}
+            'support_floor_z_m': floor, 'padding_m': .005}
 
 
 def measure_object_obstacle(capture, detector, work_area, appearance, *, camera_id='3'):

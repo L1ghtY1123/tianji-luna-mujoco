@@ -36,7 +36,7 @@ def _overlap(first, second):
 def build_release_binding(state, context, ledger, run_id, release):
     """Check the actual held/attachment/place/release records before any visual request."""
     target, arm, generation = state["target_id"], state["arm"], state["generation"]
-    scene, plan, holding = context["scene"], context["place_plan"], context["holding"]
+    scene, plan, holding = context['scene'], context['place_plan'], context['holding']
     execution = context.get("demo_place_execution", {})
     pending = context.get("pending_transfer", {})
     record = ledger.records[target]
@@ -260,6 +260,7 @@ def release_task_context(reference, binding, instruction):
 
 
 def release_result_payload(capture, binding, reference, instruction=""):
+    from .observation_requirements import sufficiency_question
     validate_release_capture(capture, binding)
     wrapped = reference.get('demo_task', {}).get('workflow') == 'unpack_transfer'
     numeric_position = release_position_check(binding) if wrapped else None
@@ -326,6 +327,7 @@ def release_result_payload(capture, binding, reference, instruction=""):
             'attachment/contact supporting the workpiece; appearing between open fingers in the wrist '
             'camera, or overlapping the robot in the head camera, is not evidence of retention. '
             'A separate object resting below the open gripper on the tabletop is not held.'))
+        questions.append(sufficiency_question())
     cameras = ("2", "3", "1")
     if wrapped:
         content.extend(reference_content(reference))
@@ -355,6 +357,7 @@ def release_result_payload(capture, binding, reference, instruction=""):
 
 
 def verify_release_result(inventory, capture, binding, reference, instruction=""):
+    from .observation_requirements import assessment
     payload = release_result_payload(capture, binding, reference, instruction)
 
     def parse(body, evidence):
@@ -367,6 +370,10 @@ def verify_release_result(inventory, capture, binding, reference, instruction=""
             confidence = min(confidence, 1. - by_name['workpiece_still_held']['probability'])
             if judgments['workpiece_still_held'] != 'no':
                 status = 'unknown'
+        observation = (assessment(judgments, {'place_result': 'yes', 'workpiece_still_held': 'no'},
+                                   capture['observation_id']) if predicate else None)
+        if observation and observation['status'] != 'confirmed':
+            status = 'unknown'
         visual = {"source": "openai_decisions", "identity_source": "execution_chain",
             "observation_id": capture["observation_id"], "status": status, "confidence": confidence,
             "confidence_rule": 'min_table_presence_and_not_held_probability' if predicate else 'place_result_answer_confidence',
@@ -378,7 +385,8 @@ def verify_release_result(inventory, capture, binding, reference, instruction=""
             "target_id": binding["target_id"], "destination_id": binding["destination_id"],
             "region_id": binding["region_id"], "slot_id": binding["slot_id"],
             "layout_revision": binding["layout_revision"], "binding_id": binding["binding_id"],
-            "release_feedback_id": binding["release_feedback_id"], "request_hash": evidence["request_hash"]}
+            "release_feedback_id": binding["release_feedback_id"], "request_hash": evidence["request_hash"],
+            **({'observation_assessment': observation} if observation else {})}
         check = {"source": "openai_decisions", "observation_id": capture["observation_id"],
                  "request_hash": evidence["request_hash"], "status": "not_requested"}
         if binding["needs_visible_inventory_check"]:
@@ -386,6 +394,7 @@ def verify_release_result(inventory, capture, binding, reference, instruction=""
                          confidence=by_name["demo_unlisted_pink"]["confidence"])
         return {"visual_evidence": visual, "demo_inventory_check": check,
                 "binding_id": binding["binding_id"], "observation_id": capture["observation_id"],
-                "evidence": {**evidence, "answers": answers}, "geometry_updated": False}
+                "evidence": {**evidence, "answers": answers}, "geometry_updated": False,
+                **({'observation_assessment': observation} if observation else {})}
 
     return VisualAPI.request(inventory, payload, capture, "verify_release_result", parse)

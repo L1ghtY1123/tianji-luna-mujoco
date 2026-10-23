@@ -31,7 +31,7 @@ def test_combined_views_confirm_output_without_claiming_individual_camera_suppor
     payload = calls[0]
     assert sum(p['type'] == 'input_image' for p in payload['input'][0]['content']) == 2
     assert 'table_release_reference' not in json.dumps(payload)
-    assert [q['name'] for q in payload['questions']] == ['unpack_result']
+    assert [q['name'] for q in payload['questions']] == ['unpack_result', 'wrapper_removed', 'observation_sufficient']
 
 
 def test_unpack_question_allows_visible_body_partly_occluded_by_open_gripper():
@@ -72,3 +72,15 @@ def test_choice_probability_does_not_replace_answer_confidence():
     body = {'answers': [{'type': 'choice', 'name': 'unpack_result', 'choice': 'yes',
         'confidence': .77, 'probabilities': [{'value': 'yes', 'probability': .99}]}]}
     assert unpack_result_evidence(body, .8)['judgments'] == {'unpack_result': 'unknown'}
+
+
+@pytest.mark.parametrize('criterion', ['wrapper_removed', 'observation_sufficient'])
+def test_visible_black_alone_cannot_bypass_missing_task_evidence(criterion):
+    capture, action = capture_and_action()
+    visual, calls = client({criterion: ('unknown', .95)})
+    result = verify_unpacking(visual, capture, target_id='pink', lifecycle=record('unpack_pending'),
+        action_evidence=action, owner_id='run', work_area=work_area(), **before_kwargs())
+    assert not result['success']
+    assert result['observation_assessment']['needs_observation']
+    assert criterion in result['observation_assessment']['missing_evidence']
+    assert len(calls) == 1

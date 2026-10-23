@@ -1,5 +1,6 @@
 * text=auto
 *.sh text eol=lf
+scripts/build_cad_assets.py text eol=lf
 # Workspace fingerprints include the exact bytes of robot assets/configuration.
 assets/** -text
 resources/** -text

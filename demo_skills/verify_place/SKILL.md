@@ -1,18 +1,7 @@
 # verify_place
 
-合法持物、attachment、实际释放反馈和撤离完成后，在当前位置采新三RGB核验当前粉件。实际TCP反馈结合抓取时实测物体参考与attachment几何，数值校验释放XY及物体包络在固定共享区；release_position_check明确标注为开爪时刚体推导，不是释放后物体实测位姿，也不证明视觉成功。单次Decisions发送初始全部实体、活动ID、工序/生命周期记录、当前实测夹爪角度及开闭限位、INITIAL三RGB/注释和CURRENT三RGB/区域图，同一请求用两个独立predicate：place_result判断主桌上可见独立粉件，workpiece_still_held判断粉件仍被手指夹持；前者概率≥0.8且后者≤0.2才通过，不要求从RGB看清底部物理接触；不再要求模型重算公制XY或把高起轮廓装进桌面投影。概率≥0.8确认、≤0.2否定、中间unknown；原始probability不叫choice confidence。源盒粉件、机器人部件不计。INITIAL是历史，先历史后当前，头部当前图最后，三视角融合；动作记录和仿真真值不能代替当前像素。成功只推进table_released，不完成工序；视觉确认后以同帧头部SAM3/RGBD更新当前物体局部障碍，背景地图不重建，深度不足则停止后续运动。旧非拆包路径仍使用choice place_result及最后一次的demo_unlisted_pink，不能把旧choice响应塞给当前predicate请求。
+撤离完成后采当前三RGB，单次Decisions联合判断place_result（桌面独立粉件）、workpiece_still_held（仍被夹持）、observation_sufficient（当前证据是否足够确认或否定这些条件）。前两项分别须yes/no，充分性须yes；概率≥0.8为yes、≤0.2为no，其余unknown。释放XY由实际前端反馈数值核验，不能拿动作历史替代当前像素。证据不足时沿最近的保留场景回固定观测位姿，采新三图再核验一次；没有确认放置成功前不建立粉件局部碰撞。仍不足停止。明确失败不重复观察。全过程绑定原始持物、释放与场景更新链；成功仅推进table_released。确认后刷新局部粉件障碍，首次桌面及背景地图复用。
 
-夹爪释放、撤离及执行链校验后，用一次Decisions请求判断桌面放置结果。输入保留同次三张CURRENT原RGB，能在画面投影的当前桌面区域另附青色CURRENT注释；未投影的相机仍保留原图。同一请求独立判断桌面粉件可见与粉件仍被夹持：place_result概率≥0.8且workpiece_still_held概率≤0.2。区域的公制包含检查由释放反馈负责。
+前提：needs_place=true、released=true、place_execution_completed=true、place_verification_completed=false。
 
-当前拆包流程按predicate概率≥0.8确认，≤0.2否定，中间unknown。数值区域检查来自实际释放反馈，视觉只验证当前主桌上的独立粉件与夹爪分离；允许其他视角遮挡。任务已知粉泡棉包黑件，这一阶段不要求看见隐藏黑件或证明包装材质。原始概率保存在answers，兼容证据字段confidence由confidence_rule=min_table_presence_and_not_held_probability，数值为min(P(桌面粉件可见), 1-P(仍被夹持))，它是两个门的保守支持值，不声称是联合事件概率明确其含义。
-
-程序独立校验实际持物、attachment、放置、开爪/撤离、当前target/arm/owner/generation/scene、冻结区域与释放反馈，结果帧必须晚于释放；模型返回后再次核对绑定，不能重绑定或沿用旧物完成证据。没有任何可投影区域时在API前停止。正常一次请求，重复相同payload用缓存，不自动重试。
-
-拆包流程成功只进入table_released、stage1，不完成工序。旧非拆包all模式最后一次放置仍在同请求附INITIAL源参考和demo_unlisted_pink；该额外题必须none且confidence≥0.8。结果保留place_result原始答案、view_scope=fused_current_three_rgb、primary_required_checks=[place_result, workpiece_still_held]和释放执行链，unknown只表示已检查而不推进。只对当前物体做头部SAM3/RGBD局部障碍更新，原背景测量场景保留；旧逐相机12题响应不能套用为新协议成功。
-
-当前题目及边界见[Decisions问题清单](../../docs/decisions-questions.md)。
-
-
-2026-10-22 放置核验与桌面颜色修订：本次cc543b实验的原图将“在两指二维投影之间”误判为仍被夹持（0.99）。verify_place继续使用一次三相机联合Decisions、原0.8/0.2阈值及初始清单/参考图，但现在加入同次capture的实际夹爪角度、开闭限位、已验证open_confirmed和来源/observation_id；不是只提供开爪命令。实测开爪不能证明物体位置，仍须当前RGB确认独立粉件在主桌上，仍保留视觉物体实际挂持/接触的否决条件。问题明确二维投影重叠不等于物理夹持，当前头部总览最后呈现。没有新增视觉请求、移动或建图。放置与拆包提示不再硬编码桌面灰色。
-
-场景桌面新增color（命名色或#RRGGBB），缺省white；从编辑器到buildScene、后端normalize_scene、MuJoCo材质及manifest保留，应用场景后生效。只改颜色常量，网页渲染器、30fps调度、灯光数量、阴影/后处理和RGBD分辨率不变，不增加渲染pass。不会把回放中历史灰色桌面改白。cuRobo官方SDK及调用边界无变化。
+输出：place_verification_completed。

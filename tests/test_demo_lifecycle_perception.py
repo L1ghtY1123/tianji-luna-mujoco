@@ -119,7 +119,7 @@ def test_unpack_prompt_accepts_one_visible_current_view_without_rgb_workspace_ju
     content = payload['input'][0]['content']
     context = json.loads(content[0]['text'])
     questions = {question['name']: question for question in payload['questions']}
-    assert set(questions) == {'unpack_result'}
+    assert set(questions) == {'unpack_result', 'wrapper_removed', 'observation_sufficient'}
     assert questions['unpack_result']['type'] == 'predicate'
     assert 'A clear view in one camera is enough' in context['views']
     assert 'right workspace' not in questions['unpack_result']['instructions']

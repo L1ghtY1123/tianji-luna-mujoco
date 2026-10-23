@@ -19,6 +19,18 @@ URDF = ROOT/'assets/marvin_urdf/marvin_with_grippers.urdf'
 FIXTURE = json.loads((ROOT/'tests/fixtures/gripper_base_first_contact.json').read_bytes())
 
 
+def original_palm_cover(config):
+    """Replay the historical recipe separately from the later certified subdivision."""
+    config = copy.deepcopy(config)
+    record = json.loads((ROOT/'resources/curobo/gripper-tight-cover-20261023.json').read_bytes())
+    kin = config['robot_cfg']['kinematics']
+    for link, proof in record['links'].items():
+        kin['collision_spheres'][link] = proof['parent_spheres']
+    kin['collision_sphere_buffer'] = record['previous_world_buffers']
+    kin['self_collision_buffer'] = record['previous_self_buffers']
+    return config
+
+
 def box(link):
     node = ET.parse(URDF).getroot().find(f"link[@name='{link}']/collision")
     size = np.fromstring(node.find('geometry/box').get('size'), sep=' ')
@@ -52,7 +64,7 @@ def test_frozen_contact_corner_is_covered_without_relying_on_world_buffer(link):
 
 
 def test_only_two_base_lists_change_with_explicit_robot_budget_and_same_collision_policy():
-    current = yaml.safe_load(CONFIG.read_bytes())
+    current = original_palm_cover(yaml.safe_load(CONFIG.read_bytes()))
     other = copy.deepcopy(current)
     spheres = other['robot_cfg']['kinematics']['collision_spheres']
     assert FIXTURE['source_sphere_count'] == 349
@@ -66,7 +78,7 @@ def test_only_two_base_lists_change_with_explicit_robot_budget_and_same_collisio
 def test_generator_certifies_all_cell_vertices_and_reproduces_only_base_lists():
     from cover_gripper_base_boxes import build_candidate
 
-    config = yaml.safe_load(CONFIG.read_bytes())
+    config = original_palm_cover(yaml.safe_load(CONFIG.read_bytes()))
     previous = copy.deepcopy(config)
     previous['robot_cfg']['kinematics']['collision_spheres'].update(FIXTURE['previous_base_spheres'])
     actual, certificate = build_candidate(previous, URDF)

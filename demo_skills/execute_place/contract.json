@@ -1,6 +1,6 @@
 {
   "id": "execute_place",
-  "description": "按已验证的带物轨迹接近并放置。松爪前以当前关节、夹爪、attachment检查区域包络和10mm碰撞阈值；位置及旋转误差记录为诊断，不要求2mm/2度准确。通过后开爪、确认开爪、detach并撤离。实际碰撞检查失败则停止，不凭计划成功自动松爪。运动中关节跟踪偏差超过0.03 rad时停止全部活动臂并报告证据。",
+  "description": "执行已验证的带物接近、放下轨迹。松爪前检查实际关节、夹爪、attachment、目标区域与10mm碰撞阈值；开爪确认、detach、阶段等待后沿设定轴lift。这里不采结果图、不分割或建立粉件局部障碍。lift完成后由verify_place调用Decisions；只有放置已确认才用同次RGBD建立粉件局部障碍，之后才能移动到VLA位姿。顺序不可提前。",
   "requires": {
     "needs_place": true,
     "grasp_held": true,

@@ -24,13 +24,13 @@
   "collision_config": {
     "source": "Earlier configured spheres retained; both gripper Base primitive boxes now use project-side analytic cell-enclosing spheres from the authored URDF.",
     "destination": "resources/curobo/marvin_gui_dual.yml",
-    "sha256": "8e03e5136f817be7ed49f9a95e66fa9ccc6c38e867d247741cd146eb2dc75385",
+    "sha256": "6aae69c87395ab76fcd0cc63140c157b8b91077cf9a1ca766e3ff81cf1db77e6",
     "links": 38,
-    "spheres": 365,
-    "sphere_budget": 365,
+    "spheres": 533,
+    "sphere_budget": 533,
     "unchanged": false,
-    "reviewed_date": "2026-10-21",
-    "generation_manifest": "resources/curobo/gripper-base-coverage-20261021.json",
+    "reviewed_date": "2026-10-23",
+    "generation_manifest": "resources/curobo/gripper-tight-cover-20261023.json",
     "original_import": {
       "source": "C:\\project\\tianji_base\\extensions\\planning\\curobo-planner\\robot_config\\marvin_gui_dual.yml",
       "destination": "resources/curobo/marvin_gui_dual.yml",

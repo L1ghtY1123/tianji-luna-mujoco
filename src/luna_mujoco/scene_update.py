@@ -84,7 +84,7 @@ def prepare_scene_update(scene, grids, model, request):
         upper = np.asarray(bounds.get('maximum_world_m'), float)
         if (lower.shape != (3,) or upper.shape != (3,) or not np.isfinite([lower, upper]).all()
                 or not (upper > lower).all() or not request.get('action_id')
-                or request.get('source') not in {'mock_vla', 'verified_drop_action_bounds'}):
+                or request.get('source') not in {'mock_vla', 'verified_drop_action_bounds', 'drop_release_action_bounds'}):
             raise ValueError('scene_action_envelope_invalid')
         envelope = 'action_envelope::' + request['target_id']
         updated_model.setdefault('cuboid', {})[envelope] = {

@@ -31,6 +31,9 @@ def runner_and_context(tmp_path):
     algorithms.publish_local_object = lambda scene, *args, **kwargs: {
         'scene': deepcopy(scene), 'measurement': {'source': 'test_head_rgbd'}}
     algorithms.publish_action_envelope = lambda scene, *args, **kwargs: deepcopy(scene)
+    algorithms.measure_local_object = lambda capture, *args: {'observation_id': capture['observation_id']}
+    algorithms.measured_object_workspace = lambda measured, arm: {
+        'reachable': True, 'arm': arm, 'observation_id': measured['observation_id']}
     runner = DemoRunner(robot, algorithms, None, tmp_path, planning_settings=TEST_SETTINGS)
     runner.run_id = 'run'
     runner.state.update(status='running', generation=1, task='grasp_place', target_id='pink',
@@ -117,6 +120,31 @@ async def test_verified_unpack_preserves_capture_and_syncs_stage_before_geometry
     runner._check_source_view({'objects': [{'id': product_id, 'coverage': {'camera_ids': ['1']}}]})
 
 
+async def test_unpack_with_missing_wrapper_evidence_supplements_then_reconfirms(tmp_path):
+    runner, context, _ = runner_and_context(tmp_path)
+    uncertain, first_calls = client({'wrapper_removed': ('unknown', .95)})
+    normal = runner.verify_unpacking
+    from luna_mujoco.demo_lifecycle_perception import verify_unpacking
+    calls = []
+    def verify(capture, **kwargs):
+        calls.append(capture['observation_id'])
+        return verify_unpacking(uncertain, capture, **kwargs) if len(calls) == 1 else normal(capture, **kwargs)
+    runner.verify_unpacking = verify
+    result = await runner._verify_unpack(context)
+    assert result['success'] and len(calls) == len(set(calls)) == 2
+    assert first_calls[0]['questions'][1]['name'] == 'wrapper_removed'
+    assert result['workspace_evidence']['reachable']
+
+
+async def test_visual_unpack_success_cannot_bypass_execution_arm_workspace(tmp_path):
+    runner, context, _ = runner_and_context(tmp_path)
+    runner.algorithms.measured_object_workspace = lambda measured, arm: {'reachable': False, 'arm': arm}
+    result = await runner._verify_unpack(context)
+    assert not result['success'] and result['status'] == 'failure'
+    assert result['reason'] == 'unpacked_object_outside_execution_workspace'
+    assert not runner.demo_task.get('product_entities')
+
+
 @pytest.mark.parametrize('key', ['post_place_capture', 'post_place_verification_input'])
 async def test_runner_requires_private_confirmed_before_reference_before_model_call(tmp_path, key):
     runner, context, calls = runner_and_context(tmp_path)
@@ -158,7 +186,7 @@ async def test_current_drop_helper_and_runner_agree_on_before_frame_and_final_st
     assert context['pending_transfer']['verified'] is completed
     assert result['visual_evidence']['before_observation_id'] == before['observation_id']
     assert result['observation_id'] != before['observation_id']
-    assert len(calls) == 1 and runner.algorithms.checkpoints == []
+    assert len(calls) == (1 if completed else 2) and runner.algorithms.checkpoints == []
 
 
 @pytest.mark.parametrize('key,value', [('observation_id', 'stale'), ('generation', 9)])

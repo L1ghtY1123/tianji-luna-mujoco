@@ -51,8 +51,9 @@ def test_black_obstacle_uses_wrist_depth_when_head_has_no_surface(monkeypatch):
         return {'camera_id': camera_id, 'source': 'wrist_rgbd_object_surface_with_height_prior',
                 'bounds': {'minimum_world_m': [.4, -.1, .56], 'maximum_world_m': [.5, 0., .62]}}
     monkeypatch.setattr('luna_mujoco.local_object_obstacle.measure_object_obstacle', measure)
-    adapter = SimpleNamespace(perception=SimpleNamespace(detector=object()),
-                              request=lambda path, payload: published.append(payload) or {'scene_token': 'new'})
+    adapter = object.__new__(DemoAlgorithms)
+    adapter.perception = SimpleNamespace(detector=object())
+    adapter.request = lambda path, payload: published.append(payload) or {'scene_token': 'new'}
     result = DemoAlgorithms.publish_local_object(adapter,
         {'scene_token': 'old', 'generation': 1, 'target_id': 'pink'},
         {'generation': 1, 'observation_id': 'current'}, 'pink', {}, 'unpacked')

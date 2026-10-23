@@ -68,6 +68,11 @@ def brief_error(code, skill=None, message=None, details=None):
     code = str(code or 'unknown_error')
     key = code.split(':', 1)[0]
     reasons = {
+        'demo_height_completion_invalid': '物体补高的尺寸来源或观测绑定无效，未发布碰撞场景。',
+        'local_object_depth_missing': '当前工件的有效深度不足，未执行后续移动。',
+        'unpacked_object_outside_execution_workspace': '黑件已经看见，但实测位置未通过执行臂工作空间检查。',
+        'unpack_depth_unconfirmed_after_observation': '补充观测后黑件深度仍不足，未开始抓取。',
+        'supplemental_observation_requires_new_capture': '补充观测没有取得新的图像，未推进流程。',
         'drop_carried_projection_outside_bin': '持物投影超出右盒内腔，尚未开始运输。请检查抓姿和投放点。',
         'semantic_scene_identity_unresolved': '部分物体身份未确认，碰撞场景尚未更新。',
         'visual_identity_unknown': '当前图像未能确认物体身份，尚未更新碰撞场景。',

@@ -607,11 +607,22 @@ class GeometryRuntime(CuroboRuntime):
         finally:
             self.gpu_lock.release()
 
-    def plan_retreat_scoped(self, request, feedback=None):
+    def plan_retreat_scoped(self, request, feedback=None, *, departure_axis=None, departure_in_tool_frame=False):
         if self.geometry_scene.get("exclusion_state") not in {"selected", "held", "released"}:
             raise ValueError("retreat requires a manipulation scene")
         with self.carrying_scope(None, feedback):
-            native = self.plan_to_pose_native(request, lock_timeout_s=600)
+            if departure_axis is None:
+                native = self.plan_to_pose_native(request, lock_timeout_s=600)
+            else:
+                with self.gpu_lock:
+                    self._prepare_scene_cache_unlocked()
+                    backend = self._backend_unlocked(request.arm)
+                    backend.release_departure = (departure_axis, departure_in_tool_frame)
+                try:
+                    native = self.plan_to_pose_native(request, lock_timeout_s=600)
+                finally:
+                    with self.gpu_lock:
+                        backend.release_departure = None
             evidence = dict(self.effective_config[request.arm]["plan"])
         return native, evidence
 
@@ -1054,7 +1065,17 @@ def run_operation(runtime, path, payload):
                     "carrying_binding": asdict(binding), "collision_evidence": evidence,
                     "retreat_requires_replan": True,
                     "planning_settings_revision": settings.revision()}
-        native, evidence = runtime.plan_retreat_scoped(request, feedback)
+        departure_axis = payload.get('departure_axis')
+        if departure_axis is not None:
+            if (departure_axis != settings.place_retreat_axis
+                    or payload.get('departure_in_tool_frame') is not settings.place_retreat_in_tool_frame):
+                raise ValueError('retreat direction conflicts with planning_settings')
+            native, evidence = runtime.plan_retreat_scoped(request, feedback, departure_axis=departure_axis,
+                departure_in_tool_frame=settings.place_retreat_in_tool_frame)
+            evidence = {**evidence, 'departure_criterion': 'official_ToolPoseCriteria.linear_motion',
+                'axis': departure_axis, 'in_tool_frame': settings.place_retreat_in_tool_frame}
+        else:
+            native, evidence = runtime.plan_retreat_scoped(request, feedback)
         return {"ok": True, "planner": "curobo_pose", "scene_token": native.scene_token,
                 "trajectory": asdict(native), "collision_evidence": evidence,
                 "attached": False, "planning_settings_revision": settings.revision()}
