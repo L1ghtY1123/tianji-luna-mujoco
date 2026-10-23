@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from jev_mujoco import geometry_service
+from luna_mujoco import geometry_service
 
 
 class Metadata(np.ndarray):
@@ -50,7 +50,8 @@ def mapped_runtime(monkeypatch):
                                                      for key, view in decoded["views"].items()}
             candidate = SimpleNamespace(selected_instance_id="source", instance_metrics={"source": {}},
                                         camera_metrics={}, table=SimpleNamespace(model={}), timings_ms={})
-            return candidate, [SimpleNamespace(feature_tensor=np.array([self.value]))], {
+            return candidate, [SimpleNamespace(feature_tensor=np.array([self.value]),
+                dims=[self.size] * 3, voxel_size=.01)], {
                 "voxel": {"background": {"dims": [self.size] * 3, "voxel_size": .01}}}
 
     boundary = SimpleNamespace(robot_spheres=lambda joints: np.array([[0., 0., 0., .01]]),
@@ -131,14 +132,14 @@ def test_capacity_growth_still_destroys_solver_after_retained_scene_rebuild(monk
     assert backend.destroyed and not runtime._batch_backends
 
 
-def test_changed_gripper_geometry_still_replaces_open_solver(monkeypatch):
+def test_changed_gripper_geometry_keeps_resident_solver(monkeypatch):
     runtime, payload = mapped_runtime(monkeypatch)
     backend = DistanceBackend()
     with runtime.carrying_scope(None, {"A": 0., "B": 0.}):
         runtime._batch_backends["cached"] = backend
     runtime.build_perception(payload)
     with runtime.carrying_scope(None, {"A": .2, "B": 0.}):
-        assert backend.destroyed and not runtime._batch_backends
+        assert not backend.destroyed and runtime._batch_backends['cached'] is backend
 
 
 @pytest.mark.parametrize("background,source_layer,disabled,excluded", [
@@ -151,7 +152,7 @@ def test_held_map_excludes_only_an_existing_source_layer(monkeypatch, background
 
     from tianji_curobo.semantic_esdf_transport import encode_semantic_esdf_request
 
-    from jev_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload
 
     runtime, payload = mapped_runtime(monkeypatch)
     if background:

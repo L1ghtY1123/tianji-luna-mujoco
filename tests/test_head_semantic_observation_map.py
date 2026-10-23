@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 from test_semantic_transport import payload
 
-from jev_mujoco.perception_mapping import decode_mapping_payload
-from jev_mujoco.semantic_builder import _requests
-from jev_mujoco.semantic_transport import decode_project_semantic_request, encode_project_semantic_request
+from luna_mujoco.perception_mapping import decode_mapping_payload
+from luna_mujoco.semantic_builder import _requests
+from luna_mujoco.semantic_transport import decode_project_semantic_request, encode_project_semantic_request
 
 
 def head_payload():

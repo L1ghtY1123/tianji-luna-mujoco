@@ -1,0 +1,16 @@
+{
+  "id": "choose_arm",
+  "description": "校验初次Responses为当前物体当前工序指定的执行臂与工作空间；不可暗换臂。包装件默认A、拆包黑件默认B。",
+  "inputs": [
+    "已校验的Responses程序执行器上下文、当前观测/反馈及输入版本"
+  ],
+  "requires": {
+    "target_selected": true,
+    "destination_selected": true,
+    "grasp_completed": false
+  },
+  "provides": [
+    "arm_selected",
+    "arms_evaluated"
+  ]
+}

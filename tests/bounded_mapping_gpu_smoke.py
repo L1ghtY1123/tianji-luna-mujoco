@@ -16,8 +16,8 @@ def main():
     from tianji_curobo.robot_segmenter import FfsDepthObservationRequest, SemanticProjectionRequest
     from tianji_curobo.volumetric_mapper import CuroboVolumetricMapperBoundary
 
-    from jev_mujoco.perception_mapping import CaptureSegmenter, create_feedback_segmenter
-    from jev_mujoco.semantic_builder import rounded_collision_padding
+    from luna_mujoco.perception_mapping import CaptureSegmenter, create_feedback_segmenter
+    from luna_mujoco.semantic_builder import rounded_collision_padding
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--offset-x", type=float, default=0.)

@@ -94,7 +94,7 @@
 
 ## Task 1 任务约束与完整清单
 
-**Files:** 修改 `src/jev_mujoco/task_request.py`、`decisions.py`、`task_progress.py`、`runner.py`、`skills/assess_task/contract.json`、`skills/build_scene/contract.json`；新增 `src/jev_mujoco/inventory_order.py`。同步对应说明与手册。
+**Files:** 修改 `src/luna_mujoco/task_request.py`、`decisions.py`、`task_progress.py`、`runner.py`、`skills/assess_task/contract.json`、`skills/build_scene/contract.json`；新增 `src/luna_mujoco/inventory_order.py`。同步对应说明与手册。
 
 **Interfaces:**
 
@@ -115,7 +115,7 @@
 
 ## Task 2 两类关联与实例去重
 
-**Files:** 修改 `src/jev_mujoco/perception.py`、`association.py`、`runner.py` 中关联/重枚举消费；扩展 `tests/test_instance_association.py`、`test_identity_lifecycle.py`、`test_task_perception.py`，新增 `test_same_camera_alias_identity.py`。
+**Files:** 修改 `src/luna_mujoco/perception.py`、`association.py`、`runner.py` 中关联/重枚举消费；扩展 `tests/test_instance_association.py`、`test_identity_lifecycle.py`、`test_task_perception.py`，新增 `test_same_camera_alias_identity.py`。
 
 **Interfaces:** 沿用 `associate_camera_detections(detections, views)` 和 `associate_inventory(previous, current, *, point_predictions_world=None, identity_states=None)` 的结果结构；mapping 必须一对一，未决状态必须显式返回。冻结清单不得被 reenumerate_ambiguous 静默换号。
 

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from test_semantic_depth import CameraObservation, prepared
 
-from jev_mujoco.perception_mapping import CaptureSegmenter
+from luna_mujoco.perception_mapping import CaptureSegmenter
 
 
 def context(*, sequence=8, valid=None, source="selected", surface=None):
@@ -84,7 +84,7 @@ def test_public_raw_robot_mask_receives_unchanged_valid_depth_and_fresh_calibrat
 
     from test_semantic_depth import Tensor
 
-    from jev_mujoco.raw_robot_depth import RawRobotDepthBoundary
+    from luna_mujoco.raw_robot_depth import RawRobotDepthBoundary
 
     class RawTensor(Tensor):
         def unsqueeze(self, axis):
@@ -153,7 +153,7 @@ def test_public_raw_robot_mask_receives_unchanged_valid_depth_and_fresh_calibrat
 def test_capture_stage_timings_reset_with_the_capture(monkeypatch):
     from test_semantic_depth import projection
 
-    from jev_mujoco import perception_mapping, semantic_depth
+    from luna_mujoco import perception_mapping, semantic_depth
 
     value = prepared(np.ones((2, 4)))
     adapter = CaptureSegmenter(SimpleNamespace(prepare_ffs_observation=lambda request: value))

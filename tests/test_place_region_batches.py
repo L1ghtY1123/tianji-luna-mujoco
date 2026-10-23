@@ -3,7 +3,7 @@ from copy import deepcopy
 import pytest
 from test_place_yaw_selection import setup_plan
 
-import jev_mujoco.algorithms as module
+import luna_mujoco.algorithms as module
 
 
 @pytest.mark.parametrize('first_feasible', [True, False])

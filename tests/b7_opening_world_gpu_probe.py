@@ -9,9 +9,9 @@ import numpy as np
 import torch
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.carrying import CarryingBinding
-from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
-from jev_mujoco.planning_settings import PlanningSettings
+from luna_mujoco.carrying import CarryingBinding
+from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
+from luna_mujoco.planning_settings import PlanningSettings
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--pack", default="/tmp/b7-opening-world-pack.npz")

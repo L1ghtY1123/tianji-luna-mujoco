@@ -5,8 +5,9 @@ import numpy as np
 import pytest
 from test_backend_builder import native_batch
 
-from jev_mujoco.backend_builder import BatchPlanningOverrides, ValidatedBatchBackend, validate_grasp_batch
-from jev_mujoco.trajectory_postprocessing import (
+from luna_mujoco.backend_builder import ValidatedBatchBackend, validate_grasp_batch
+from luna_mujoco.public_planner import PublicPlanner as PlannerAdapter
+from luna_mujoco.trajectory_postprocessing import (
     add_trajectory_derivatives,
     build_execution_phases,
 )
@@ -75,7 +76,7 @@ def test_scene_token_rebinding_keeps_copied_derivatives():
 
 
 def test_derivative_collection_does_not_interpolate_and_selection_interpolates_only_three_phases(monkeypatch):
-    from jev_mujoco import trajectory_postprocessing
+    from luna_mujoco import trajectory_postprocessing
 
     original = trajectory_postprocessing.quintic_hermite_points
     calls = []
@@ -210,7 +211,7 @@ def test_hard_clearance_checks_raw_paths_only_not_hermite_execution_points():
     assert [len(points) for points in checked_points] == [6, 6]
 
 
-def test_public_grasp_override_preserves_result_for_postprocessing():
+def test_public_grasp_composition_preserves_result_for_postprocessing():
     raw = sdk_result()
 
     class PublicPlanner:
@@ -218,10 +219,7 @@ def test_public_grasp_override_preserves_result_for_postprocessing():
             assert goal == "goal" and state == "state"
             return raw
 
-    class Configured(BatchPlanningOverrides, PublicPlanner):
-        pass
-
-    planner = Configured()
+    planner = PlannerAdapter(PublicPlanner(), SimpleNamespace(), batch=True)
     assert planner.plan_grasp("goal", "state") is raw
     assert planner.last_grasp_result is raw
 
@@ -234,6 +232,7 @@ def test_backend_releases_public_result_after_success_or_failure(monkeypatch, fa
     if failure == "derivative":
         raw.approach_interpolated_trajectory.velocity = None
     backend = object.__new__(ValidatedBatchBackend)
+    backend.arm = 'A'
     backend.motion_planner = SimpleNamespace(last_grasp_result="stale")
 
     def native_call(self, request):
@@ -246,11 +245,14 @@ def test_backend_releases_public_result_after_success_or_failure(monkeypatch, fa
     monkeypatch.setattr(_NativeCuroboBackend, "plan_grasp_batch_native", native_call)
     checked = []
     backend.validate_trajectory_native = lambda request: checked.append(request.points_deg)
+    backend.tool_fk_evidence = lambda joints, scene_token: {
+        "joints_rad": list(joints), "scene_token": scene_token}
+    request = SimpleNamespace(scene_token="scene")
     if failure:
         with pytest.raises((RuntimeError, ValueError)):
-            backend.plan_grasp_batch_native("request")
+            backend.plan_grasp_batch_native(request)
     else:
-        result = backend.plan_grasp_batch_native("request")
+        result = backend.plan_grasp_batch_native(request)
         assert result.items[0].approach.command_positions_rad is None
         assert len(result.items[0].approach.velocities_rad_s) == 2
         assert [len(points) for points in checked] == [6, 6]

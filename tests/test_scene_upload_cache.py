@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jev_mujoco.geometry_service import GeometryRuntime
+from luna_mujoco.geometry_service import GeometryRuntime
 
 
 def test_scene_upload_reuses_only_same_backend_revision_and_exclusion():

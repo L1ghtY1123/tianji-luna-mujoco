@@ -1,6 +1,6 @@
 # 实验记录格式 v1
 
-根目录默认为 `/home/guangyu/projects/tianji-experiments`，可以用 `JEV_EXPERIMENT_DIR` 指定。Docker把同名宿主目录挂到容器，重建容器不会删除实验。每次运行的32位run_id同时作为目录名和API标识；用户名称放在manifest中，重命名不改变引用。
+根目录默认为 `/home/guangyu/projects/tianji-experiments`，可以用 `LUNA_EXPERIMENT_DIR` 指定。Docker把同名宿主目录挂到容器，重建容器不会删除实验。每次运行的32位run_id同时作为目录名和API标识；用户名称放在manifest中，重命名不改变引用。
 
 ## 操作
 

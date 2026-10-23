@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from test_visible_placement import measured_inputs
 
-from jev_mujoco.algorithms import AlgorithmError, Algorithms
+from luna_mujoco.algorithms import AlgorithmError, Algorithms
 
 
 def setup_plan(monkeypatch, *, valid=(0, 1, 2)):

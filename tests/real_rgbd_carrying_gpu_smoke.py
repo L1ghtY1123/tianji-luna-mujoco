@@ -9,9 +9,9 @@ import numpy as np
 def main():
     from tianji_curobo.curobo_service import materialize_urdf
 
-    from jev_mujoco.geometry import grasp_targets
-    from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
-    from jev_mujoco.trajectory_postprocessing import build_execution_phases
+    from luna_mujoco.geometry import grasp_targets
+    from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
+    from luna_mujoco.trajectory_postprocessing import build_execution_phases
 
     directory = Path("/opt/jev/tests/artifacts/task3")
     payload = json.loads((directory / "real-rgbd-map-request.json").read_text())

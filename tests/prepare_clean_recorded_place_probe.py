@@ -8,9 +8,9 @@ from pathlib import Path
 
 import numpy as np
 
-from jev_mujoco.algorithms import Algorithms
-from jev_mujoco.perception_mapping import decode_mapping_payload
-from jev_mujoco.placement import public_observation, release_goal
+from luna_mujoco.algorithms import Algorithms
+from luna_mujoco.perception_mapping import decode_mapping_payload
+from luna_mujoco.placement import public_observation, release_goal
 
 
 def main():

@@ -5,9 +5,9 @@ from copy import deepcopy
 import pytest
 from test_current_grasp_attachment import fixture
 
-from jev_mujoco.runner import Runner
-from jev_mujoco.skills import Registry, SkillSelectionError
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco.runner import Runner
+from luna_mujoco.skills import Registry, SkillSelectionError
+from luna_mujoco.task_progress import TaskProgress
 
 
 def test_build_scene_contract_rejects_completed_grasp_and_retains_empty_hand_entry():

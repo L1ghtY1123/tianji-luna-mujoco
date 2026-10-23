@@ -12,7 +12,7 @@ def binding(**updates):
 
 
 def test_carrying_rejects_stale_owner_frame_or_observation():
-    from jev_mujoco.carrying import CarryingBinding
+    from luna_mujoco.carrying import CarryingBinding
 
     scene = {"scene_token": "scene-2", "observation_id": "rgbd-2", "generation": 2, "target_id": "sam-source"}
     valid = CarryingBinding.from_mapping(binding(), scene=scene, arm="A")
@@ -25,7 +25,7 @@ def test_carrying_rejects_stale_owner_frame_or_observation():
 
 
 def test_measured_envelope_covers_observed_surface_and_uncertainty():
-    from jev_mujoco.carrying import CarryingBinding, carrying_spheres
+    from luna_mujoco.carrying import CarryingBinding, carrying_spheres
 
     value = CarryingBinding.from_mapping(binding(), scene={"scene_token": "scene-2", "observation_id": "rgbd-2",
                                                           "generation": 2, "target_id": "sam-source"}, arm="A")
@@ -33,11 +33,11 @@ def test_measured_envelope_covers_observed_surface_and_uncertainty():
     corners = np.asarray(value.points_tool_m)
     distance = np.linalg.norm(corners[:, None] - spheres[None, :, :3], axis=-1)
     assert np.all(np.min(distance - spheres[None, :, 3], axis=1) <= -.004 + 1e-12)
-    assert 1 <= len(spheres) <= 256
+    assert 1 <= len(spheres) <= 24
 
 
 def test_configured_carried_link_preserves_robot_and_only_ignores_hold_contacts():
-    from jev_mujoco.carrying import CarryingBinding, create_carrying_robot_config
+    from luna_mujoco.carrying import CarryingBinding, create_carrying_robot_config
 
     robot = {"robot_cfg": {"kinematics": {"tool_frames": ["TCP_Link_L"],
              "collision_link_names": ["Link1_L", "TCP_Link_L", "gripL_Base", "gripR_Base"],
@@ -56,7 +56,7 @@ def test_configured_carried_link_preserves_robot_and_only_ignores_hold_contacts(
 
 
 def test_retreat_never_accepts_attachment_and_open_requires_driver_feedback():
-    from jev_mujoco.carrying import validate_phase_request
+    from luna_mujoco.carrying import validate_phase_request
 
     with pytest.raises(ValueError, match="retreat"):
         validate_phase_request({"phase": "retreat", "carrying_binding": binding()})
@@ -69,7 +69,7 @@ def test_gripper_lock_tolerates_only_tiny_endpoint_feedback_error():
 
     import yaml
 
-    from jev_mujoco.carrying import configure_gripper_feedback
+    from luna_mujoco.carrying import configure_gripper_feedback
 
     root = Path(__file__).resolve().parents[1]
     config = yaml.safe_load((root / 'resources/curobo/marvin_gui_dual.yml').read_bytes())
@@ -86,7 +86,7 @@ def test_derived_gripper_config_mirrors_only_mesh_verified_opposing_pad_and_link
 
     import yaml
 
-    from jev_mujoco.carrying import configure_gripper_feedback
+    from luna_mujoco.carrying import configure_gripper_feedback
 
     root = Path(__file__).resolve().parents[1]
     original = yaml.safe_load((root / "resources/curobo/marvin_gui_dual.yml").read_bytes())
@@ -102,12 +102,16 @@ def test_derived_gripper_config_mirrors_only_mesh_verified_opposing_pad_and_link
     allowed = {(f"grip{arm}_Link{part}_{side}", f"grip{arm}_Link{part}_{other}")
                for arm in ("L", "R") for part in (3, 4) for side, other in (("L", "R"), ("R", "L"))}
     assert added <= allowed
-    assert configured["robot_cfg"]["kinematics"]["collision_spheres"] == before["robot_cfg"]["kinematics"]["collision_spheres"]
+    for link, spheres in configured['robot_cfg']['kinematics']['collision_spheres'].items():
+        for actual, source in zip(spheres, before['robot_cfg']['kinematics']['collision_spheres'][link], strict=True):
+            assert actual['center'] == source['center']
+            padding = 1e-9 if link.startswith(('gripL_', 'gripR_')) else 0.
+            assert actual['radius'] == source['radius'] + padding
     assert original == before
 
 
 def test_target_contact_exemption_is_limited_to_final_tcp_zone():
-    from jev_mujoco.carrying import target_contact_samples
+    from luna_mujoco.carrying import target_contact_samples
 
     goal = np.eye(4)
     matrices = np.repeat(goal[None], 4, axis=0)
@@ -122,7 +126,7 @@ def test_target_contact_exemption_is_limited_to_final_tcp_zone():
 
 
 def test_top_surface_never_adds_unseen_bottom_or_accepts_prior_fields():
-    from jev_mujoco.carrying import CarryingBinding, carrying_spheres
+    from luna_mujoco.carrying import CarryingBinding, carrying_spheres
     scene = {"scene_token": "scene-2", "observation_id": "rgbd-2", "generation": 2, "target_id": "sam-source"}
     payload = binding(points_tool_m=[[-.03, -.02, .04], [.03, .02, .04]])
     value = CarryingBinding.from_mapping(payload, scene=scene, arm="A")
@@ -135,7 +139,7 @@ def test_top_surface_never_adds_unseen_bottom_or_accepts_prior_fields():
 
 
 def test_support_prefix_is_needed_only_until_full_soft_clearance():
-    from jev_mujoco.carrying import CarryingBinding, support_prefix_distance
+    from luna_mujoco.carrying import CarryingBinding, support_prefix_distance
 
     scene = {"scene_token": "scene-2", "observation_id": "rgbd-2", "generation": 2, "target_id": "sam-source"}
     value = CarryingBinding.from_mapping(binding(), scene=scene, arm="A")
@@ -148,14 +152,14 @@ def test_support_prefix_is_needed_only_until_full_soft_clearance():
 
 
 def test_support_contact_policy_is_bound_to_lift():
-    from jev_mujoco.carrying import validate_phase_request
+    from luna_mujoco.carrying import validate_phase_request
 
     with pytest.raises(ValueError, match="support"):
         validate_phase_request({"phase": "place", "carrying_binding": binding(), "support_contact_policy": "observed_plane_normal_departure"})
 
 
 def test_actual_telemetry_must_match_the_first_named_command():
-    from jev_mujoco.carrying import validate_phase_request
+    from luna_mujoco.carrying import validate_phase_request
 
     payload = {"phase": "approach_grasp", "arm": "A", "positions_rad": [[0.] * 7],
                "joint_names": [f"Joint{i}_L" for i in range(1, 8)], "current_joints_rad": [0.] * 7}
@@ -173,7 +177,7 @@ def test_actual_telemetry_must_match_the_first_named_command():
 
 
 def test_world_z_lift_uses_tilted_support_frame_without_requiring_goal_collinearity():
-    from jev_mujoco.carrying import support_departure_frame, validate_support_goal_projection
+    from luna_mujoco.carrying import support_departure_frame, validate_support_goal_projection
 
     tcp = np.eye(4)
     tcp[:3, :3] = [[1, 0, 0], [0, -1, 0], [0, 0, -1]]

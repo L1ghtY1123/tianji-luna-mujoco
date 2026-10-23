@@ -48,7 +48,7 @@ ID 关联是把新观测中的检测与账本里的旧对象对应起来。SAM3 
 
 ## 同一时刻：三个相机如何认为自己看到同一个物体
 
-实现入口：[association.py](../src/jev_mujoco/association.py) 的 `associate_camera_detections` 和 [perception.py](../src/jev_mujoco/perception.py) 的 `_same_observed_instance`。
+实现入口：[association.py](../src/luna_mujoco/association.py) 的 `associate_camera_detections` 和 [perception.py](../src/luna_mujoco/perception.py) 的 `_same_observed_instance`。
 
 相机 3 为头部，2/1 为左右腕部；使用当前同步 RGBD 的标定变换，将掩码内点投影到同一世界坐标。每个实例组最多容纳同一相机的一个检测。已有头部检测时以头部为参考；没有头部时可由腕部证据成立，不要求三路都看到。
 
@@ -66,7 +66,7 @@ ID 关联是把新观测中的检测与账本里的旧对象对应起来。SAM3 
 
 ## 不同时刻：怎样给新掩码恢复旧 ID
 
-实现入口：[association.py](../src/jev_mujoco/association.py) 的 `associate_inventory`。
+实现入口：[association.py](../src/luna_mujoco/association.py) 的 `associate_inventory`。
 
 ### 先限制候选与对象状态
 
@@ -160,7 +160,7 @@ ID 关联是把新观测中的检测与账本里的旧对象对应起来。SAM3 
 
 ## questions 审查覆盖
 
-实际问题主要在 [decisions.py](../src/jev_mujoco/decisions.py) 和 [task_request.py](../src/jev_mujoco/task_request.py)。JEV 读取压缩状态、问题 instructions / criteria 及 Registry contract；不会自动把每份人读 SKILL.md 全文当输入。
+实际问题主要在 [decisions.py](../src/luna_mujoco/decisions.py) 和 [task_request.py](../src/luna_mujoco/task_request.py)。JEV 读取压缩状态、问题 instructions / criteria 及 Registry contract；不会自动把每份人读 SKILL.md 全文当输入。
 
 TypeSafe 同请求中的问题独立使用共同输入状态，不能假定后一问已经知道前一问的答案；选项缺失也不能靠模型聪明补出。审查依据：[State](https://docs.typesafe.ai/concepts/state)、[Choice](https://docs.typesafe.ai/primitives/choice)、[fan-out](https://docs.typesafe.ai/patterns/fan-out)。当前主提问已按共同状态解释，但消费者仍有下列缺口。
 
@@ -233,7 +233,7 @@ GraspGen 的 grasp frame 到 EE 的 195 mm 与机器人 TCP 到夹持参考的 1
 
 ### A1 — P1，放置执行沿用旧的持物与夹爪反馈
 
-[runner.py](../src/jev_mujoco/runner.py) 的 `prepare_attachment` 会检查当前 held；但 `execute_place` 只检查缓存 verified/attached。`measured_state` 又把闭合时双臂夹爪角度覆盖到实时 robot_snapshot 中。
+[runner.py](../src/luna_mujoco/runner.py) 的 `prepare_attachment` 会检查当前 held；但 `execute_place` 只检查缓存 verified/attached。`measured_state` 又把闭合时双臂夹爪角度覆盖到实时 robot_snapshot 中。
 
 A/B 两臂均复现：当前执行臂 0.8 rad 被判 empty，execute_place 仍进入 approach 验证，发送缓存 0.48 rad；对侧实时0.1也变成缓存0.0。复现到第一次验证调用即停止，无运动。
 

@@ -3,8 +3,8 @@ import copy
 import numpy as np
 from test_rgbd_algorithms import observed_scene
 
-from jev_mujoco.algorithms import Algorithms
-from jev_mujoco.perception_mapping import decode_mapping_payload
+from luna_mujoco.algorithms import Algorithms
+from luna_mujoco.perception_mapping import decode_mapping_payload
 
 
 def test_painted_marker_keeps_depth_without_requiring_its_own_collision_volume():

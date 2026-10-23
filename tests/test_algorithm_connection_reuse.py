@@ -3,7 +3,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from jev_mujoco.algorithms import Algorithms
+from luna_mujoco.algorithms import Algorithms
 
 
 def test_algorithm_requests_reuse_connection_and_close_it(monkeypatch):

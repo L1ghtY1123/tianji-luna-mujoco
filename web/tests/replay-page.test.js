@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-import { buildExecutionGraph, createExecutionGraph, graphSvg } from '../src/execution-graph.js';
+import { buildExecutionGraph, createExecutionGraph, graphSvg, renderObjectTimeline } from '../src/execution-graph.js';
+import { createReplayEvidence } from '../src/replay-evidence.js';
 import { formatJson, traceDetails, confidenceLabel, candidateCount, createEventTitleResolver } from '../src/model.js';
 import { taskProgressSummary } from '../src/run-evidence.js';
 import { createObjectList } from '../src/object-list.js';
+import { groupObservationFrames, modelCallInfo, inventorySnapshots, renderReplayStages, renderInventorySnapshot } from '../src/replay-story.js';
 
 const source = (await readFile(new URL('../src/replay.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
 const traceSource = (await readFile(new URL('../src/trace.js', import.meta.url), 'utf8')).replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
@@ -56,8 +58,9 @@ function page(url = 'http://localhost/replay.html') {
     addEventListener() {}, clearTimeout(id) { timers.delete(id); }, setTimeout(callback) { timers.set(timers.size + 1, callback); return timers.size; },
   };
   const context = vm.createContext({
-    document, window, URL, Error, console, buildExecutionGraph, createExecutionGraph, graphSvg,
+    document, window, URL, Error, console, buildExecutionGraph, createExecutionGraph, graphSvg, renderObjectTimeline, createReplayEvidence,
     runConclusion,
+    groupObservationFrames, modelCallInfo, inventorySnapshots, renderReplayStages, renderInventorySnapshot,
     formatJson, traceDetails, confidenceLabel, candidateCount, createEventTitleResolver, taskProgressSummary, createObjectList,
     request(path, body) { return new Promise((resolve, reject) => pending.push({ path, body, resolve, reject })); },
     fetch(path, options) { return new Promise((resolve, reject) => pending.push({ path, options, resolve, reject })); },
@@ -80,6 +83,31 @@ function page(url = 'http://localhost/replay.html') {
   function text(item) { return [item.textContent, ...item.children.map(text)].join(' '); }
   return { get, take, load, pending, window, text };
 }
+
+test('IK replay exposes eligibility separately and labels historical raw-only results', async () => {
+  const ui = page();
+  await ui.load([manifest('recorded')]);
+  const container = ui.get('candidate-filter-test');
+  const viewer = createReplayEvidence(container, { fileUrl: (_run, path) => path });
+  const replay = { stage: 'after_ik', candidate_indices: [27],
+    request: { goal_matrices_world: [[[1]]] },
+    response: { items: [{ candidate_index: 0, success: true }] } };
+  await viewer.show('recorded', [], { values: [{ candidate_replay: replay }] });
+  assert.match(ui.text(container), /仅原始 IK/);
+  assert.match(ui.text(container), /最终可用性未记录/);
+  await viewer.show('recorded', [], { values: [{ candidate_replay: { ...replay,
+    candidate_filters: [{ candidate_index: 27, accepted: false, reason: 'predicted_gripper_collision' }],
+  } }] });
+  assert.match(ui.text(container), /0 通过.*1 未通过/);
+  const select = container.querySelectorAll('[aria-label]').find(node =>
+    node.getAttribute('aria-label') === '选择候选编号');
+  select.value = '27';
+  select.listeners.change();
+  assert.match(ui.text(container), /"rawStatus": "passed"/);
+  assert.match(ui.text(container), /"eligible": false/);
+  assert.match(ui.text(container), /predicted_gripper_collision/);
+  viewer.dispose();
+});
 
 test('deep links select graph and task time while busy records prevent save/discard/export', async () => {
   const ui = page('http://localhost/replay.html?run=busy&view=graph&t=12.5');
@@ -150,8 +178,9 @@ test('observation details expose the actual RGBD artifact and can seek both trac
   ui.get('execution-graph').querySelectorAll('[data-node-id]').find(node => node.getAttribute('data-node-id') === 'event:1').listeners.click();
   assert.equal(ui.get('scene-video').currentTime, 7.5);
   assert.equal(ui.get('cameras-video').currentTime, 7.5);
-  assert.match(ui.text(ui.get('node-artifacts')), /RGBD/);
-  const downloads = ui.get('node-artifacts').children.flatMap(child => child.children).filter(child => child.href);
+  assert.equal(ui.get('node-diagnostics').open, false);
+  assert.match(ui.text(ui.get('node-files')), /RGBD/);
+  const downloads = ui.get('node-files').children.flatMap(child => child.children).filter(child => child.href);
   assert.equal(downloads.some(link => link.href.endsWith('/observations/frame.json')), true);
 });
 
@@ -305,21 +334,22 @@ test('observation gallery defaults to analyzed head frame and selects later thre
   const ui = page('http://localhost/replay.html?view=observations');
   await ui.load([manifest('recorded')], observations());
   assert.equal(ui.get('tab-observations').getAttribute('aria-selected'), 'true');
-  assert.equal(ui.get('observation-select').children.length, 3);
-  assert.match(ui.get('observation-meta').textContent, /head-1.*初始.*已分析/);
+  assert.equal(ui.get('observation-select').children.length, 2);
+  assert.equal(ui.get('observation-revision').children.length, 2);
+  assert.match(ui.get('observation-meta').textContent, /初始观测.*00:00:02.000.*2 个标注版本/);
   assert.equal(ui.get('observation-cameras').children.length, 1);
   assert.match(ui.text(ui.get('observation-cameras')), /头部.*3/);
-  ui.get('observation-select').value = '5';
+  ui.get('observation-select').value = 'three-2';
   ui.get('observation-select').listeners.change();
   const cameras = ui.get('observation-cameras').children;
   assert.equal(cameras.length, 3);
-  assert.match(ui.get('observation-meta').textContent, /three-2.*放后/);
+  assert.match(ui.get('observation-meta').textContent, /桌面放置后观察/);
   assert.match(ui.text(cameras[0]), /左腕/);
   assert.match(ui.text(cameras[1]), /头部/);
   assert.match(ui.text(cameras[2]), /右腕/);
-  assert.match(ui.text(ui.get('observation-artifacts')), /Decisions.*verify_destination_region/);
+  assert.match(ui.text(ui.get('observation-artifacts')), /模型调用.*verify_destination_region/);
   ui.get('observation-seek').listeners.click();
-  assert.equal(ui.get('playback-time').textContent, '00:00:09.000');
+  assert.equal(ui.get('playback-time').textContent, '00:00:08.000');
 });
 
 test('annotation viewer zooms and reads the matching embedded original without a live camera request', async () => {
@@ -358,4 +388,44 @@ test('switching archives closes old annotation and ignores an outstanding raw-im
   assert.equal(ui.get('observation-cameras').children.length, 0);
   assert.equal(ui.get('observation-image').getAttribute('src'), null);
   assert.match(ui.get('observation-meta').textContent, /未保存/);
+});
+
+test('workflow model button loads its archived questions and never performs an inference request', async () => {
+  const ui = page();
+  await ui.load([manifest('recorded')], [
+    { id: 1, kind: 'skill_start', title: 'verify_place', invocation_id: 'verify', t_s: 1 },
+    { id: 2, kind: 'visual_decisions_call', invocation_id: 'verify', t_s: 2,
+      data: { endpoint: '/v1/decisions', purpose: 'verify_release_result', artifact: 'decisions/place.json' } },
+    { id: 3, kind: 'skill_complete', title: 'verify_place', invocation_id: 'verify', t_s: 3 },
+  ]);
+  assert.equal(ui.pending.length, 0);
+  const call = ui.get('object-timeline').querySelectorAll('[aria-label]').find(item => item.getAttribute('aria-label') === 'Decisions · 确认桌面放置与松爪');
+  call.listeners.click();
+  ui.take('/api/experiments/recorded/files/decisions/place.json').resolve({
+    endpoint: '/v1/decisions', purpose: 'verify_release_result',
+    request: { input: [], questions: [{ name: 'workpiece_still_held', instructions: 'Is the object still held?' }] },
+    response: { answers: [{ name: 'workpiece_still_held', type: 'predicate', probability: 0 }] },
+  });
+  await settle();
+  assert.match(ui.text(ui.get('node-evidence')), /工件仍被夹持.*概率：0.0%/);
+  assert.match(ui.text(ui.get('node-evidence')), /Is the object still held/);
+  assert.equal(ui.get('node-diagnostics').open, false);
+  assert.equal(ui.pending.length, 0);
+});
+
+test('inventory tab switches real snapshots and keeps permanent input and independent product IDs', async () => {
+  const ui = page();
+  const initial = { all_entities: { pink: { id: 'pink', display_id: 1, kind: 'object', color: 'pink' } },
+    process_records: { p: { id: 'p', display_id: 1, input_entity_id: 'pink', to_table_arm: 'A', to_right_bin_arm: 'B' } }, process_order: ['p'] };
+  await ui.load([manifest('recorded')], [
+    { id: 14, kind: 'skill_complete', title: 'bind_inventory', data: { result: initial } },
+    { id: 158, kind: 'product_created', data: { process_id: 'p', input_entity_id: 'pink', output_entity_id: 'black', product_entity: { id: 'black', kind: 'object', color: 'black' } } },
+  ]);
+  ui.get('tab-inventory').listeners.click();
+  assert.equal(ui.get('tab-inventory').getAttribute('aria-selected'), 'true');
+  assert.match(ui.text(ui.get('inventory-board')), /非完整快照.*已拆包 · 待投放 · 1.*产物：black/);
+  ui.get('inventory-snapshot').value = '14';
+  ui.get('inventory-snapshot').listeners.change();
+  assert.match(ui.text(ui.get('inventory-board')), /完整清单快照.*待拆包 · 1.*输入：pink/);
+  assert.doesNotMatch(ui.text(ui.get('inventory-board')), /产物：black/);
 });

@@ -39,7 +39,7 @@
 
 ## Task 1：收敛感知数据与观察合同
 
-**Files:** `resources/cameras/calibration.json`，`src/jev_mujoco/cameras.py`、`perception.py`、`placement.py`、`runner.py`、`algorithms.py`、`verification.py` 和 `skills/observe/*`；实际合同回归位于 `tests/test_perception.py`、`test_visible_perception.py`、`test_visible_verification.py`、`test_rgbd_application.py`、`test_cameras.py`、`test_camera_api.py`，不另建原计划名 `test_visible_cloud_contract.py`。
+**Files:** `resources/cameras/calibration.json`，`src/luna_mujoco/cameras.py`、`perception.py`、`placement.py`、`runner.py`、`algorithms.py`、`verification.py` 和 `skills/observe/*`；实际合同回归位于 `tests/test_perception.py`、`test_visible_perception.py`、`test_visible_verification.py`、`test_rgbd_application.py`、`test_cameras.py`、`test_camera_api.py`，不另建原计划名 `test_visible_cloud_contract.py`。
 
 **Interfaces:** 实例包含身份、语义、颜色、可见点及来源和观察 ID；`points_world_m` 只包含实测点。`Runner.observe(context, *, checkpoint)` 使用 initial/fine/post_grasp/release/post_place/standalone_place 显式节点。
 
@@ -52,7 +52,7 @@
 
 ## Task 2：Open3D 可选去噪与点簇预览
 
-**Files:** 新增 `src/jev_mujoco/pointcloud_filter.py`、`tests/test_pointcloud_filter.py`；修改 `src/jev_mujoco/perception_mapping.py`、`geometry_service.py` 及地图调试显示。
+**Files:** 新增 `src/luna_mujoco/pointcloud_filter.py`、`tests/test_pointcloud_filter.py`；修改 `src/luna_mujoco/perception_mapping.py`、`geometry_service.py` 及地图调试显示。
 
 **Interfaces:** `filter_observed_points(points_world, point_sources, *, settings)` 返回原点索引对应的 keep_mask、rejected_mask、可选 cluster_labels 和 counts。映射保存相机/像素来源与实例归属；降采样保留来源。项目适配层在目标排除及 TSDF/ESDF 建图前应用过滤，禁止改 vendor。仿真默认 OFF，包含关闭原生路径中隐含的统计/半径/小连通簇过滤。
 
@@ -65,7 +65,7 @@
 
 ## Task 3：保持审核通过的初始观察流程
 
-**Files:** 新增 `src/jev_mujoco/observation_motion.py`、`resources/observation_poses.json`、`skills/move_to_observe/{SKILL.md,contract.json}`、`tests/test_observation_motion.py`；修改 `runner.py`、`algorithms.py` 和场景适配。
+**Files:** 新增 `src/luna_mujoco/observation_motion.py`、`resources/observation_poses.json`、`skills/move_to_observe/{SKILL.md,contract.json}`、`tests/test_observation_motion.py`；修改 `runner.py`、`algorithms.py` 和场景适配。
 
 **Interfaces:** `Algorithms.plan_observation_motion(observation, scene, arm, goal_joints_rad, *, planning_settings)` 输出版本绑定的关节轨迹；`Runner.move_to_observe(context)` 顺序处理 A/B 实际状态。
 
@@ -76,7 +76,7 @@
 
 ## Task 4：grasp 结束建立持久表面球 attachment
 
-**Files:** `src/jev_mujoco/carrying.py`、`placement.py`、`geometry_service.py`、`backend_builder.py`、`runner.py`；实际回归在 `tests/test_carrying.py`、`test_visible_workflow.py`、`test_rgbd_workflow.py`、`test_visible_surface_gpu_contract.py` 等，不另建原计划中的两个测试文件名。
+**Files:** `src/luna_mujoco/carrying.py`、`placement.py`、`geometry_service.py`、`backend_builder.py`、`runner.py`；实际回归在 `tests/test_carrying.py`、`test_visible_workflow.py`、`test_rgbd_workflow.py`、`test_visible_surface_gpu_contract.py` 等，不另建原计划中的两个测试文件名。
 
 **Interfaces:** `CarryingBinding` 消费 points_tool_m、observation_id、generation、instance_id、arm、state 和表面采样/余量配置，不再强制 estimated_bounds_tool_m 或 shape_prior_provenance。`carrying_spheres` 只覆盖实测表面体素。grasp 结束时在 post_grasp 持物确认后更新闭爪球并建立持久绑定；成功返回时 place-ready。运动规划仍使用现有 approach/lift 参数，不增加 reverse_grasp_segment。
 
@@ -89,7 +89,7 @@
 
 ## Task 5：夹爪状态更新与规划器复用
 
-**Files:** `src/jev_mujoco/geometry_service.py`、`backend_builder.py`、`carrying.py`；实际回归在 `tests/test_geometry_service.py`、`test_backend_builder.py`、`test_carrying.py`、`test_visible_surface_gpu_contract.py`，独立 GPU 脚本/结果在 `data/visible-cloud-work/`。
+**Files:** `src/luna_mujoco/geometry_service.py`、`backend_builder.py`、`carrying.py`；实际回归在 `tests/test_geometry_service.py`、`test_backend_builder.py`、`test_carrying.py`、`test_visible_surface_gpu_contract.py`，独立 GPU 脚本/结果在 `data/visible-cloud-work/`。
 
 **Interfaces:** 锁定 SDK 的 attachment 更新只影响一个 model，不能假定会自动传播所有 solver。现实现采用有界、精确键的配置复用，键包含实际 A/B 夹爪反馈与 binding；需要时重建相关后端，不量化反馈求缓存命中。场景版本与持物绑定分别管理；scope 不销毁跨 grasp/place 的绑定。数值等价校验只用于采集状态核对，不改变 FK、缓存键或碰撞球。
 
@@ -103,7 +103,7 @@
 
 ## Task 6：简化 place 与三种 skill
 
-**Files:** `src/jev_mujoco/placement.py`、`algorithms.py`、`runner.py`、`verification.py`、`decisions.py`、`skills/plan_grasp_and_place/*` 及相关合同；实际回归在 `tests/test_visible_placement.py`、`test_visible_workflow.py`、`test_rgbd_workflow.py`、`test_release_association.py` 等。
+**Files:** `src/luna_mujoco/placement.py`、`algorithms.py`、`runner.py`、`verification.py`、`decisions.py`、`skills/plan_grasp_and_place/*` 及相关合同；实际回归在 `tests/test_visible_placement.py`、`test_visible_workflow.py`、`test_rgbd_workflow.py`、`test_release_association.py` 等。
 
 **Interfaces:** `release_goal(visible_points_tool, destination_reference_world, tool_rotation_world, *, release_height_m, offset_world_m, grasp_support_reference)` 返回 TCP 放置目标和实测参照来源。视觉提供目标区域世界 XY；界面 Z 对应 release_height_m，定义为物体底部离盒内底面的距离，默认 0.01。grasp_support_reference 保存实测桌面高度和闭爪时实际 TCP 位姿；默认恢复该朝向以保持物体初始姿态，在水平支撑、无滑动条件下应用底面高度关系。机器人绝对 Z 仍需有效盒底高度参考，不从仿真模型取值。不接收完整尺寸或 box cavity。
 
@@ -116,7 +116,7 @@
 
 ## Task 7：设置、展示、部署与完整验收
 
-**Files:** 修改 `src/jev_mujoco/planning_settings.py`、`web/src/main.js`、`web/src/scene-preview.js`、`web/src/planning-settings.js`、`web/src/camera-panel.js`、`web/src/scene-view.js`、`README.md` 和 `tests/rgbd_pick_place_smoke.py`；沿用 `tests/test_bins.py` 与 `web/tests/bin-editor.test.js` 并补充所需回归。
+**Files:** 修改 `src/luna_mujoco/planning_settings.py`、`web/src/main.js`、`web/src/scene-preview.js`、`web/src/planning-settings.js`、`web/src/camera-panel.js`、`web/src/scene-view.js`、`README.md` 和 `tests/rgbd_pick_place_smoke.py`；沿用 `tests/test_bins.py` 与 `web/tests/bin-editor.test.js` 并补充所需回归。
 
 - [x] 开口物料盒编辑器及底/四壁物理碰撞实现，bins Python/前端测试通过；颜色/位置/尺寸只用于仿真编辑，规划盒壁/底来自 RGBD。
 - [x] 观察 A/B 位姿、可选 Open3D/DBSCAN、attachment 采样/余量/预算、原 approach/lift、place 高度/姿态已接入高级设置，运行使用冻结设置。旧容量/箱腔/接触离桌设置移除；持物已有 binding 不被中途设置改写，见[设置实现](../../../data/visible-cloud-work/settings-ui-completion-report.md)及[独立复核](../../../data/visible-cloud-work/settings-endtoend-review.txt)。

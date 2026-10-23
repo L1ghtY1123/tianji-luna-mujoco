@@ -2,7 +2,7 @@
 import argparse
 from pathlib import Path
 
-from jev_mujoco.workspace_builder import build_workspace
+from luna_mujoco.workspace_builder import build_workspace
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])

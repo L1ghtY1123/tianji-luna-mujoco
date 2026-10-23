@@ -1,6 +1,6 @@
 import numpy as np
 
-from jev_mujoco.simulation import Simulation
+from luna_mujoco.simulation import Simulation
 
 
 def test_robot_feedback_exposes_only_real_robot_measurements():

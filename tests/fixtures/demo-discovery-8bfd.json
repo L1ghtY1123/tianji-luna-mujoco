@@ -1,0 +1,224 @@
+{
+  "entities": [
+    {
+      "ref": "destination-table",
+      "kind": "table",
+      "color": "灰色",
+      "description": "camera 3 中可见的大型灰色工作台面",
+      "bbox": [
+        0.22,
+        0.38,
+        0.8,
+        1.0
+      ],
+      "membership": "excluded",
+      "segmentation_prompt": "灰色桌面",
+      "parent_ref": null,
+      "reference_camera_id": "3"
+    },
+    {
+      "ref": "source-bin",
+      "kind": "bin",
+      "color": "蓝色",
+      "description": "装有粉色物体的蓝色盒子",
+      "bbox": [
+        0.025,
+        0.38,
+        0.7,
+        1.0
+      ],
+      "membership": "excluded",
+      "segmentation_prompt": "装有粉色物体的蓝色盒子",
+      "parent_ref": null,
+      "reference_camera_id": "2"
+    },
+    {
+      "ref": "empty-blue-bin",
+      "kind": "bin",
+      "color": "蓝色",
+      "description": "camera 1 中可见的另一个空蓝色盒子",
+      "bbox": [
+        0.3,
+        0.36,
+        0.98,
+        0.92
+      ],
+      "membership": "excluded",
+      "segmentation_prompt": "空蓝色盒子",
+      "parent_ref": null,
+      "reference_camera_id": "1"
+    },
+    {
+      "ref": "pink-object-1",
+      "kind": "object",
+      "color": "粉色",
+      "description": "盒内靠左、部分被机械臂遮挡的粉色物体",
+      "bbox": [
+        0.3,
+        0.72,
+        0.38,
+        0.85
+      ],
+      "membership": "required",
+      "segmentation_prompt": "粉色物体",
+      "parent_ref": "source-bin",
+      "reference_camera_id": "2"
+    },
+    {
+      "ref": "pink-object-2",
+      "kind": "object",
+      "color": "粉色",
+      "description": "盒内中间的粉色物体",
+      "bbox": [
+        0.405,
+        0.665,
+        0.46,
+        0.77
+      ],
+      "membership": "required",
+      "segmentation_prompt": "粉色物体",
+      "parent_ref": "source-bin",
+      "reference_camera_id": "2"
+    },
+    {
+      "ref": "pink-object-3",
+      "kind": "object",
+      "color": "粉色",
+      "description": "盒内靠右的粉色物体",
+      "bbox": [
+        0.49,
+        0.6,
+        0.555,
+        0.72
+      ],
+      "membership": "required",
+      "segmentation_prompt": "粉色物体",
+      "parent_ref": "source-bin",
+      "reference_camera_id": "2"
+    }
+  ],
+  "task": {
+    "supported": true,
+    "reason": "技能支持将盒中所有可见粉色物体逐个搬运到配置的桌面目标区域；三件可见粉色物体均能在 camera 2 中区分。可见清单不代表盒内隐藏区域为空。",
+    "scope": "all",
+    "requested_count": null,
+    "source_bin_ref": "source-bin",
+    "destination_table_ref": "destination-table",
+    "source_inventory_complete": "confirmed"
+  },
+  "program": {
+    "version": 1,
+    "steps": [
+      {
+        "type": "for_each_target",
+        "body": [
+          {
+            "type": "skill",
+            "skill": "identify_target",
+            "arguments": [
+              {
+                "name": "target_id",
+                "value": "$target"
+              }
+            ]
+          },
+          {
+            "type": "skill",
+            "skill": "identify_destination",
+            "arguments": [
+              {
+                "name": "destination_id",
+                "value": "$destination"
+              }
+            ]
+          },
+          {
+            "type": "skill",
+            "skill": "choose_arm",
+            "arguments": [
+              {
+                "name": "arm",
+                "value": "auto"
+              }
+            ]
+          },
+          {
+            "type": "skill",
+            "skill": "build_scene",
+            "arguments": []
+          },
+          {
+            "type": "skill",
+            "skill": "generate_grasps",
+            "arguments": []
+          },
+          {
+            "type": "skill",
+            "skill": "plan_grasp",
+            "arguments": []
+          },
+          {
+            "type": "skill",
+            "skill": "execute_grasp",
+            "arguments": []
+          },
+          {
+            "type": "skill",
+            "skill": "verify_grasp",
+            "arguments": []
+          },
+          {
+            "type": "if_result",
+            "condition": "success",
+            "then_steps": [
+              {
+                "type": "skill",
+                "skill": "plan_place",
+                "arguments": []
+              },
+              {
+                "type": "skill",
+                "skill": "execute_place",
+                "arguments": []
+              },
+              {
+                "type": "skill",
+                "skill": "verify_place",
+                "arguments": []
+              },
+              {
+                "type": "if_result",
+                "condition": "success",
+                "then_steps": [],
+                "else_steps": [
+                  {
+                    "type": "stop",
+                    "reason": "放置核验未确认成功，停止后续搬运。"
+                  }
+                ]
+              }
+            ],
+            "else_steps": [
+              {
+                "type": "stop",
+                "reason": "抓取核验未确认持物，停止后续操作。"
+              }
+            ]
+          }
+        ],
+        "between_targets": [
+          {
+            "type": "skill",
+            "skill": "move_to_observe",
+            "arguments": []
+          },
+          {
+            "type": "skill",
+            "skill": "observe_scene",
+            "arguments": []
+          }
+        ]
+      }
+    ]
+  }
+}

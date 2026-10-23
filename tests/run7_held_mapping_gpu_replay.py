@@ -7,9 +7,9 @@ import time
 import numpy as np
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
-from jev_mujoco.perception_mapping import decode_mapping_payload
-from jev_mujoco.semantic_transport import IDENTITY_FIELDS, encode_project_semantic_request
+from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
+from luna_mujoco.perception_mapping import decode_mapping_payload
+from luna_mujoco.semantic_transport import IDENTITY_FIELDS, encode_project_semantic_request
 
 
 def main():

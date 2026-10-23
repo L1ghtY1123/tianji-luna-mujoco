@@ -16,8 +16,8 @@ import yaml
 from PIL import Image
 from scipy.optimize import least_squares
 
-from jev_mujoco.cameras import RgbdRenderer, camera_pose, clone_render_model, deproject_view
-from jev_mujoco.model_builder import ARM_JOINTS, ModelBuilder, normalize_scene
+from luna_mujoco.cameras import RgbdRenderer, camera_pose, clone_render_model, deproject_view
+from luna_mujoco.model_builder import ARM_JOINTS, ModelBuilder, normalize_scene
 
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCE_SCENE = {"objects": [
@@ -188,8 +188,8 @@ def main():
         poses = json.loads(path.read_text())["joints_rad"] if args.verify else search(model, data)
         evidence = validate(model, data, poses, ROOT / "data/visible-cloud-work/observation-poses")
         paths = ["assets/marvin_urdf/marvin_with_grippers.urdf", "resources/cameras/calibration.json",
-                 "resources/curobo/marvin_gui_dual.yml", "src/jev_mujoco/model_builder.py",
-                 "src/jev_mujoco/cameras.py", "scripts/calibrate_observation_poses.py"]
+                 "resources/curobo/marvin_gui_dual.yml", "src/luna_mujoco/model_builder.py",
+                 "src/luna_mujoco/cameras.py", "scripts/calibrate_observation_poses.py"]
         hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in paths}
         record = {"schema_version": 1, "model_validated": True, "joints_rad": poses,
                   "validation": evidence, "source_sha256": hashes, "search_seed": 20261009,

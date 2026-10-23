@@ -1,0 +1,5 @@
+# verify_drop
+
+合法持物、attachment运输、实际开爪后，一次Decisions融合CURRENT三RGB、BEFORE三RGB及同盒右腕/头部区域放大图，判断本次是否有新增黑件进入右盒。随机落体可能堆叠，不要求当前逐个数清N+1件；须有新增可见物体本体或新增工件轮廓特征，不能仅凭旧件移动、旋转、视角变化、历史数量或动作记录确认。完全遮挡且没有新增视觉证据时unknown，不推进。predicate current_item_added概率≥0.8确认、≤0.2否定，其余unknown。完成数只作上下文，不重新辨认盒内个体ID。辅助图只放大原像素，来自同观测已发布完整盒体占据的标定投影，不SAM、不建图、不使用仿真真值；完整CAD壳校验与归档保留，但不重复发送壳片明细给模型。成功完成独立产物及process，保留原始回答、完整反馈链与released_in_bin_and_visible_addition语义。
+
+保留原六张完整RGB；右腕和头部各按BEFORE/CURRENT标定投影追加最多四张BIN REGION图。出画图可省略。发布占据的完整层名、完整CAD表面（历史地图为49片凸分解）、SHA、实例、观测版本、scene_token和边界包含关系仍在调用前校验；bin_region_geometry归档全部几何证明。只有模型提示省略重复壳片明细。旧实验结果不重写，新旧completion_semantics明确区分。

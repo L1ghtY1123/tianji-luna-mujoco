@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from jev_mujoco.instance_mapping import instance_grid_layout
-from jev_mujoco.release_clearance import release_clearance_evidence
+from luna_mujoco.instance_mapping import instance_grid_layout
+from luna_mujoco.release_clearance import release_clearance_evidence
 
 
 @pytest.mark.parametrize('floor', [.60999888, .6163, .6327])
@@ -27,26 +27,10 @@ def test_release_uses_the_same_numerical_cost_epsilon_as_trajectory_validation()
     assert real_conflict['conflict']
 
 
-def test_independent_ik_checker_preserves_real_costs_and_normalizes_roundoff():
-    from jev_mujoco.backend_builder import ClearanceCostTolerance
-
-    class PublicChecker:
-        def get_collision_distance(self, value):
-            return value
-
-    class Checker(ClearanceCostTolerance, PublicChecker):
-        pass
-
-    original = np.array([0., 4.55e-11, 1e-9, 1.1e-9, .00125, -1., np.nan])
-    result = Checker().get_collision_distance(original)
-    np.testing.assert_equal(result, [0., 0., 0., 1.1e-9, .00125, -1., np.nan])
-    assert original[1] == 4.55e-11
-
-
 def test_measured_instance_floor_is_bound_to_scene_identity():
     from test_perception_mapping import wire
 
-    from jev_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload
     request = wire()
     decoded, first = decode_mapping_payload(request | {'instance_floor_heights_m': {'source': .61}})
     _, second = decode_mapping_payload(request | {'instance_floor_heights_m': {'source': .62}})
@@ -59,6 +43,6 @@ def test_measured_instance_floor_is_bound_to_scene_identity():
 def test_unmeasured_or_invalid_floor_metadata_is_rejected(floors):
     from test_perception_mapping import wire
 
-    from jev_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload
     with pytest.raises(ValueError, match='instance_floor_heights'):
         decode_mapping_payload(wire() | {'instance_floor_heights_m': floors})

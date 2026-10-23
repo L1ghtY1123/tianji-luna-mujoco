@@ -1,7 +1,7 @@
 """Application contract for fixed workspace lookup without GPU requests."""
 import pytest
 
-from jev_mujoco.algorithms import AlgorithmError, Algorithms
+from luna_mujoco.algorithms import AlgorithmError, Algorithms
 
 
 def test_requested_arm_and_single_target_do_not_query_other_arm_or_destination():

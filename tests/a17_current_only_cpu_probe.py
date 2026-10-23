@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial import cKDTree
 
-from jev_mujoco.carrying import CarryingBinding, carrying_geometry
+from luna_mujoco.carrying import CarryingBinding, carrying_geometry
 
 ROOT = Path(__file__).resolve().parents[1]
 folder = ROOT / "data/visible-cloud-work"

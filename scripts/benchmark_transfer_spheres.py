@@ -14,7 +14,7 @@ import torch
 import yaml
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.geometry_service import SDK_COMMIT, GeometryRuntime, run_operation, sdk_identity
+from luna_mujoco.geometry_service import SDK_COMMIT, GeometryRuntime, run_operation, sdk_identity
 
 
 def check_idle():

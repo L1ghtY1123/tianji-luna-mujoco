@@ -1,0 +1,7 @@
+# plan_transport
+
+黑件lift后带attachment，用官方普通plan_pose将夹爪前端放到右盒靠机器人的半区上方。机器人+X向前，XY取当前配准盒腔包围范围中心向-X偏移X宽度的1/4（近侧半区中心）；保持实际lift旋转。用户坐标均为夹爪前端，SDK法兰目标减去R@[0,0,0.185]，不使用持物中心，不检查整件投影包含。Z保留宽松选择：持物最低点高于当前盒体占据上界10cm，并可提高到缩短肩腕距离的高度。附件与机器人/场景的三维10mm碰撞检查、当前闭爪/全开detach端点及高级设置五次插值/时间伸长保持。盒边界只来自最新发布的该ID体素/CAD配准，不从仿真真值或原SAM飞点求高度；版本、边界不完整或无解时停止。
+
+前提：grasp_completed=true, grasp_held=true, scene_ready=true, unpack_verified=true。
+
+输出事实：transport_plan_ready。完整原始输入、视觉请求、版本及失败证据保存回放；unknown不作为成功。

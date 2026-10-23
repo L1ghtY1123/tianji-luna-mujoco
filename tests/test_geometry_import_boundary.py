@@ -15,8 +15,8 @@ class NoRenderer(MetaPathFinder):
         if fullname == "mujoco" or fullname.startswith("mujoco."):
             raise ModuleNotFoundError("GPU service has no MuJoCo renderer")
 sys.meta_path.insert(0, NoRenderer())
-from jev_mujoco.planning_settings import PlanningSettings
-assert PlanningSettings().attachment.sphere_budget == 16
+from luna_mujoco.planning_settings import PlanningSettings
+assert PlanningSettings().attachment.sphere_budget == 24
 assert "mujoco" not in sys.modules
 '''
     result = subprocess.run([sys.executable, '-c', code], env={**os.environ, 'PYTHONPATH': str(source)},

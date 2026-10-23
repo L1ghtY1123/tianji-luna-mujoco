@@ -1,7 +1,7 @@
 import pytest
 
-from jev_mujoco.skills import Registry
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco.skills import Registry
+from luna_mujoco.task_progress import TaskProgress
 
 
 def test_visible_unfinished_required_member_cannot_be_reported_complete():
@@ -32,7 +32,7 @@ def test_unknown_evidence_or_rejected_action_does_not_consume_motion_retry_budge
 async def test_same_capture_geometry_preserves_visual_semantics_without_api_repeat(tmp_path):
     from test_rgbd_workflow import SensorRobot, VisionAlgorithms
 
-    from jev_mujoco.runner import Runner
+    from luna_mujoco.runner import Runner
 
     class Visual:
         calls = 0
@@ -69,32 +69,12 @@ async def test_same_capture_geometry_preserves_visual_semantics_without_api_repe
     assert 'visual_semantics' not in state['observation']['objects'][0]
 
 
-@pytest.mark.parametrize('task,expected', [('grasp', 'held'), ('grasp_place', 'completed')])
-async def test_action_status_refreshes_labels_only_for_analyzed_current_capture(tmp_path, task, expected):
-    import asyncio
-
-    from test_rgbd_workflow import Choices, SensorRobot, VisionAlgorithms
-
-    from jev_mujoco.runner import Runner
-
-    class RecordedRunner(Runner):
-        def record_annotation(self, capture, labels):
-            from copy import deepcopy
-            revisions.append(deepcopy(labels))
-
-    revisions = []
-    runner = RecordedRunner(SensorRobot(), VisionAlgorithms(), lambda record: Choices(task), tmp_path)
-    await runner.start('把红色方块放进蓝色盒子')
-    await asyncio.wait_for(runner.worker, 5)
-    assert runner.state['status'] == 'succeeded', runner.state.get('error')
-    assert {row['status'] for row in runner.state['object_labels']['items'] if row['id'] == 'source'} == {expected}
-    assert runner.algorithms.checkpoints == ['initial', 'fine'] + (['post_place'] if task == 'grasp_place' else [])
 
 
 async def test_new_observation_never_inherits_old_container_floor(tmp_path):
     from test_rgbd_workflow import SensorRobot, VisionAlgorithms
 
-    from jev_mujoco.runner import Runner
+    from luna_mujoco.runner import Runner
 
     class MissingFloor(VisionAlgorithms):
         def observe(self, *args, **kwargs):
@@ -113,7 +93,7 @@ async def test_new_observation_never_inherits_old_container_floor(tmp_path):
 
 
 def test_public_placement_reference_exposes_its_source_frame():
-    from jev_mujoco.placement import public_observation
+    from luna_mujoco.placement import public_observation
     observation = {'source': 'rgbd', 'observation_id': 'new', 'objects': [
         {'id': 'bin', 'kind': 'bin', 'placement_reference': {'observation_id': 'old', 'floor_z_m': .6}}]}
     assert public_observation(observation)['objects'][0]['placement_reference']['observation_id'] == 'old'

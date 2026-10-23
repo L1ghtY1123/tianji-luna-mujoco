@@ -4,9 +4,9 @@ from types import SimpleNamespace
 import pytest
 from test_observation_motion import ObservationAlgorithms, context
 
-from jev_mujoco.perception import PerceptionError
-from jev_mujoco.runner import SkillSelectionError
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco.perception import PerceptionError
+from luna_mujoco.runner import SkillSelectionError
+from luna_mujoco.task_progress import TaskProgress
 
 
 class RouteAlgorithms(ObservationAlgorithms):

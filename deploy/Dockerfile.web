@@ -7,7 +7,7 @@ COPY web/ ./
 RUN pnpm build
 
 FROM python:3.12-slim@sha256:64695412729fbe8cf054511723820c82bbe5a077d4a6b4070cd4a7225d3422ce AS runtime
-LABEL org.opencontainers.image.title="tianji-jev-mujoco-guangyu"
+LABEL org.opencontainers.image.title="tianji-luna-mujoco-guangyu"
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/opt/jev/src HOME=/tmp MUJOCO_GL=osmesa PYOPENGL_PLATFORM=osmesa
 WORKDIR /opt/jev
 RUN apt-get update && apt-get install --no-install-recommends -y libosmesa6 libgl1 ffmpeg && rm -rf /var/lib/apt/lists/*
@@ -19,13 +19,13 @@ COPY --from=frontend /usr/local/bin/node /usr/local/bin/node
 RUN node --version
 COPY assets/ ./assets/
 COPY resources/ ./resources/
-COPY skills/ ./skills/
+COPY demo_skills/ ./demo_skills/
 COPY vendor/tianji_graspgen/__init__.py vendor/tianji_graspgen/client.py vendor/tianji_graspgen/wire.py ./vendor/tianji_graspgen/
 COPY vendor/tianji_curobo/__init__.py vendor/tianji_curobo/contracts.py vendor/tianji_curobo/trajectory_interpolation.py vendor/tianji_curobo/semantic_esdf_transport.py ./vendor/tianji_curobo/
 COPY --from=frontend /build/web/dist ./web/dist
 COPY --from=frontend /build/web/node_modules ./.web-node_modules
-COPY deploy/run-web.sh ./deploy/run-web.sh
+COPY deploy/run-web.sh deploy/run-demo.sh ./deploy/
 RUN mkdir -p data assets/render_meshes && chown 1000:1000 data assets/render_meshes
 USER 1000:1000
-EXPOSE 8340
+EXPOSE 8350
 CMD ["bash", "/opt/jev/deploy/run-web.sh"]

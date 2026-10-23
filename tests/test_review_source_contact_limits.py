@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from test_visible_surface_gpu_contract import measured_binding
 
-from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
 
 
 def guard_with_limits(limits):

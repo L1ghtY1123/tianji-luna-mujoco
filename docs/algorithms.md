@@ -1,8 +1,8 @@
 # Independent algorithm services
 
 `Algorithms` is a synchronous, SI-unit client boundary. The app calls it in worker
-threads while MuJoCo keeps stepping. Defaults are `JEV_CUROBO_URL=http://127.0.0.1:8310`
-and `JEV_GRASPGEN_URL=http://127.0.0.1:8323`. There is no production mock or fallback.
+threads while MuJoCo keeps stepping. Defaults are `LUNA_CUROBO_URL=http://127.0.0.1:8310`
+and `LUNA_GRASPGEN_URL=http://127.0.0.1:8323`. There is no production mock or fallback.
 
 Start the dedicated services from the new project:
 

@@ -13,7 +13,7 @@ def main():
     from tianji_curobo.contracts import CuroboToolError
     from tianji_curobo.curobo_service import materialize_urdf
 
-    from jev_mujoco.geometry_service import ROOT, GeometryRuntime, sdk_identity
+    from luna_mujoco.geometry_service import ROOT, GeometryRuntime, sdk_identity
 
     assert sdk_identity()[0] == "8e734f3ced1df898990bcd92de40abce475907db"
     urdf = materialize_urdf(ROOT / "assets/marvin_urdf/marvin_with_grippers.urdf",

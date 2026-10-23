@@ -118,7 +118,7 @@ SDK 若允许公开更新独立层 pose，使用该接口；否则以保留的�
 
 ### Task 1：稳定清单、显示编号与基线
 
-**Files:** 修改 `src/jev_mujoco/task_progress.py`、`tests/test_task_progress.py`；记录 `data/observation-inventory-20261013/baseline-manifest.json` 和同目录 `baseline.zip`。
+**Files:** 修改 `src/luna_mujoco/task_progress.py`、`tests/test_task_progress.py`；记录 `data/observation-inventory-20261013/baseline-manifest.json` 和同目录 `baseline.zip`。
 **Interfaces:** 新增 `TaskProgress.assign_display_ids(observation: dict) -> dict[str, int]`、`TaskProgress.rank_candidates(observation: dict, *, arm: str) -> list[dict]`；`snapshot()` 补充上述清单字段。距离排序只提供证据，不改变当前目标。
 
 - [ ] 记录本地文件基线、远端版本/空闲状态和现有参数。读取文档与源码差异，以实际部署状态为准；不保存或输出凭据。
@@ -128,7 +128,7 @@ SDK 若允许公开更新独立层 pose，使用该接口；否则以保留的�
 
 ### Task 2：拆分两类关联并建立准确度数据集
 
-**Files:** 新增 `src/jev_mujoco/association.py`、`tests/test_instance_association.py`、`tests/association_replay.py`；修改 `perception.py`、`runner.py`、`tests/test_perception.py`、`tests/test_task_perception.py`。
+**Files:** 新增 `src/luna_mujoco/association.py`、`tests/test_instance_association.py`、`tests/association_replay.py`；修改 `perception.py`、`runner.py`、`tests/test_perception.py`、`tests/test_task_perception.py`。
 **Interfaces:** `associate_camera_detections(detections: list[dict], views: dict) -> dict` 返回 `groups/evidence/unresolved`；`associate_inventory(previous: dict, current: dict, *, action: dict | None, parameters: dict) -> dict` 返回 `mapping/evidence/unresolved`；`Perception.associate` 保留兼容入口直到调用方完成迁移。
 
 - [ ] 先写测试：`test_two_parts_five_cm_apart_keep_two_ids`、`test_missing_wrist_does_not_create_new_identity`、`test_single_candidate_without_support_is_not_accepted`、`test_two_identical_parts_swapped_unobservably_are_ambiguous`、`test_placed_object_and_table_object_do_not_merge`。断言唯一对应/保持两个 ID/无法判定时不强配；保留原 FOV 与前景深度冲突回归。
@@ -139,7 +139,7 @@ SDK 若允许公开更新独立层 pose，使用该接口；否则以保留的�
 
 ### Task 3：明确观测目的与固定头部变化检查
 
-**Files:** 新增 `src/jev_mujoco/scene_changes.py`、`tests/test_scene_changes.py`；修改 `runner.py`、`perception.py`、`observation_motion.py`、`visual_assistance.py`、`visual_scene.py`、`tests/test_observation_motion.py`、`tests/test_visual_scene_assistance.py`。
+**Files:** 新增 `src/luna_mujoco/scene_changes.py`、`tests/test_scene_changes.py`；修改 `runner.py`、`perception.py`、`observation_motion.py`、`visual_assistance.py`、`visual_scene.py`、`tests/test_observation_motion.py`、`tests/test_visual_scene_assistance.py`。
 **Interfaces:** `compare_scene_observations(before: dict, after: dict, *, transferred_id: str, parameters: dict) -> dict` 返回 `status=expected_only|unexpected|unknown`、`changed_ids/regions/evidence/before_capture_id/after_capture_id`。扩展 `VisualAssistance.inspect_scene(..., reference=None, call_budget=None, purpose="semantics")`，新增 `purpose="scene_change"` 并保留原调用兼容。
 
 - [ ] 先写 `test_only_transferred_object_is_expected_change`、`test_bin_wall_motion_requires_reobservation`、`test_existing_bin_object_displaced_is_unexpected`、`test_robot_occlusion_is_unknown_not_motion`、`test_unsegmented_depth_obstacle_is_detected`、`test_changed_calibration_rejects_mask_comparison`、`test_duplicate_frame_pair_reuses_visual_result`。
@@ -149,7 +149,7 @@ SDK 若允许公开更新独立层 pose，使用该接口；否则以保留的�
 
 ### Task 4：目标层更新与碰撞证据版本
 
-**Files:** 新增 `src/jev_mujoco/scene_update.py`、`tests/test_scene_update.py`、`tests/scene_update_gpu_smoke.py`；修改 `algorithms.py`、`geometry_service.py`、`geometry.py`、`perception_mapping.py`、`collision_mapping.py`、`placement.py`、`runner.py` 及 `tests/test_geometry_scene_reuse.py`。
+**Files:** 新增 `src/luna_mujoco/scene_update.py`、`tests/test_scene_update.py`、`tests/scene_update_gpu_smoke.py`；修改 `algorithms.py`、`geometry_service.py`、`geometry.py`、`perception_mapping.py`、`collision_mapping.py`、`placement.py`、`runner.py` 及 `tests/test_geometry_scene_reuse.py`。
 **Interfaces:** `make_scene_update(scene: dict, holding: dict, capture: dict, changes: dict) -> dict` 生成目标 ID、旧 token、新 capture、预测变换和来源证据；`Algorithms.update_scene(request: dict) -> dict` 经既有 GPU 服务通道返回新 `scene_token/layer_evidence/collision_evidence`。清单不由此函数修改。
 
 - [ ] 先在锁定 SDK 的公开源码/示例中核对层变换与场景发布接口，记录使用的公开入口及版本；运行独立最小 GPU 探针，检查目标移动前后旧位置/新位置的碰撞查询改变、其他层不变。若没有原位 pose 更新入口，验证项目侧单层重构再发布路径；不修改 SDK。无法提供实际碰撞更新时明确报告该能力未完成，不只移动前端显示。
@@ -171,7 +171,7 @@ SDK 若允许公开更新独立层 pose，使用该接口；否则以保留的�
 
 ### Task 6：工作台和回放展示
 
-**Files:** 新增 `web/src/object-list.js`、`web/tests/object-list.test.js`；修改 `web/src/main.js`、`camera-panel.js`、`pointcloud-panel.js`、`replay.js`、`execution-graph.js`、`styles.css`、`web/index.html`、`src/jev_mujoco/app.py`、`experiments.py`。
+**Files:** 新增 `web/src/object-list.js`、`web/tests/object-list.test.js`；修改 `web/src/main.js`、`camera-panel.js`、`pointcloud-panel.js`、`replay.js`、`execution-graph.js`、`styles.css`、`web/index.html`、`src/luna_mujoco/app.py`、`experiments.py`。
 **Interfaces:** `createObjectList(container)` 返回 `render(taskProgress)`；相机 API 的当前 task capture 增加帧绑定的 `object_labels`（display_id、边界/锚点、状态）；展示只能使用同一帧标签。预测/测量图层由碰撞预览证据提供，禁止从编辑器真值生成任务标签。
 
 - [ ] 写前端测试：编号完成后不跳号、任务状态与可见性分开、旧帧标签不叠到新实时画面、清单更新不触发建图请求、历史记录没有新字段仍可回放。

@@ -1,7 +1,7 @@
 import { createEventTitleResolver } from './model.js';
 
 const SKILL_EVENTS = new Set(['skill_start', 'skill_complete', 'skill_error']);
-const CATEGORY_NAMES = { jev: '服务 · JEV', skill: '脚本 · skill', algorithm: '算法调用', system: '系统记录', subgraph: '阶段子图' };
+const CATEGORY_NAMES = { jev: '历史模型记录', skill: '技能程序', algorithm: '算法调用', system: '系统记录', subgraph: '阶段子图' };
 const STATUS_NAMES = { failed: '失败', complete: '完成', warning: '需关注', recorded: '已记录', incomplete: '未记录结束', cancelled: '已取消' };
 const COLORS = { jev: '#7ec3ff', skill: '#8ed2a2', algorithm: '#7ec3ff', system: '#b7c6d5', subgraph: '#c3a6f0' };
 const STATUS_COLORS = { failed: '#f07e73', complete: '#80d59b', warning: '#edc778', recorded: '#9aaebe', incomplete: '#edc778', cancelled: '#b7c6d5' };
@@ -12,6 +12,8 @@ const PHASES = {
   container: ['目的容器', 'identify_destination'],
   grasp: ['抓取', 'generate_grasps', 'evaluate_arms', 'choose_arm', 'plan_grasp', 'plan_grasp_and_place', 'execute_approach', 'execute_grasp', 'close_gripper', 'execute_lift', 'verify_grasp'],
   transport: ['运输 / 放置', 'plan_place', 'execute_place', 'verify_place'],
+  unpack: ['VLA 拆包', 'prepare_unpack', 'mock_unpack', 'verify_unpack'],
+  drop: ['黑件运输 / 右盒投放', 'plan_transport', 'execute_transport', 'drop', 'verify_drop'],
   recovery: ['恢复 / 重试', 'recover_task', 'inspect_visual_result'],
   system: ['任务 / 决策'],
 };
@@ -113,6 +115,124 @@ export function buildExecutionGraph(events = []) {
   }
   return { nodes, events: records.map(record => record.event),
     edges: nodes.slice(1).map((node, index) => ({ from: nodes[index].id, to: node.id })), warnings: [...warnings] };
+}
+
+const OBJECT_PHASES = {
+  observe: ['观测 / 清单', 'observe_scene', 'observe', 'bind_inventory'],
+  target: ['目标 / 放置区', 'identify_target', 'identify_destination'],
+  arm: ['执行臂选择', 'choose_arm'],
+  map: ['场景建图', 'build_scene'],
+  return: ['返回观测位姿', 'move_to_observe'],
+  generate: ['GraspGen', 'generate_grasps'],
+  ik: ['Batched IK', 'evaluate_arms'],
+  plan: ['IK / 抓取规划', 'plan_grasp', 'plan_grasp_and_place'],
+  grasp: ['抓取 / 持物', 'execute_approach', 'execute_grasp', 'close_gripper', 'execute_lift', 'verify_grasp'],
+  place: ['放置 / 松爪', 'plan_place', 'execute_place'],
+  verify: ['放置核验', 'verify_place', 'observe_result'],
+  unpack: ['VLA 拆包 / 核验', 'prepare_unpack', 'mock_unpack', 'verify_unpack'],
+  transport: ['黑件持物运输', 'plan_transport', 'execute_transport'],
+  drop: ['右盒投放 / 完成核验', 'drop', 'verify_drop'],
+  system: ['程序 / 记录'],
+};
+
+export function buildObjectTimeline(graph) {
+  const groups = new Map();
+  const processRecords = { ...(graph.events?.findLast(event => event.data?.task_progress?.process_records)
+    ?.data.task_progress.process_records ?? {}) };
+  for (const event of graph.events ?? []) {
+    if (event.kind !== 'product_created' || !event.data?.process_id) continue;
+    const data = event.data;
+    processRecords[data.process_id] = { ...data, ...processRecords[data.process_id] };
+  }
+  const entityProcesses = new Map();
+  for (const [id, record] of Object.entries(processRecords)) {
+    for (const entity of [record.input_entity_id, record.output_entity_id].filter(Boolean)) entityProcesses.set(entity, id);
+  }
+  const inventory = graph.events?.findLast(event => Array.isArray(event.data?.task_progress?.objects))
+    ?.data.task_progress.objects ?? [];
+  const displayIds = new Map(inventory.filter(object => Number.isInteger(object.display_id) && object.display_id > 0)
+    .map(object => [object.id, object.display_id]));
+  for (const node of graph.nodes) {
+    const targets = [...new Set(node.events.map(event => event.target_id ?? event.data?.target_id
+      ?? event.data?.result?.target_id).filter(value => typeof value === 'string' && value))];
+    const targetId = targets.length === 1 ? targets[0] : null;
+    const processIds = [...new Set([...node.events.map(event => event.process_id ?? event.data?.process_id),
+      ...targets.map(id => entityProcesses.get(id))].filter(Boolean))];
+    const processId = processIds.length === 1 ? processIds[0] : null;
+    const process = processRecords[processId] ?? {};
+    const key = processId ?? targetId ?? '__shared__';
+    if (!groups.has(key)) groups.set(key, { targetId, processId,
+      inputEntityId: process.input_entity_id ?? null, outputEntityId: process.output_entity_id ?? null,
+      displayId: process.display_id ?? displayIds.get(targetId) ?? null, stages: [] });
+    const source = node.events.find(event => SKILL_EVENTS.has(event.kind)) ?? node.events[0];
+    const skill = source.data?.skill ?? source.title;
+    let phase = Object.entries(OBJECT_PHASES).find(([, names]) => names.slice(1).includes(skill))?.[0];
+    if (!phase && node.events.some(event => event.kind === 'product_created')) phase = 'unpack';
+    if (!phase && node.events.some(event => event.kind === 'visual_decisions_call' || event.kind?.startsWith('observation_'))) phase = 'observe';
+    phase ??= 'system';
+    const group = groups.get(key);
+    let stage = group.stages.at(-1);
+    if (!stage || stage.phase !== phase) {
+      stage = { id: `timeline:${node.id}`, phase, title: OBJECT_PHASES[phase][0], nodes: [], events: [] };
+      group.stages.push(stage);
+    }
+    stage.nodes.push(node);
+    stage.events.push(...node.events);
+  }
+  for (const group of groups.values()) {
+    for (const stage of group.stages) {
+      stage.startTime = stage.nodes.find(node => Number.isFinite(node.startTime))?.startTime ?? null;
+      stage.status = ['failed', 'warning', 'incomplete'].find(status => stage.nodes.some(node => node.status === status))
+        ?? (stage.nodes.some(node => node.status === 'complete') ? 'complete' : 'recorded');
+      const paths = new Set(stage.events.flatMap(event => [
+        event.artifact, event.data?.artifact, event.data?.observation_artifact,
+      ]).filter(Boolean));
+      stage.artifactCount = paths.size;
+    }
+  }
+  return [...groups.values()];
+}
+
+export function renderObjectTimeline(container, graph, onSelect) {
+  const document = container.ownerDocument;
+  const element = (tag, text, className = '') => {
+    const item = document.createElement(tag);
+    item.textContent = text;
+    item.className = className;
+    return item;
+  };
+  container.replaceChildren();
+  for (const group of buildObjectTimeline(graph)) {
+    const section = element('section', '', 'object-route');
+    section.append(element('h3', group.processId ? `工序 #${group.displayId ?? '—'}` : group.targetId
+      ? group.displayId ? `物体 #${group.displayId}` : `物体 ${group.targetId}`
+      : '共享观测 / 未记录目标 ID'));
+    if (group.processId) section.append(element('p', `输入 ID：${group.inputEntityId ?? '未记录'} → 产物 ID：${group.outputEntityId ?? '等待拆包确认'}`, 'muted'));
+    else if (group.displayId) section.append(element('p', `永久 ID：${group.targetId}`, 'muted'));
+    const route = element('div', '', 'object-route-stages');
+    for (const [stageIndex, stage] of group.stages.entries()) {
+      const card = element('div', '', `object-stage status-${stage.status}`);
+      const button = element('button', '', 'object-stage-button');
+      button.type = 'button';
+      button.append(element('span', `步骤 ${stageIndex + 1}`, 'muted'), element('strong', stage.title), element('span', STATUS_NAMES[stage.status]),
+        element('span', `${stage.artifactCount} 个证据文件 · ${stage.events.length} 条记录`));
+      button.addEventListener('click', () => onSelect(stage));
+      card.append(button);
+      if (stage.nodes.length > 1) {
+        const details = element('details', '', 'object-stage-calls');
+        details.append(element('summary', `展开 ${stage.nodes.length} 次调用`));
+        for (const node of stage.nodes) {
+          const child = element('button', `${node.title} · ${STATUS_NAMES[node.status]}`, 'stage-button');
+          child.addEventListener('click', () => onSelect(node));
+          details.append(child);
+        }
+        card.append(details);
+      }
+      route.append(card);
+    }
+    section.append(route);
+    container.append(section);
+  }
 }
 
 function phaseOf(node, skills) {
@@ -230,7 +350,7 @@ function drawing(graph, options = {}) {
   const title = options.title ?? '实验执行图';
   const content = [label(28, 38, wrapText(title, 72)[0], { 'font-size': 26 }),
     label(28, 72, '从左到右，换行继续 · 实际调用开始顺序 · 分组含完整决策证据'),
-    label(28, 107, '蓝：JEV / 算法调用   绿：skill 脚本   紫：阶段子图'),
+    label(28, 107, '蓝：模型 / 算法调用   绿：技能程序   紫：阶段子图'),
     label(28, 136, '路线颜色表示前一调用结果：绿 = 完成，红 = 失败，灰 = 其他', { fill: '#b3c6d5' })];
   for (const group of layout.groups) {
     content.push(shape('rect', { x: group.x, y: group.y, width: group.width, height: group.height, rx: 14, fill: '#121f2d', stroke: '#716587', 'stroke-width': 2 }));

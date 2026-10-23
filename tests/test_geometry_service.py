@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from jev_mujoco import geometry_service
-from jev_mujoco.planning_settings import PlanningSettings
+from luna_mujoco import geometry_service
+from luna_mujoco.planning_settings import PlanningSettings
 
 
 def test_profile_change_destroys_cached_solvers_but_time_scale_does_not():
@@ -73,13 +73,14 @@ def test_scene_upload_preserves_integer_voxel_strides(arm):
     voxels = SimpleNamespace(params=params)
     planner = SimpleNamespace(scene_collision_checker=SimpleNamespace(data=SimpleNamespace(voxels=voxels)))
 
-    def load(*args, **kwargs):
-        params[0, 0] = [*raw_counts, voxel_size]
+    def load(grids, *args, **kwargs):
+        public_counts = np.asarray(grids[0].dims, np.float32) / np.float32(grids[0].voxel_size)
+        params[0, 0] = [*public_counts, voxel_size]
 
     backend = SimpleNamespace(update_voxel_scene=load, motion_planner=planner)
     runtime = geometry_service.GeometryRuntime()
     runtime.geometry_scene = {"scene_token": "scene", "target_id": "target"}
-    runtime.geometry_grids = [object()]
+    runtime.geometry_grids = [SimpleNamespace(dims=dimensions.tolist(), voxel_size=float(voxel_size))]
     runtime.geometry_model = {"voxel": {}}
     for _ in range(2):
         assert runtime._refresh_scene_unlocked(arm=arm, backend=backend) == "scene"
@@ -124,7 +125,7 @@ def test_small_batches_reuse_one_backend_without_exposing_padding(monkeypatch, a
         )
 
     monkeypatch.setattr(runtime, "_create_real_backend_unlocked", create_backend)
-    for count in (1, 5, 9, 16, 17):
+    for count in (1, 3, 4, 5, 9, 16, 17):
         payload = request_payload(PlanningSettings())
         payload["arm"] = arm
         goals = []
@@ -135,13 +136,13 @@ def test_small_batches_reuse_one_backend_without_exposing_padding(monkeypatch, a
         payload["goal_matrices_world"] = goals
         result = geometry_service.run_operation(runtime, "/tools/plan_grasp_batch", payload)
         assert result["batch_size"] == count
-        assert result["batch_capacity"] == (16 if count <= 16 else 50)
+        assert result["batch_capacity"] == (4 if count <= 4 else 16 if count <= 16 else 50)
         assert [item["candidate_index"] for item in result["items"]] == list(range(count))
         assert [item["success"] for item in result["items"]] == [index != 1 for index in range(count)]
         assert len(submitted_goals[-1]) == result["batch_capacity"]
         assert [list(map(list, goal)) for goal in submitted_goals[-1][:count]] == goals
         assert all(goal == submitted_goals[-1][count - 1] for goal in submitted_goals[-1][count:])
-    assert created_capacities == [16, 50]
+    assert created_capacities == [4, 16, 50]
 
 
 def request_payload(settings):
@@ -206,7 +207,7 @@ def test_batch_service_preserves_flags_and_nested_phase_payload():
 def test_large_collision_profile_expands_esdf_grid_padding(monkeypatch):
     from test_algorithms import snapshot
 
-    from jev_mujoco.geometry import geometry_payload
+    from luna_mujoco.geometry import geometry_payload
 
     calls = []
 

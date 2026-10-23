@@ -1,0 +1,747 @@
+{
+  "run_id": "30dd72b14f9b4eac811be2520492025d",
+  "request_hash": "f5f5b9071ed8eaa40313fd2e2b2e27c36625bab32502a6886edb8d200d081bb3",
+  "note": "Actual archived request text/questions and controller progress. Images omitted: this fixture tests text presentation, not visual evidence.",
+  "request": {
+    "model": "gpt-6-luna",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"observation_id\": \"rgbd-2-3273853e5a564b42ac284a5a7db53ff7\", \"generation\": 2, \"purpose\": \"verify_transfer\", \"task\": \"把盒子中的所有粉色物体放到桌面的目标区域\", \"fixed_entities\": {\"table\": {\"id\": \"table\", \"kind\": \"table\", \"color\": \"gray\", \"description\": \"Large gray tabletop visible in camera 3\", \"initial_parent_id\": null, \"roles\": [\"table\", \"collision\"], \"display_id\": 4}, \"instance-626f8edc7f9c4fe0\": {\"id\": \"instance-626f8edc7f9c4fe0\", \"kind\": \"bin\", \"color\": \"blue\", \"description\": \"Blue box containing visible pink objects\", \"initial_parent_id\": null, \"roles\": [\"container\", \"collision\"], \"display_id\": 5}, \"instance-a03f57d4b5fe4633\": {\"id\": \"instance-a03f57d4b5fe4633\", \"kind\": \"object\", \"color\": \"pink\", \"description\": \"Leftmost visible pink oval-shaped object in the source box\", \"initial_parent_id\": \"instance-626f8edc7f9c4fe0\", \"roles\": [\"transport\", \"collision\"], \"display_id\": 1}, \"instance-5c36aca925904dc0\": {\"id\": \"instance-5c36aca925904dc0\", \"kind\": \"object\", \"color\": \"pink\", \"description\": \"Middle visible pink oval-shaped object in the source box\", \"initial_parent_id\": \"instance-626f8edc7f9c4fe0\", \"roles\": [\"transport\", \"collision\"], \"display_id\": 2}, \"instance-e9d3f85eae824529\": {\"id\": \"instance-e9d3f85eae824529\", \"kind\": \"object\", \"color\": \"pink\", \"description\": \"Rightmost visible pink oval-shaped object in the source box\", \"initial_parent_id\": \"instance-626f8edc7f9c4fe0\", \"roles\": [\"transport\", \"collision\"], \"display_id\": 3}, \"instance-27de129de30a46a1\": {\"id\": \"instance-27de129de30a46a1\", \"kind\": \"bin\", \"color\": \"blue\", \"description\": \"Separate blue box with no visible contents\", \"initial_parent_id\": null, \"roles\": [\"container\", \"collision\"], \"display_id\": 6}}, \"transport_progress\": {\"instance-a03f57d4b5fe4633\": {\"status\": \"selected\", \"destination_id\": \"demo-destination\", \"stage_index\": 0, \"region_id\": \"region:demo-destination\", \"slot_id\": 1}, \"instance-5c36aca925904dc0\": {\"status\": \"observed\"}, \"instance-e9d3f85eae824529\": {\"status\": \"observed\"}}, \"source_inventory\": {\"source_bin_id\": \"instance-626f8edc7f9c4fe0\", \"source_object_ids\": [\"instance-a03f57d4b5fe4633\", \"instance-5c36aca925904dc0\", \"instance-e9d3f85eae824529\"]}, \"candidate_geometric_location_hints\": [{\"candidate\": \"candidate-0\", \"camera\": \"3\", \"measured_centroid_world_m\": [0.28038179874420166, -0.6052828431129456, 0.4717113971710205], \"measured_bounds_world_m\": [[0.16714736819267273, -0.7880016565322876, 0.4119988977909088], [0.34895485639572144, -0.40000098943710327, 0.599999189376831]]}, {\"candidate\": \"candidate-1\", \"camera\": \"3\", \"measured_centroid_world_m\": [0.2946341037750244, 0.6169924139976501, 0.47979041934013367], \"measured_bounds_world_m\": [[0.1799333244562149, 0.400015652179718, 0.4119981527328491], [0.348742812871933, 0.7880209684371948, 0.5999985337257385]]}, {\"candidate\": \"candidate-2\", \"camera\": \"3\", \"measured_centroid_world_m\": [0.20730723440647125, 0.5335984230041504, 0.5015395283699036], \"measured_bounds_world_m\": [[0.18328306078910828, 0.41140928864479065, 0.43218234181404114], [0.22945643961429596, 0.5798031687736511, 0.5999981760978699]]}, {\"candidate\": \"candidate-3\", \"camera\": \"3\", \"measured_centroid_world_m\": [0.20538662374019623, 0.4818213880062103, 0.5162689089775085], \"measured_bounds_world_m\": [[0.1801067292690277, 0.41073548793792725, 0.45682841539382935], [0.22764043509960175, 0.5401820540428162, 0.5999981760978699]]}, {\"candidate\": \"candidate-4\", \"camera\": \"3\", \"measured_centroid_world_m\": [0.42712897062301636, 0.08121668547391891, 0.6353216171264648], \"measured_bounds_world_m\": [[0.4083191454410553, 0.06434670090675354, 0.5599998831748962], [0.5288390517234802, 0.11486548185348511, 0.6600016951560974]]}, {\"candidate\": \"candidate-5\", \"camera\": \"3\", \"measured_centroid_world_m\": [0.4025574028491974, 0.06093791872262955, 1.0329278707504272], \"measured_bounds_world_m\": [[0.3783123195171356, 0.024150867015123367, 6.110801109571184e-08], [2.112258195877075, 0.2505110800266266, 1.08614981174469]]}, {\"candidate\": \"candidate-6\", \"camera\": \"3\", \"measured_centroid_world_m\": [0.29462361335754395, 0.6168349385261536, 0.4798761308193207], \"measured_bounds_world_m\": [[0.1799333244562149, 0.40001562237739563, 0.4119981527328491], [0.3488297462463379, 0.7880209684371948, 0.5999985337257385]]}, {\"candidate\": \"candidate-7\", \"camera\": \"3\", \"measured_centroid_world_m\": [0.2073286771774292, 0.533595621585846, 0.5015608072280884], \"measured_bounds_world_m\": [[0.18328306078910828, 0.41140928864479065, 0.43218234181404114], [0.22945643961429596, 0.5798031687736511, 0.5999981760978699]]}, {\"candidate\": \"candidate-8\", \"camera\": \"3\", \"measured_centroid_world_m\": [0.42702820897102356, 0.08117029815912247, 0.6351850032806396], \"measured_bounds_world_m\": [[0.4083191454410553, 0.06434670090675354, 0.5599998831748962], [0.5288390517234802, 0.11486548185348511, 0.6600016951560974]]}, {\"candidate\": \"candidate-9\", \"camera\": \"3\", \"measured_centroid_world_m\": [0.4025602340698242, 0.06094352900981903, 1.032853126525879], \"measured_bounds_world_m\": [[0.3783123195171356, 0.024150867015123367, 6.110801109571184e-08], [2.112258195877075, 0.2505110800266266, 1.08614981174469]]}, {\"candidate\": \"candidate-10\", \"camera\": \"2\", \"measured_centroid_world_m\": [0.4435238838195801, 0.08047443628311157, 0.6482182145118713], \"measured_bounds_world_m\": [[0.37063804268836975, 0.06430157274007797, 0.559999942779541], [0.4683123528957367, 0.13434581458568573, 0.660001814365387]]}, {\"candidate\": \"candidate-11\", \"camera\": \"1\", \"measured_centroid_world_m\": [0.2505781054496765, -0.6067169904708862, 0.47563713788986206], \"measured_bounds_world_m\": [[0.06199996545910835, -0.7996131181716919, 0.4119986593723297], [0.34945276379585266, -0.4009438753128052, 0.8814586400985718]]}, {\"candidate\": \"candidate-12\", \"camera\": \"1\", \"measured_centroid_world_m\": [0.25058355927467346, -0.6066519021987915, 0.47563040256500244], \"measured_bounds_world_m\": [[0.06199996545910835, -0.7995923161506653, 0.4119986593723297], [0.34945276379585266, -0.4009438753128052, 0.8814586400985718]]}], \"geometric_location_rule\": \"These are calibrated measured RGBD surface locations, not identities. Robot world +Y is physical robot LEFT and -Y is robot RIGHT; +X is in front of the robot. Use them to distinguish physically separate, similarly colored boxes across views. The source is the robot-left box containing the pink objects; the robot-right empty box has its own fixed ID. A camera number alone does not identify a subject. Do not merge opposite-side boxes merely because they have the same color; check RGB and geometry together.\", \"rules\": \"Use RGB appearance, initial references and scene context to match physical identity. Current numbered boxes locate SAM3 proposals, not established identities. Use the original full RGB images and their annotated versions; No segmentation contours or raw depth images are supplied. Calibrated measured surface location summaries are supplied as geometric hints, never automatic identity. SAM3 prompts are proposals, not truth. A box may enclose other objects, especially container contents. Match the proposed subject, not every pixel. Boxes only locate subjects; they do not show segmentation pixel ownership. Do not judge mask quality. Several camera candidates or repeated same-frame proposals may show one entity. Distinct identical objects must keep distinct IDs. A large movement is allowed. If identity cannot be established (including identical objects exchanged under occlusion), choose unknown. Inventory spans the large table, adjacent small tables and both bins, including known entities subsequently lifted or moved. Reject background, robot and objects outside this inventory. Visibility is the union of current cameras, not a requirement for all cameras to see each entity. Judge visibility and destination directly from full RGB even if SAM3 missed an object. Action history is context, never proof of success. Region overlays are locally projected references, not evidence of visible support or exact object pose. The configured unmarked destination demo-destination is a region on the large table. Its overlay describes intended placement, not a physical marker or proof of release. Demo slot XY refers to the measured grasped-object reference, not a potentially eccentric TCP. Check the union of all three full images for visible unlisted pink source task objects, even if SAM3 misses them. This visible-subject check does not establish hidden contents or source emptiness.\", \"identity_display_legend\": {\"R1\": {\"entity_id\": \"instance-27de129de30a46a1\", \"description\": \"Separate blue box with no visible contents\", \"display_id\": 6}, \"R2\": {\"entity_id\": \"instance-5c36aca925904dc0\", \"description\": \"Middle visible pink oval-shaped object in the source box\", \"display_id\": 2}, \"R3\": {\"entity_id\": \"instance-626f8edc7f9c4fe0\", \"description\": \"Blue box containing visible pink objects\", \"display_id\": 5}, \"R4\": {\"entity_id\": \"instance-a03f57d4b5fe4633\", \"description\": \"Leftmost visible pink oval-shaped object in the source box\", \"display_id\": 1}, \"R5\": {\"entity_id\": \"instance-e9d3f85eae824529\", \"description\": \"Rightmost visible pink oval-shaped object in the source box\", \"display_id\": 3}, \"R6\": {\"entity_id\": \"table\", \"description\": \"Large gray tabletop visible in camera 3\", \"display_id\": 4}}, \"candidate_display_legend\": {\"C0\": \"candidate-0\", \"C1\": \"candidate-1\", \"C2\": \"candidate-2\", \"C3\": \"candidate-3\", \"C4\": \"candidate-4\", \"C5\": \"candidate-5\", \"C6\": \"candidate-6\", \"C7\": \"candidate-7\", \"C8\": \"candidate-8\", \"C9\": \"candidate-9\", \"C10\": \"candidate-10\", \"C11\": \"candidate-11\", \"C12\": \"candidate-12\"}, \"display_label_rule\": \"R labels locate permanent references and C labels locate unassociated candidates. Neutral frame colors encode no identity. Labels never replace canonical choice values.\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "INITIAL RGB REFERENCE. These IDs are permanent; positions may change."
+          },
+          {
+            "type": "input_text",
+            "text": "INITIAL REFERENCE RGB camera 2"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"image_role\": \"initial_reference_annotations\", \"camera\": \"2\", \"items\": [{\"id\": \"instance-626f8edc7f9c4fe0\", \"box\": [0.023, 0.377, 0.695, 1.0], \"display_label\": \"R3\"}, {\"id\": \"instance-a03f57d4b5fe4633\", \"box\": [0.313, 0.656, 0.381, 0.777], \"display_label\": \"R4\"}, {\"id\": \"instance-5c36aca925904dc0\", \"box\": [0.42, 0.662, 0.473, 0.775], \"display_label\": \"R2\"}, {\"id\": \"instance-e9d3f85eae824529\", \"box\": [0.508, 0.665, 0.58, 0.779], \"display_label\": \"R5\"}], \"regions\": [], \"coordinates\": \"normalized to original RGB; labels are in the added right margin\", \"frame_color\": [235, 235, 235], \"source_rgb_size_px\": [640, 480], \"source_image_sha256\": \"ecd730eb345feb668e4eccd6b56c2bec7e9bf85b59bdafaf28bd871448d74706\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "INITIAL REFERENCE RGB camera 3"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"image_role\": \"initial_reference_annotations\", \"camera\": \"3\", \"items\": [{\"id\": \"table\", \"box\": [0.219, 0.381, 0.813, 1.0], \"display_label\": \"R6\"}], \"regions\": [], \"coordinates\": \"normalized to original RGB; labels are in the added right margin\", \"frame_color\": [235, 235, 235], \"source_rgb_size_px\": [640, 360], \"source_image_sha256\": \"c5c7b15d68362e60ddeaa2704dfef5050ab3b0f87652e72268f824e8b688905e\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "INITIAL REFERENCE RGB camera 1"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"image_role\": \"initial_reference_annotations\", \"camera\": \"1\", \"items\": [{\"id\": \"instance-27de129de30a46a1\", \"box\": [0.305, 0.362, 0.978, 1.0], \"display_label\": \"R1\"}], \"regions\": [], \"coordinates\": \"normalized to original RGB; labels are in the added right margin\", \"frame_color\": [235, 235, 235], \"source_rgb_size_px\": [640, 480], \"source_image_sha256\": \"905597a3ddd55b9ab5e0101abf7537e84afb09e8f82df7bd0f39c66828f7d849\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "CURRENT RGB camera 3"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"image_role\": \"current_annotations\", \"camera\": \"3\", \"items\": [{\"id\": \"candidate-0\", \"box\": [0.784375, 0.7222222222222222, 1.0, 1.0], \"display_label\": \"C0\"}, {\"id\": \"candidate-1\", \"box\": [0.0, 0.7472222222222222, 0.2234375, 1.0], \"display_label\": \"C1\"}, {\"id\": \"candidate-2\", \"box\": [0.071875, 0.9388888888888889, 0.1625, 1.0], \"display_label\": \"C2\"}, {\"id\": \"candidate-3\", \"box\": [0.13125, 0.9388888888888889, 0.1625, 1.0], \"display_label\": \"C3\"}, {\"id\": \"candidate-4\", \"box\": [0.425, 0.5666666666666667, 0.4609375, 0.6888888888888889], \"display_label\": \"C4\"}, {\"id\": \"candidate-5\", \"box\": [0.33125, 0.0, 0.45625, 0.33611111111111114], \"display_label\": \"C5\"}, {\"id\": \"candidate-6\", \"box\": [0.0, 0.7472222222222222, 0.2234375, 1.0], \"display_label\": \"C6\"}, {\"id\": \"candidate-7\", \"box\": [0.071875, 0.9388888888888889, 0.1625, 1.0], \"display_label\": \"C7\"}, {\"id\": \"candidate-8\", \"box\": [0.425, 0.5666666666666667, 0.4609375, 0.6888888888888889], \"display_label\": \"C8\"}, {\"id\": \"candidate-9\", \"box\": [0.33125, 0.0, 0.45625, 0.33611111111111114], \"display_label\": \"C9\"}], \"regions\": [{\"camera_id\": \"3\", \"region_id\": \"region:demo-destination\", \"slot_id\": 1, \"polygon\": [[0.5022277391201173, 0.7400663614761864], [0.49644639029271376, 0.5728866130338619], [0.40341420983914356, 0.5762934547581621], [0.3914758021625202, 0.7519854857502256]], \"center\": [0.4481836346579028, 0.6554290559208689]}, {\"camera_id\": \"3\", \"region_id\": \"region:demo-destination\", \"slot_id\": 2, \"polygon\": [[0.5022277391201173, 0.7400663614761864], [0.6119871174298839, 0.7282540563711639], [0.5979013785790726, 0.5691713277901194], [0.49644639029271376, 0.5728866130338619]], \"center\": [0.5514569290733113, 0.6470365237902983]}, {\"camera_id\": \"3\", \"region_id\": \"region:demo-destination\", \"slot_id\": 3, \"polygon\": [[0.5022277391201173, 0.7400663614761864], [0.3914758021625202, 0.7519854857502256], [0.3770980172156219, 0.9635767051918227], [0.509808131902996, 0.9592692147149885]], \"center\": [0.4457496543949933, 0.8467946472713348]}, {\"camera_id\": \"3\", \"region_id\": \"region:demo-destination\", \"slot_id\": 4, \"polygon\": [[0.5022277391201173, 0.7400663614761864], [0.509808131902996, 0.9592692147149885], [0.6320905723881683, 0.9553001845539132], [0.6119871174298839, 0.7282540563711639]], \"center\": [0.5639059762610134, 0.8366593174508232]}], \"coordinates\": \"normalized to original RGB; labels are in the added right margin\", \"frame_color\": [235, 235, 235], \"source_rgb_size_px\": [640, 360], \"source_image_sha256\": \"552f08921fd01bbf6b87920d8d9b9cf59d6216fb9182ebbca9a7263fcd667105\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "CURRENT RGB camera 2"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"image_role\": \"current_annotations\", \"camera\": \"2\", \"items\": [{\"id\": \"candidate-10\", \"box\": [0.4453125, 0.28958333333333336, 0.5515625, 0.4895833333333333], \"display_label\": \"C10\"}], \"regions\": [{\"camera_id\": \"2\", \"region_id\": \"region:demo-destination\", \"slot_id\": 1, \"polygon\": [[0.6845965773544395, 0.36112056399601045], [0.5128792826930083, 0.06548213220075158], [0.3144585316947132, 0.3148747652542034], [0.4925037202946151, 0.5629151492016702]], \"center\": [0.5016412493407343, 0.3452244276223483]}, {\"camera_id\": \"2\", \"region_id\": \"region:demo-destination\", \"slot_id\": 2, \"polygon\": [[0.6845965773544395, 0.36112056399601045], [0.9340146935375915, 0.09910548405849202], [0.8022425649505941, -0.29821506432799477], [0.5128792826930083, 0.06548213220075158]], \"center\": [0.7281981514425835, 0.0830615318721599]}, {\"camera_id\": \"2\", \"region_id\": \"region:demo-destination\", \"slot_id\": 3, \"polygon\": [[0.6845965773544395, 0.36112056399601045], [0.4925037202946151, 0.5629151492016702], [0.6175150712605875, 0.7370724164394349], [0.8128178886512734, 0.5818737937115602]], \"center\": [0.6515129644521793, 0.5721037125439429]}, {\"camera_id\": \"2\", \"region_id\": \"region:demo-destination\", \"slot_id\": 4, \"polygon\": [[0.6845965773544395, 0.36112056399601045], [0.8128178886512734, 0.5818737937115602], [1.0354509475709732, 0.40495702118537413], [0.9340146935375915, 0.09910548405849202]], \"center\": [0.864105283126092, 0.37671723941500707]}], \"coordinates\": \"normalized to original RGB; labels are in the added right margin\", \"frame_color\": [235, 235, 235], \"source_rgb_size_px\": [640, 480], \"source_image_sha256\": \"38a0d24dc73471631be396b2a395f6922f76ead1c7d0ab9003424239a179fc18\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "CURRENT RGB camera 1"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"image_role\": \"current_annotations\", \"camera\": \"1\", \"items\": [{\"id\": \"candidate-11\", \"box\": [0.30625, 0.3645833333333333, 0.96875, 0.9979166666666667], \"display_label\": \"C11\"}, {\"id\": \"candidate-12\", \"box\": [0.30625, 0.3645833333333333, 0.96875, 0.9979166666666667], \"display_label\": \"C12\"}], \"regions\": [{\"camera_id\": \"1\", \"region_id\": \"region:demo-destination\", \"slot_id\": 1, \"polygon\": [[-0.125890413780433, 0.4660370909383201], [-0.09663805130146477, 0.23858965360136505], [-0.24407673516019218, 0.25859025931903784], [-0.29190472028370557, 0.4915183190852574]], \"center\": [-0.1907051335953712, 0.3606488597912082]}, {\"camera_id\": \"1\", \"region_id\": \"region:demo-destination\", \"slot_id\": 2, \"polygon\": [[-0.125890413780433, 0.4660370909383201], [0.04991198530139336, 0.4390535066067215], [0.07358881681378593, 0.2154977459512014], [-0.09663805130146477, 0.23858965360136505]], \"center\": [-0.02613965249649084, 0.3353345286728429]}, {\"camera_id\": \"1\", \"region_id\": \"region:demo-destination\", \"slot_id\": 3, \"polygon\": [[-0.125890413780433, 0.4660370909383201], [-0.29190472028370557, 0.4915183190852574], [-0.34254652846270606, 0.7381500367234836], [-0.15984119803146662, 0.7300164149682818]], \"center\": [-0.23015012117904982, 0.6026476864129617]}, {\"camera_id\": \"1\", \"region_id\": \"region:demo-destination\", \"slot_id\": 4, \"polygon\": [[-0.125890413780433, 0.4660370909383201], [-0.15984119803146662, 0.7300164149682818], [0.01994371439596714, 0.7220128035163044], [0.04991198530139336, 0.4390535066067215]], \"center\": [-0.0540017683965651, 0.5829274701330429]}], \"coordinates\": \"normalized to original RGB; labels are in the added right margin\", \"frame_color\": [235, 235, 235], \"source_rgb_size_px\": [640, 480], \"source_image_sha256\": \"905597a3ddd55b9ab5e0101abf7537e84afb09e8f82df7bd0f39c66828f7d849\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-0\", \"camera\": \"3\", \"box\": [0.784375, 0.7222222222222222, 1.0, 1.0], \"sam3_prompt_proposal\": \"blue box\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-1\", \"camera\": \"3\", \"box\": [0.0, 0.7472222222222222, 0.2234375, 1.0], \"sam3_prompt_proposal\": \"blue box\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-2\", \"camera\": \"3\", \"box\": [0.071875, 0.9388888888888889, 0.1625, 1.0], \"sam3_prompt_proposal\": \"pink object\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-3\", \"camera\": \"3\", \"box\": [0.13125, 0.9388888888888889, 0.1625, 1.0], \"sam3_prompt_proposal\": \"pink object\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-4\", \"camera\": \"3\", \"box\": [0.425, 0.5666666666666667, 0.4609375, 0.6888888888888889], \"sam3_prompt_proposal\": \"pink object\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-5\", \"camera\": \"3\", \"box\": [0.33125, 0.0, 0.45625, 0.33611111111111114], \"sam3_prompt_proposal\": \"pink object\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-6\", \"camera\": \"3\", \"box\": [0.0, 0.7472222222222222, 0.2234375, 1.0], \"sam3_prompt_proposal\": \"object inside the left blue box\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-7\", \"camera\": \"3\", \"box\": [0.071875, 0.9388888888888889, 0.1625, 1.0], \"sam3_prompt_proposal\": \"elliptical pink object\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-8\", \"camera\": \"3\", \"box\": [0.425, 0.5666666666666667, 0.4609375, 0.6888888888888889], \"sam3_prompt_proposal\": \"elliptical pink object\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-9\", \"camera\": \"3\", \"box\": [0.33125, 0.0, 0.45625, 0.33611111111111114], \"sam3_prompt_proposal\": \"elliptical pink object\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-10\", \"camera\": \"2\", \"box\": [0.4453125, 0.28958333333333336, 0.5515625, 0.4895833333333333], \"sam3_prompt_proposal\": \"pink object\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-11\", \"camera\": \"1\", \"box\": [0.30625, 0.3645833333333333, 0.96875, 0.9979166666666667], \"sam3_prompt_proposal\": \"blue box\"}"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"candidate\": \"candidate-12\", \"camera\": \"1\", \"box\": [0.30625, 0.3645833333333333, 0.96875, 0.9979166666666667], \"sam3_prompt_proposal\": \"empty blue box\"}"
+          }
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "type": "choice",
+        "name": "identity_0",
+        "instructions": "Which permanent entity is the proposed subject of candidate-0 in camera 3? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C0; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_1",
+        "instructions": "Which permanent entity is the proposed subject of candidate-1 in camera 3? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C1; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_2",
+        "instructions": "Which permanent entity is the proposed subject of candidate-2 in camera 3? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C2; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_3",
+        "instructions": "Which permanent entity is the proposed subject of candidate-3 in camera 3? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C3; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_4",
+        "instructions": "Which permanent entity is the proposed subject of candidate-4 in camera 3? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C4; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_5",
+        "instructions": "Which permanent entity is the proposed subject of candidate-5 in camera 3? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C5; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_6",
+        "instructions": "Which permanent entity is the proposed subject of candidate-6 in camera 3? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C6; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_7",
+        "instructions": "Which permanent entity is the proposed subject of candidate-7 in camera 3? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C7; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_8",
+        "instructions": "Which permanent entity is the proposed subject of candidate-8 in camera 3? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C8; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_9",
+        "instructions": "Which permanent entity is the proposed subject of candidate-9 in camera 3? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C9; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_10",
+        "instructions": "Which permanent entity is the proposed subject of candidate-10 in camera 2? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C10; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_11",
+        "instructions": "Which permanent entity is the proposed subject of candidate-11 in camera 1? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C11; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "identity_12",
+        "instructions": "Which permanent entity is the proposed subject of candidate-12 in camera 1? Locate its numbered box in the annotated view and compare the full RGB images with the initial reference. Reject unrelated or outside-inventory subjects. Identify the proposed subject, not every object inside its rectangle. For a container proposal, identify the container even when its box includes contents. Unknown when the subject cannot be distinguished or matched to one permanent identity. Its display label is C12; return a canonical permanent ID.",
+        "choices": [
+          {
+            "value": "instance-626f8edc7f9c4fe0",
+            "description": "R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · R3 · Blue box containing visible pink objects"
+          },
+          {
+            "value": "instance-a03f57d4b5fe4633",
+            "description": "R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · R4 · Leftmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-5c36aca925904dc0",
+            "description": "R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · R2 · Middle visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-e9d3f85eae824529",
+            "description": "R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · R5 · Rightmost visible pink oval-shaped object in the source box"
+          },
+          {
+            "value": "instance-27de129de30a46a1",
+            "description": "R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · R1 · Separate blue box with no visible contents"
+          },
+          {
+            "value": "reject"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "visibility_instance-626f8edc7f9c4fe0",
+        "instructions": "Is initial entity instance-626f8edc7f9c4fe0 visible in ANY CURRENT RGB view? Look at full images regardless of SAM3 proposals. visible requires identifiable pixels; unseen means absent/occluded; unknown means uncertain identity.",
+        "choices": [
+          {
+            "value": "visible"
+          },
+          {
+            "value": "unseen"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "visibility_instance-a03f57d4b5fe4633",
+        "instructions": "Is initial entity instance-a03f57d4b5fe4633 visible in ANY CURRENT RGB view? Look at full images regardless of SAM3 proposals. visible requires identifiable pixels; unseen means absent/occluded; unknown means uncertain identity.",
+        "choices": [
+          {
+            "value": "visible"
+          },
+          {
+            "value": "unseen"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "visibility_instance-5c36aca925904dc0",
+        "instructions": "Is initial entity instance-5c36aca925904dc0 visible in ANY CURRENT RGB view? Look at full images regardless of SAM3 proposals. visible requires identifiable pixels; unseen means absent/occluded; unknown means uncertain identity.",
+        "choices": [
+          {
+            "value": "visible"
+          },
+          {
+            "value": "unseen"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "visibility_instance-e9d3f85eae824529",
+        "instructions": "Is initial entity instance-e9d3f85eae824529 visible in ANY CURRENT RGB view? Look at full images regardless of SAM3 proposals. visible requires identifiable pixels; unseen means absent/occluded; unknown means uncertain identity.",
+        "choices": [
+          {
+            "value": "visible"
+          },
+          {
+            "value": "unseen"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "visibility_instance-27de129de30a46a1",
+        "instructions": "Is initial entity instance-27de129de30a46a1 visible in ANY CURRENT RGB view? Look at full images regardless of SAM3 proposals. visible requires identifiable pixels; unseen means absent/occluded; unknown means uncertain identity.",
+        "choices": [
+          {
+            "value": "visible"
+          },
+          {
+            "value": "unseen"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "progress_instance-a03f57d4b5fe4633",
+        "instructions": "Where is entity instance-a03f57d4b5fe4633 NOW relative to destination demo-destination? Assigned region region:demo-destination, slot 1. Slot XY specifies the measured grasped-object reference. Local geometry checks footprint containment; RGB does not certify millimetre pose accuracy. Region outlines are support-plane projections onto the tabletop, not a 3D enclosure. Assess the object base/contact, not its entire silhouette or SAM3 box. Elevated object pixels may extend outside the same 2D polygon while its supporting base is inside. at_destination requires visible base/support on the assigned region or inside the destination container, and no visible holding by the gripper. Use the union of current views to assess support and separation from the gripper; action history is not proof. elsewhere means visibly outside it or held; unknown for hidden, uncertain identity or unknown destination. Use current RGB even without a SAM3 candidate.",
+        "choices": [
+          {
+            "value": "at_destination"
+          },
+          {
+            "value": "elsewhere"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "progress_instance-5c36aca925904dc0",
+        "instructions": "Where is entity instance-5c36aca925904dc0 NOW relative to destination None? at_destination requires visible base/support on the assigned region or inside the destination container, and no visible holding by the gripper. Use the union of current views to assess support and separation from the gripper; action history is not proof. elsewhere means visibly outside it or held; unknown for hidden, uncertain identity or unknown destination. Use current RGB even without a SAM3 candidate.",
+        "choices": [
+          {
+            "value": "at_destination"
+          },
+          {
+            "value": "elsewhere"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "progress_instance-e9d3f85eae824529",
+        "instructions": "Where is entity instance-e9d3f85eae824529 NOW relative to destination None? at_destination requires visible base/support on the assigned region or inside the destination container, and no visible holding by the gripper. Use the union of current views to assess support and separation from the gripper; action history is not proof. elsewhere means visibly outside it or held; unknown for hidden, uncertain identity or unknown destination. Use current RGB even without a SAM3 candidate.",
+        "choices": [
+          {
+            "value": "at_destination"
+          },
+          {
+            "value": "elsewhere"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      },
+      {
+        "type": "choice",
+        "name": "demo_unlisted_pink",
+        "instructions": "Source bin ID: \"instance-626f8edc7f9c4fe0\"; permanent source-object IDs: [\"instance-a03f57d4b5fe4633\", \"instance-5c36aca925904dc0\", \"instance-e9d3f85eae824529\"]. Across the union of CURRENT RGB images, are any VISIBLE pink movable source task objects unmatched to these permanent source IDs? Ignore robot parts, reflections and annotations. none means every visible pink task subject matches a permanent source ID; it does not claim the source bin is empty or hidden contents are absent. extra means a clearly visible unmatched pink source task object. unknown means a visible subject has ambiguous identity or current RGB is insufficient to assess visible task subjects. Occluded interior alone does not mean extra or unknown. A known object already moved to its destination is not extra. Missing SAM3 candidates do not prove absence. Compare the listed R references below with all three full CURRENT RGB images, including outside any zoom crop. Count each physical object once across cameras: multiple views or visibly connected faces of the same identifiable object are not additional objects. An unresolved SAM candidate in an auxiliary view does not by itself establish another physical object; inspect the full RGB and the clearest available view. Do not merge subjects merely because they share a color or are nearby. If a possibly distinct visible pink subject remains unresolved, answer unknown. The listed reference count does not establish the current number or prove there are no extra subjects; cropped reference views cannot establish absence outside their bounds. Visible-source reference guide: {\"scope\": \"initial_reference_inventory_not_a_current_count_or_matching_verdict\", \"listed_reference_count\": 3, \"references\": [{\"entity_id\": \"instance-a03f57d4b5fe4633\", \"reference_display_label\": \"R4\", \"display_id\": 1, \"description\": \"Leftmost visible pink oval-shaped object in the source box\", \"reference_boxes\": [{\"camera_id\": \"2\", \"box\": [0.313, 0.656, 0.381, 0.777]}]}, {\"entity_id\": \"instance-5c36aca925904dc0\", \"reference_display_label\": \"R2\", \"display_id\": 2, \"description\": \"Middle visible pink oval-shaped object in the source box\", \"reference_boxes\": [{\"camera_id\": \"2\", \"box\": [0.42, 0.662, 0.473, 0.775]}]}, {\"entity_id\": \"instance-e9d3f85eae824529\", \"reference_display_label\": \"R5\", \"display_id\": 3, \"description\": \"Rightmost visible pink oval-shaped object in the source box\", \"reference_boxes\": [{\"camera_id\": \"2\", \"box\": [0.508, 0.665, 0.58, 0.779]}]}]}",
+        "choices": [
+          {
+            "value": "none"
+          },
+          {
+            "value": "extra"
+          },
+          {
+            "value": "unknown"
+          }
+        ]
+      }
+    ]
+  },
+  "controller_progress": {
+    "instance-a03f57d4b5fe4633": {
+      "status": "selected",
+      "destination_id": "demo-destination",
+      "stage_index": 0,
+      "release_feedback_id": "feedback-2-123.71700000022668",
+      "region_id": "region:demo-destination",
+      "slot_id": 1,
+      "assigned_slot": {
+        "index": 1,
+        "area_m2": 0.025600000000000005,
+        "center_world_xy_m": [
+          0.4376983199674955,
+          0.08220641628676754
+        ],
+        "polygon_world_xy_m": [
+          [
+            0.36,
+            -4.554041391645164e-18
+          ],
+          [
+            0.52,
+            0.006762144478907804
+          ],
+          [
+            0.5199999999999999,
+            0.16000000000000003
+          ],
+          [
+            0.3532378555210921,
+            0.15999999999999998
+          ]
+        ],
+        "slot_id": 1,
+        "initial_head_center_pixel_xy": [
+          656.4544200647478,
+          174.73344109148417
+        ],
+        "floor_z_m": 0.5600000023841858,
+        "layout_revision": "47a957ad977187c6eb5b6fbf"
+      }
+    },
+    "instance-5c36aca925904dc0": {
+      "status": "observed"
+    },
+    "instance-e9d3f85eae824529": {
+      "status": "observed"
+    }
+  }
+}

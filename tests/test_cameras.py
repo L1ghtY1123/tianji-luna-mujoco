@@ -9,8 +9,8 @@ import pytest
 
 
 def cameras_module():
-    assert importlib.util.find_spec("jev_mujoco.cameras") is not None, "RGBD adapter is missing"
-    return importlib.import_module("jev_mujoco.cameras")
+    assert importlib.util.find_spec("luna_mujoco.cameras") is not None, "RGBD adapter is missing"
+    return importlib.import_module("luna_mujoco.cameras")
 
 
 def small_calibration():
@@ -20,17 +20,17 @@ def small_calibration():
                      "intrinsics": dict(intrinsics)} for index in (1, 2, 3)}}
 
 
-def test_historical_rgb_calibration_keeps_precision_and_converts_translation_once():
+def test_user_extrinsics_keep_rgb_intrinsics_and_convert_translation_once():
     calibration = cameras_module().load_calibration()
     right = calibration["cameras"]["1"]
     assert right["intrinsics"]["cx"] == 317.9415584415584
     np.testing.assert_allclose(np.asarray(right["T_parent_rgb_m"])[:3, 3],
-                               [-0.0011901059103524876, 0.09237720705946873, 0.05135253272235849])
-    assert right["T_parent_rgb_m"][0][0] == -0.9997204930531767
+                               [.00211961167771889, .09119845517638979, .03725148394276182])
+    assert right["T_parent_rgb_m"][0][0] == -.9999617995060496
     assert right["source_sha256"] == "e8cd47a5d902ade17d045fbaad7e008a7a173fb4695208b7f8d0bae07604ce8d"
     head = calibration["cameras"]["3"]
     assert head["parent_body"] == "world"
-    assert head["T_parent_rgb_m"][2][3] == pytest.approx(1.07227570530598)
+    assert head["T_parent_rgb_m"][2][3] == pytest.approx(1.199981040227405)
 
 
 def test_wrist_uses_captured_fk_and_head_is_already_in_world():

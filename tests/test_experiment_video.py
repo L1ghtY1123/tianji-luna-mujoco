@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jev_mujoco import experiment_video as video
+from luna_mujoco import experiment_video as video
 
 
 def pose_frame(t_s, x, quaternion=(1, 0, 0, 0)):
@@ -36,6 +36,15 @@ def test_geometry_interpolation_uses_shortest_quaternion_rotation():
     np.testing.assert_allclose(middle["geometry_poses"][0]["quaternion"],
                                [math.cos(math.pi / 8), 0, 0, math.sin(math.pi / 8)])
     assert frames[-1][1]["geometry_poses"][0]["position"] == [2, 0, 0]
+
+
+def test_geometry_revision_change_is_instant_without_invented_morph_or_motion():
+    samples = [{**pose_frame(0, 0), "manifest_revision": 1},
+               {**pose_frame(1, 2), "manifest_revision": 2}]
+    frames = list(video.resample_frames(samples, duration_s=1.5, fps=2, interpolate=True))
+    assert frames[1][1]["geometry_poses"][0]["position"] == [0, 0, 0]
+    assert frames[1][1]["manifest_revision"] == 1
+    assert frames[2][1]["manifest_revision"] == 2
 
 
 def test_streaming_resampler_does_not_read_all_frames_in_advance():
@@ -78,6 +87,14 @@ class RecordingSimulation:
     def manifest(self):
         return {"geometries": [], "quaternion_order": "wxyz"}
 
+    def recording_snapshot(self, known_revision=None):
+        snapshot = {**self.snapshot(), "manifest_revision": 1}
+        if known_revision != 1:
+            snapshot["geometry_update"] = {
+                "scene": {key: snapshot[key] for key in ("table", "objects")},
+                "geometry_manifest": {**self.manifest(), "revision": 1}}
+        return snapshot
+
     def preview_rgb(self):
         self.preview_entered.set()
         self.release_preview.wait(timeout=3)
@@ -111,6 +128,31 @@ def test_missing_ffmpeg_is_failed_even_when_recorded_data_exists(tmp_path, monke
     assert result["video_status"] == "failed"
     assert any("ffmpeg" in error for error in result["errors"])
     assert not (tmp_path / "videos" / "scene.mp4").exists()
+
+
+def test_recorder_archives_geometry_revision_before_its_first_frame(tmp_path, monkeypatch):
+    sim = RecordingSimulation()
+    sim.release_preview.set()
+    original = sim.recording_snapshot
+    def changed(known_revision=None):
+        snapshot = original(known_revision)
+        if sim.snapshots >= 3:
+            snapshot["manifest_revision"] = 2
+            snapshot["geometry_update"] = {
+                "scene": {"table": snapshot["table"], "objects": [{"id": "same", "color": "black"}]},
+                "geometry_manifest": {"revision": 2, "geometries": []}}
+        return snapshot
+    monkeypatch.setattr(sim, "recording_snapshot", changed)
+    monkeypatch.setattr(video, "encode_videos", lambda _: {"video_status": "ready", "errors": []})
+    recorder = video.VideoRecorder(tmp_path, sim, time.monotonic(), 1)
+    recorder.start()
+    time.sleep(.3)
+    recorder.finish()
+    recording = json.loads((tmp_path / "videos/recording.json").read_text())
+    assert recording["geometry_revisions"]["2"]["scene"]["objects"][0]["color"] == "black"
+    frames = list(video._read_packets(tmp_path / "frames.jsonl.gz"))
+    assert {frame["manifest_revision"] for frame in frames} == {1, 2}
+    assert recording["geometry_updates"][0]["manifest_revision"] == 2
 
 
 def test_recording_write_failure_is_reported_not_ready(tmp_path, monkeypatch):

@@ -3,7 +3,7 @@ import copy
 import numpy as np
 import pytest
 
-from jev_mujoco.placement import carrying_binding, public_observation, release_goal
+from luna_mujoco.placement import carrying_binding, public_observation, release_goal
 
 
 def measured_inputs():

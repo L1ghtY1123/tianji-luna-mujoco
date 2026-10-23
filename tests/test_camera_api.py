@@ -3,8 +3,8 @@ from io import BytesIO
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from jev_mujoco.app import create_app
-from jev_mujoco.simulation import Simulation
+from luna_mujoco.app import create_app
+from luna_mujoco.simulation import Simulation
 
 
 def test_camera_preview_is_three_same_frame_local_pngs_and_reset_rejects_old_frame(tmp_path):

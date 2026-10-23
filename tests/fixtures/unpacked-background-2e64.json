@@ -1,0 +1,66 @@
+{
+  "run_id": "2e6487d72001407da7e87bc617e0fbed",
+  "source_event": "event-00177",
+  "background_query": {
+    "camera": "1",
+    "prompt": "black object",
+    "candidate_index": 11
+  },
+  "head_black_query": {
+    "camera": "3",
+    "prompt": "black object",
+    "candidate_index": 4
+  },
+  "demo_tables": {
+    "source_observation_id": "rgbd-2-52b15c74e56d40c8bff61d6e40243308",
+    "primary_table_id": "table",
+    "tables": {
+      "table": {
+        "model": {
+          "pose": [
+            0.46025723218917847,
+            -2.9802322387695312e-08,
+            0.41000000238418577,
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "dims": [
+            0.5994220972061157,
+            0.8000023365020752,
+            0.3
+          ]
+        },
+        "surface_height_m": 0.5600000023841858,
+        "normal": [
+          1.497348023349332e-07,
+          9.423807227904035e-07,
+          1.0
+        ],
+        "inlier_count": 208144,
+        "source": "initial_inventory_ransac_table",
+        "fit": {
+          "iterations": 256,
+          "distance_threshold_m": 0.006,
+          "maximum_tilt_deg": 5.0,
+          "input_point_count": 75460,
+          "sample_limit": 6000,
+          "multicamera_fusion": {
+            "source": "same_plane_connected_multicamera_measured_returns",
+            "maximum_footprint_growth_m": 0.02,
+            "local_support_radius_m": 0.02,
+            "local_support_neighbours": 16,
+            "normal_tolerance_deg": 5.0,
+            "accepted_point_count_by_camera": {
+              "1": 66292,
+              "2": 66409
+            }
+          }
+        },
+        "downward_extent_m": 0.3,
+        "downward_extent_source": "bounded_cuboid_completion"
+      }
+    }
+  }
+}

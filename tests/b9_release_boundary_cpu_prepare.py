@@ -7,10 +7,10 @@ from pathlib import Path
 
 import numpy as np
 
-from jev_mujoco.algorithms import Algorithms
-from jev_mujoco.cameras import letterbox_view
-from jev_mujoco.perception_mapping import decode_mapping_payload
-from jev_mujoco.runner import Runner
+from luna_mujoco.algorithms import Algorithms
+from luna_mujoco.cameras import letterbox_view
+from luna_mujoco.perception_mapping import decode_mapping_payload
+from luna_mujoco.runner import Runner
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data/visible-cloud-work/grasp-place-right-9"

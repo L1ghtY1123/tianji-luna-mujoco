@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from test_visible_placement import measured_inputs
 
-from jev_mujoco import placement
-from jev_mujoco.perception import measured_bin_reference
+from luna_mujoco import placement
+from luna_mujoco.perception import measured_bin_reference
 
 
 def region_inputs(kind="bin"):

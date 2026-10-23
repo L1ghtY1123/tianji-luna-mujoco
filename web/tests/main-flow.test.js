@@ -11,6 +11,7 @@ import { createCameraPanel } from '../src/camera-panel.js';
 import { createObjectList } from '../src/object-list.js';
 import { createPointcloudPanel } from '../src/pointcloud-panel.js';
 import { runEvidence, runStatusSummary } from '../src/run-evidence.js';
+import { loadCadAssets } from '../src/cad-assets.js';
 
 // Execute the real page entry point with DOM and network boundaries replaced.
 // No browser, GPU service, or physical scene is touched by these ordering tests.
@@ -18,6 +19,25 @@ const source = (await readFile(new URL('../src/main.js', import.meta.url), 'utf8
   .replace(/^import .*;\r?\n/gm, '');
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('clean scene draft follows mock CAD revision and final motion without changing generation', async () => {
+  const pink = { id: 'part', kind: 'cad', asset_id: 'pink_wrapped', color: 'pink',
+    size: [.103, .063, .11], position: [.24, .50, .461], yaw_deg: 0 };
+  const initial = snapshot({ objects: [pink], run: { status: 'running' } });
+  initial.simulation.manifest_revision = 1;
+  const ui = await page(initial);
+  const black = { ...pink, asset_id: 'black_core', color: 'black', size: [.044, .056, .0745],
+    position: [.36, -.05, .59825] };
+  const changed = snapshot({ serverTime: 1001, objects: [black], run: { status: 'running' } });
+  changed.simulation.manifest_revision = 2;
+  ui.message(changed);
+  assert.equal(ui.metadataInput('类型').value, 'black_core');
+  const final = snapshot({ serverTime: 1002, objects: [{ ...black, position: [.2, -.605, .45] }],
+    run: { status: 'succeeded' } });
+  final.simulation.manifest_revision = 2;
+  ui.message(final);
+  assert.equal(Number(ui.vectorInput('object-editor', 0, 1).value), -605);
+});
 
 function snapshot({ generation = 1, serverTime = 1000, run = { status: 'idle' }, events = [], objects = [], settings = planningPayload(), instanceId } = {}) {
   return {
@@ -80,6 +100,7 @@ async function page(initial = snapshot(), { loadSettings = true } = {}) {
     createCameraPanel,
     createObjectList: container => createObjectList(container, { document: { createElement: element } }),
     createPointcloudPanel,
+    loadCadAssets,
     runConclusion,
     runEvidence,
     runStatusSummary,
@@ -92,6 +113,11 @@ async function page(initial = snapshot(), { loadSettings = true } = {}) {
     request(path, body) {
       if (path === '/api/manifest') return Promise.resolve({ revision: 1, geometries: [] });
       if (path === '/api/health') return Promise.resolve({});
+      if (path === '/api/cad-assets') return Promise.resolve({ assets: [
+        { id: 'pink_wrapped', label: '粉色包装件', size_m: [.06, .04, .1], default_color: 'pink' },
+        { id: 'blue_box', label: '蓝色盒子', size_m: [.31, .41, .145], default_color: 'blue' },
+        { id: 'black_core', label: '黑色工件', size_m: [.044, .056, .0745], default_color: 'black' },
+      ] });
       return new Promise((resolve, reject) => pending.push({ path, body, resolve, reject }));
     },
     setInterval(callback, milliseconds) { intervals.set(milliseconds, callback); },
@@ -180,10 +206,38 @@ test('live pose updates do not reserialize unchanged event history', async () =>
   assert.equal(app.traceRenders(), before + 1);
 });
 
+test('table color field waits for Apply and submits the selected appearance', async () => {
+  const ui = await page(snapshot());
+  const field = ui.element('table-fields').children.find(child =>
+    child.className === 'input-field' && child.children[0]?.textContent.startsWith('桌面颜色'));
+  const input = field.children.find(child => child.tagName === 'input');
+  assert.equal(input.value, 'white');
+  input.value = '#427e9a';
+  input.listeners.input();
+  assert.ok(!ui.requests().includes('/api/scene'));
+  ui.click('apply-scene');
+  assert.equal(ui.takeRequest('/api/scene').body.table.color, '#427e9a');
+});
+
 const sceneObjects = [
   { id: 'black_cube', kind: 'cube', color: 'black', position: [.4, .15, .62], size: [.04, .04, .04], quaternion: [1, 0, 0, 0] },
   { id: 'red_box', kind: 'box', color: 'red', position: [.5, -.15, .63], size: [.05, .04, .06], quaternion: [1, 0, 0, 0] },
 ];
+
+test('scene editor adds a selected CAD, locks native dimensions and submits its custom color', async () => {
+  const ui = await page(snapshot());
+  ui.element('add-asset').value = 'black_core';
+  ui.click('add-object');
+  assert.deepEqual([...ui.metadataInput('类型').children].map(option => option.value), ['pink_wrapped', 'blue_box', 'black_core']);
+  assert.ok([0, 1, 2].every(axis => ui.vectorInput('object-editor', 1, axis).disabled));
+  ui.inputMetadata('自定义颜色 #RRGGBB', '#aabbcc');
+  ui.click('apply-scene');
+  const submitted = ui.takeRequest('/api/scene').body.objects[0];
+  assert.equal(submitted.asset_id, 'black_core');
+  assert.equal(submitted.kind, 'cad');
+  assert.equal(submitted.color, '#aabbcc');
+  assert.deepEqual([...submitted.size], [.044, .056, .0745]);
+});
 
 test('cancel scene edits restores the latest physical snapshot without a mutation request', async () => {
   const ui = await page(snapshot({ objects: sceneObjects }));
@@ -247,9 +301,9 @@ test('partial success keeps collection counts and deferred reasons visible', asy
   assert.equal(ui.element('facts-section').hidden, false);
 });
 
-test('active grasp failure presents evidence awaiting JEV recovery without reset advice', async () => {
+test('grasp failure presents the stopped program and its evidence without reset advice', async () => {
   const ui = await page(snapshot({ run: { status: 'running', failure: { code: 'grasp_verification_failed' } } }));
-  assert.match(ui.element('run-failure').textContent, /等待 JEV/);
+  assert.match(ui.element('run-failure').textContent, /技能程序已停止/);
   assert.equal(ui.element('run-failure').textContent.includes('Reset'), false);
 });
 
@@ -529,6 +583,18 @@ for (const kind of ['cube', 'sphere', 'cylinder', 'box']) {
     assert.deepEqual(Array.from(ui.takeRequest('/api/scene').body.objects[0].size), afterHeight);
   });
 }
+
+test('ellipse size controls keep independent axes in the submitted scene', async () => {
+  const ui = await page(snapshot({ objects: [{ ...sceneObjects[0], kind: 'cylinder',
+    cross_section: 'ellipse', color: 'pink', size: [.06, .04, .1] }] }));
+  ui.inputSize(0, '70');
+  assert.deepEqual(ui.view.draft.objects[0].size, [.07, .04, .1]);
+  ui.click('apply-scene');
+  const object = ui.takeRequest('/api/scene').body.objects[0];
+  assert.equal(object.cross_section, 'ellipse');
+  assert.equal(object.color, 'pink');
+  assert.deepEqual(Array.from(object.size), [.07, .04, .1]);
+});
 
 for (const invalid of ['', 'Infinity', 'NaN']) {
   for (const field of ['position', 'size', 'yaw', 'table position', 'table size']) {
@@ -932,8 +998,8 @@ test('planning timeouts keep a Chinese summary and the original reason in error 
 });
 
 for (const [error, explanation] of [
-  ['arm_already_attempted:B', /该机械臂本轮已尝试规划.*每臂最多尝试一次/],
-  ['no_reachable_arm', /JEV 未选择可执行的机械臂/],
+  ['arm_already_attempted:B', /该机械臂本轮已尝试规划.*任务已停止/],
+  ['no_reachable_arm', /源与目的未同时命中可用机械臂工作空间/],
 ]) {
   test(`arm selection rejection explains ${error} without claiming both arms are unreachable`, async () => {
     const ui = await page(snapshot({ run: { status: 'failed', error,

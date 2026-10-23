@@ -41,6 +41,28 @@ function rotatePosition(position, quaternion) {
   return new Vector3(...position).applyQuaternion(new Quaternion(x, y, z, w)).toArray();
 }
 
+function cadPreview(definition, pose, edit, draft, activeDrag, id) {
+  const [lw, lx, ly, lz] = definition.local_quaternion;
+  const localRotation = new Quaternion(lx, ly, lz, lw);
+  const [pw, px, py, pz] = pose.quaternion;
+  const bodyRotation = new Quaternion(px, py, pz, pw).multiply(localRotation.clone().invert());
+  const oldOffset = new Vector3(...definition.local_position_m).applyQuaternion(bodyRotation);
+  const center = new Vector3(...pose.position).sub(oldOffset).toArray();
+  const yaw = edit?.yaw_deg;
+  if (yaw !== undefined && yaw !== '' && yaw !== null && Number.isFinite(Number(yaw))) {
+    bodyRotation.setFromAxisAngle(new Vector3(0, 0, 1), Number(yaw) * Math.PI / 180);
+    const pitch = Number(edit.pitch_deg ?? 0);
+    if (Number.isFinite(pitch)) {
+      bodyRotation.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), pitch * Math.PI / 180));
+    }
+  }
+  const desiredCenter = objectPreviewPosition(id, center, draft, activeDrag);
+  const offset = new Vector3(...definition.local_position_m).applyQuaternion(bodyRotation);
+  const position = new Vector3(...desiredCenter).add(offset).toArray();
+  const rotation = bodyRotation.multiply(localRotation);
+  return { position, quaternion: [rotation.w, rotation.x, rotation.y, rotation.z] };
+}
+
 // Draft lengths stay in meters. Only editable scene geometry receives preview
 // transforms; robot poses always come from the live MuJoCo snapshot.
 export function applyScenePreview(mesh, definition, pose, draft, activeDrag) {
@@ -73,6 +95,11 @@ export function applyScenePreview(mesh, definition, pose, draft, activeDrag) {
   if (!edit && definition.object_kind === 'bin' && definition.local_position_m && activeDrag?.id === id) {
     const offset = rotatePosition(definition.local_position_m, quaternion);
     position = activeDrag.position.map((value, index) => value + offset[index]);
+  }
+  if (definition.object_kind === 'cad' && definition.local_position_m && definition.local_quaternion
+      && (edit || activeDrag?.id === id)) {
+    ({ position, quaternion } = cadPreview(definition, pose, edit, draft, activeDrag, id));
+    scale = [1, 1, 1];
   }
   if (definition.object_kind === 'marker') {
     const tablePosition = finiteVector(draft?.table?.position);

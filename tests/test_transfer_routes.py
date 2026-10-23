@@ -1,6 +1,6 @@
 import pytest
 
-from jev_mujoco.task_progress import TaskProgress, original_source_bin
+from luna_mujoco.task_progress import TaskProgress, original_source_bin
 
 
 def test_original_source_requires_one_dominant_measured_bin_relationship():

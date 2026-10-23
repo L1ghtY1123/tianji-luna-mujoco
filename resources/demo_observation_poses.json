@@ -1,0 +1,578 @@
+{
+  "schema_version": 1,
+  "model_validated": true,
+  "joints_rad": {
+    "A": [
+      -0.5256233575306123,
+      0.9770702218514655,
+      0.3721391031102309,
+      -1.9186753533024064,
+      0.25532421627425045,
+      -0.5119574294874967,
+      -1.0574775404908443
+    ],
+    "B": [
+      0.5256233575306123,
+      0.9770702218514655,
+      -0.3721391031102309,
+      -1.9186753533024064,
+      -0.25532421627425045,
+      -0.5119574294874967,
+      1.0574775404908443
+    ]
+  },
+  "joints_deg": {
+    "A": [
+      -30.116,
+      55.982,
+      21.322,
+      -109.932,
+      14.629,
+      -29.333,
+      -60.589
+    ],
+    "B": [
+      30.116,
+      55.982,
+      -21.322,
+      -109.932,
+      -14.629,
+      -29.333,
+      60.589
+    ]
+  },
+  "validation": {
+    "mujoco_version": "3.10.0",
+    "physical_left_arm": "A",
+    "source_camera_id": "2",
+    "physical_right_arm": "B",
+    "right_camera_id": "1",
+    "endpoint_clearance_m": {
+      "peer": [
+        0.023959763197117595,
+        [
+          "Base_L",
+          "Base_R"
+        ]
+      ],
+      "self": [
+        0.001507866433036173,
+        [
+          "Link5_L",
+          "Link7_L"
+        ]
+      ],
+      "scene": [
+        0.1680885075171584,
+        [
+          "gripL_Link3_R",
+          "object_geom_blue_source_bin__cad_4"
+        ]
+      ]
+    },
+    "mujoco_robot_scene_contacts": 0,
+    "robot_scene_contact_pairs": [],
+    "mujoco_source_object_contacts": 0,
+    "source_object_contact_pairs": [],
+    "source_positions_world_m": {
+      "pink_cylinder_1": [
+        0.481,
+        0.49299999999999994,
+        0.5595
+      ]
+    },
+    "rgbd_views": {
+      "1": {
+        "visible_source_count": 0,
+        "source_pixels_by_object": {
+          "pink_cylinder_1": 0
+        },
+        "bin_visible_pixels": 0,
+        "bin_bounds_px": null,
+        "valid_depth_pixels": 307200,
+        "T_world_camera": [
+          [
+            -0.03617771277968662,
+            -0.9738310037717008,
+            0.22437546477062312,
+            0.21511814083230163
+          ],
+          [
+            -0.9934629473846701,
+            0.05937166828345142,
+            0.09750065219784562,
+            -0.5675673626015127
+          ],
+          [
+            -0.10827070366353012,
+            -0.21938135996078253,
+            -0.9696129504240146,
+            0.976610139707796
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "2": {
+        "visible_source_count": 1,
+        "source_pixels_by_object": {
+          "pink_cylinder_1": 4866
+        },
+        "bin_visible_pixels": 89123,
+        "bin_bounds_px": [
+          50,
+          0,
+          493,
+          238
+        ],
+        "valid_depth_pixels": 307200,
+        "T_world_camera": [
+          [
+            0.041986344232524064,
+            -0.9721214351954062,
+            0.2306882357893798,
+            0.2165675559741173
+          ],
+          [
+            -0.9934444758105654,
+            -0.0651913384781006,
+            -0.09390507371228506,
+            0.5696521629789678
+          ],
+          [
+            0.10632600989157803,
+            -0.2252332227293794,
+            -0.968485815590233,
+            0.9685490254900464
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "3": {
+        "visible_source_count": 1,
+        "source_pixels_by_object": {
+          "pink_cylinder_1": 1679
+        },
+        "bin_visible_pixels": 20123,
+        "bin_bounds_px": [
+          0,
+          154,
+          181,
+          288
+        ],
+        "valid_depth_pixels": 230400,
+        "T_world_camera": [
+          [
+            -0.01454722709711409,
+            -0.8308943775432586,
+            0.5562399765845549,
+            0.1273603218756391
+          ],
+          [
+            -0.9997718620421182,
+            0.020788309933185922,
+            0.004906122599163287,
+            -0.0034876335486242415
+          ],
+          [
+            -0.01563975871365053,
+            -0.5560417066525882,
+            -0.8310072312623135,
+            1.199981040227405
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    },
+    "source_bin_coverage": {
+      "camera_id": "2",
+      "opening_corners_px": [
+        [
+          476.26802881250774,
+          -32.55256791112848
+        ],
+        [
+          108.06076004584838,
+          -84.80146212735255
+        ],
+        [
+          45.99900098498267,
+          189.22650397431534
+        ],
+        [
+          494.212611076063,
+          222.4945097562791
+        ]
+      ],
+      "envelope_corners_px": [
+        [
+          476.26802881250774,
+          -32.55256791112848
+        ],
+        [
+          108.06076004584838,
+          -84.80146212735255
+        ],
+        [
+          45.99900098498267,
+          189.22650397431534
+        ],
+        [
+          494.212611076063,
+          222.4945097562791
+        ],
+        [
+          427.6113717083621,
+          56.367619902377754
+        ],
+        [
+          153.00188542818705,
+          24.32960478224973
+        ],
+        [
+          116.82176073109733,
+          231.7997554977795
+        ],
+        [
+          433.54280801459646,
+          252.4311067442199
+        ]
+      ],
+      "minimum_edge_margin_px": -84.80146212735255,
+      "full_envelope_inside_image": false,
+      "acceptance_gate": false,
+      "scope": "offline full-bin frustum diagnostic only; inspect recognizable bin and all objects in rendered RGBD"
+    },
+    "endpoint_collision_clear": true,
+    "all_source_objects_visible": true,
+    "source_object_count": 1,
+    "scene_config": {
+      "schema_version": 1,
+      "units": "meters",
+      "scale_basis": "User CAD native millimeters converted once to meters; only table dimensions remain explicit demo settings.",
+      "object_count": 1,
+      "main_table": {
+        "position": [
+          0.572,
+          -0.026,
+          0.532
+        ],
+        "size": [
+          0.6,
+          0.8,
+          0.08
+        ],
+        "color": "white"
+      },
+      "source_bin": {
+        "id": "blue_source_bin",
+        "kind": "cad",
+        "asset_id": "blue_box",
+        "color": "blue",
+        "position": [
+          0.481,
+          0.573,
+          0.571
+        ],
+        "size": [
+          0.41,
+          0.31,
+          0.145
+        ],
+        "yaw_deg": 90,
+        "mass_kg": 0.5,
+        "fixed": true
+      },
+      "right_bin": {
+        "id": "blue_right_bin",
+        "kind": "cad",
+        "asset_id": "blue_box",
+        "color": "blue",
+        "position": [
+          0.481,
+          -0.625,
+          0.571
+        ],
+        "size": [
+          0.41,
+          0.31,
+          0.145
+        ],
+        "yaw_deg": -90,
+        "mass_kg": 0.5,
+        "fixed": true
+      },
+      "source_objects": {
+        "asset_id": "pink_wrapped",
+        "mass_kg": 0.08,
+        "yaw_deg": 180,
+        "single_object_offset_xy_m": [
+          0.0,
+          -0.08
+        ],
+        "row_start_offset_xy_m": [
+          0.04,
+          -0.105
+        ],
+        "row_step_xy_m": [
+          -0.04,
+          0.07
+        ],
+        "two_object_offsets_xy_m": [
+          [
+            0.0,
+            -0.08
+          ],
+          [
+            0.0,
+            0.08
+          ]
+        ],
+        "four_object_grid": {
+          "x_offsets_from_bin_center_m": [
+            -0.07,
+            0.05
+          ],
+          "y_offsets_from_bin_center_m": [
+            -0.115,
+            0.005
+          ]
+        },
+        "settling_gap_m": 0.001
+      },
+      "destination": {
+        "region_id": "demo_destination",
+        "center_offset_from_main_table_m": [
+          -0.1,
+          0.1
+        ],
+        "size_m": 0.32,
+        "physical_marker": false
+      },
+      "arm_camera_mapping": {
+        "left_arm": "A",
+        "left_camera_id": "2",
+        "right_arm": "B",
+        "right_camera_id": "1",
+        "head_camera_id": "3"
+      },
+      "observation_poses_resource": "resources/demo_observation_poses.json",
+      "observation_left_joints_deg": [
+        -30.116,
+        55.982,
+        21.322,
+        -109.932,
+        14.629,
+        -29.333,
+        -60.589
+      ]
+    },
+    "environment_truth_in_runtime": false,
+    "scope": "offline endpoint geometry and rendered RGBD only; runtime path must be collision planned",
+    "collision_geometry": "buffered planner spheres against supports and conservative AABBs of individual CAD convex pieces",
+    "minimum_clearance_m": {
+      "scene": 0.01,
+      "peer": 0.01,
+      "self": 0.0
+    },
+    "mirror_fk": {
+      "joint_signs_A_to_B": [
+        -1,
+        1,
+        -1,
+        1,
+        -1,
+        1,
+        -1
+      ],
+      "checked_sign_combinations": 128,
+      "links": [
+        "Link1",
+        "Link2",
+        "Link3",
+        "Link4",
+        "Link5",
+        "Link6",
+        "Link7",
+        "TCP_Link"
+      ],
+      "maximum_position_error_m": 3.504003919832939e-06,
+      "maximum_rotation_matrix_error": 4.222328486781304e-05,
+      "best_squared_error": 6.648827859860725e-09,
+      "next_best_squared_error": 2.0429938006167236,
+      "scope": "robot_link_mirror_independent_of_scene_layout",
+      "evidence_origin": "computed_current_robot_fk",
+      "robot_urdf_sha256": "cad92ac6d4dd94a9651c79b383520efe7fafadaabcd83aff5b17222e7eab0dea"
+    }
+  },
+  "arm_camera_mapping": {
+    "left_arm": "A",
+    "left_camera_id": "2",
+    "right_arm": "B",
+    "right_camera_id": "1",
+    "head_camera_id": "3"
+  },
+  "validation_by_object_count": {
+    "1": {
+      "source_object_count": 1,
+      "source_pixels_by_object": {
+        "pink_cylinder_1": 4866
+      },
+      "all_source_objects_visible": true,
+      "mujoco_robot_scene_contacts": 0,
+      "mujoco_source_object_contacts": 0,
+      "source_positions_world_m": {
+        "pink_cylinder_1": [
+          0.481,
+          0.49299999999999994,
+          0.5595
+        ]
+      },
+      "endpoint_collision_clear": true,
+      "evidence_path": "data/place-result-cc543b/white-table-observation/evidence.json",
+      "evidence_sha256": "463257712ada42564c6b249ba6de5378d3f4b0d1460e2be67035e57e4236a8b3"
+    },
+    "2": {
+      "source_object_count": 2,
+      "source_pixels_by_object": {
+        "pink_cylinder_1": 4873,
+        "pink_cylinder_2": 5368
+      },
+      "all_source_objects_visible": true,
+      "mujoco_robot_scene_contacts": 0,
+      "mujoco_source_object_contacts": 0,
+      "source_positions_world_m": {
+        "pink_cylinder_1": [
+          0.481,
+          0.49299999999999994,
+          0.5595
+        ],
+        "pink_cylinder_2": [
+          0.481,
+          0.6529999999999999,
+          0.5595
+        ]
+      },
+      "endpoint_collision_clear": true,
+      "evidence_path": "data/place-result-cc543b/white-table-observation/count-2/evidence.json",
+      "evidence_sha256": "abbf6df9bb76c827cfe27e0d67df54511aeddfa9fa3b51042bf8230ae9d68819"
+    },
+    "3": {
+      "source_object_count": 3,
+      "source_pixels_by_object": {
+        "pink_cylinder_1": 4934,
+        "pink_cylinder_2": 4751,
+        "pink_cylinder_3": 4627
+      },
+      "all_source_objects_visible": true,
+      "mujoco_robot_scene_contacts": 0,
+      "mujoco_source_object_contacts": 0,
+      "source_positions_world_m": {
+        "pink_cylinder_1": [
+          0.521,
+          0.46799999999999997,
+          0.5595
+        ],
+        "pink_cylinder_2": [
+          0.481,
+          0.5379999999999999,
+          0.5595
+        ],
+        "pink_cylinder_3": [
+          0.441,
+          0.608,
+          0.5595
+        ]
+      },
+      "endpoint_collision_clear": true,
+      "evidence_path": "data/place-result-cc543b/white-table-observation/count-3/evidence.json",
+      "evidence_sha256": "9619374c2a10cd2a58aa202561df337b3c553e78e55760f6662e9324c806d7e4"
+    },
+    "4": {
+      "source_object_count": 4,
+      "source_pixels_by_object": {
+        "pink_cylinder_1": 3637,
+        "pink_cylinder_2": 4826,
+        "pink_cylinder_3": 3366,
+        "pink_cylinder_4": 4527
+      },
+      "all_source_objects_visible": true,
+      "mujoco_robot_scene_contacts": 0,
+      "mujoco_source_object_contacts": 0,
+      "source_positions_world_m": {
+        "pink_cylinder_1": [
+          0.411,
+          0.45799999999999996,
+          0.5595
+        ],
+        "pink_cylinder_2": [
+          0.531,
+          0.45799999999999996,
+          0.5595
+        ],
+        "pink_cylinder_3": [
+          0.411,
+          0.578,
+          0.5595
+        ],
+        "pink_cylinder_4": [
+          0.531,
+          0.578,
+          0.5595
+        ]
+      },
+      "endpoint_collision_clear": true,
+      "evidence_path": "data/place-result-cc543b/white-table-observation/count-4/evidence.json",
+      "evidence_sha256": "6671b7b032be1936d0294fdde752b00644d93e05750e16fb8ade2e2e491a45be"
+    }
+  },
+  "source_sha256": {
+    "assets/marvin_urdf/marvin_with_grippers.urdf": "cad92ac6d4dd94a9651c79b383520efe7fafadaabcd83aff5b17222e7eab0dea",
+    "resources/cameras/calibration.json": "c4007b0a4dffecfa8db709712681239d14bc733ccd2474c662afaae20a3d49a1",
+    "resources/curobo/marvin_gui_dual.yml": "8e03e5136f817be7ed49f9a95e66fa9ccc6c38e867d247741cd146eb2dc75385",
+    "resources/demo-config.json": "e13e1d896f2faa960aa871ac2d7d98feb550f7cf88a98bf503cc4016e7649029",
+    "src/luna_mujoco/model_builder.py": "4903ad536964aef5741c0b260861da13e5af67a863db1a78c102afd991049d9c",
+    "src/luna_mujoco/cameras.py": "1311fd65087eff22a3e27f07823dad9b38bbd5cbb4ae727ddd760068c36eaa5b",
+    "src/luna_mujoco/demo_scene.py": "b8ee1eeefe3499525c734649fc8c0ea18ce825e2c1d2a0e187d50d7b8e899782",
+    "src/luna_mujoco/cad_assets.py": "9ac39269920827622f4a6eea34b2c06d6eb8e2adc23d3d1fd0476d7a1601e88f",
+    "src/luna_mujoco/geometry.py": "a403e0fe495482b507ecd09f7e4fb740931f41d3bc9ce6ee16b1ae1035dee479",
+    "resources/cad/manifest.json": "9c8d64371f00778377e4b1dc5dfdbb1ad07629152ce7c0a28e5246df6ea845ae",
+    "scripts/build_cad_assets.py": "953bcedcdbbe9522f59cb252edf12509b9d9bcafb7a3284b331a6edef9354054",
+    "scripts/calibrate_demo_observation_poses.py": "5f4142adfa85e9b1f06dedc3f16556a0c4a44552df2d65a6211d75535bc35647"
+  },
+  "startup_joints_rad": {
+    "A": [
+      -0.5256233575306123,
+      0.9770702218514655,
+      0.3721391031102309,
+      -1.9186753533024064,
+      0.25532421627425045,
+      -0.5119574294874967,
+      -1.0574775404908443
+    ],
+    "B": [
+      0.5256233575306123,
+      0.9770702218514655,
+      -0.3721391031102309,
+      -1.9186753533024064,
+      -0.25532421627425045,
+      -0.5119574294874967,
+      1.0574775404908443
+    ]
+  },
+  "provenance": "exact user left joints; unique sign mirror verified from all corresponding link FK"
+}

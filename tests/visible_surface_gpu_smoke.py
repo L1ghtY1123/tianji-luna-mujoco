@@ -11,9 +11,9 @@ def main():
     from curobo.types import JointState
     from tianji_curobo.curobo_service import materialize_urdf
 
-    from jev_mujoco.carrying import CarryingBinding, carrying_spheres
-    from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
-    from jev_mujoco.planning_settings import PlanningSettings
+    from luna_mujoco.carrying import CarryingBinding, carrying_spheres
+    from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
+    from luna_mujoco.planning_settings import PlanningSettings
 
     report = {"sdk": sdk_identity()[0], "torch": torch.__version__, "cuda": torch.version.cuda, "physical_success_claimed": False}
     assert report["sdk"] == "8e734f3ced1df898990bcd92de40abce475907db"

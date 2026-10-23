@@ -54,8 +54,8 @@ def main():
     from tianji_curobo.curobo_robot_config import create_dual_arm_robot_config
     from tianji_curobo.curobo_service import materialize_urdf
 
-    from jev_mujoco.carrying import CarryingBinding, carrying_spheres, configure_gripper_feedback
-    from jev_mujoco.geometry_service import ROOT, sdk_identity
+    from luna_mujoco.carrying import CarryingBinding, carrying_spheres, configure_gripper_feedback
+    from luna_mujoco.geometry_service import ROOT, sdk_identity
 
     urdf = materialize_urdf(ROOT / "assets/marvin_urdf/marvin_with_grippers.urdf",
         marvin_meshes=ROOT / "assets/marvin_urdf/meshes", rag_meshes=ROOT / "assets/marvin_urdf/rag100_050/meshes")

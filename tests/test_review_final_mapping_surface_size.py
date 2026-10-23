@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from jev_mujoco.perception_mapping import decode_mapping_payload
+from luna_mujoco.perception_mapping import decode_mapping_payload
 
 
 def test_selected_surface_above_twenty_thousand_retains_all_measured_returns():

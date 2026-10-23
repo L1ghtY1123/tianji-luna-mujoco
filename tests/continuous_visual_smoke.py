@@ -13,8 +13,8 @@ import httpx
 import numpy as np
 from dotenv import load_dotenv
 
-from jev_mujoco.visual_assistance import VisualAssistance, VisualCallBudget
-from jev_mujoco.visual_scene import VisualScene, capture_fingerprint, grounded_scene, scene_legend
+from luna_mujoco.visual_assistance import VisualAssistance, VisualCallBudget
+from luna_mujoco.visual_scene import VisualScene, capture_fingerprint, grounded_scene, scene_legend
 
 
 class TimedStream(httpx.SyncByteStream):

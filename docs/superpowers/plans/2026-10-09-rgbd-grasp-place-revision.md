@@ -33,7 +33,7 @@
 
 ## Task 1：信息边界与观察合同
 
-**Files:** 修改 `src/jev_mujoco/cameras.py`、`simulation.py`、`perception.py`、`runner.py`、`verification.py`，`skills/observe/{SKILL.md,contract.json}`；新增 `tests/test_observation_checkpoints.py`，扩展现有 `test_cameras.py` 与无真值测试。
+**Files:** 修改 `src/luna_mujoco/cameras.py`、`simulation.py`、`perception.py`、`runner.py`、`verification.py`，`skills/observe/{SKILL.md,contract.json}`；新增 `tests/test_observation_checkpoints.py`，扩展现有 `test_cameras.py` 与无真值测试。
 
 **Interfaces:** `Runner.observe(context, *, checkpoint)` 接收 `initial/fine/post_grasp/post_place/standalone_place`；每份结果记录 observation_id、generation、capture_time、checkpoint、views、robot_feedback。算法和验证消费该观察，不能自行读取 Simulation 环境状态。
 
@@ -44,7 +44,7 @@
 
 ## Task 2：局部点云与可用于携带的几何范围
 
-**Files:** 修改 `src/jev_mujoco/perception.py`、`placement.py`、`verification.py`、`algorithms.py`、`carrying.py`；扩展 `tests/test_perception.py`，新增 `tests/test_estimated_geometry.py`。
+**Files:** 修改 `src/luna_mujoco/perception.py`、`placement.py`、`verification.py`、`algorithms.py`、`carrying.py`；扩展 `tests/test_perception.py`，新增 `tests/test_estimated_geometry.py`。
 
 **Interfaces:** 感知实例保留 measured_points、estimated_shape（frame、bounds、prior、uncertainty）、coverage 和感知生成的 instance_id；保持兼容读取时必须显式 estimated，禁止旧 T_world_object 被解释为 CAD 真值。`carrying.py` 的共享 `geometry_for_carrying(instance, T_world_tcp)` 输出 TCP 局部点云、包络及来源。
 
@@ -55,7 +55,7 @@
 
 ## Task 3：水平启动到观察位姿
 
-**Files:** 新增 `src/jev_mujoco/observation_motion.py`、`resources/observation_poses.json`、`skills/move_to_observe/{SKILL.md,contract.json}`、`tests/test_observation_motion.py`；修改 `runner.py`、`algorithms.py`、`perception_mapping.py`、`geometry_service.py`。
+**Files:** 新增 `src/luna_mujoco/observation_motion.py`、`resources/observation_poses.json`、`skills/move_to_observe/{SKILL.md,contract.json}`、`tests/test_observation_motion.py`；修改 `runner.py`、`algorithms.py`、`perception_mapping.py`、`geometry_service.py`。
 
 **Interfaces:** `Algorithms.plan_observation_motion(observation, scene, arm, goal_joints_rad, *, planning_settings)` 返回与普通关节轨迹相同的关节、时间和场景版本结构；`Runner.move_to_observe(context)` 顺序执行 A/B 并记录实际完成情况。scene purpose 为 observation_motion，目标层必须 included。
 
@@ -67,7 +67,7 @@
 
 ## Task 4：attachment 和释放状态机
 
-**Files:** 修改 `src/jev_mujoco/carrying.py`、`geometry_service.py`、`backend_builder.py`、`runner.py`、`verification.py`；扩展 `tests/test_carrying.py`，新增 `tests/test_hold_release_states.py` 和对应 GPU 场景。
+**Files:** 修改 `src/luna_mujoco/carrying.py`、`geometry_service.py`、`backend_builder.py`、`runner.py`、`verification.py`；扩展 `tests/test_carrying.py`，新增 `tests/test_hold_release_states.py` 和对应 GPU 场景。
 
 **Interfaces:** holding state 使用 `empty/provisional/held/release_pending/unknown`，记录 arm、绑定实例、TCP 局部几何、最近观察及反馈时间。规划假设与实际状态分离。`Algorithms.validate_release_retreat(observation, arm, scene, trajectory, holding, release_volume, *, planning_settings)` 分别检查静态预计物体与意外随手两种假设，只有全部通过返回可执行；它复用 GPU 阶段碰撞检查，release_volume 为明确推断的可能落下范围。
 
@@ -80,7 +80,7 @@
 
 ## Task 5：三种规划 skill 与执行衔接
 
-**Files:** 修改 `src/jev_mujoco/algorithms.py`、`runner.py`、`decisions.py`、`placement.py`；新增 `skills/plan_grasp_and_place/{SKILL.md,contract.json}`，调整现有抓取/放置执行与验证合同；新增 `tests/test_plan_grasp_and_place.py`，扩展运行器回归。
+**Files:** 修改 `src/luna_mujoco/algorithms.py`、`runner.py`、`decisions.py`、`placement.py`；新增 `skills/plan_grasp_and_place/{SKILL.md,contract.json}`，调整现有抓取/放置执行与验证合同；新增 `tests/test_plan_grasp_and_place.py`，扩展运行器回归。
 
 **Interfaces:** `Algorithms.plan_grasp_and_place(observation, source_id, destination_id, arm, evaluations, scene, *, planning_settings, progress=None, cancelled=None)` 返回同一候选及分阶段预检结果；独立 `plan_grasp` 不再暗含放置语义，独立 `plan_place` 只接受实际 held。
 
@@ -92,7 +92,7 @@
 
 ## Task 6：高级设置、界面和实际验收
 
-**Files:** 修改 `src/jev_mujoco/planning_settings.py`、`app.py`、`web/src/planning-settings.js`、`camera-panel.js` 及现有运行进度模块；扩展设置/前端测试、`tests/rgbd_pick_place_smoke.py`，更新 README 和部署记录。
+**Files:** 修改 `src/luna_mujoco/planning_settings.py`、`app.py`、`web/src/planning-settings.js`、`camera-panel.js` 及现有运行进度模块；扩展设置/前端测试、`tests/rgbd_pick_place_smoke.py`，更新 README 和部署记录。
 
 - [ ] 在现有设置上增加观察 A/B 姿态与阶段等待，统一共享/抓取/放置设置；展示三个规划入口和观察节点、几何估计与持物状态。保持设置在单次运行内冻结。
 - [ ] 通过相关 Python/前端测试及前端构建；用真实界面检查单位、错误说明、阶段图像和状态，不只看数据接口。

@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>实验回放 · Tianji JEV</title>
+    <title>实验回放 · Tianji Luna MuJoCo</title>
     <link rel="stylesheet" href="/src/replay.css" />
   </head>
   <body>
     <header class="replay-header">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">TJ</span><div><h1>实验回放</h1><p>TIANJI / JEV · 从记录还原每次执行</p></div></div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">TJ</span><div><h1>实验回放</h1><p>TIANJI LUNA MUJOCO · 从记录还原每次执行</p></div></div>
       <a class="button" href="/">返回工作台</a>
     </header>
     <div id="page-error" class="notice error" role="alert" hidden></div>
@@ -29,19 +29,22 @@
             <div class="section-heading"><h2 id="experiment-title">实验</h2><span id="retention-badge" class="badge"></span></div>
             <p id="experiment-instruction"></p>
             <p id="experiment-meta" class="muted"></p>
-            <section id="replay-object-list" class="object-list" hidden></section>
+            <div id="replay-metrics" class="replay-metrics"></div>
             <p id="experiment-errors" class="inline-error" hidden></p>
+            <details class="archive-management"><summary>实验管理与下载</summary>
             <form id="rename-form" class="name-form"><label for="experiment-name">实验名称</label><input id="experiment-name" maxlength="200" placeholder="未命名实验" /><button id="save-experiment" class="button primary" type="submit">保存名称</button><button id="discard-experiment" class="button danger" type="button" hidden>删除实验</button></form>
             <div class="export-links"><a id="review-export" class="button" download>下载审阅 ZIP</a><a id="full-export" class="button" download>下载完整 ZIP</a><span class="muted">审阅包含视频与 JSON；大型数组和采样文件见完整包。</span></div>
+            </details>
           </section>
           <section class="replay-view panel">
             <div class="tabs" role="tablist" aria-label="回放视图">
-              <button id="tab-video" role="tab" aria-controls="view-video" aria-selected="true" data-view="video">视频</button>
+              <button id="tab-graph" role="tab" aria-controls="view-graph" aria-selected="true" data-view="graph">执行流程</button>
+              <button id="tab-inventory" role="tab" aria-controls="view-inventory" aria-selected="false" data-view="inventory" tabindex="-1">物体清单</button>
+              <button id="tab-video" role="tab" aria-controls="view-video" aria-selected="false" data-view="video" tabindex="-1">视频</button>
               <button id="tab-observations" role="tab" aria-controls="view-observations" aria-selected="false" data-view="observations" tabindex="-1">观测图</button>
-              <button id="tab-graph" role="tab" aria-controls="view-graph" aria-selected="false" data-view="graph" tabindex="-1">执行图</button>
-              <button id="tab-data" role="tab" aria-controls="view-data" aria-selected="false" data-view="data" tabindex="-1">数据</button>
+              <button id="tab-data" role="tab" aria-controls="view-data" aria-selected="false" data-view="data" tabindex="-1">原始数据</button>
             </div>
-            <div class="timeline">
+            <div id="replay-timeline" class="timeline">
               <div class="timeline-actions"><button id="play-pause" class="button" disabled>播放</button><output id="playback-time" aria-label="当前任务时间">00:00:00.000</output><span class="muted">/</span><output id="playback-duration">00:00:00.000</output><label class="speed-label">速度 <select id="playback-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label></div>
               <input id="playback-seek" type="range" min="0" max="0" step="0.001" value="0" aria-label="任务时间轴（秒）" />
               <p id="video-status" class="muted" role="status"></p>
@@ -54,23 +57,39 @@
               <p class="view-note muted">两路视频共用任务时间轴。录制采样时刻、缺帧和编码详情可在「数据」中的 video-metadata.json 查看。</p>
             </section>
             <section id="view-observations" class="tab-view" role="tabpanel" aria-labelledby="tab-observations" hidden>
-              <div class="section-heading"><h2>任务观测 · 归档标注图</h2><span id="observation-count" class="badge">0 帧</span></div>
-              <p class="view-note muted">初始分析使用头部，相机按实际归档显示。每项保留当时的标注版本；未分析图不使用后续标签。</p>
-              <label class="search-label" for="observation-select">选择观测帧 / 标注版本</label>
+              <div class="section-heading"><h2>观测时刻</h2><span id="observation-count" class="badge">0 帧</span></div>
+              <p class="view-note muted">同一次拍摄只列一次；旧帧上的身份、选中和夹持状态变化保留在标注版本中。</p>
+              <label class="search-label" for="observation-select">选择观测时刻</label>
               <div class="observation-controls"><select id="observation-select" disabled aria-label="选择观测帧与标注版本"></select><button id="observation-seek" class="button" disabled>定位任务时间</button></div>
               <p id="observation-meta" class="view-note muted" aria-live="polite">本次实验未保存观测标注图。</p>
+              <div class="annotation-revisions"><label for="observation-revision">同帧标注版本</label><select id="observation-revision"></select><p id="observation-reuse-note" class="inline-warning" hidden></p></div>
               <div id="observation-cameras" class="observation-grid"></div>
               <div id="observation-artifacts" class="artifact-links"></div>
             </section>
             <section id="view-graph" class="tab-view" role="tabpanel" aria-labelledby="tab-graph" hidden>
-              <div class="graph-toolbar"><p class="muted">阶段从左到右，换行后继续。点击节点看证据，展开查看每次调用。拖动画布平移，滚轮缩放；「适合画布」查看完整路线。</p><div class="actions"><a id="standalone-graph" class="button" target="_blank" rel="noopener">独立查看 ↗</a><button id="export-svg" class="button">导出 SVG</button><button id="export-png" class="button">导出 PNG</button></div></div>
+              <div class="section-heading"><h2>实际执行流程</h2><span class="badge">按发生顺序</span></div>
+              <p class="view-note muted">点击步骤查看算法与动作；点击 Responses / Decisions 查看实际问题、回答和输入图片。</p>
+              <div class="workflow-layout">
+                <nav id="object-timeline" class="workflow" aria-label="执行步骤与模型调用"></nav>
+                <aside class="node-details"><div class="section-heading"><h2 id="node-title">选择一个步骤</h2></div><p id="node-meta" class="muted">选择步骤或模型调用，查看对应证据。</p><button id="seek-node" class="button" hidden>定位视频</button><div id="node-artifacts" class="artifact-links"></div><div id="node-evidence" class="node-evidence" aria-live="polite"></div><details id="node-diagnostics" class="node-diagnostics"><summary>原始事件与诊断 <span id="detail-event-count" class="badge">0</span></summary><div id="node-files" class="artifact-links"></div><div id="node-trace" class="trace-list"></div></details></aside>
+              </div>
+              <details class="full-call-graph"><summary>展开完整调用图与导出</summary>
+              <div class="graph-toolbar"><p class="muted">完整调用图保留原始事件顺序与调用关系。拖动画布平移，滚轮缩放。</p><div class="actions"><a id="standalone-graph" class="button" target="_blank" rel="noopener">独立查看 ↗</a><button id="export-svg" class="button">导出 SVG</button><button id="export-png" class="button">导出 PNG</button></div></div>
               <div class="graph-controls actions"><button id="graph-zoom-in" class="button" aria-label="放大执行图">＋ 放大</button><button id="graph-zoom-out" class="button" aria-label="缩小执行图">− 缩小</button><button id="graph-fit" class="button">适合画布</button><button id="graph-reset" class="button">100% / 重置</button></div>
               <p id="graph-warning" class="inline-warning" hidden></p>
-              <div class="graph-layout"><div id="execution-graph" class="execution-graph" aria-label="实际执行图画布"></div><aside class="node-details"><div class="section-heading"><h2 id="node-title">节点详情</h2><span id="detail-event-count" class="badge">0</span></div><p id="node-meta" class="muted">选择左侧节点查看记录。</p><button id="seek-node" class="button" hidden>定位视频</button><div id="node-artifacts" class="artifact-links"></div><div id="node-trace" class="trace-list"></div></aside></div>
+              <div id="execution-graph" class="execution-graph" aria-label="实际执行图画布"></div></details>
+            </section>
+            <section id="view-inventory" class="tab-view" role="tabpanel" aria-labelledby="tab-inventory" hidden>
+              <div class="section-heading"><h2>清单如何变化</h2><span class="badge">归档证据</span></div>
+              <p class="view-note muted">Responses 提议初始实体与任务程序，程序结合身份核验登记永久 ID。拆出的黑件使用独立 ID，通过工序记录关联输入粉件；右盒集合不重复计为新工件。</p>
+              <div id="inventory-origin" class="inventory-origin"></div>
+              <label class="search-label" for="inventory-snapshot">查看清单时刻</label><select id="inventory-snapshot"></select>
+              <div id="inventory-board"></div>
+              <details class="legacy-inventory"><summary>完整清单字段与诊断（任务结束时）</summary><section id="replay-object-list" class="object-list" hidden></section></details>
             </section>
             <section id="view-data" class="tab-view" role="tabpanel" aria-labelledby="tab-data" hidden>
-              <p class="muted">点击 JSON 文件预览；数组保留原始精度，以 NPZ 文件引用，可单独下载。</p>
-              <div class="data-layout"><div><label class="search-label" for="file-search">筛选文件</label><input id="file-search" type="search" placeholder="例如 artifacts、npz…" /><div id="file-list" class="file-list"></div></div><section class="file-preview"><div class="section-heading"><h2 id="file-title">数据预览</h2><a id="file-download" class="button" download hidden>下载原文件</a></div><div id="array-references" class="artifact-links"></div><pre id="file-content">选择一个 JSON 文件查看。</pre></section></div>
+              <p class="muted">点击 JSON 文件预览模型图片、分割掩码及 3D 候选。NPZ 保留原始精度；大点云预览明确显示抽样点数，可下载全量数组。</p>
+              <div class="data-layout"><div><label class="search-label" for="file-search">筛选文件</label><input id="file-search" type="search" placeholder="例如 artifacts、npz…" /><div id="file-list" class="file-list"></div></div><section class="file-preview"><div class="section-heading"><h2 id="file-title">数据预览</h2><a id="file-download" class="button" download hidden>下载原文件</a></div><div id="array-references" class="artifact-links"></div><div id="file-evidence"></div><pre id="file-content">选择一个 JSON 文件查看。</pre></section></div>
             </section>
           </section>
         </div>

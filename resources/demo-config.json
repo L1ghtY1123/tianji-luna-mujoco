@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "units": "meters",
+  "scale_basis": "User CAD native millimeters converted once to meters; only table dimensions remain explicit demo settings.",
+  "object_count": 1,
+  "main_table": {"position": [0.572, -0.026, 0.532], "size": [0.60, 0.80, 0.08], "color": "white"},
+  "source_bin": {
+    "id": "blue_source_bin", "kind": "cad", "asset_id": "blue_box", "color": "blue",
+    "position": [0.481, 0.573, 0.571], "size": [0.410, 0.310, 0.145],
+    "yaw_deg": 90, "mass_kg": 0.5, "fixed": true
+  },
+  "right_bin": {
+    "id": "blue_right_bin", "kind": "cad", "asset_id": "blue_box", "color": "blue",
+    "position": [0.481, -0.625, 0.571], "size": [0.410, 0.310, 0.145],
+    "yaw_deg": -90, "mass_kg": 0.5, "fixed": true
+  },
+  "source_objects": {
+    "asset_id": "pink_wrapped",
+    "mass_kg": 0.08,
+    "yaw_deg": 180,
+    "single_object_offset_xy_m": [0.0, -0.08],
+    "row_start_offset_xy_m": [0.04, -0.105],
+    "row_step_xy_m": [-0.04, 0.07],
+    "two_object_offsets_xy_m": [[0.0, -0.08], [0.0, 0.08]],
+    "four_object_grid": {
+      "x_offsets_from_bin_center_m": [-0.07, 0.05],
+      "y_offsets_from_bin_center_m": [-0.115, 0.005]
+    },
+    "settling_gap_m": 0.001
+  },
+  "destination": {
+    "region_id": "demo_destination",
+    "center_offset_from_main_table_m": [-0.07040, 0.14246],
+    "size_m": 0.32,
+    "physical_marker": false
+  },
+  "arm_camera_mapping": {
+    "left_arm": "A", "left_camera_id": "2",
+    "right_arm": "B", "right_camera_id": "1", "head_camera_id": "3"
+  },
+  "observation_poses_resource": "resources/demo_observation_poses.json",
+  "observation_left_joints_deg": [-30.116, 55.982, 21.322, -109.932, 14.629, -29.333, -60.589]
+}

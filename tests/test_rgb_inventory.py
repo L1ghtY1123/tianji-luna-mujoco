@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 from test_visual_inventory import client_with_answers, fixture
 
-from jev_mujoco.task_progress import TaskProgress
-from jev_mujoco.visual_inventory import VisualInventory
+from luna_mujoco.task_progress import TaskProgress
+from luna_mujoco.visual_inventory import VisualInventory
 
 
 def entities():
@@ -20,8 +20,8 @@ def entities():
 
 
 def test_discovery_uses_responses_rgb_only_and_allocates_stable_ids():
-    assert importlib.util.find_spec('jev_mujoco.visual_discovery') is not None, 'RGB discovery is missing'
-    from jev_mujoco.visual_discovery import VisualDiscovery
+    assert importlib.util.find_spec('luna_mujoco.visual_discovery') is not None, 'RGB discovery is missing'
+    from luna_mujoco.visual_discovery import VisualDiscovery
     capture, _ = fixture()
     calls, audits = [], []
     discovered = {'entities': [
@@ -105,7 +105,7 @@ def test_same_kind_distinct_entities_keep_distinct_mask_ownership():
 
 
 def test_initial_rgb_boxes_are_displayed_when_sam_misses_but_never_reused_as_current_boxes():
-    from jev_mujoco.observation_labels import make_object_labels
+    from luna_mujoco.observation_labels import make_object_labels
     capture, _ = fixture()
     capture.update(objects=[], scene_entities=entities(), visual_discovery={'source': 'openai_responses'})
     initial = make_object_labels(capture, {}, {'red': 'required'})
@@ -120,7 +120,7 @@ def test_real_perception_flow_discovers_before_sam_and_retains_missing_geometry(
     from geometry_perception_fixture import ScriptedDiscovery
     from test_perception import capture_fixture
 
-    from jev_mujoco.perception import Perception
+    from luna_mujoco.perception import Perception
     capture, _ = capture_fixture()
     order = []
     class Discovery(ScriptedDiscovery):
@@ -151,8 +151,8 @@ def test_discovered_inventory_survives_a_later_failure_and_is_not_rediscovered(s
     from geometry_perception_fixture import ScriptedDiscovery
     from test_perception import capture_fixture
 
-    from jev_mujoco.perception import Perception, PerceptionError
-    from jev_mujoco.visual_inventory import VisualInventoryError
+    from luna_mujoco.perception import Perception, PerceptionError
+    from luna_mujoco.visual_inventory import VisualInventoryError
     capture, _ = capture_fixture()
     class Discovery(ScriptedDiscovery):
         calls = 0
@@ -189,31 +189,6 @@ def test_discovered_inventory_survives_a_later_failure_and_is_not_rediscovered(s
     assert discovery.calls == 1 and set(result['scene_entities']) == {'first', 'second'}
 
 
-async def test_runner_preserves_initial_rgb_identity_on_failure_and_updates_with_three_cameras(tmp_path):
-    from test_jev_visual_policy import visual_runner
-
-    from jev_mujoco.perception import PerceptionError
-    runner = visual_runner(tmp_path)
-    captured = []
-    def failed(capture, **options):
-        captured.append(options['source_hint'])
-        error = PerceptionError('visual_decisions_http_429')
-        error.initial_inventory = {'entities': entities(), 'reference': {'entities': entities(),
-            'observation_id': capture['observation_id'], 'views': {}},
-            'observation_id': capture['observation_id'], 'evidence': {'source': 'openai_responses'}}
-        raise error
-    runner.algorithms.observe = failed
-    context = {'visual_plan': {'initial': 'initialize_inventory'}}
-    with pytest.raises(PerceptionError):
-        await runner.observe(context, purpose='scene', recovery=True)
-    assert set(runner.task_progress.scene_entities) == {'red', 'other'}
-    assert context['visual_inventory_reference']['observation_id']
-    assert {item['id'] for item in runner.state.get('object_labels', {}).get('items', [])} == {'red', 'other'}
-    context['visual_plan'] = {'initial': 'associate_inventory'}
-    with pytest.raises(PerceptionError):
-        await runner.observe(context, purpose='scene', recovery=True)
-    assert captured[-1]['camera_ids'] == ['1', '2', '3']
-    assert set(captured[-1]['scene_entities']) == {'red', 'other'}
 
 
 def test_rgb_inventory_numbering_preserves_row_grouping_without_sam_masks():

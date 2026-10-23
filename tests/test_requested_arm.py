@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from test_algorithms import snapshot
 
-from jev_mujoco.algorithms import Algorithms
+from luna_mujoco.algorithms import Algorithms
 
 
 @pytest.mark.parametrize('arm', ['A', 'B'])

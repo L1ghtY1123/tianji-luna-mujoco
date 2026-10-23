@@ -7,12 +7,12 @@ import mujoco
 import numpy as np
 import pytest
 
-from jev_mujoco.model_builder import ModelBuilder, normalize_scene
+from luna_mujoco.model_builder import ModelBuilder, normalize_scene
 
 
 def detect(capture, table):
-    assert importlib.util.find_spec("jev_mujoco.table_markers"), "RGBD marker detector is missing"
-    return importlib.import_module("jev_mujoco.table_markers").detect_table_markers(capture, table)
+    assert importlib.util.find_spec("luna_mujoco.table_markers"), "RGBD marker detector is missing"
+    return importlib.import_module("luna_mujoco.table_markers").detect_table_markers(capture, table)
 
 
 def marker_scene(**changes):
@@ -147,7 +147,7 @@ def test_occlusion_cannot_be_filled_with_synthetic_marker_surface():
 
 
 def test_authored_marker_is_detectable_in_actual_head_camera_rgbd(builder):
-    from jev_mujoco.cameras import RgbdRenderer, clone_render_model
+    from luna_mujoco.cameras import RgbdRenderer, clone_render_model
 
     model = builder.build(marker_scene(position=[.6, -.2, .6], yaw_deg=0))
     data = mujoco.MjData(model)
@@ -165,8 +165,8 @@ def test_authored_marker_is_detectable_in_actual_head_camera_rgbd(builder):
 
 
 def test_actual_vertical_bin_base_is_not_a_table_marker_at_wrist_observation_pose(builder):
-    from jev_mujoco.cameras import RgbdRenderer, clone_render_model
-    from jev_mujoco.model_builder import ARM_JOINTS
+    from luna_mujoco.cameras import RgbdRenderer, clone_render_model
+    from luna_mujoco.model_builder import ARM_JOINTS
 
     scene = normalize_scene({"objects": [{"id": "bin", "kind": "bin", "color": "blue",
         "position": [.64, .15, .65], "size": [.16, .16, .1]}]})

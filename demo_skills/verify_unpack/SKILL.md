@@ -1,0 +1,7 @@
+# verify_unpack
+
+mock VLA完成后在当前位置用一个Decisions请求联合三相机RGB判断主桌黑件。若任一视图确认黑件，使用同次RGBD（头部优先，深度不足依次尝试两腕相机）分割当前黑件，加入保留背景场景并移除过时粉件层；若不能确认，则仅移除活动拆包件及过时粉件层，不建立黑件障碍。两种情况都必须沿保留场景将双臂移动到观测位姿，到位采新三RGBD，再用一个Decisions确认桌面黑件；概率≥0.8才创建独立产物ID并绑定该次观测，否则停止。随后observe_scene分析全部当前清单实体，build_scene重建全局2cm TSDF/ESDF后才能抓取，首次桌面cuboid复用。服务错误或可见但所有相机深度均不足则停止，不用仿真真值代替测量。最多两次结果判断、一次回位；程序不得重复插入内部回位。
+
+前提：unpack_pending=true，vla_pose_ready=true。
+
+输出：unpack_verified，grasp_view_ready，observation_pose_ready。

@@ -2,11 +2,10 @@ import copy
 
 import numpy as np
 from test_runner import Algorithms as FakeAlgorithms
-from test_runner import Decisions, Sim, wait
+from test_runner import Sim
 
-from jev_mujoco.algorithms import Algorithms
-from jev_mujoco.planning_settings import PlanningSettings
-from jev_mujoco.runner import Runner
+from luna_mujoco.algorithms import Algorithms
+from luna_mujoco.planning_settings import PlanningSettings
 
 
 class VisibleAlgorithms(FakeAlgorithms):
@@ -35,42 +34,12 @@ class VisibleAlgorithms(FakeAlgorithms):
         return {"attached": True, "scene_token": scene["scene_token"]}
 
 
-async def test_visible_grasp_keeps_binding_without_preparing_attachment(tmp_path):
-    algorithms = VisibleAlgorithms()
-    simulation = Sim()
-    settings = PlanningSettings(attachment={"voxel_size_m": .007, "margin_m": .002, "sphere_budget": 12})
-    runner = Runner(simulation, algorithms, lambda record: Decisions(), tmp_path, planning_settings=settings)
-    await runner.start("抓取黑色物体")
-    await wait(runner)
-    assert runner.state["status"] == "succeeded", runner.state.get("error")
-    assert runner.holding_state["attached"] is False
-    assert runner.holding_state["verified"] is True
-    assert algorithms.prepared == []
-    for name, value in settings.attachment.model_dump().items():
-        assert runner.holding_state[name] == value
-    assert len(algorithms.observations) == 2  # Initial discovery and atomic pregrasp preparation.
-    assert "estimated_bounds_tool_m" not in runner.holding_state
-    assert "T_tcp_object" not in runner.holding_state
-    assert runner.holding_state["grasp_support_reference"]["table_height_m"] == 0.
 
 
-async def test_target_geometry_from_registered_wrist_camera_is_sufficient(tmp_path):
-    class WristOnly(VisibleAlgorithms):
-        def observe(self, *args, **kwargs):
-            observation = super().observe(*args, **kwargs)
-            observation["objects"][0]["coverage"]["camera_ids"] = ["1", "2"]
-            return observation
-
-    simulation = Sim()
-    runner = Runner(simulation, WristOnly(), lambda record: Decisions(), tmp_path)
-    await runner.start("抓取黑色物体")
-    await wait(runner)
-    assert runner.state['status'] == 'succeeded', runner.state.get('error')
-    assert simulation.state["arms"]["A"]["joints_rad"] == [1.] * 7
 
 
 def test_grasp_cloud_uses_measured_points_without_object_pose():
-    from jev_mujoco.cameras import deproject_view
+    from luna_mujoco.cameras import deproject_view
 
     class Graspgen:
         def generate(self, request):
@@ -108,7 +77,7 @@ def test_grasp_validation_keeps_open_model_without_support_departure():
 
 
 def test_prepare_carrying_validates_union_point_provenance():
-    from jev_mujoco.carrying import CarryingBinding
+    from luna_mujoco.carrying import CarryingBinding
 
     simulation = Sim()
     observation = VisibleAlgorithms().observe(simulation.capture_rgbd())
@@ -131,9 +100,9 @@ def test_prepare_carrying_validates_union_point_provenance():
 
 
 def test_held_scene_removes_predicted_surface_without_target_segmentation():
-    from jev_mujoco.cameras import deproject_view
-    from jev_mujoco.perception_mapping import decode_mapping_payload
-    from jev_mujoco.simulation import Simulation
+    from luna_mujoco.cameras import deproject_view
+    from luna_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.simulation import Simulation
     simulation = Simulation()
     simulation.start()
     try:

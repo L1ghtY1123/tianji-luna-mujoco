@@ -7,8 +7,8 @@ import torch
 import yaml
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.carrying import CarryingBinding
-from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation
+from luna_mujoco.carrying import CarryingBinding
+from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation
 
 folder = ROOT / "data/visible-cloud-work/trial12-place-diagnostic"
 mapping = json.loads((folder / "gpu-requests/017-perception-build.json").read_text())

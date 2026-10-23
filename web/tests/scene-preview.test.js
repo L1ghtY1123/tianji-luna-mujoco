@@ -11,6 +11,16 @@ function near(actual, expected) {
   actual.forEach((value, index) => assert.ok(Math.abs(value - expected[index]) < 1e-10, `${actual} != ${expected}`));
 }
 
+test('editing a flat CAD workpiece keeps its long axis horizontal', () => {
+  const mesh = new Mesh();
+  const definition = { name: 'black_mesh', object_id: 'block', object_kind: 'cad',
+    local_position_m: [0, 0, 0], local_quaternion: [1, 0, 0, 0] };
+  const value = draft();
+  Object.assign(value.objects[0], { kind: 'cad', yaw_deg: 30, pitch_deg: 90 });
+  applyScenePreview(mesh, definition, pose, value);
+  near(new Vector3(0, 0, 1).applyQuaternion(mesh.quaternion).toArray(), [Math.sqrt(3) / 2, .5, 0]);
+});
+
 test('yaw and full dimensions immediately change the displayed mesh in world coordinates', () => {
   const mesh = new Mesh(new BoxGeometry(.04, .04, .04));
   assert.equal(applyScenePreview(mesh, box, pose, draft()), true);

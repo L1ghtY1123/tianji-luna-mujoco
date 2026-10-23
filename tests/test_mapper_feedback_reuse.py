@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from jev_mujoco.perception_mapping import CaptureSegmenter, PerceptionMapper
+from luna_mujoco.perception_mapping import CaptureSegmenter, PerceptionMapper
 
 
 def test_new_gripper_feedback_replaces_robot_filter_without_discarding_mapper_allocations():

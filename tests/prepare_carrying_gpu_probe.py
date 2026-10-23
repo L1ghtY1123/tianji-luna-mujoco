@@ -13,8 +13,8 @@ def main():
     from curobo.types import GoalToolPose, Pose
     from tianji_curobo.curobo_service import materialize_urdf
 
-    from jev_mujoco.carrying import CarryingBinding, carrying_spheres
-    from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
+    from luna_mujoco.carrying import CarryingBinding, carrying_spheres
+    from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
 
     urdf = materialize_urdf(ROOT / "assets/marvin_urdf/marvin_with_grippers.urdf",
         marvin_meshes=ROOT / "assets/marvin_urdf/meshes", rag_meshes=ROOT / "assets/marvin_urdf/rag100_050/meshes")
@@ -101,7 +101,7 @@ def main():
     report["allocated_peak_mib"] = torch.cuda.max_memory_allocated() / 2**20
     report["reserved_peak_mib"] = torch.cuda.max_memory_reserved() / 2**20
     report["holding_preserved"] = runtime.logical_carrying_binding == held
-    output = Path(os.environ.get('JEV_PREPARE_PROBE_OUTPUT', '/tmp/jev-prepare-latency-20261016/result.json'))
+    output = Path(os.environ.get('LUNA_PREPARE_PROBE_OUTPUT', '/tmp/jev-prepare-latency-20261016/result.json'))
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2))
     print(json.dumps({key: value for key, value in report.items() if key != "public_ik_metrics"}), flush=True)

@@ -1,7 +1,33 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { objectRows, labelsForFrame } from '../src/object-list.js';
+import { objectRows, labelsForFrame, createObjectList } from '../src/object-list.js';
+
+test('process inventory separates pending sources from products and completed jobs', () => {
+  const element = tag => ({ tag, children: [], append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = children; } });
+  const container = element('section');
+  const list = createObjectList(container, { document: { createElement: element } });
+  list.render({ all_entities: { pink_a: { id: 'pink_a', color: 'pink' }, pink_b: { id: 'pink_b', color: 'pink' },
+      black_a: { id: 'black_a', color: 'black' } },
+    process_order: ['job_a', 'job_b'], pending_unpack_ids: ['pink_b'], processing_ids: [],
+    completed_process_ids: ['job_a'], product_ids: ['black_a'],
+    process_records: {
+      job_a: { id: 'job_a', display_id: 1, input_display_id: 1, input_entity_id: 'pink_a', output_entity_id: 'black_a', status: 'completed', phase: 'completed' },
+      job_b: { id: 'job_b', display_id: 2, input_display_id: 2, input_entity_id: 'pink_b', output_entity_id: null, status: 'pending', phase: 'wrapped_source' },
+    },
+  });
+  const text = node => [node.textContent ?? '', ...node.children.map(text)].join(' ');
+  const result = text(container);
+  assert.match(result, /当前场景实体.*3/);
+  assert.match(result, /初始物体档案/);
+  assert.match(result, /已拆包 · 待投放/);
+  assert.match(result, /待拆包.*1/);
+  assert.match(result, /已完成.*1/);
+  assert.match(result, /#2.*pink_b/);
+  assert.match(result, /pink_a.*black_a/);
+  assert.doesNotMatch(result, /搬运物体清单|同一物体/);
+});
 
 test('released objects stay pending until visual destination confirmation', () => {
   const rows = objectRows({objects: [{id: 'red', status: 'selected',

@@ -2,10 +2,10 @@ const GROUPS = {
   shared: ['共享 IK 参数', '机械臂评估与 plan_grasp_batch 共用 IK 参数。IK 优化 seeds 与 LM 初始解 seeds 分别控制优化起点数和初始解生成预算；random seed 是复现随机序列的编号，不是搜索数量。'],
   planner: ['plan_grasp_batch', 'TrajOpt seeds 是轨迹优化的初始轨迹数量。它与 IK 优化 seeds、LM 初始解 seeds 属于三个不同阶段的搜索预算。'],
   grasp: ['抓取几何与候选', '设置抓取候选和接近、抓取、提升的几何条件。'],
-  place: ['放置位姿', '两指前端 TCP 的世界 XY 固定为分区中心，绕世界 Z 轴生成 18 个 yaw。attachment 球底规划间隙为碰撞阈值加 2 mm；实际不得低于碰撞阈值，默认允许 10–14 mm。'],
+  place: ['放置位姿', '粉件放到共享目标区域中心，保持抓取姿态，attachment参与规划，Z靠近10mm碰撞阈值。黑件普通plan_pose到右盒中心上方，保持lift姿态，Z允许较大余量。'],
   filter: ['可见点云过滤（默认关闭）', '只处理 RGBD 实测点；统计或半径过滤不能保证去除密集浮岛。DBSCAN 仅诊断点簇，不按点簇大小或桌面连通性删除障碍。'],
   observation: ['空手观察位姿 · 只读', 'A、B 臂各 7 个已标定参考关节角，用于计算观察 TCP 目标。校准值在此只读；运行仍须通过碰撞规划与 RGBD 覆盖检查。'],
-  attachment: ['持物可见表面碰撞球', '修改应用于下一次抓取，当前持物绑定保持原参数。仅在提升后 verify_grasp 确认持物后建立。体素大小、附加余量和数量预算只作用于实测可见表面，不补齐遮挡面。超预算时调整表面采样并报告实际分辨率，保留全部实测点的覆盖。'],
+  attachment: ['持物碰撞球', '允许1–31个球，默认24。覆盖实测及明确标注的尺寸先验补全，保留不确定度和余量；允许与同手夹爪组件接触，继续检查相机支架、上游、异臂和世界。'],
   verification: ['持物位置判断', '完整闭合命令后比较实测位置与空夹基准；不使用力、电流或驱动状态。'],
   execution: ['执行时间', 'time_scale 统一作用于抓取与放置轨迹；数值越大，执行越慢。停留时间不乘倍率。'],
 };
@@ -53,7 +53,7 @@ export function planningFieldMetadata(name, field) {
     range: choices ? choices.map(value => choiceLabel(value, field)).join(' / ') : bounds.length ? `${bounds.join('，')}${unit}` : '由后端校验',
     source: planningFieldCategory(name, field) === 'system' && name !== 'self_collision_check'
       ? '项目标定 resources/observation_poses.json；范围来自机器人 URDF'
-      : `项目 schema · src/jev_mujoco/planning_settings.py${officialDefaults[name] ? `；${officialDefaults[name]}（锁定 SDK）` : '；项目采用值，不代表所有官方接口默认'}`,
+      : `项目 schema · src/luna_mujoco/planning_settings.py${officialDefaults[name] ? `；${officialDefaults[name]}（锁定 SDK）` : '；项目采用值，不代表所有官方接口默认'}`,
     impact: descriptions[name] ?? field.description ?? '应用后供下一次任务使用；Reset 保留已应用值。',
   };
 }

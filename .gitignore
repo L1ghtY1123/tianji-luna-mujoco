@@ -15,3 +15,17 @@ web/node_modules/
 web/dist/
 deploy-bundle.tar.gz
 *.bundle
+
+# Local tooling, generated packages and verification output.
+.DS_Store
+Thumbs.db
+.idea/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.py[cod]
+*.tmp
+*.swp
+*.bak

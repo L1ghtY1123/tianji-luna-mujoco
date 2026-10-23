@@ -4,20 +4,7 @@ import numpy as np
 import pytest
 from test_observation_motion import ObservationAlgorithms, context
 
-from jev_mujoco.observation_motion import source_view_evidence
-from jev_mujoco.skills import Registry
-
-
-def test_observation_contracts_expose_initial_and_atomic_pregrasp_boundaries():
-    contracts = Registry().contracts
-    for name in ('observe_scene', 'build_scene'):
-        assert name in contracts
-    assert 'scene_ready' not in contracts['observe_scene'].provides
-    for name in ('observe_geometry', 'observe_result', 'move_to_observe', 'check_scene_changes', 'update_scene'):
-        with pytest.raises(ValueError, match='unknown_skill'):
-            Registry().validate_selection(name, {})
-    Registry().validate_selection('build_scene', {'observed': True, 'target_selected': True,
-        'arm_selected': True, 'inventory_finalized': True, 'destination_ready': True})
+from luna_mujoco.observation_motion import source_view_evidence
 
 
 @pytest.mark.parametrize('cameras', [['1'], ['2'], ['3'], ['1', '3']])

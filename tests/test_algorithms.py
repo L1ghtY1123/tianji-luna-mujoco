@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from jev_mujoco.algorithms import AlgorithmError, Algorithms
-from jev_mujoco.geometry import GeometryCache, grasp_targets, primitive_sdf
+from luna_mujoco.algorithms import AlgorithmError, Algorithms
+from luna_mujoco.geometry import GeometryCache, grasp_targets, primitive_sdf
 
 
 def snapshot():
@@ -117,8 +117,8 @@ def test_grasp_pool_reports_actual_count_and_propagates_second_request_failure()
 def test_scene_layers_disable_only_target_for_entire_operation(monkeypatch):
     from unittest.mock import MagicMock
 
-    from jev_mujoco import geometry_service
-    from jev_mujoco.geometry import geometry_payload
+    from luna_mujoco import geometry_service
+    from luna_mujoco.geometry import geometry_payload
 
     monkeypatch.setattr(geometry_service, "make_grid",
                         lambda name, kind, size, pose: (name, {"dims": size, "voxel_size": .01}))

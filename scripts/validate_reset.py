@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import numpy as np
 
-from jev_mujoco.model_builder import DEFAULT_SCENE
+from luna_mujoco.model_builder import DEFAULT_SCENE
 
 with httpx.Client(base_url="http://192.168.3.4:8340", timeout=20) as client:
     state = client.get("/api/state").json()

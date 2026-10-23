@@ -22,15 +22,15 @@
     }
   },
   "collision_config": {
-    "source": "Original finger Link1-3 and earlier public MORPHIT parts/central-symmetry configuration retained; four gripper Link4 lists use project-side constrained triangle-enclosing spheres and existing hand/bilateral mirrors",
+    "source": "Earlier configured spheres retained; both gripper Base primitive boxes now use project-side analytic cell-enclosing spheres from the authored URDF.",
     "destination": "resources/curobo/marvin_gui_dual.yml",
-    "sha256": "3b2566219c97f5570f3d5c1dec1618f08b215004d29012a36f9d9476255debe6",
+    "sha256": "8e03e5136f817be7ed49f9a95e66fa9ccc6c38e867d247741cd146eb2dc75385",
     "links": 38,
-    "spheres": 349,
-    "sphere_budget": 350,
+    "spheres": 365,
+    "sphere_budget": 365,
     "unchanged": false,
-    "reviewed_date": "2026-10-16",
-    "generation_manifest": "resources/curobo/link4-refit-20261016.json",
+    "reviewed_date": "2026-10-21",
+    "generation_manifest": "resources/curobo/gripper-base-coverage-20261021.json",
     "original_import": {
       "source": "C:\\project\\tianji_base\\extensions\\planning\\curobo-planner\\robot_config\\marvin_gui_dual.yml",
       "destination": "resources/curobo/marvin_gui_dual.yml",
@@ -39,7 +39,27 @@
       "spheres": 1362,
       "unchanged": true
     },
-    "validation_status": "349 spheres across 38 links, within 350 budget. Only four gripper Link4 lists changed, each 4 to 14 spheres. Recursive containment proves their complete collision surfaces/volumes and visual surfaces; other links retain their earlier approximation limits. Open default/zero and observation-pose checks, mirrored templates, unchanged non-sphere settings, and the complete recorded held-IK failure are checked separately. This does not claim overall planning speedup or acceptance of every physical task."
+    "validation_status": "365 spheres across 38 links. Each Base has 12 spheres that analytically contain all rectangular cells of its authored collision box. Only the two Base sphere lists changed from the preceding 349-sphere revision; other geometry and collision policy remain unchanged. Installed public cuRobo FK accepts all 365 spheres and coverage tests include the recorded contact corner. Full task acceptance is reported separately; this does not certify unobserved environment geometry.",
+    "previous_revision": {
+      "source": "Original finger Link1-3 and earlier public MORPHIT parts/central-symmetry configuration retained; four gripper Link4 lists use project-side constrained triangle-enclosing spheres and existing hand/bilateral mirrors",
+      "destination": "resources/curobo/marvin_gui_dual.yml",
+      "sha256": "3b2566219c97f5570f3d5c1dec1618f08b215004d29012a36f9d9476255debe6",
+      "links": 38,
+      "spheres": 349,
+      "sphere_budget": 350,
+      "unchanged": false,
+      "reviewed_date": "2026-10-16",
+      "generation_manifest": "resources/curobo/link4-refit-20261016.json",
+      "original_import": {
+        "source": "C:\\project\\tianji_base\\extensions\\planning\\curobo-planner\\robot_config\\marvin_gui_dual.yml",
+        "destination": "resources/curobo/marvin_gui_dual.yml",
+        "sha256": "d7e627475865271a66bc785258dd59177080eb3a6e106cce26cb4465971421ae",
+        "links": 38,
+        "spheres": 1362,
+        "unchanged": true
+      },
+      "validation_status": "349 spheres across 38 links, within 350 budget. Only four gripper Link4 lists changed, each 4 to 14 spheres. Recursive containment proves their complete collision surfaces/volumes and visual surfaces; other links retain their earlier approximation limits. Open default/zero and observation-pose checks, mirrored templates, unchanged non-sphere settings, and the complete recorded held-IK failure are checked separately. This does not claim overall planning speedup or acceptance of every physical task."
+    }
   },
   "robot_asset": "assets/marvin_urdf/marvin_with_grippers.urdf shared with MuJoCo; original relative assets retained; only temporary SDK axis/path derived URDF written",
   "tool_mapping": {

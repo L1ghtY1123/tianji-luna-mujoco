@@ -1,8 +1,8 @@
 import pytest
 from test_runner import Algorithms, Sim
 
-from jev_mujoco.runner import Runner
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco.runner import Runner
+from luna_mujoco.task_progress import TaskProgress
 
 
 def release_case(tmp_path):
@@ -69,7 +69,7 @@ async def test_visual_confirmation_cannot_replace_missing_release_feedback(tmp_p
 
 
 def test_success_conclusion_describes_release_without_claiming_final_pose():
-    from jev_mujoco.run_conclusion import run_conclusion
+    from luna_mujoco.run_conclusion import run_conclusion
 
     result = run_conclusion({'status': 'succeeded', 'verification': {
         'status': 'confirmed', 'verification_scope': 'release_only'}}, [])

@@ -10,8 +10,8 @@ def main():
     from curobo.types import JointState
     from tianji_curobo.curobo_service import materialize_urdf
 
-    from jev_mujoco.carrying import CarryingBinding
-    from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
+    from luna_mujoco.carrying import CarryingBinding
+    from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
 
     directory = ROOT / "tests/artifacts/task3"
     payload = json.loads((directory / "real-rgbd-map-request.json").read_text())

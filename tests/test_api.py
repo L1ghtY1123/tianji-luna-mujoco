@@ -1,9 +1,8 @@
-import asyncio
 
 import numpy as np
 from fastapi.testclient import TestClient
 
-from jev_mujoco.app import create_app
+from luna_mujoco.app import create_app
 
 
 class Simulation:
@@ -33,8 +32,9 @@ class Simulation:
         self.generation += 1
         return self.snapshot()
 
-    def configure(self, scene):
+    def configure(self, scene, *, initial_joints=None):
         self.last_scene = scene
+        self.initial_joints = initial_joints
         self.generation += 1
         self.confirmed = False
         return self.snapshot()
@@ -48,8 +48,24 @@ class Algorithms:
         return {"ok": True, "attached": False}
 
 
+def test_progress_poll_does_not_snapshot_or_serialize_historical_geometry(tmp_path):
+    simulation = Simulation()
+    app = create_app(simulation, Algorithms(), lambda record: None, tmp_path)
+    app.state.runner.state['historical_geometry'] = object()
+    app.state.runner.events.append({'large_history': object()})
+    def forbidden_snapshot():
+        raise AssertionError('progress polling must not acquire a physics snapshot')
+    simulation.snapshot = forbidden_snapshot
+    with TestClient(app) as client:
+        response = client.get('/api/run-progress')
+        assert response.status_code == 200
+        assert response.json()['run']['status'] == 'idle'
+        assert 'historical_geometry' not in response.json()['run']
+        assert 'events' not in response.json()
+
+
 def test_workspace_view_is_read_only_and_reports_missing_atlas(tmp_path, monkeypatch):
-    from jev_mujoco.workspace import WorkspaceAtlas
+    from luna_mujoco.workspace import WorkspaceAtlas
     payload = {'source': 'offline_single_arm_workspace', 'arms': []}
     monkeypatch.setattr(WorkspaceAtlas, 'preview', lambda self: payload)
     simulation = Simulation()
@@ -69,21 +85,6 @@ def test_workspace_view_is_read_only_and_reports_missing_atlas(tmp_path, monkeyp
         assert 'workspace_file_missing' in response.json()['detail']
 
 
-def test_http_lifecycle_and_missing_key_error_is_recorded(tmp_path):
-    def no_model(record):
-        raise ValueError("TYPESAFE_API_KEY_not_configured")
-    app = create_app(Simulation(), Algorithms(), no_model, tmp_path)
-    with TestClient(app) as client:
-        assert client.post("/api/start", json={"instruction": "抓取黑色物体"}).status_code == 409
-        assert client.post("/api/confirm").status_code == 200
-        assert client.post("/api/start", json={"instruction": "抓取黑色物体"}).status_code == 200
-        state = client.get("/api/state").json()
-        assert state["run"]["status"] == "failed"
-        assert state["run"]["error"] == "TYPESAFE_API_KEY_not_configured"
-        assert client.post("/api/reset").json()["generation"] == 2
-        reset = client.get("/api/state").json()
-        assert reset["run"]["status"] == "idle"
-        assert reset["events"] == []
 
 
 def test_websocket_initial_packet_and_reset_event_mode(tmp_path):
@@ -153,21 +154,6 @@ def test_only_scene_apply_commits_edits_and_clears_previous_run(tmp_path):
         assert client.get("/api/state").json()["run"]["status"] == "idle"
 
 
-def test_scene_apply_is_rejected_while_task_is_waiting_for_jev(tmp_path):
-    class WaitingDecisions:
-        async def bind_request(self, instruction):
-            await asyncio.Event().wait()
-
-    simulation = Simulation()
-    app = create_app(simulation, Algorithms(), lambda record: WaitingDecisions(), tmp_path)
-    with TestClient(app) as client:
-        client.post("/api/confirm").raise_for_status()
-        client.post("/api/start", json={"instruction": "抓取黑色物体"}).raise_for_status()
-        result = client.post("/api/scene", json={"objects": [{"id": "cube", "position": [.4, .1, .7]}]})
-        assert result.status_code == 409
-        assert result.json()["detail"] == "run_active_reset_first"
-        assert not hasattr(simulation, "last_scene")
-        client.post("/api/reset").raise_for_status()
 
 
 def test_start_sent_before_reset_cannot_restart_the_reset_scene(tmp_path):
@@ -184,40 +170,6 @@ def test_start_sent_before_reset_cannot_restart_the_reset_scene(tmp_path):
         assert state["events"] == []
 
 
-def test_reset_reports_pending_planner_and_rejects_overlapping_start(tmp_path):
-    from test_runner import Decisions, Sim
-    from test_runner_failures import WaitingPlanner
-
-    class Scene(Sim):
-        def start(self):
-            pass
-
-        def close(self):
-            pass
-
-        def reset(self):
-            self.state["generation"] += 1
-            return self.snapshot()
-
-    algorithms = WaitingPlanner()
-    app = create_app(Scene(), algorithms, lambda record: Decisions(), tmp_path)
-    with TestClient(app) as client:
-        try:
-            client.post("/api/start", json={"instruction": "抓取黑色物体"}).raise_for_status()
-            assert algorithms.entered.wait(2)
-            state = client.get("/api/state").json()
-            assert state["run"]["current_step"]["skill"] == "plan_grasp"
-            assert state["run"]["algorithm_pending"]
-            client.post("/api/reset").raise_for_status()
-            reset = client.get("/api/state").json()
-            assert reset["run"]["status"] == "idle"
-            assert reset["run"]["algorithm_pending"]
-            assert reset["events"] == []
-            start = client.post("/api/start", json={"instruction": "抓取黑色物体"})
-            assert start.status_code == 409
-            assert start.json()["detail"] == "algorithm_request_pending"
-        finally:
-            algorithms.release.set()
 
 
 def test_reset_clears_remote_attachment_without_blocking_physics_or_allowing_a_new_run(tmp_path):

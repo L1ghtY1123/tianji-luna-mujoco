@@ -16,8 +16,8 @@ from curobo.types import GoalToolPose, Pose
 from scipy.spatial.transform import Rotation
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.carrying import CarryingBinding
-from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation
+from luna_mujoco.carrying import CarryingBinding
+from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--run-folder", type=Path, required=True,

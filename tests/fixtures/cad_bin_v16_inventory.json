@@ -1,0 +1,12 @@
+{
+  "run_id": "142a98e9d20142eaafbd17567c22a3c7",
+  "observation_id": "rgbd-3-d5da9fc88555463a94c5e000d8a21f03",
+  "source_artifact": "event-00025.npz",
+  "source_sha256": "87c4cb75bd9bf62e10b007896c69737a647a6f0ac0f3d36b7ae7847eb38bd94f",
+  "fixture_sha256": "9b83bd2725c628d3910ce8416628f81c15a1de2dea99abeeb96b3d930c829f81",
+  "evidence": "unmodified frozen inventory pointclouds before mapper filtering; no simulator pose in fixture",
+  "point_counts": {
+    "source": 79987,
+    "right": 87582
+  }
+}

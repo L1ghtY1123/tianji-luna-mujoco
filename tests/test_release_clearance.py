@@ -3,9 +3,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from jev_mujoco import backend_builder
-from jev_mujoco.backend_builder import CuroboToolError
-from jev_mujoco.release_clearance import release_clearance_evidence
+from luna_mujoco import backend_builder
+from luna_mujoco.backend_builder import CuroboToolError
+from luna_mujoco.release_clearance import release_clearance_evidence
 
 
 def request(**changes):

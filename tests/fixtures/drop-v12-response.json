@@ -1,0 +1,57 @@
+{
+  "model": "gpt-6-luna",
+  "answers": [
+    {
+      "type": "choice",
+      "name": "in_right_bin",
+      "choice": "yes",
+      "probabilities": [
+        {
+          "value": "yes",
+          "probability": 0.86
+        },
+        {
+          "value": "no",
+          "probability": 0.13
+        },
+        {
+          "value": "unknown",
+          "probability": 0.01
+        }
+      ],
+      "confidence": 0.79
+    },
+    {
+      "type": "choice",
+      "name": "current_item_added",
+      "choice": "yes",
+      "probabilities": [
+        {
+          "value": "yes",
+          "probability": 1.0
+        },
+        {
+          "value": "no",
+          "probability": 0.0
+        },
+        {
+          "value": "unknown",
+          "probability": 0.0
+        }
+      ],
+      "confidence": 1.0
+    }
+  ],
+  "usage": {
+    "input_tokens": 35965,
+    "input_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 35714
+    },
+    "output_tokens": 0,
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "total_tokens": 35965
+  }
+}

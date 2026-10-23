@@ -1,0 +1,15 @@
+{
+  "id": "identify_destination",
+  "description": "按当前工序绑定数值桌面共享完整区域或初次Responses确认的右盒；共享区域不分槽，所有物体依次使用中心，Z由实测桌面提供。",
+  "inputs": [
+    "已校验的Responses程序执行器上下文、当前观测/反馈及输入版本"
+  ],
+  "requires": {
+    "target_selected": true,
+    "observed": true
+  },
+  "provides": [
+    "destination_selected",
+    "destination_ready"
+  ]
+}

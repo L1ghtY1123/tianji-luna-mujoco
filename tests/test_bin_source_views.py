@@ -7,7 +7,7 @@ from geometry_perception_fixture import GeometryPerception
 from test_broad_perception import PromptSegmenter
 from test_perception import capture_fixture
 
-from jev_mujoco.observation_motion import initial_view_evidence
+from luna_mujoco.observation_motion import initial_view_evidence
 
 
 def measured_bin_source():

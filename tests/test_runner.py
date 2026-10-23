@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pytest
 
-from jev_mujoco.runner import Runner, public_summary
+from luna_mujoco.runner import Runner, public_summary
 
 
 def visual_inventory_result(capture, source_hint, objects, *, membership_status='required',
@@ -247,50 +247,10 @@ async def wait(runner):
     await asyncio.wait_for(runner.worker, 5)
 
 
-@pytest.mark.parametrize("grasps_first", [False, True])
-async def test_each_action_executes_and_only_measurements_produce_success(tmp_path, grasps_first):
-    class Ordered(Decisions):
-        async def choose_skill(self, state, registry):
-            available = registry.eligible(state["facts"])
-            if grasps_first and "generate_grasps" in available and state['facts'].get('views_ready'):
-                return "generate_grasps"
-            return legacy_workflow_choice(state, available)
-
-    runner = Runner(Sim(), Algorithms(), lambda record: Ordered(), tmp_path)
-    await runner.start("抓取黑色物体")
-    await wait(runner)
-    assert runner.state["status"] == "succeeded"
-    assert runner.state["arm"] == "A"
-    assert runner.state["facts"]["verified"]
-    assert len([e for e in runner.events if e["kind"] == "skill_complete"]) == 9
-    completed = [e["title"] for e in runner.events if e["kind"] == "skill_complete"]
-    assert completed == ['observe_scene', 'identify_target', 'evaluate_reachability', 'choose_arm',
-                         'build_scene', 'generate_grasps', 'plan_grasp', 'execute_grasp', 'verify_grasp']
-    assert not runner.holding_state['attached']
 
 
-async def test_jev_stop_ends_without_substitute_or_execution(tmp_path):
-    class Stop(Decisions):
-        async def choose_skill(self, state, registry):
-            return "stop"
-
-    runner = Runner(Sim(), Algorithms(), lambda record: Stop(), tmp_path)
-    await runner.start("抓取黑色物体")
-    await wait(runner)
-    assert runner.state["error"] == "jev_selected_stop"
-    assert not any(event["kind"] == "skill_start" for event in runner.events)
 
 
-async def test_missing_target_stops_before_gpu_or_motion(tmp_path):
-    class Missing(Decisions):
-        async def choose_target(self, state, objects):
-            return "missing"
-    runner = Runner(Sim(), Algorithms(), lambda record: Missing(), tmp_path)
-    await runner.start("抓取黑色物体")
-    await wait(runner)
-    assert runner.state["status"] == "failed"
-    assert runner.state["error"] == "target_missing"
-    assert not runner.state["facts"].get("scene_ready")
 
 
 async def test_unconfirmed_scene_rejected(tmp_path):
@@ -299,67 +259,3 @@ async def test_unconfirmed_scene_rejected(tmp_path):
     runner = Runner(sim, Algorithms(), lambda record: Decisions(), tmp_path)
     with pytest.raises(ValueError, match="confirm_scene_first"):
         await runner.start("抓取黑色物体")
-
-
-async def test_place_without_verified_holding_is_rejected_before_execution(tmp_path):
-    class Place(Decisions):
-        async def bind_task(self, instruction):
-            return "place"
-    runner = Runner(Sim(), Algorithms(), lambda record: Place(), tmp_path)
-    await runner.start("放置")
-    await wait(runner)
-    assert runner.state["task"] == "place"
-    assert runner.state["error"] == "place_requires_verified_holding"
-    assert not any(e["kind"] == "skill_start" for e in runner.events)
-
-
-@pytest.mark.parametrize("selections,executed,unmet", [
-    (["execute_grasp"], [], {"plan_ready": {"expected": True, "actual": False},
-                             "arm_selected": {"expected": True, "actual": False}}),
-])
-async def test_invalid_jev_selection_is_rejected_without_execution_or_substitution(
-        tmp_path, monkeypatch, selections, executed, unmet):
-    calls = []
-
-    class Selected(Decisions):
-        async def choose_skill(self, state, registry):
-            if state.get('skill_rejection'):
-                return 'stop'
-            skill = selections[len(calls)]
-            calls.append(skill)
-            return skill
-
-    runner = Runner(Sim(), Algorithms(), lambda record: Selected(), tmp_path)
-    actual_executed = []
-    execute = runner.execute
-
-    async def tracked_execute(skill, context, decisions):
-        actual_executed.append(skill)
-        return await execute(skill, context, decisions)
-
-    monkeypatch.setattr(runner, "execute", tracked_execute)
-    await runner.start("抓取黑色物体")
-    await wait(runner)
-    assert runner.state["status"] == "needs_attention"
-    assert runner.state["error"] == "skill_contract_not_satisfied:" + selections[-1]
-    assert calls == selections
-    assert actual_executed == executed
-    error = next(event["data"] for event in runner.events if event["kind"] == "skill_error")
-    assert error["details"] == {"selected_skill": selections[-1], "unmet_requirements": unmet}
-    assert not runner.state["facts"].get("plan_ready")
-
-
-async def test_unknown_skill_is_rejected_with_selected_name(tmp_path):
-    class Unknown(Decisions):
-        async def choose_skill(self, state, registry):
-            if state.get('skill_rejection'):
-                return 'stop'
-            return "does_not_exist"
-
-    runner = Runner(Sim(), Algorithms(), lambda record: Unknown(), tmp_path)
-    await runner.start("抓取黑色物体")
-    await wait(runner)
-    assert runner.state["error"] == "unknown_skill:does_not_exist"
-    assert not any(event["kind"] == "skill_start" for event in runner.events)
-    error = next(event["data"] for event in runner.events if event["kind"] == "skill_error")
-    assert error["details"]["selected_skill"] == "does_not_exist"

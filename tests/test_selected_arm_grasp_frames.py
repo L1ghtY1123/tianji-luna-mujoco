@@ -3,8 +3,8 @@ import pytest
 from scipy.spatial.transform import Rotation
 from test_rgbd_algorithms import observed_scene
 
-from jev_mujoco.algorithms import AlgorithmError, Algorithms
-from jev_mujoco.geometry import TOOL_PROFILE, grasp_targets
+from luna_mujoco.algorithms import AlgorithmError, Algorithms
+from luna_mujoco.geometry import TOOL_PROFILE, grasp_targets
 
 
 class Generator:

@@ -2,8 +2,8 @@ from typing import ClassVar
 
 import numpy as np
 
-from jev_mujoco.algorithms import Algorithms
-from jev_mujoco.planning_settings import PlanningSettings
+from luna_mujoco.algorithms import Algorithms
+from luna_mujoco.planning_settings import PlanningSettings
 
 
 def test_adapter_reuses_prior_selected_map_for_verified_place_return():
@@ -49,7 +49,7 @@ def test_observation_adapter_submits_known_joint_goals_and_joint_validation():
 def test_service_dual_uses_same_scene_and_measured_grippers():
     from contextlib import nullcontext
 
-    from jev_mujoco.geometry_service import run_operation
+    from luna_mujoco.geometry_service import run_operation
     class Runtime:
         geometry_solver_profile = PlanningSettings().solver_payload()
         geometry_scene: ClassVar[dict] = {'exclusion_state': 'observation'}
@@ -71,12 +71,13 @@ def test_service_dual_uses_same_scene_and_measured_grippers():
 
 
 def test_geometry_runtime_constructs_joint_backend_not_single_arm(monkeypatch):
-    import jev_mujoco.geometry_service as module
+    import luna_mujoco.geometry_service as module
     calls = []
     def build(runtime):
         calls.append(runtime)
         return 'joint-backend'
     monkeypatch.setattr(module, 'build_dual_geometry_backend', build, raising=False)
     runtime = object.__new__(module.GeometryRuntime)
+    runtime.warmup_status = {'ready': False}
     assert runtime._create_real_backend_unlocked('AB') == 'joint-backend'
     assert calls == [runtime]

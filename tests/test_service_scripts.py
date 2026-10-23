@@ -38,7 +38,7 @@ def launcher(tmp_path):
         f"#!{sys.executable}\n"
         "import json, os, sys\n"
         "args = sys.argv[1:]\n"
-        "keys = ('JEV_WEB_IMAGE_TAG', 'JEV_ALGORITHM_IMAGE_TAG', 'JEV_UID', 'JEV_GID')\n"
+        "keys = ('LUNA_WEB_IMAGE_TAG', 'LUNA_ALGORITHM_IMAGE_TAG', 'LUNA_UID', 'LUNA_GID')\n"
         "with open(os.environ['FAKE_DOCKER_RECORD'], 'a') as output:\n"
         "    output.write(json.dumps({'args': args, 'frontend_mountpoint_exists': "
         "os.path.isdir('web/node_modules'), 'env': {key: os.environ.get(key) "
@@ -63,7 +63,7 @@ def launcher(tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
     environment = dict(os.environ)
-    for key in ("JEV_WEB_IMAGE_TAG", "JEV_ALGORITHM_IMAGE_TAG", "JEV_UID", "JEV_GID"):
+    for key in ("LUNA_WEB_IMAGE_TAG", "LUNA_ALGORITHM_IMAGE_TAG", "LUNA_UID", "LUNA_GID"):
         environment.pop(key, None)
     environment["PATH"] = str(binaries) + os.pathsep + environment["PATH"]
     environment["FAKE_DOCKER_RECORD"] = str(record)
@@ -121,9 +121,9 @@ def test_web_start_never_builds_and_waits_for_health_when_image_exists(launcher,
     inspections = [call for call in calls if call["args"][:2] == ["image", "inspect"]]
     assert len(inspections) == 1
     assert inspections[0]["args"][-1] == "tianji-jev-mujoco:0.4.0-experiments-guangyu"
-    assert calls[-1]["env"]["JEV_WEB_IMAGE_TAG"] == "0.4.0-experiments-guangyu"
-    assert calls[-1]["env"]["JEV_UID"] == str(os.getuid())
-    assert calls[-1]["env"]["JEV_GID"] == str(os.getgid())
+    assert calls[-1]["env"]["LUNA_WEB_IMAGE_TAG"] == "0.4.0-experiments-guangyu"
+    assert calls[-1]["env"]["LUNA_UID"] == str(os.getuid())
+    assert calls[-1]["env"]["LUNA_GID"] == str(os.getgid())
 
 
 def test_web_explicit_build_uses_requested_private_tag_and_does_not_start(launcher):
@@ -131,7 +131,7 @@ def test_web_explicit_build_uses_requested_private_tag_and_does_not_start(launch
     result, calls = run("scripts/web-service.sh", "build", "0.2.0-guangyu-test")
     assert result.returncode == 0, result.stderr
     assert compose_actions(calls, project, "web.compose.yaml") == [["build", "web"]]
-    assert calls[-1]["env"]["JEV_WEB_IMAGE_TAG"] == "0.2.0-guangyu-test"
+    assert calls[-1]["env"]["LUNA_WEB_IMAGE_TAG"] == "0.2.0-guangyu-test"
 
 
 @pytest.mark.parametrize("arguments", [
@@ -261,7 +261,7 @@ def test_algorithm_start_includes_rgbd_segmentation_and_waits_for_all_health(lau
     assert compose_actions(calls, project, "algorithms.compose.yaml") == [
         ["up", "-d", "--no-build", "--wait", "--wait-timeout", "300", "sam3", "curobo", "graspgen"]
     ]
-    assert calls[-1]["env"]["JEV_ALGORITHM_IMAGE_TAG"] == "0.2.0-guangyu-test"
+    assert calls[-1]["env"]["LUNA_ALGORITHM_IMAGE_TAG"] == "0.2.0-guangyu-test"
 
 
 def test_algorithm_start_never_builds_a_missing_image(launcher):
@@ -358,4 +358,4 @@ def test_root_start_forwards_dev_and_version_arguments(launcher):
     assert compose_actions(calls, project, "web.compose.yaml") == [
         ["up", "-d", "--no-build", "--wait", "--wait-timeout", "120", "web"]
     ]
-    assert calls[-1]["env"]["JEV_WEB_IMAGE_TAG"] == "0.2.0-guangyu-test"
+    assert calls[-1]["env"]["LUNA_WEB_IMAGE_TAG"] == "0.2.0-guangyu-test"

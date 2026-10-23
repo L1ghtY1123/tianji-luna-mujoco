@@ -1,0 +1,15 @@
+{
+  "id": "move_to_observe",
+  "description": "双臂沿最近保留场景回固定初始观测位姿，遵循10mm碰撞检查和高级时间设置，到位采三RGBD，不自动建图。用于每个粉件前、最后黑件入盒后的收尾；verify_unpack内部也必须回位。最后成功回位才报告任务完成。已绑定抓取视图后不得重复运动使视图失效。",
+  "inputs": [
+    "已校验的Responses程序执行器上下文、当前观测/反馈及输入版本"
+  ],
+  "requires": {
+    "scene_available": true,
+    "grasp_held": false
+  },
+  "provides": [
+    "observation_pose_ready",
+    "grasp_view_ready"
+  ]
+}

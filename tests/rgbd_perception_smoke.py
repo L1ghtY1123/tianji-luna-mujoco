@@ -15,15 +15,15 @@ import mujoco
 import numpy as np
 from PIL import Image
 
-from jev_mujoco.cameras import CALIBRATION_PATH
-from jev_mujoco.perception import (
+from luna_mujoco.cameras import CALIBRATION_PATH
+from luna_mujoco.perception import (
     SAM3_MODEL_IDENTITY,
     Perception,
     PerceptionError,
     Sam3Client,
     public_observation,
 )
-from jev_mujoco.simulation import Simulation
+from luna_mujoco.simulation import Simulation
 
 SCENE = {
     "table": {"position": [.55, 0., .56], "size": [.7, 1., .08]},
@@ -67,7 +67,7 @@ class RecordingDetector:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sam3-url", default=os.getenv("JEV_SAM3_URL", "http://127.0.0.1:8322"))
+    parser.add_argument("--sam3-url", default=os.getenv("LUNA_SAM3_URL", "http://127.0.0.1:8322"))
     parser.add_argument("--output", type=Path, default=Path("tests/artifacts/rgbd/perception"))
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)

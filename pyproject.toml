@@ -3,12 +3,12 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tianji-jev-mujoco"
+name = "tianji-luna-mujoco"
 version = "0.1.0"
-description = "JEV skill decisions with continuous MuJoCo physics"
+description = "Responses skill programs and Decisions verification with MuJoCo physics"
 requires-python = ">=3.12"
 dependencies = [
-  "pydantic-ai-slim[typesafe]==2.47.0", "typesafe-sdk==0.7.1",
+  "pydantic>=2.10,<3",
   "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-dotenv>=1.1,<2",
   "numpy>=2,<3", "scipy>=1.15,<2", "mujoco==3.10.0", "trimesh>=4.6,<5",
   "httpx>=0.28,<1", "msgpack>=1.1,<2", "PyYAML>=6,<7", "websockets>=14,<17", "Pillow>=11,<13"
@@ -19,7 +19,7 @@ pointcloud = ["open3d==0.19.0"]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.26,<2", "ruff>=0.12"]
 
 [project.scripts]
-jev-mujoco = "jev_mujoco.app:main"
+tianji-luna-mujoco = "luna_mujoco.demo_app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

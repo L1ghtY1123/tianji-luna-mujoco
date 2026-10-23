@@ -24,10 +24,10 @@ def main():
         create_robot_segmenter_adapter,
     )
 
-    from jev_mujoco.carrying import configure_gripper_feedback
-    from jev_mujoco.perception_mapping import create_feedback_segmenter
-    from jev_mujoco.semantic_depth import partition_semantic_depth
-    from jev_mujoco.semantic_transport import decode_project_semantic_request
+    from luna_mujoco.carrying import configure_gripper_feedback
+    from luna_mujoco.perception_mapping import create_feedback_segmenter
+    from luna_mujoco.semantic_depth import partition_semantic_depth
+    from luna_mujoco.semantic_transport import decode_project_semantic_request
 
     parser = argparse.ArgumentParser()
     parser.add_argument("capture", type=Path)
@@ -35,9 +35,10 @@ def main():
     root = Path("/opt/jev")
     config_path = root / "resources/curobo/marvin_gui_dual.yml"
     original = yaml.safe_load(config_path.read_bytes())
-    urdf = materialize_urdf(Path(os.environ["JEV_ROBOT_URDF"]),
-        marvin_meshes=Path(os.environ["JEV_MARVIN_MESHES"]),
-        rag_meshes=Path(os.environ["JEV_RAG_MESHES"]))
+    sphere_count = sum(map(len, original["robot_cfg"]["kinematics"]["collision_spheres"].values()))
+    urdf = materialize_urdf(Path(os.environ["LUNA_ROBOT_URDF"]),
+        marvin_meshes=Path(os.environ["LUNA_MARVIN_MESHES"]),
+        rag_meshes=Path(os.environ["LUNA_RAG_MESHES"]))
     payload = json.loads(args.capture.read_text())["body"]
     fields = {key: value for key, value in payload.items() if key not in (
         "planning_settings", "exclusion_state", "gripper_joint_positions_rad",
@@ -77,7 +78,7 @@ def main():
             state = JointState.from_position(boundary.device_cfg.to_device(positions), joint_names=names)
             expected = locked.compute_kinematics(locked.get_active_js(state)).robot_spheres.detach().cpu().numpy().reshape(-1, 4)
             actual = boundary.robot_spheres(request.joint_positions_deg)
-            assert actual.shape == expected.shape == (349, 4)
+            assert actual.shape == expected.shape == (sphere_count, 4)
             max_center_error = max(max_center_error, float(np.max(np.abs(actual[:, :3] - expected[:, :3]))))
             max_radius_error = max(max_radius_error, float(np.max(np.abs(actual[:, 3] - expected[:, 3]))))
             np.testing.assert_allclose(actual, expected, atol=2e-6, rtol=0)
@@ -124,7 +125,7 @@ def main():
         np.testing.assert_allclose(actual.pose.get_matrix().cpu(), expected.pose.get_matrix().cpu(), atol=1e-6)
     print(json.dumps({"capture": str(args.capture), "construction_s": construction_s,
         "feedback_cases": results, "camera_ids_preserved": True, "kinematics_preserved": True,
-        "crop_and_stack_equal": True, "sphere_count": 349}, indent=2), flush=True)
+        "crop_and_stack_equal": True, "sphere_count": sphere_count}, indent=2), flush=True)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from xml.etree import ElementTree
 
 import numpy as np
 
-from jev_mujoco.observation_labels import annotated_rgb_svg, make_object_labels
+from luna_mujoco.observation_labels import annotated_rgb_svg, make_object_labels
 
 
 def observation():

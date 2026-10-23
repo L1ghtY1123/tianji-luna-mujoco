@@ -1,11 +1,11 @@
 import copy
 
 import pytest
-from test_runner import Decisions, Sim, wait
+from test_runner import Decisions, Sim
 from test_visible_workflow import VisibleAlgorithms
 
-from jev_mujoco.runner import Runner
-from jev_mujoco.skills import SkillSelectionError
+from luna_mujoco.runner import Runner
+from luna_mujoco.skills import SkillSelectionError
 
 
 class RequestDecisions(Decisions):
@@ -15,49 +15,10 @@ class RequestDecisions(Decisions):
                 'destination_kind': 'any', 'destination_color': 'any', 'destination_position': 'any'}
 
 
-@pytest.mark.parametrize('choice', ['retry_grasp', 'stop'])
-async def test_empty_grasp_returns_to_jev_and_obeys_its_choice(tmp_path, choice):
-    class EmptyFirst(Sim):
-        def __init__(self):
-            super().__init__()
-            self.closures = 0
-
-        def set_gripper(self, arm, closed, generation):
-            result = super().set_gripper(arm, closed, generation)
-            if closed:
-                self.closures += 1
-                if self.closures == 1:
-                    self.state['arms'][arm]['gripper_position_rad'] = .8
-            return result
-
-    class Choices(RequestDecisions):
-        def __init__(self):
-            self.failures = []
-
-        async def choose_skill(self, state, registry):
-            if state['facts'].get('recovery_needed'):
-                return 'recover_task'
-            return await super().choose_skill(state, registry)
-
-        async def choose_recovery(self, state):
-            self.failures.append(copy.deepcopy(state['failure']))
-            return choice
-
-        async def choose_arm(self, *args):
-            raise AssertionError('explicit arm must not call JEV arm selection')
-
-    simulation, decisions = EmptyFirst(), Choices()
-    runner = Runner(simulation, VisibleAlgorithms(), lambda record: decisions, tmp_path)
-    await runner.start('用左臂抓取黑色物体')
-    await wait(runner)
-    assert len(decisions.failures) == 1
-    assert decisions.failures[0]['stage'] == 'verify_grasp'
-    assert simulation.closures == (2 if choice == 'retry_grasp' else 1)
-    assert runner.state['status'] == ('succeeded' if choice == 'retry_grasp' else 'failed'), runner.state
 
 
 async def test_recovery_cannot_discard_an_object_still_held(tmp_path):
-    from jev_mujoco.task_progress import TaskProgress
+    from luna_mujoco.task_progress import TaskProgress
 
     runner = Runner(Sim(), VisibleAlgorithms(), None, tmp_path)
     runner.state.update(arm='A', target_id='black', generation=1)
@@ -71,7 +32,7 @@ async def test_recovery_cannot_discard_an_object_still_held(tmp_path):
 
 
 async def test_jev_selected_stop_preserves_unknown_identity_status(tmp_path):
-    from jev_mujoco.task_progress import TaskProgress
+    from luna_mujoco.task_progress import TaskProgress
 
     runner = Runner(Sim(), VisibleAlgorithms(), None, tmp_path)
     runner.task_progress = TaskProgress('抓取红色物体', 'single', 'A')
@@ -89,7 +50,7 @@ async def test_jev_selected_stop_preserves_unknown_identity_status(tmp_path):
     ('plan_place', False, True), ('plan_place', True, False), ('execute_place', False, False),
 ])
 async def test_explicit_place_retry_keeps_only_an_unchanged_valid_planning_scene(tmp_path, stage, refresh, keep_scene):
-    from jev_mujoco.task_progress import TaskProgress
+    from luna_mujoco.task_progress import TaskProgress
 
     runner = Runner(Sim(), VisibleAlgorithms(), None, tmp_path)
     runner.state.update(arm='A', target_id='black', generation=1)

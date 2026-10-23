@@ -1,0 +1,17 @@
+{
+  "id": "execute_transport",
+  "description": "执行已校验的带attachment普通pose轨迹；核对当前scene、held binding和实际起点，无采图/建图。运动中关节跟踪偏差超过0.03 rad时停止全部活动臂并报告证据。",
+  "inputs": [
+    "frozen_task_item_lifecycle",
+    "current_robot_feedback",
+    "latest_collision_scene",
+    "versioned_execution_and_visual_evidence"
+  ],
+  "requires": {
+    "transport_plan_ready": true,
+    "grasp_held": true
+  },
+  "provides": [
+    "transport_execution_completed"
+  ]
+}

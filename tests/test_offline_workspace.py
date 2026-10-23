@@ -5,13 +5,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jev_mujoco import reachability
+from luna_mujoco import reachability
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_checked_in_workspaces_match_the_current_robot_model():
-    from jev_mujoco.workspace import WorkspaceAtlas, model_fingerprint
+    from luna_mujoco.workspace import WorkspaceAtlas, model_fingerprint
 
     atlas = WorkspaceAtlas(ROOT)
     for arm in ('A', 'B'):
@@ -21,7 +21,7 @@ def test_checked_in_workspaces_match_the_current_robot_model():
 
 
 def atlas_fixture(root):
-    from jev_mujoco.workspace import model_fingerprint
+    from luna_mujoco.workspace import model_fingerprint
     for name in ('resources/curobo/marvin_gui_dual.yml', 'assets/marvin_urdf/marvin_with_grippers.urdf'):
         dest = root / name
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -40,7 +40,7 @@ def atlas_fixture(root):
 
 
 def test_lookup_has_bounded_grid_error_and_does_not_invent_boundary_cells(tmp_path):
-    from jev_mujoco.workspace import WorkspaceAtlas
+    from luna_mujoco.workspace import WorkspaceAtlas
     atlas = WorkspaceAtlas(atlas_fixture(tmp_path))
     hit, miss = atlas.query('A', [[.411, .008, .612], [.43, .01, .61]])
     outside, = atlas.query('A', [[5, 0, 2]])
@@ -53,7 +53,7 @@ def test_lookup_has_bounded_grid_error_and_does_not_invent_boundary_cells(tmp_pa
 
 
 def test_model_change_rejects_stale_atlas(tmp_path):
-    from jev_mujoco.workspace import WorkspaceAtlas
+    from luna_mujoco.workspace import WorkspaceAtlas
     root = atlas_fixture(tmp_path)
     (root / 'resources/curobo/marvin_gui_dual.yml').write_text('changed model')
     with pytest.raises(ValueError, match='workspace_model_mismatch'):
@@ -61,7 +61,7 @@ def test_model_change_rejects_stale_atlas(tmp_path):
 
 
 def test_missing_atlas_has_explicit_error(tmp_path):
-    from jev_mujoco.workspace import WorkspaceAtlas
+    from luna_mujoco.workspace import WorkspaceAtlas
     root = atlas_fixture(tmp_path)
     (root / 'resources/workspaces/arm_A.npz').unlink()
     with pytest.raises(ValueError, match='workspace_file_missing'):
@@ -69,7 +69,7 @@ def test_missing_atlas_has_explicit_error(tmp_path):
 
 
 def test_partial_benchmark_cannot_be_loaded_as_a_complete_workspace(tmp_path):
-    from jev_mujoco.workspace import WorkspaceAtlas
+    from luna_mujoco.workspace import WorkspaceAtlas
     root = atlas_fixture(tmp_path)
     path = root / 'resources/workspaces/arm_A.npz'
     with np.load(path) as data:
@@ -83,7 +83,7 @@ def test_partial_benchmark_cannot_be_loaded_as_a_complete_workspace(tmp_path):
 def test_offline_model_excludes_peer_but_keeps_stand_and_head_camera():
     import yaml
 
-    from jev_mujoco.workspace_builder import workspace_robot
+    from luna_mujoco.workspace_builder import workspace_robot
     base = yaml.safe_load((ROOT / 'resources/curobo/marvin_gui_dual.yml').read_text())
     for arm, own, peer in [('A', '_L', '_R'), ('B', '_R', '_L')]:
         model = workspace_robot(ROOT, arm)
@@ -102,7 +102,7 @@ def test_invalid_points_rejected_by_shared_contract():
 
 
 def test_surface_preview_preserves_cells_holes_and_lookup(tmp_path):
-    from jev_mujoco.workspace import WorkspaceAtlas
+    from luna_mujoco.workspace import WorkspaceAtlas
     root = atlas_fixture(tmp_path)
     path = root / 'resources/workspaces/arm_A.npz'
     with np.load(path) as data:

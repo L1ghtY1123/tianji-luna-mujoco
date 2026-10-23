@@ -24,10 +24,10 @@ def main(folder, output, partial_attachment):
     from tianji_curobo.curobo_robot_config import create_frozen_peer_arm_robot_config
     from tianji_curobo.curobo_service import materialize_urdf
 
-    from jev_mujoco.backend_builder import create_solver_configs
-    from jev_mujoco.carrying import configure_gripper_feedback
-    from jev_mujoco.geometry_service import ROOT, sdk_identity
-    from jev_mujoco.planning_settings import PlanningSettings
+    from luna_mujoco.backend_builder import create_solver_configs
+    from luna_mujoco.carrying import configure_gripper_feedback
+    from luna_mujoco.geometry_service import ROOT, sdk_identity
+    from luna_mujoco.planning_settings import PlanningSettings
 
     recorded = json.loads((folder / "pre-change-state.json").read_text())
     cpu = json.loads((folder / "cpu-kinematic-probe.json").read_text())

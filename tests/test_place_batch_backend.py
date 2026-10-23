@@ -8,8 +8,8 @@ from test_carrying import binding
 from test_geometry_service import request_payload
 from test_release_clearance import Tensor
 
-from jev_mujoco import backend_builder, geometry_service
-from jev_mujoco.planning_settings import PlanningSettings
+from luna_mujoco import backend_builder, geometry_service
+from luna_mujoco.planning_settings import PlanningSettings
 
 
 def payload():
@@ -163,7 +163,7 @@ def test_place_ik_uses_closed_gripper_and_held_attachment_scope(monkeypatch):
 
 
 def test_prepare_returns_exact_uploaded_cpu_spheres_without_building_trajectory_solver(monkeypatch):
-    from jev_mujoco.carrying import CarryingBinding
+    from luna_mujoco.carrying import CarryingBinding
 
     runtime = geometry_service.GeometryRuntime()
     scene = {"scene_token": "scene", "target_id": "sam-source", "observation_id": "rgbd-2", "generation": 2}
@@ -194,7 +194,7 @@ def test_prepare_returns_exact_uploaded_cpu_spheres_without_building_trajectory_
 def test_prepare_and_failed_place_ik_reuse_one_backend_and_preserve_hold(monkeypatch):
     from tianji_curobo.contracts import NativeIkBatchResult, NativeIkResult
 
-    from jev_mujoco.carrying import CarryingBinding
+    from luna_mujoco.carrying import CarryingBinding
 
     runtime = geometry_service.GeometryRuntime()
     runtime.geometry_scene = {"scene_token": "scene", "target_id": "sam-source",
@@ -227,7 +227,7 @@ def test_prepare_and_failed_place_ik_reuse_one_backend_and_preserve_hold(monkeyp
 
 
 def test_all_failed_batch_needs_no_phase_samples():
-    from jev_mujoco.place_batch import place_batch_items_from_result
+    from luna_mujoco.place_batch import place_batch_items_from_result
 
     raw = SimpleNamespace(approach_success=Tensor([0] * 16), grasp_success=Tensor([0] * 16),
         status="No grasp in goal set was reachable.")
@@ -237,7 +237,7 @@ def test_all_failed_batch_needs_no_phase_samples():
 
 @pytest.mark.parametrize("length", [1, 1.5, 5, float("nan")])
 def test_invalid_successful_candidate_length_is_a_service_failure(length):
-    from jev_mujoco.place_batch import place_batch_items_from_result
+    from luna_mujoco.place_batch import place_batch_items_from_result
 
     raw = raw_result()
     raw.grasp_interpolated_last_tstep.values[2] = length
@@ -247,7 +247,7 @@ def test_invalid_successful_candidate_length_is_a_service_failure(length):
 
 @pytest.mark.parametrize("ik_only", [True, False])
 def test_attachment_upload_uses_fixed_tool_spheres_and_ik_has_no_attachment_manager(ik_only):
-    from jev_mujoco.carrying import CarryingBinding, carrying_spheres
+    from luna_mujoco.carrying import CarryingBinding, carrying_spheres
 
     value, _, _, _ = backend(raw_result())
     value.ik_only = ik_only
@@ -282,13 +282,13 @@ def test_retreat_distinguishes_normal_no_solution_from_internal_sdk_failure(monk
 
 
 @pytest.mark.parametrize("ik_only", [True, False])
-def test_held_batch_ik_trajopt_and_checker_share_closed_gripper_and_attachment(monkeypatch, ik_only):
+def test_held_backend_construction_reserves_shared_geometry_before_measured_update(monkeypatch, ik_only):
     import sys
     from types import ModuleType
 
     from test_backend_builder import ConfigFactory
 
-    from jev_mujoco.carrying import CarryingBinding, carrying_spheres
+    from luna_mujoco.carrying import CarryingBinding
 
     captured = {}
     class CheckerReached(Exception):
@@ -307,7 +307,8 @@ def test_held_batch_ik_trajopt_and_checker_share_closed_gripper_and_attachment(m
         "curobo.collision_checking": {"RobotCollisionChecker": object, "RobotCollisionCheckerCfg": CheckerConfig},
         "curobo.inverse_kinematics": {"InverseKinematics": Planner, "InverseKinematicsCfg": ConfigFactory},
         "curobo.kinematics": {"Kinematics": object, "KinematicsCfg": object},
-        "curobo.motion_planner": {"MotionPlannerCfg": ConfigFactory}, "curobo.scene": {"Cuboid": object},
+        "curobo.motion_planner": {"MotionPlannerCfg": ConfigFactory, "MotionPlanner": Planner},
+        "curobo.batch_motion_planner": {"BatchMotionPlanner": Planner}, "curobo.scene": {"Cuboid": object},
         "curobo.types": dict.fromkeys(("GoalToolPose", "JointState", "Pose", "ToolPoseCriteria"), object),
         "tianji_curobo.grasp_planner": {"GraspBatchMotionPlanner": Planner},
     }
@@ -331,9 +332,10 @@ def test_held_batch_ik_trajopt_and_checker_share_closed_gripper_and_attachment(m
     if not ik_only:
         assert config.ik_solver_config.robot is config.robot
     kin = config.robot["robot_cfg"]["kinematics"]
-    assert kin["lock_joints"]["gripL_finger_joint"] == .4
-    assert kin["collision_spheres"]["jev_carried_object_A"] == [
-        {"center": row[:3], "radius": row[3]} for row in carrying_spheres(held)]
+    assert kin["lock_joints"]["gripL_finger_joint"] == 0.
+    for arm in ('A', 'B'):
+        reserved = kin['collision_spheres']['jev_carried_object_' + arm]
+        assert len(reserved) == 31 and all(row['radius'] < 0 for row in reserved)
 
 
 def test_batch_hard_check_failure_is_local_and_sdk_exception_is_fatal():

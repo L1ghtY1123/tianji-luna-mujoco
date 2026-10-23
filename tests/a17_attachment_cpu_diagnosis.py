@@ -9,7 +9,7 @@ import numpy as np
 import trimesh
 import yaml
 
-from jev_mujoco.carrying import configure_gripper_feedback
+from luna_mujoco.carrying import configure_gripper_feedback
 
 ROOT = Path(__file__).resolve().parents[1]
 folder = ROOT / "data/visible-cloud-work"

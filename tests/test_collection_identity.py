@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 from test_rgbd_workflow import Choices, SensorRobot, VisionAlgorithms
 
-from jev_mujoco.runner import Runner
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco.runner import Runner
+from luna_mujoco.task_progress import TaskProgress
 
 
 def identity_runner(tmp_path, algorithms=None, *, route='direct'):

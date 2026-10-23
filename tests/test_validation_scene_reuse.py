@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jev_mujoco import geometry_service
+from luna_mujoco import geometry_service
 
 
 @pytest.mark.parametrize('cache,key', [('_backends', 'A'), ('_batch_backends', ('A', 8, .01, .03))])

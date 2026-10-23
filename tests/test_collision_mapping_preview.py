@@ -8,7 +8,7 @@ import pytest
 
 
 def test_preview_preserves_actual_layers_distances_and_inferred_table():
-    from jev_mujoco import collision_mapping
+    from luna_mujoco import collision_mapping
 
     centers = np.array([[.3, .1, .7], [.4, .2, .8]], dtype='<f4')
     table = {'pose': [.5, 0., .45, 1., 0., 0., 0.], 'dims': [.8, .6, .305]}
@@ -46,7 +46,7 @@ def test_preview_preserves_actual_layers_distances_and_inferred_table():
 
 @pytest.mark.parametrize('include_background', [False, True])
 def test_instance_preview_uses_named_surface_when_background_is_omitted_or_reordered(include_background):
-    from jev_mujoco.collision_mapping import collision_scene_preview
+    from luna_mujoco.collision_mapping import collision_scene_preview
 
     background = np.array([[.2, -.1, .7]], dtype='<f4') if include_background else np.empty((0, 3), dtype='<f4')
     table = {'pose': [.5, 0., .45, 1., 0., 0., 0.], 'dims': [.8, .6, .3]}
@@ -83,7 +83,7 @@ def test_instance_preview_uses_named_surface_when_background_is_omitted_or_reord
 def test_mapping_input_preview_keeps_camera_and_pixel_provenance():
     from test_perception_mapping import wire
 
-    from jev_mujoco.perception_mapping import decode_mapping_payload, filter_mapping_views
+    from luna_mujoco.perception_mapping import decode_mapping_payload, filter_mapping_views
 
     decoded, _ = decode_mapping_payload(wire())
     filtering = filter_mapping_views(decoded, {})
@@ -98,8 +98,8 @@ def test_mapping_input_preview_keeps_camera_and_pixel_provenance():
 def test_transport_preserves_original_sensor_pixels_through_letterboxing():
     from test_rgbd_algorithms import observed_scene
 
-    from jev_mujoco.algorithms import Algorithms
-    from jev_mujoco.perception_mapping import decode_mapping_payload, filter_mapping_views
+    from luna_mujoco.algorithms import Algorithms
+    from luna_mujoco.perception_mapping import decode_mapping_payload, filter_mapping_views
 
     sent = []
     Algorithms(curobo_request=lambda path, body: (sent.append(body) or {'scene_token': 'test'})).build_scene(

@@ -38,7 +38,7 @@ Application: `Algorithms.observe(capture, instruction='')`, `build_scene(observa
 
 ## Task 1 Sensor and RGBD perception
 
-Files: new src/jev_mujoco/cameras.py, perception.py, camera calibration resource JSON; tests/test_cameras.py, test_perception.py. Owner camera agent. Simulation hook integration is root-owned.
+Files: new src/luna_mujoco/cameras.py, perception.py, camera calibration resource JSON; tests/test_cameras.py, test_perception.py. Owner camera agent. Simulation hook integration is root-owned.
 
 - [ ] Write/run failures for off-center projection, mm-to-m/head-once/wrist FK, RGB/depth alignment, same-frame capture and detector identities without simulator IDs.
 - [ ] Implement `RgbdRenderer(model, calibration).capture(data, generation, arms)` using public MuJoCo Renderer/MjSpec camera API and calibrated RGB optical poses; one thread owns rendering. Export setup helper for root model/simulation integration.

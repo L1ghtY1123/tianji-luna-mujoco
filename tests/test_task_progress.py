@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco.task_progress import TaskProgress
 
 
 @pytest.mark.parametrize('route', ['direct', 'box_table'])

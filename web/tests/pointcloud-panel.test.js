@@ -59,6 +59,39 @@ test('collision scene preview rejects stale map identity and camera provenance r
   assert.throws(() => validatePointcloudPreview({ ...mappedPreview(), camera_ids: ['1'] }), /相机/);
 });
 
+function shellPreview() {
+  const data = mappedPreview();
+  data.collision_scene.cuboid_layers = [{name: 'semantic_instance::bin::bin_shell::wall_x_minus',
+    enabled: true, role: 'bin_shell_completion', provenance: 'measured_planes_and_user_bin_dimensions',
+    instance_id: 'bin', observation_id: data.observation_id, generation: data.generation,
+    model: {pose: [.056, .6, .5, 1, 0, 0, 0], dims: [.012, .4, .2]}}];
+  return data;
+}
+
+test('derived bin walls are visible as thin cuboids and keep measured voxel inputs unchanged', () => {
+  const data = shellPreview();
+  const before = structuredClone(data);
+  const layer = createPointcloudLayer();
+  layer.update(data, 'collision');
+  const wall = layer.object.children.find(child => child.name === data.collision_scene.cuboid_layers[0].name);
+  assert.ok(wall);
+  assert.deepEqual(wall.scale.toArray(), [.012, .4, .2]);
+  assert.deepEqual(wall.position.toArray(), [.056, .6, .5]);
+  assert.equal(wall.userData.provenance, 'measured_planes_and_user_bin_dimensions');
+  assert.equal(wall.userData.instanceId, 'bin');
+  assert.deepEqual(data, before);
+  layer.dispose();
+});
+
+test('derived bin preview rejects stale or unlabelled synthetic geometry', () => {
+  for (const change of [{generation: 99}, {observation_id: 'old'}, {provenance: 'registered_rgbd'},
+    {enabled: 'true'}, {instance_id: null}, {model: {pose: [0, 0, 0, 1, 0, 0, 0], dims: [-1, 1, 1]}}]) {
+    const data = shellPreview();
+    Object.assign(data.collision_scene.cuboid_layers[0], change);
+    assert.throws(() => validatePointcloudPreview(data), /补全/);
+  }
+});
+
 test('an instance-only collision scene colors its first layer as an instance, not a missing background', () => {
   const layer = createPointcloudLayer();
   const data = mappedPreview();

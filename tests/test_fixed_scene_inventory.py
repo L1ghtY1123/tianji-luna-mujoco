@@ -7,8 +7,8 @@ from test_inventory_image_order import head_observation, progress_for
 from test_perception import capture_fixture
 from test_route_observation import route_context
 
-from jev_mujoco.perception import PerceptionError
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco.perception import PerceptionError
+from luna_mujoco.task_progress import TaskProgress
 
 
 def test_scene_inventory_fixes_entities_roles_queries_and_table_before_motion():

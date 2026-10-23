@@ -1,0 +1,1358 @@
+{
+  "provenance": {
+    "run_id": "2e6487d72001407da7e87bc617e0fbed",
+    "source": "actual archived capture, initial successful Decisions and cleaned masks; no GT",
+    "original_identity_request_hash": "61e1a744c8ffe9964e14439165406b74b806c512dcfc05dcb28b808f98320199"
+  },
+  "observation": {
+    "observation_id": "rgbd-2-52b15c74e56d40c8bff61d6e40243308",
+    "generation": 2,
+    "visual_inventory": {
+      "membership": {
+        "instance-56e81a7c27ae46e1": "required",
+        "instance-97001d1051374996": "required",
+        "instance-d6076b782ef749be": "excluded",
+        "instance-f1d690494bc64f61": "excluded"
+      },
+      "evidence": {
+        "source": "openai_decisions",
+        "observation_id": "rgbd-2-52b15c74e56d40c8bff61d6e40243308",
+        "request_hash": "9a0b361a087a9487fcbb69799803fa5db692c0ed0091948d0ec695b85881d64b",
+        "http_status": 200,
+        "elapsed_s": 1.571,
+        "model": "gpt-6-luna",
+        "usage": {
+          "input_tokens": 19544,
+          "input_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 12095
+          },
+          "output_tokens": 0,
+          "output_tokens_details": {
+            "reasoning_tokens": 0
+          },
+          "total_tokens": 19544
+        },
+        "demo_inventory_check": {
+          "status": "none",
+          "source": "openai_decisions",
+          "observation_id": "rgbd-2-52b15c74e56d40c8bff61d6e40243308",
+          "confidence": 1.0,
+          "request_hash": "9a0b361a087a9487fcbb69799803fa5db692c0ed0091948d0ec695b85881d64b"
+        },
+        "generation": 2,
+        "answers": [
+          {
+            "type": "choice",
+            "name": "identity_0",
+            "choice": "instance-f1d690494bc64f61",
+            "probabilities": [
+              {
+                "value": "instance-d6076b782ef749be",
+                "probability": 0.24
+              },
+              {
+                "value": "instance-f1d690494bc64f61",
+                "probability": 0.32
+              },
+              {
+                "value": "instance-56e81a7c27ae46e1",
+                "probability": 0.04
+              },
+              {
+                "value": "instance-97001d1051374996",
+                "probability": 0.05
+              },
+              {
+                "value": "reject",
+                "probability": 0.17
+              },
+              {
+                "value": "unknown",
+                "probability": 0.18
+              }
+            ],
+            "confidence": 0.18
+          },
+          {
+            "type": "choice",
+            "name": "identity_1",
+            "choice": "instance-d6076b782ef749be",
+            "probabilities": [
+              {
+                "value": "instance-d6076b782ef749be",
+                "probability": 0.62
+              },
+              {
+                "value": "instance-f1d690494bc64f61",
+                "probability": 0.08
+              },
+              {
+                "value": "instance-56e81a7c27ae46e1",
+                "probability": 0.05
+              },
+              {
+                "value": "instance-97001d1051374996",
+                "probability": 0.02
+              },
+              {
+                "value": "reject",
+                "probability": 0.12
+              },
+              {
+                "value": "unknown",
+                "probability": 0.11
+              }
+            ],
+            "confidence": 0.54
+          },
+          {
+            "type": "choice",
+            "name": "identity_2",
+            "choice": "instance-f1d690494bc64f61",
+            "probabilities": [
+              {
+                "value": "instance-d6076b782ef749be",
+                "probability": 0.22
+              },
+              {
+                "value": "instance-f1d690494bc64f61",
+                "probability": 0.29
+              },
+              {
+                "value": "instance-56e81a7c27ae46e1",
+                "probability": 0.04
+              },
+              {
+                "value": "instance-97001d1051374996",
+                "probability": 0.05
+              },
+              {
+                "value": "reject",
+                "probability": 0.18
+              },
+              {
+                "value": "unknown",
+                "probability": 0.22
+              }
+            ],
+            "confidence": 0.15
+          },
+          {
+            "type": "choice",
+            "name": "identity_3",
+            "choice": "instance-d6076b782ef749be",
+            "probabilities": [
+              {
+                "value": "instance-d6076b782ef749be",
+                "probability": 0.58
+              },
+              {
+                "value": "instance-f1d690494bc64f61",
+                "probability": 0.11
+              },
+              {
+                "value": "instance-56e81a7c27ae46e1",
+                "probability": 0.06
+              },
+              {
+                "value": "instance-97001d1051374996",
+                "probability": 0.03
+              },
+              {
+                "value": "reject",
+                "probability": 0.1
+              },
+              {
+                "value": "unknown",
+                "probability": 0.12
+              }
+            ],
+            "confidence": 0.5
+          },
+          {
+            "type": "choice",
+            "name": "identity_4",
+            "choice": "instance-56e81a7c27ae46e1",
+            "probabilities": [
+              {
+                "value": "instance-d6076b782ef749be",
+                "probability": 0.04
+              },
+              {
+                "value": "instance-f1d690494bc64f61",
+                "probability": 0.03
+              },
+              {
+                "value": "instance-56e81a7c27ae46e1",
+                "probability": 0.32
+              },
+              {
+                "value": "instance-97001d1051374996",
+                "probability": 0.17
+              },
+              {
+                "value": "reject",
+                "probability": 0.18
+              },
+              {
+                "value": "unknown",
+                "probability": 0.26
+              }
+            ],
+            "confidence": 0.18
+          },
+          {
+            "type": "choice",
+            "name": "identity_5",
+            "choice": "instance-d6076b782ef749be",
+            "probabilities": [
+              {
+                "value": "instance-d6076b782ef749be",
+                "probability": 1.0
+              },
+              {
+                "value": "instance-f1d690494bc64f61",
+                "probability": 0.0
+              },
+              {
+                "value": "instance-56e81a7c27ae46e1",
+                "probability": 0.0
+              },
+              {
+                "value": "instance-97001d1051374996",
+                "probability": 0.0
+              },
+              {
+                "value": "reject",
+                "probability": 0.0
+              },
+              {
+                "value": "unknown",
+                "probability": 0.0
+              }
+            ],
+            "confidence": 1.0
+          },
+          {
+            "type": "choice",
+            "name": "identity_6",
+            "choice": "instance-d6076b782ef749be",
+            "probabilities": [
+              {
+                "value": "instance-d6076b782ef749be",
+                "probability": 1.0
+              },
+              {
+                "value": "instance-f1d690494bc64f61",
+                "probability": 0.0
+              },
+              {
+                "value": "instance-56e81a7c27ae46e1",
+                "probability": 0.0
+              },
+              {
+                "value": "instance-97001d1051374996",
+                "probability": 0.0
+              },
+              {
+                "value": "reject",
+                "probability": 0.0
+              },
+              {
+                "value": "unknown",
+                "probability": 0.0
+              }
+            ],
+            "confidence": 1.0
+          },
+          {
+            "type": "choice",
+            "name": "identity_7",
+            "choice": "instance-56e81a7c27ae46e1",
+            "probabilities": [
+              {
+                "value": "instance-d6076b782ef749be",
+                "probability": 0.0
+              },
+              {
+                "value": "instance-f1d690494bc64f61",
+                "probability": 0.0
+              },
+              {
+                "value": "instance-56e81a7c27ae46e1",
+                "probability": 0.98
+              },
+              {
+                "value": "instance-97001d1051374996",
+                "probability": 0.0
+              },
+              {
+                "value": "reject",
+                "probability": 0.01
+              },
+              {
+                "value": "unknown",
+                "probability": 0.01
+              }
+            ],
+            "confidence": 0.98
+          },
+          {
+            "type": "choice",
+            "name": "identity_8",
+            "choice": "instance-97001d1051374996",
+            "probabilities": [
+              {
+                "value": "instance-d6076b782ef749be",
+                "probability": 0.0
+              },
+              {
+                "value": "instance-f1d690494bc64f61",
+                "probability": 0.0
+              },
+              {
+                "value": "instance-56e81a7c27ae46e1",
+                "probability": 0.01
+              },
+              {
+                "value": "instance-97001d1051374996",
+                "probability": 0.99
+              },
+              {
+                "value": "reject",
+                "probability": 0.0
+              },
+              {
+                "value": "unknown",
+                "probability": 0.0
+              }
+            ],
+            "confidence": 0.99
+          },
+          {
+            "type": "choice",
+            "name": "identity_9",
+            "choice": "instance-f1d690494bc64f61",
+            "probabilities": [
+              {
+                "value": "instance-d6076b782ef749be",
+                "probability": 0.0
+              },
+              {
+                "value": "instance-f1d690494bc64f61",
+                "probability": 0.99
+              },
+              {
+                "value": "instance-56e81a7c27ae46e1",
+                "probability": 0.0
+              },
+              {
+                "value": "instance-97001d1051374996",
+                "probability": 0.0
+              },
+              {
+                "value": "reject",
+                "probability": 0.0
+              },
+              {
+                "value": "unknown",
+                "probability": 0.01
+              }
+            ],
+            "confidence": 0.99
+          },
+          {
+            "type": "choice",
+            "name": "identity_10",
+            "choice": "instance-f1d690494bc64f61",
+            "probabilities": [
+              {
+                "value": "instance-d6076b782ef749be",
+                "probability": 0.0
+              },
+              {
+                "value": "instance-f1d690494bc64f61",
+                "probability": 0.99
+              },
+              {
+                "value": "instance-56e81a7c27ae46e1",
+                "probability": 0.01
+              },
+              {
+                "value": "instance-97001d1051374996",
+                "probability": 0.0
+              },
+              {
+                "value": "reject",
+                "probability": 0.0
+              },
+              {
+                "value": "unknown",
+                "probability": 0.0
+              }
+            ],
+            "confidence": 0.99
+          },
+          {
+            "type": "choice",
+            "name": "visibility_instance-d6076b782ef749be",
+            "choice": "visible",
+            "probabilities": [
+              {
+                "value": "visible",
+                "probability": 0.88
+              },
+              {
+                "value": "unseen",
+                "probability": 0.07
+              },
+              {
+                "value": "unknown",
+                "probability": 0.05
+              }
+            ],
+            "confidence": 0.82
+          },
+          {
+            "type": "choice",
+            "name": "visibility_instance-f1d690494bc64f61",
+            "choice": "visible",
+            "probabilities": [
+              {
+                "value": "visible",
+                "probability": 0.71
+              },
+              {
+                "value": "unseen",
+                "probability": 0.26
+              },
+              {
+                "value": "unknown",
+                "probability": 0.03
+              }
+            ],
+            "confidence": 0.56
+          },
+          {
+            "type": "choice",
+            "name": "visibility_instance-56e81a7c27ae46e1",
+            "choice": "visible",
+            "probabilities": [
+              {
+                "value": "visible",
+                "probability": 0.97
+              },
+              {
+                "value": "unseen",
+                "probability": 0.01
+              },
+              {
+                "value": "unknown",
+                "probability": 0.02
+              }
+            ],
+            "confidence": 0.96
+          },
+          {
+            "type": "choice",
+            "name": "visibility_instance-97001d1051374996",
+            "choice": "visible",
+            "probabilities": [
+              {
+                "value": "visible",
+                "probability": 0.97
+              },
+              {
+                "value": "unseen",
+                "probability": 0.01
+              },
+              {
+                "value": "unknown",
+                "probability": 0.02
+              }
+            ],
+            "confidence": 0.96
+          },
+          {
+            "type": "choice",
+            "name": "demo_unlisted_pink",
+            "choice": "none",
+            "probabilities": [
+              {
+                "value": "none",
+                "probability": 1.0
+              },
+              {
+                "value": "extra",
+                "probability": 0.0
+              },
+              {
+                "value": "unknown",
+                "probability": 0.0
+              }
+            ],
+            "confidence": 1.0
+          }
+        ]
+      },
+      "unassociated_candidates": [
+        {
+          "candidate": "candidate-0",
+          "camera_id": "3",
+          "status": "unknown",
+          "choice": "instance-f1d690494bc64f61",
+          "confidence": 0.18,
+          "minimum_confidence": 0.8,
+          "geometry_policy": "discard_from_inventory_map",
+          "reason": "supplementary_identity_uncertain"
+        },
+        {
+          "candidate": "candidate-1",
+          "camera_id": "3",
+          "status": "unknown",
+          "choice": "instance-d6076b782ef749be",
+          "confidence": 0.54,
+          "minimum_confidence": 0.8,
+          "geometry_policy": "discard_from_inventory_map",
+          "reason": "supplementary_identity_uncertain"
+        },
+        {
+          "candidate": "candidate-2",
+          "camera_id": "3",
+          "status": "unknown",
+          "choice": "instance-f1d690494bc64f61",
+          "confidence": 0.15,
+          "minimum_confidence": 0.8,
+          "geometry_policy": "discard_from_inventory_map",
+          "reason": "supplementary_identity_uncertain"
+        },
+        {
+          "candidate": "candidate-3",
+          "camera_id": "3",
+          "status": "unknown",
+          "choice": "instance-d6076b782ef749be",
+          "confidence": 0.5,
+          "minimum_confidence": 0.8,
+          "geometry_policy": "discard_from_inventory_map",
+          "reason": "supplementary_identity_uncertain"
+        },
+        {
+          "candidate": "candidate-4",
+          "camera_id": "3",
+          "status": "unknown",
+          "choice": "instance-56e81a7c27ae46e1",
+          "confidence": 0.18,
+          "minimum_confidence": 0.8,
+          "geometry_policy": "discard_from_inventory_map",
+          "reason": "supplementary_identity_uncertain"
+        }
+      ],
+      "identity_coverage": {
+        "source": "openai_decisions",
+        "observation_id": "rgbd-2-52b15c74e56d40c8bff61d6e40243308",
+        "request_hash": "9a0b361a087a9487fcbb69799803fa5db692c0ed0091948d0ec695b85881d64b",
+        "purpose": "initialize_inventory",
+        "minimum_confidence": 0.8,
+        "required_entity_ids": [
+          "instance-56e81a7c27ae46e1",
+          "instance-97001d1051374996",
+          "instance-d6076b782ef749be",
+          "instance-f1d690494bc64f61"
+        ],
+        "accepted_entity_ids": [
+          "instance-56e81a7c27ae46e1",
+          "instance-97001d1051374996",
+          "instance-d6076b782ef749be",
+          "instance-f1d690494bc64f61"
+        ],
+        "accepted_left_entity_ids": [
+          "instance-56e81a7c27ae46e1",
+          "instance-97001d1051374996",
+          "instance-d6076b782ef749be"
+        ],
+        "source_object_ids": [
+          "instance-56e81a7c27ae46e1",
+          "instance-97001d1051374996"
+        ],
+        "remaining_source_ids": [
+          "instance-56e81a7c27ae46e1",
+          "instance-97001d1051374996"
+        ]
+      },
+      "missing_geometry_ids": [],
+      "visibility": {
+        "instance-d6076b782ef749be": "visible",
+        "instance-f1d690494bc64f61": "unknown",
+        "instance-56e81a7c27ae46e1": "visible",
+        "instance-97001d1051374996": "visible"
+      },
+      "progress": {},
+      "demo_inventory_check": {
+        "status": "none",
+        "source": "openai_decisions",
+        "observation_id": "rgbd-2-52b15c74e56d40c8bff61d6e40243308",
+        "confidence": 1.0,
+        "request_hash": "9a0b361a087a9487fcbb69799803fa5db692c0ed0091948d0ec695b85881d64b"
+      }
+    },
+    "demo_inventory_check": {
+      "status": "none",
+      "source": "openai_decisions",
+      "observation_id": "rgbd-2-52b15c74e56d40c8bff61d6e40243308",
+      "confidence": 1.0,
+      "request_hash": "9a0b361a087a9487fcbb69799803fa5db692c0ed0091948d0ec695b85881d64b"
+    },
+    "visual_reference": {
+      "observation_id": "rgbd-2-52b15c74e56d40c8bff61d6e40243308",
+      "entities": {
+        "table": {
+          "id": "table",
+          "kind": "table",
+          "color": "gray",
+          "description": "Large gray tabletop visible in the head-camera view",
+          "bbox": [
+            0.183,
+            0.378,
+            0.833,
+            1.0
+          ],
+          "reference_camera_id": "3",
+          "initial_parent_id": null,
+          "identity_source": "openai_responses",
+          "visual_membership": "excluded",
+          "roles": [
+            "table",
+            "collision"
+          ]
+        },
+        "instance-d6076b782ef749be": {
+          "id": "instance-d6076b782ef749be",
+          "kind": "bin",
+          "color": "blue",
+          "description": "Blue box on the robot's left containing pink objects",
+          "bbox": [
+            0.025,
+            0.377,
+            0.703,
+            1.0
+          ],
+          "reference_camera_id": "2",
+          "initial_parent_id": null,
+          "identity_source": "openai_responses",
+          "visual_membership": "excluded",
+          "roles": [
+            "container",
+            "collision"
+          ],
+          "segmentation_query": {
+            "kind": "bin",
+            "color": "blue",
+            "prompt": "blue box"
+          }
+        },
+        "instance-f1d690494bc64f61": {
+          "id": "instance-f1d690494bc64f61",
+          "kind": "bin",
+          "color": "blue",
+          "description": "Separate empty blue box on the robot's right",
+          "bbox": [
+            0.3,
+            0.362,
+            0.984,
+            0.944
+          ],
+          "reference_camera_id": "1",
+          "initial_parent_id": null,
+          "identity_source": "openai_responses",
+          "visual_membership": "excluded",
+          "roles": [
+            "container",
+            "collision"
+          ],
+          "segmentation_query": {
+            "kind": "bin",
+            "color": "blue",
+            "prompt": "empty blue box"
+          }
+        },
+        "instance-56e81a7c27ae46e1": {
+          "id": "instance-56e81a7c27ae46e1",
+          "kind": "object",
+          "color": "pink",
+          "description": "Pink rounded packaging object, partly occluded by the robot arm in the source box",
+          "bbox": [
+            0.305,
+            0.723,
+            0.374,
+            0.84
+          ],
+          "reference_camera_id": "2",
+          "initial_parent_id": "instance-d6076b782ef749be",
+          "identity_source": "openai_responses",
+          "visual_membership": "required",
+          "roles": [
+            "collision"
+          ],
+          "segmentation_query": {
+            "kind": "object",
+            "color": "pink",
+            "prompt": "pink object"
+          },
+          "display_id": 2,
+          "segmentation_prompts": [
+            "pink object",
+            "pink foam wrapped object",
+            "object inside the left blue box",
+            "elliptical pink object"
+          ]
+        },
+        "instance-97001d1051374996": {
+          "id": "instance-97001d1051374996",
+          "kind": "object",
+          "color": "pink",
+          "description": "Pink rounded packaging object visible inside the source box",
+          "bbox": [
+            0.5,
+            0.6,
+            0.552,
+            0.708
+          ],
+          "reference_camera_id": "2",
+          "initial_parent_id": "instance-d6076b782ef749be",
+          "identity_source": "openai_responses",
+          "visual_membership": "required",
+          "roles": [
+            "collision"
+          ],
+          "segmentation_query": {
+            "kind": "object",
+            "color": "pink",
+            "prompt": "pink object"
+          },
+          "display_id": 1,
+          "segmentation_prompts": [
+            "pink object",
+            "pink foam wrapped object",
+            "object inside the left blue box",
+            "elliptical pink object"
+          ]
+        }
+      },
+      "demo_task": {
+        "scope": "all",
+        "requested_count": null,
+        "source_bin_id": "instance-d6076b782ef749be",
+        "destination_table_id": "table",
+        "source_object_ids": [
+          "instance-97001d1051374996",
+          "instance-56e81a7c27ae46e1"
+        ],
+        "transport_ids": [
+          "instance-97001d1051374996",
+          "instance-56e81a7c27ae46e1"
+        ],
+        "ordering_camera_id": "2",
+        "source_inventory_complete": "confirmed",
+        "workflow": "unpack_transfer",
+        "right_bin_id": "instance-f1d690494bc64f61",
+        "prior": "pink foam wraps one black core; VLA removes packaging; canonical task identity persists",
+        "item_lifecycle": {
+          "instance-56e81a7c27ae46e1": {
+            "phase": "wrapped_source",
+            "appearance": "wrapped",
+            "appearance_revision": 0,
+            "to_table_arm": "A",
+            "to_right_bin_arm": "B"
+          },
+          "instance-97001d1051374996": {
+            "phase": "wrapped_source",
+            "appearance": "wrapped",
+            "appearance_revision": 0,
+            "to_table_arm": "A",
+            "to_right_bin_arm": "B"
+          }
+        }
+      }
+    },
+    "views": {
+      "3": {
+        "instance_masks": {}
+      },
+      "2": {
+        "instance_masks": {
+          "instance-d6076b782ef749be": {
+            "array_key": "array_0"
+          }
+        }
+      },
+      "1": {
+        "instance_masks": {
+          "instance-f1d690494bc64f61": {
+            "array_key": "array_1"
+          }
+        }
+      }
+    }
+  },
+  "initial_capture": {
+    "observation_id": "rgbd-2-52b15c74e56d40c8bff61d6e40243308",
+    "generation": 2,
+    "time": 11.289999999999182,
+    "views": {
+      "1": {
+        "depth_m": {
+          "array_key": "array_2"
+        },
+        "valid_depth": {
+          "array_key": "array_3"
+        },
+        "calibration_id": "user-extrinsics-5a390ce34b936bd8",
+        "registered_to": "rgb",
+        "intrinsics": {
+          "cx": 317.9415584415584,
+          "cy": 235.86363636363635,
+          "fx": 374.025974025974,
+          "fy": 374.025974025974,
+          "width": 640,
+          "height": 480
+        },
+        "T_world_camera": [
+          [
+            -0.03617771277968662,
+            -0.9738310037717008,
+            0.22437546477062312,
+            0.21511814083230163
+          ],
+          [
+            -0.9934629473846701,
+            0.05937166828345142,
+            0.09750065219784562,
+            -0.5675673626015127
+          ],
+          [
+            -0.10827070366353012,
+            -0.21938135996078253,
+            -0.9696129504240146,
+            0.976610139707796
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "2": {
+        "depth_m": {
+          "array_key": "array_4"
+        },
+        "valid_depth": {
+          "array_key": "array_5"
+        },
+        "calibration_id": "user-extrinsics-5a390ce34b936bd8",
+        "registered_to": "rgb",
+        "intrinsics": {
+          "cx": 318.9871794871795,
+          "cy": 243.08974358974362,
+          "fx": 369.2307692307693,
+          "fy": 369.2307692307693,
+          "width": 640,
+          "height": 480
+        },
+        "T_world_camera": [
+          [
+            0.041986344232524064,
+            -0.9721214351954062,
+            0.2306882357893798,
+            0.2165675559741173
+          ],
+          [
+            -0.9934444758105654,
+            -0.0651913384781006,
+            -0.09390507371228506,
+            0.5696521629789678
+          ],
+          [
+            0.10632600989157803,
+            -0.2252332227293794,
+            -0.968485815590233,
+            0.9685490254900464
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "3": {
+        "depth_m": {
+          "array_key": "array_6"
+        },
+        "valid_depth": {
+          "array_key": "array_7"
+        },
+        "calibration_id": "user-extrinsics-5a390ce34b936bd8",
+        "registered_to": "rgb",
+        "intrinsics": {
+          "cx": 320.0405405405405,
+          "cy": 194.6351351351351,
+          "fx": 291.8918918918919,
+          "fy": 291.8918918918919,
+          "width": 640,
+          "height": 360
+        },
+        "T_world_camera": [
+          [
+            -0.01454722709711409,
+            -0.8308943775432586,
+            0.5562399765845549,
+            0.1273603218756391
+          ],
+          [
+            -0.9997718620421182,
+            0.020788309933185922,
+            0.004906122599163287,
+            -0.0034876335486242415
+          ],
+          [
+            -0.01563975871365053,
+            -0.5560417066525882,
+            -0.8310072312623135,
+            1.199981040227405
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    }
+  },
+  "current_capture": {
+    "observation_id": "rgbd-2-355108f690484b91822dff28f0a270de",
+    "generation": 2,
+    "time": 141.4210000003112,
+    "views": {
+      "1": {
+        "depth_m": {
+          "array_key": "array_8"
+        },
+        "valid_depth": {
+          "array_key": "array_9"
+        },
+        "calibration_id": "user-extrinsics-5a390ce34b936bd8",
+        "registered_to": "rgb",
+        "intrinsics": {
+          "cx": 317.9415584415584,
+          "cy": 235.86363636363635,
+          "fx": 374.025974025974,
+          "fy": 374.025974025974,
+          "width": 640,
+          "height": 480
+        },
+        "T_world_camera": [
+          [
+            -0.03617765150772251,
+            -0.9738310124436088,
+            0.22437543701225918,
+            0.21511815820392288
+          ],
+          [
+            -0.9934629498525939,
+            0.05937160556563642,
+            0.09750066524255911,
+            -0.5675673340300997
+          ],
+          [
+            -0.10827070149199583,
+            -0.2193813384397474,
+            -0.9696129555357729,
+            0.9766101417991109
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "2": {
+        "depth_m": {
+          "array_key": "array_10"
+        },
+        "valid_depth": {
+          "array_key": "array_11"
+        },
+        "calibration_id": "user-extrinsics-5a390ce34b936bd8",
+        "registered_to": "rgb",
+        "intrinsics": {
+          "cx": 318.9871794871795,
+          "cy": 243.08974358974362,
+          "fx": 369.2307692307693,
+          "fy": 369.2307692307693,
+          "width": 640,
+          "height": 480
+        },
+        "T_world_camera": [
+          [
+            0.04198628291858397,
+            -0.9721214443701025,
+            0.23068820828657055,
+            0.21656757330061074
+          ],
+          [
+            -0.9934444786481167,
+            -0.06519127586174767,
+            -0.0939050871630017,
+            0.5696521343256943
+          ],
+          [
+            0.10632600759105959,
+            -0.22523320125439997,
+            -0.9684858208370646,
+            0.9685490275520637
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "3": {
+        "depth_m": {
+          "array_key": "array_12"
+        },
+        "valid_depth": {
+          "array_key": "array_13"
+        },
+        "calibration_id": "user-extrinsics-5a390ce34b936bd8",
+        "registered_to": "rgb",
+        "intrinsics": {
+          "cx": 320.0405405405405,
+          "cy": 194.6351351351351,
+          "fx": 291.8918918918919,
+          "fy": 291.8918918918919,
+          "width": 640,
+          "height": 360
+        },
+        "T_world_camera": [
+          [
+            -0.01454722709711409,
+            -0.8308943775432586,
+            0.5562399765845549,
+            0.1273603218756391
+          ],
+          [
+            -0.9997718620421182,
+            0.020788309933185922,
+            0.004906122599163287,
+            -0.0034876335486242415
+          ],
+          [
+            -0.01563975871365053,
+            -0.5560417066525882,
+            -0.8310072312623135,
+            1.199981040227405
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    }
+  },
+  "detections": [
+    {
+      "camera_id": "3",
+      "kind": "bin",
+      "mask": {
+        "array_key": "array_14"
+      },
+      "silhouette_mask": {
+        "array_key": "array_15"
+      }
+    },
+    {
+      "camera_id": "3",
+      "kind": "bin",
+      "mask": {
+        "array_key": "array_16"
+      },
+      "silhouette_mask": {
+        "array_key": "array_17"
+      }
+    },
+    {
+      "camera_id": "3",
+      "kind": "bin",
+      "mask": {
+        "array_key": "array_18"
+      },
+      "silhouette_mask": {
+        "array_key": "array_19"
+      }
+    },
+    {
+      "camera_id": "3",
+      "kind": "bin",
+      "mask": {
+        "array_key": "array_20"
+      },
+      "silhouette_mask": {
+        "array_key": "array_21"
+      }
+    },
+    {
+      "camera_id": "3",
+      "kind": "object",
+      "mask": {
+        "array_key": "array_22"
+      },
+      "silhouette_mask": {
+        "array_key": "array_23"
+      }
+    },
+    {
+      "camera_id": "3",
+      "kind": "object",
+      "mask": {
+        "array_key": "array_24"
+      },
+      "silhouette_mask": {
+        "array_key": "array_25"
+      }
+    },
+    {
+      "camera_id": "2",
+      "kind": "bin",
+      "mask": {
+        "array_key": "array_26"
+      },
+      "silhouette_mask": {
+        "array_key": "array_27"
+      }
+    },
+    {
+      "camera_id": "2",
+      "kind": "bin",
+      "mask": {
+        "array_key": "array_28"
+      },
+      "silhouette_mask": {
+        "array_key": "array_29"
+      }
+    },
+    {
+      "camera_id": "2",
+      "kind": "object",
+      "mask": {
+        "array_key": "array_30"
+      },
+      "silhouette_mask": {
+        "array_key": "array_31"
+      }
+    },
+    {
+      "camera_id": "1",
+      "kind": "bin",
+      "mask": {
+        "array_key": "array_32"
+      },
+      "silhouette_mask": {
+        "array_key": "array_33"
+      }
+    },
+    {
+      "camera_id": "1",
+      "kind": "bin",
+      "mask": {
+        "array_key": "array_34"
+      },
+      "silhouette_mask": {
+        "array_key": "array_35"
+      }
+    },
+    {
+      "camera_id": "1",
+      "kind": "object",
+      "mask": {
+        "array_key": "array_36"
+      },
+      "silhouette_mask": {
+        "array_key": "array_37"
+      }
+    },
+    {
+      "camera_id": "1",
+      "kind": "object",
+      "mask": {
+        "array_key": "array_38"
+      },
+      "silhouette_mask": {
+        "array_key": "array_39"
+      }
+    },
+    {
+      "camera_id": "1",
+      "kind": "object",
+      "mask": {
+        "array_key": "array_40"
+      },
+      "silhouette_mask": {
+        "array_key": "array_41"
+      }
+    }
+  ],
+  "entities": {
+    "table": {
+      "id": "table",
+      "kind": "table",
+      "color": "gray",
+      "description": "Large gray tabletop visible in the head-camera view",
+      "bbox": [
+        0.183,
+        0.378,
+        0.833,
+        1.0
+      ],
+      "reference_camera_id": "3",
+      "initial_parent_id": null,
+      "identity_source": "openai_responses",
+      "visual_membership": "excluded",
+      "roles": [
+        "table",
+        "collision"
+      ]
+    },
+    "instance-d6076b782ef749be": {
+      "id": "instance-d6076b782ef749be",
+      "kind": "bin",
+      "color": "blue",
+      "description": "Blue box on the robot's left containing pink objects",
+      "bbox": [
+        0.025,
+        0.377,
+        0.703,
+        1.0
+      ],
+      "reference_camera_id": "2",
+      "initial_parent_id": null,
+      "identity_source": "openai_responses",
+      "visual_membership": "excluded",
+      "roles": [
+        "container",
+        "collision"
+      ],
+      "segmentation_query": {
+        "kind": "bin",
+        "color": "blue",
+        "prompt": "blue box"
+      }
+    },
+    "instance-f1d690494bc64f61": {
+      "id": "instance-f1d690494bc64f61",
+      "kind": "bin",
+      "color": "blue",
+      "description": "Separate empty blue box on the robot's right",
+      "bbox": [
+        0.3,
+        0.362,
+        0.984,
+        0.944
+      ],
+      "reference_camera_id": "1",
+      "initial_parent_id": null,
+      "identity_source": "openai_responses",
+      "visual_membership": "excluded",
+      "roles": [
+        "container",
+        "collision"
+      ],
+      "segmentation_query": {
+        "kind": "bin",
+        "color": "blue",
+        "prompt": "empty blue box"
+      }
+    },
+    "instance-56e81a7c27ae46e1": {
+      "id": "instance-56e81a7c27ae46e1",
+      "kind": "object",
+      "color": "pink",
+      "description": "pink foam wrapped workpiece, inside the left source bin",
+      "bbox": [
+        0.305,
+        0.723,
+        0.374,
+        0.84
+      ],
+      "reference_camera_id": "2",
+      "initial_parent_id": "instance-d6076b782ef749be",
+      "identity_source": "openai_responses",
+      "visual_membership": "required",
+      "roles": [
+        "collision"
+      ],
+      "segmentation_query": {
+        "kind": "object",
+        "color": "pink",
+        "prompt": "pink object"
+      },
+      "display_id": 2,
+      "segmentation_prompts": [
+        "pink object",
+        "pink foam wrapped object",
+        "elliptical pink object"
+      ],
+      "current_appearance": "wrapped",
+      "appearance_revision": 0,
+      "lifecycle_phase": "wrapped_source",
+      "height_prior_m": 0.1
+    },
+    "instance-97001d1051374996": {
+      "id": "instance-97001d1051374996",
+      "kind": "object",
+      "color": "pink",
+      "description": "pink foam wrapped workpiece, inside the left source bin",
+      "bbox": [
+        0.5,
+        0.6,
+        0.552,
+        0.708
+      ],
+      "reference_camera_id": "2",
+      "initial_parent_id": "instance-d6076b782ef749be",
+      "identity_source": "openai_responses",
+      "visual_membership": "required",
+      "roles": [
+        "collision"
+      ],
+      "segmentation_query": {
+        "kind": "object",
+        "color": "pink",
+        "prompt": "pink object"
+      },
+      "display_id": 1,
+      "segmentation_prompts": [
+        "pink object",
+        "pink foam wrapped object",
+        "elliptical pink object"
+      ],
+      "current_appearance": "wrapped",
+      "appearance_revision": 0,
+      "lifecycle_phase": "wrapped_source",
+      "height_prior_m": 0.1
+    }
+  }
+}

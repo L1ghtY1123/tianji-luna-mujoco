@@ -8,9 +8,9 @@ import torch
 import yaml
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.carrying import CarryingBinding
-from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation
-from jev_mujoco.placement import release_goal
+from luna_mujoco.carrying import CarryingBinding
+from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation
+from luna_mujoco.placement import release_goal
 
 
 def main():

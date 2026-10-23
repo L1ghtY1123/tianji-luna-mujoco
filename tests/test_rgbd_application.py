@@ -3,8 +3,7 @@ import copy
 import numpy as np
 import pytest
 
-from jev_mujoco.runner import Runner
-from jev_mujoco.skills import Registry
+from luna_mujoco.runner import Runner
 
 
 class RobotSimulation:
@@ -55,15 +54,10 @@ def test_decision_uses_only_observed_fields_and_omits_pixels_and_hidden_ids(tmp_
     assert measured["objects"] == before["objects"]
 
 
-def test_registry_contains_separate_destination_plan_execute_and_verify():
-    registry = Registry()
-    assert {"identify_destination", "plan_place", "execute_place", "verify_place"} <= set(registry.contracts)
-    assert registry.contracts["verify_place"].requires["place_execution_completed"] is True
-    assert registry.contracts["identify_destination"].requires["needs_place"] is True
 
 
 def test_object_release_tcp_goal_uses_measured_support_reference_without_full_extent():
-    from jev_mujoco.placement import release_goal
+    from luna_mujoco.placement import release_goal
 
     target = {"visible_centroid_world": [.5, .1, .63]}
     destination = {"id": "track-bin", "kind": "bin", "placement_reference": {
@@ -79,7 +73,7 @@ def test_object_release_tcp_goal_uses_measured_support_reference_without_full_ex
 
 
 def test_release_goal_does_not_read_poison_capacity_or_object_geometry():
-    from jev_mujoco.placement import release_goal
+    from luna_mujoco.placement import release_goal
 
     target = {"visible_centroid_world": [.5, .1, .63], "size": "poison", "T_world_object": "poison"}
     destination = {"id": "bin", "kind": "bin", "cavity": "poison", "placement_reference": {

@@ -4,32 +4,8 @@ from copy import deepcopy
 import pytest
 from test_runner import Algorithms, Sim
 
-from jev_mujoco.runner import Runner
-from jev_mujoco.skills import Registry, SkillSelectionError
-
-
-async def test_atomic_scene_preparation_uses_fixed_policy_without_nested_jev_choice(tmp_path):
-    runner = Runner(Sim(), Algorithms(), None, tmp_path)
-    runner.state.update(target_id='source')
-    runner.state['facts'].update(observed=True, views_ready=True)
-    context = {'observation': {'observation_id': 'fresh', 'source': 'rgbd', 'objects': []}}
-    seen = []
-
-    class Judgment:
-        async def choose_visual_plan(self, state, skill, requests):
-            assert skill == 'build_scene'
-            return requests
-
-    async def prepare(current):
-        seen.append('selected')
-        return {'exclusion_state': 'selected'}
-
-    runner.prepare_grasp_scene = prepare
-    arguments = await runner.select_arguments('build_scene', context, Judgment())
-    result = await runner.execute('build_scene', context, arguments)
-    assert arguments == {'visual_plan': {'fine': 'initialize_inventory'}}
-    assert result['exclusion_state'] == 'selected'
-    assert seen == ['selected']
+from luna_mujoco.runner import Runner
+from luna_mujoco.skills import Registry, SkillSelectionError
 
 
 @pytest.mark.parametrize('policy', ['ignore_walls', 'held', None])

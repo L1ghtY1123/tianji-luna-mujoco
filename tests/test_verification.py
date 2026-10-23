@@ -1,7 +1,7 @@
 """One tri-state interface replaces the old CAD-pose success test."""
 import pytest
 
-from jev_mujoco.verification import combine_holding_evidence
+from luna_mujoco.verification import combine_holding_evidence
 
 
 @pytest.mark.parametrize('position, visual, expected', [

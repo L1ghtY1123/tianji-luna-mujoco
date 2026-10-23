@@ -20,9 +20,9 @@ def main():
     from curobo.types import Pose
     from tianji_curobo.curobo_service import materialize_urdf
 
-    from jev_mujoco.geometry_service import ROOT
-    from jev_mujoco.instance_mapping import InstanceMapper
-    from jev_mujoco.perception_mapping import (
+    from luna_mujoco.geometry_service import ROOT
+    from luna_mujoco.instance_mapping import InstanceMapper
+    from luna_mujoco.perception_mapping import (
         PerceptionMapper,
         create_feedback_segmenter,
         decode_mapping_payload,

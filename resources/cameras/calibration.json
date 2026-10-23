@@ -1,9 +1,8 @@
 {
   "schema_version": 1,
-  "calibration_kind": "historical_frozen_rgb_virtual_camera",
+  "calibration_kind": "user_extrinsics_with_frozen_registered_rgb_intrinsics",
   "translation_units": "meters",
-  "extrinsics_source": "C:\\project\\tianji_base\\extensions\\cameras\\camera-extrinsics\\defaults\\camera_extrinsics.json",
-  "extrinsics_sha256": "2705f84e03687cded0e1f1373bd5933ccdc8edd10cad6e934a19cf0266be2b67",
+  "extrinsics_source": "resources/cameras/user-extrinsics/",
   "cameras": {
     "1": {
       "camera_id": "1",
@@ -26,22 +25,22 @@
       ],
       "T_parent_rgb_m": [
         [
-          -0.9997204930531767,
-          0.02071581306489101,
-          0.011392579101365818,
-          -0.0011901059103524875
+          -0.9999617995060496,
+          -0.0011724087180412712,
+          0.008661696509441517,
+          0.0021196116777188897
         ],
         [
-          -0.023613993016487367,
-          -0.8983341899081219,
-          -0.4386776294455136,
-          0.09237720705946872
+          -0.002748187873857464,
+          -0.8985364352347763,
+          -0.43889033028649765,
+          0.09119845517638979
         ],
         [
-          0.001146779550649013,
-          -0.4388240402840052,
-          0.8985722823265165,
-          0.05135253272235849
+          0.008297408754170985,
+          -0.4388973684284048,
+          0.8984988886996954,
+          0.03725148394276182
         ],
         [
           0.0,
@@ -433,54 +432,18 @@
         "stereo_calibration_available": true,
         "stereo_calibration_error": ""
       },
-      "historical_extrinsic": {
-        "schema_version": 1,
-        "cam_id": "right_wrist",
-        "label": "\u53f3\u8155\u76f8\u673a",
-        "arm": "B",
-        "mode": "eye_in_hand",
-        "board": {
-          "dictionary": "auto",
-          "marker_len_mm": 11.25,
-          "square_len_mm": 15.0,
-          "squares_x": 9,
-          "squares_y": 12
-        },
+      "extrinsic_provenance": {
+        "source_path": "resources/cameras/user-extrinsics/camera_right_wrist_extrinsic.json",
+        "source_sha256": "e4a33a2fcb96b1edcd9aea40957e991dfc902a29a6173ee90908b87c19267dee",
+        "original_source_path": "C:\\Users\\l1ght\\Downloads\\camera_right_wrist_extrinsic.json",
+        "source_frame": "base_link",
         "extrinsic_name": "T_flange_cam",
-        "extrinsic": [
-          [
-            -0.9997204930531767,
-            0.02071581306489101,
-            0.011392579101365818,
-            -1.1901059103524876
-          ],
-          [
-            -0.023613993016487367,
-            -0.8983341899081219,
-            -0.4386776294455136,
-            92.37720705946873
-          ],
-          [
-            0.001146779550649013,
-            -0.4388240402840052,
-            0.8985722823265165,
-            51.35253272235849
-          ],
-          [
-            0.0,
-            0.0,
-            0.0,
-            1.0
-          ]
-        ],
-        "residuals": {
-          "rot_deg_max": 0.19074828116127843,
-          "rot_deg_rms": 0.12321032353473745,
-          "trans_mm_max": 2.4881815100295612,
-          "trans_mm_rms": 1.0631323133896855
-        },
-        "n_samples": 10,
-        "saved_at": "2026-07-07T12:33:13+08:00"
+        "source_translation_unit": "mm",
+        "translation_scale_to_m": 0.001,
+        "T_world_base_applied": false,
+        "camera_serial_number": "260522273287",
+        "intrinsic_revision_from_source": "0221644e4262f50edb1ae006ba133040f84004f2",
+        "frame_interpretation": "flange-local optical frame"
       }
     },
     "2": {
@@ -504,22 +467,22 @@
       ],
       "T_parent_rgb_m": [
         [
-          0.9991137295648849,
-          0.035408678559817885,
-          0.02275919325446818,
-          -0.002083835079513786
+          0.9999768015386681,
+          0.004093155537392857,
+          0.005444489162678353,
+          -0.0007043940851217336
         ],
         [
-          -0.04176965091460155,
-          0.9008414249710993,
-          0.43213426538346983,
-          -0.0934308801702364
+          -0.006046830390639956,
+          0.9014062539760227,
+          0.43293209760324036,
+          -0.08750098578110607
         ],
         [
-          -0.005201120784899649,
-          -0.4327019211173976,
-          0.901522043992212,
-          0.04774827351742707
+          -0.003135638168323137,
+          -0.432954976147245,
+          0.9014100933551923,
+          0.04430276474981776
         ],
         [
           0.0,
@@ -911,54 +874,18 @@
         "stereo_calibration_available": true,
         "stereo_calibration_error": ""
       },
-      "historical_extrinsic": {
-        "schema_version": 1,
-        "cam_id": "left_wrist",
-        "label": "\u5de6\u8155\u76f8\u673a",
-        "arm": "A",
-        "mode": "eye_in_hand",
-        "board": {
-          "dictionary": "auto",
-          "marker_len_mm": 11.25,
-          "square_len_mm": 15.0,
-          "squares_x": 9,
-          "squares_y": 12
-        },
+      "extrinsic_provenance": {
+        "source_path": "resources/cameras/user-extrinsics/camera_left_wrist_extrinsic.json",
+        "source_sha256": "ca9c562b15e4fd96ffaafaf31fdd40ad6b0c5c7f7a7843f9cb136c725cfa9cdc",
+        "original_source_path": "C:\\Users\\l1ght\\Downloads\\camera_left_wrist_extrinsic.json",
+        "source_frame": "base_link",
         "extrinsic_name": "T_flange_cam",
-        "extrinsic": [
-          [
-            0.9991137295648849,
-            0.035408678559817885,
-            0.02275919325446818,
-            -2.0838350795137863
-          ],
-          [
-            -0.04176965091460155,
-            0.9008414249710993,
-            0.43213426538346983,
-            -93.4308801702364
-          ],
-          [
-            -0.005201120784899649,
-            -0.4327019211173976,
-            0.901522043992212,
-            47.748273517427066
-          ],
-          [
-            0.0,
-            0.0,
-            0.0,
-            1.0
-          ]
-        ],
-        "residuals": {
-          "rot_deg_max": 0.15041360089105454,
-          "rot_deg_rms": 0.09054630555139175,
-          "trans_mm_max": 0.776747735011211,
-          "trans_mm_rms": 0.45948410656140726
-        },
-        "n_samples": 9,
-        "saved_at": "2026-07-07T12:57:41+08:00"
+        "source_translation_unit": "mm",
+        "translation_scale_to_m": 0.001,
+        "T_world_base_applied": false,
+        "camera_serial_number": "260422273023",
+        "intrinsic_revision_from_source": "0221644e4262f50edb1ae006ba133040f84004f2",
+        "frame_interpretation": "flange-local optical frame"
       }
     },
     "3": {
@@ -982,22 +909,22 @@
       ],
       "T_parent_rgb_m": [
         [
-          0.009406203861934234,
-          -0.8622106423530579,
-          0.5064625667727455,
-          0.11613389134390073
+          -0.014547227097114104,
+          -0.8308943775432586,
+          0.5562399765845549,
+          0.1273603218756391
         ],
         [
-          -0.999953108178163,
-          -0.009277058944961716,
-          0.0027780608639685735,
-          0.028640379409888082
+          -0.9997718620421182,
+          0.02078830993318591,
+          0.004906122599163287,
+          -0.0034876335486242415
         ],
         [
-          0.0023032094433487194,
-          -0.506464948827124,
-          -0.8622574736329046,
-          1.07227570530598
+          -0.015639758713650476,
+          -0.5560417066525882,
+          -0.8310072312623136,
+          1.199981040227405
         ],
         [
           0.0,
@@ -1397,120 +1324,25 @@
         "stereo_calibration_available": true,
         "stereo_calibration_error": ""
       },
-      "historical_extrinsic": {
-        "schema_version": 1,
-        "cam_id": "head",
-        "label": "\u5934\u90e8\u76f8\u673a",
-        "arm": "B",
-        "mode": "eye_to_hand",
-        "base_frame": "base_link",
-        "T_world_base": [
-          [
-            1.0,
-            0.0,
-            0.0,
-            0.0
-          ],
-          [
-            0.0,
-            0.0,
-            -1.0,
-            -37.0
-          ],
-          [
-            0.0,
-            1.0,
-            0.0,
-            1121.0
-          ],
-          [
-            0.0,
-            0.0,
-            0.0,
-            1.0
-          ]
-        ],
-        "board": {
-          "dictionary": "auto",
-          "marker_len_mm": 22.5,
-          "square_len_mm": 30.0,
-          "squares_x": 9,
-          "squares_y": 12
-        },
+      "extrinsic_provenance": {
+        "source_path": "resources/cameras/user-extrinsics/camera_head_extrinsic.json",
+        "source_sha256": "5df5565d1093ff6310ab599531b0f90621686d5e6addbacc99850b4c8ef54d91",
+        "original_source_path": "C:\\Users\\l1ght\\Downloads\\camera_head_extrinsic.json",
+        "source_frame": "base_link",
         "extrinsic_name": "T_base_cam",
-        "extrinsic": [
-          [
-            0.009406203861934234,
-            -0.8622106423530579,
-            0.5064625667727455,
-            116.13389134390073
-          ],
-          [
-            -0.999953108178163,
-            -0.009277058944961716,
-            0.0027780608639685735,
-            28.640379409888084
-          ],
-          [
-            0.0023032094433487194,
-            -0.506464948827124,
-            -0.8622574736329046,
-            1072.27570530598
-          ],
-          [
-            0.0,
-            0.0,
-            0.0,
-            1.0
-          ]
-        ],
-        "matrix": [
-          [
-            0.009406203861934234,
-            -0.8622106423530579,
-            0.5064625667727455,
-            116.13389134390073
-          ],
-          [
-            -0.999953108178163,
-            -0.009277058944961716,
-            0.0027780608639685735,
-            28.640379409888084
-          ],
-          [
-            0.0023032094433487194,
-            -0.506464948827124,
-            -0.8622574736329046,
-            1072.27570530598
-          ],
-          [
-            0.0,
-            0.0,
-            0.0,
-            1.0
-          ]
-        ],
-        "residuals": {
-          "trans_mm_rms": 0.7841893038776984,
-          "trans_mm_max": 1.1912550831149031,
-          "rot_deg_rms": 0.20519280794438646,
-          "rot_deg_max": 0.33202272761407164
-        },
-        "translation_rms_mm": 0.7841893038776984,
-        "rotation_rms_deg": 0.20519280794438646,
-        "quality": {
-          "grade": "excellent",
-          "warnings": [],
-          "translation_rms_mm": 0.7841893038776984,
-          "rotation_rms_deg": 0.20519280794438646,
-          "translation_span_mm": 100.461,
-          "rotation_span_deg": 29.199
-        },
-        "n_samples": 31,
-        "saved_at": "2026-08-26T04:35:38+00:00",
-        "promoted_at": "2026-08-26T04:48:27+00:00"
+        "source_translation_unit": "mm",
+        "translation_scale_to_m": 0.001,
+        "T_world_base_applied": false,
+        "camera_serial_number": "CPB94630009P",
+        "intrinsic_revision_from_source": "0221644e4262f50edb1ae006ba133040f84004f2",
+        "frame_interpretation": "T_base_cam is already in robot world/base_link"
       }
     }
   },
-  "calibration_id": "historical-rgb-b6a717b114bff14b"
+  "calibration_id": "user-extrinsics-5a390ce34b936bd8",
+  "extrinsics_source_sha256": {
+    "right_wrist": "e4a33a2fcb96b1edcd9aea40957e991dfc902a29a6173ee90908b87c19267dee",
+    "left_wrist": "ca9c562b15e4fd96ffaafaf31fdd40ad6b0c5c7f7a7843f9cb136c725cfa9cdc",
+    "head": "5df5565d1093ff6310ab599531b0f90621686d5e6addbacc99850b4c8ef54d91"
+  }
 }

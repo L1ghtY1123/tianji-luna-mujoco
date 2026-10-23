@@ -1,0 +1,44 @@
+{
+  "source": "frozen rendered RGBD inventory masks; one-pixel erosion; no simulator pose passed to registration",
+  "original_manifest": "data/cad-inspection/measured-bin-fixtures/manifest.json",
+  "fixtures": [
+    {
+      "file": "blue_source_bin-camera-2.npz",
+      "sha256": "e407c548be2fb84a9715f711174a3a0547665d1abb8c03388f2362480419941c",
+      "camera_id": "2",
+      "observation_id": "rgbd-1-aabd61d38a5a4945876f7f34f63324f0",
+      "generation": 1,
+      "intrinsics": {
+        "cx": 318.9871794871795,
+        "cy": 243.08974358974362,
+        "fx": 369.2307692307693,
+        "fy": 369.2307692307693,
+        "width": 640,
+        "height": 480
+      },
+      "raw_points": 61863,
+      "interior_points": 59965,
+      "source": "actual frozen MuJoCo registered RGBD; offline segmentation label; one pixel erosion",
+      "no_ground_truth_pose_in_registration_input": true
+    },
+    {
+      "file": "blue_right_bin-camera-1.npz",
+      "sha256": "63c2be502dfbfdda1d108c72de9266ed0a3a58e2422f06f0501547fa8d572a84",
+      "camera_id": "1",
+      "observation_id": "rgbd-1-aabd61d38a5a4945876f7f34f63324f0",
+      "generation": 1,
+      "intrinsics": {
+        "cx": 317.9415584415584,
+        "cy": 235.86363636363635,
+        "fx": 374.025974025974,
+        "fy": 374.025974025974,
+        "width": 640,
+        "height": 480
+      },
+      "raw_points": 62356,
+      "interior_points": 60980,
+      "source": "actual frozen MuJoCo registered RGBD; offline segmentation label; one pixel erosion",
+      "no_ground_truth_pose_in_registration_input": true
+    }
+  ]
+}

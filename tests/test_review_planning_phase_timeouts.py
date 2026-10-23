@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 from test_runner import Sim
 
-from jev_mujoco.planning_settings import PlanningSettings
-from jev_mujoco.runner import Runner
+from luna_mujoco.planning_settings import PlanningSettings
+from luna_mujoco.runner import Runner
 
 
 @pytest.mark.asyncio

@@ -234,12 +234,12 @@ test('observation joint arrays remain read-only while attachment fields unlock a
     AttachmentSettings: { properties: {
       voxel_size_m: { type: 'number', group: 'attachment', display_scale: 1000, minimum: .001, maximum: .05 },
       margin_m: { type: 'number', group: 'attachment', display_scale: 1000, minimum: 0, maximum: .03 },
-      sphere_budget: { type: 'integer', group: 'attachment', minimum: 1, maximum: 256 },
+      sphere_budget: { type: 'integer', group: 'attachment', minimum: 1, maximum: 128 },
     } },
   } };
   const joints = [.123456789123, 0, 0, 0, 0, 0, 0];
   payload.settings = { ...payload.settings, observation: { A: [...joints], B: [...joints] },
-    attachment: { voxel_size_m: .01, margin_m: .001, sphere_budget: 256 } };
+    attachment: { voxel_size_m: .01, margin_m: .001, sphere_budget: 128 } };
   const original = structuredClone(payload.settings);
   ui.settings.load(payload);
   assert.equal(ui.input('observation.A.0').disabled, true);
@@ -247,6 +247,9 @@ test('observation joint arrays remain read-only while attachment fields unlock a
   assert.equal(ui.input('attachment.margin_m').disabled, true);
   assert.deepEqual(ui.settings.read(), payload.settings);
   ui.settings.setAdvancedLocked(false);
+  ui.change('attachment.sphere_budget', '129');
+  assert.throws(() => ui.settings.read(), /128/);
+  ui.change('attachment.sphere_budget', '128');
   assert.equal(ui.input('observation.B.6').disabled, true);
   assert.equal(ui.input('observation.B.6').tagName, 'output');
   ui.change('attachment.margin_m', '2');

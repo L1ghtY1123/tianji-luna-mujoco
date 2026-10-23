@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 import yaml
 
-from jev_mujoco.cameras import RgbdRenderer, clone_render_model, deproject_view
-from jev_mujoco.model_builder import ARM_JOINTS, ModelBuilder, normalize_scene
+from luna_mujoco.cameras import RgbdRenderer, clone_render_model, deproject_view
+from luna_mujoco.model_builder import ARM_JOINTS, ModelBuilder, normalize_scene
 
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCE_SCENE = {

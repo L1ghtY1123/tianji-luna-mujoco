@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0c121a" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230c121a'/%3E%3Cpath d='M7 10h18M16 10v15M10 19l6-9 6 9' stroke='%2364e0c0' stroke-width='2.5' fill='none'/%3E%3C/svg%3E" />
-    <title>Tianji · JEV MuJoCo 工作台</title>
+    <title>Tianji Luna MuJoCo</title>
   </head>
   <body class="workbench-page">
     <header class="app-header">
       <div class="brand-mark" aria-hidden="true">T</div>
-      <div class="brand"><h1>Tianji <span>/</span> JEV 工作台</h1></div>
+      <div class="brand"><h1>Tianji <span>/</span> Luna MuJoCo</h1></div>
       <nav class="header-actions" aria-label="工作台操作">
         <button id="toggle-scene-editor" class="button secondary" aria-controls="editor-panel" aria-expanded="true">收起场景</button>
         <button id="open-planning" class="button secondary" aria-haspopup="dialog">参数设置</button>
@@ -21,15 +21,16 @@
     <main class="workspace" id="workspace">
       <aside class="panel editor-panel" id="editor-panel">
         <div class="panel-heading"><h2>场景编辑</h2><span id="scene-badge" class="subtle-badge">待连接</span></div>
-        <p class="panel-description">位置 / 尺寸 mm · 角度 °。修改后应用，再稳定并确认。</p>
+        <p class="panel-description">位置 / 尺寸 mm · 角度 °。三种 CAD 可重复添加，数量不限。修改后应用，再稳定并确认。</p>
         <fieldset id="scene-fields" disabled>
           <div class="section-label"><span>场景物体 <b id="object-count">0</b></span><button id="add-object" class="text-button" type="button">＋ 添加</button></div>
+          <label class="input-field"><span>添加 CAD 物体</span><select id="add-asset" aria-label="添加 CAD 物体"></select></label>
           <div id="object-list" class="object-list"><div class="empty-small">正在读取场景…</div></div>
           <div id="object-editor" class="object-editor"></div>
-          <details class="table-editor"><summary>固定桌面 <span>位置与尺寸</span></summary><div id="table-fields"></div><p class="field-note">桌面保持固定，不受重力移动。</p></details>
+          <details class="table-editor"><summary>固定桌面 <span>颜色、位置与尺寸</span></summary><div id="table-fields"></div><p class="field-note">桌面默认白色，可填写 white、gray、blue 或 #RRGGBB，应用场景后生效。桌面保持固定，不受重力移动。</p></details>
           <div class="scene-edit-actions"><button id="apply-scene" type="button" class="button secondary">应用场景修改</button><button id="cancel-scene" type="button" class="button secondary" disabled>取消修改</button></div>
         </fieldset>
-        <div class="scene-actions"><button id="settle" class="button secondary" disabled>↓ 重力稳定</button><button id="confirm" class="button primary" disabled>✓ 确认场景</button></div>
+        <div class="scene-actions"><label>预设粉件数 <select id="demo-count"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label><button id="demo-preset" class="button secondary">加载 Demo</button></div><div class="scene-actions"><button id="settle" class="button secondary" disabled>↓ 重力稳定</button><button id="confirm" class="button primary" disabled>✓ 确认场景</button></div>
         <p id="scene-note" class="helper-text">确认后可开始任务，Reset 将恢复该物理基线。</p>
         <div class="service-section"><div class="section-label">服务状态 <button id="refresh-health" class="text-button">刷新</button></div><div id="services" class="services"><span class="muted">等待后端…</span></div></div>
       </aside>
@@ -66,7 +67,7 @@
         <section class="instruction-panel" aria-labelledby="task-heading">
           <div class="instruction-heading"><h2 id="task-heading">TASK <span>任务指令</span></h2><div class="run-strip"><span class="run-dot" id="run-dot"></span><strong id="run-status">等待场景</strong></div></div>
           <label class="sr-only" for="instruction">任务指令</label>
-          <textarea id="instruction" rows="2" placeholder="例如：抓取红色方块到蓝色盒子里" maxlength="200"></textarea>
+          <textarea id="instruction" rows="2" placeholder="逐件从左盒取出，在桌面拆包，再将黑件放入右盒" maxlength="200">对于左侧盒子中的所有粉色待拆包物体，逐个拿出放到桌面目标区域，用VLA拆包取出黑色物体，再把黑色物体放到右侧盒子里。一个物体完成后再处理下一个。</textarea>
           <div class="experiment-controls">
             <label class="experiment-name">实验名称<input id="experiment-name" type="text" maxlength="120" placeholder="可选，便于查找" /></label>
             <label>保存方式<select id="experiment-save-mode"><option value="auto" selected>自动保存</option><option value="ask">完成后决定</option><option value="none">不保存</option></select></label>
@@ -86,8 +87,8 @@
             <p id="run-last-error" class="run-warning" hidden></p><p id="run-failure" class="run-failure" role="alert" hidden></p>
             <p id="algorithm-pending" class="run-warning" hidden>后台算法调用尚未返回。结果不会触发后续动作；返回前不能开始新任务，仍可 Reset 或编辑场景。</p>
           </section>
-          <section id="task-object-list" class="object-list" aria-label="目标清单" hidden></section>
-          <details class="log-guide"><summary>记录说明与性能</summary><p class="panel-description">仅「JEV 决策」表示模型调用；其余为 skill 执行、算法计算或系统事件。</p><div id="performance-summary" class="performance-summary" aria-label="JEV 性能摘要" hidden><div><span>JEV 调用数</span><strong id="metric-count">—</strong></div><div><span>平均耗时</span><strong id="metric-mean">—</strong></div><div><span>累计耗时</span><strong id="metric-total">—</strong></div><div><span>整轮耗时</span><strong id="metric-run">—</strong></div></div></details>
+          <section id="task-object-list" class="object-list" aria-label="物体与拆包工序清单" hidden></section>
+          <details class="log-guide"><summary>记录说明与性能</summary><p class="panel-description">Responses 建立初始清单并编排 skills，程序校验与执行；Decisions 判断身份及放置结果。</p><div id="performance-summary" class="performance-summary" aria-label="视觉模型性能摘要" hidden><div><span>Responses / Decisions 调用</span><strong id="metric-count">—</strong></div><div><span>已记录平均耗时</span><strong id="metric-mean">—</strong></div><div><span>已记录累计耗时</span><strong id="metric-total">—</strong></div><div><span>整轮耗时</span><strong id="metric-run">—</strong></div></div></details>
           <div id="trace-list" class="trace-list"><div class="trace-empty"><strong>等待第一条指令</strong><p>运行事件按时间记录于此。</p></div></div>
           <details id="facts-section" class="facts-section" hidden><summary>运行事实 / 验证 / 性能</summary><pre id="facts-content"></pre></details>
         </div>

@@ -4,14 +4,14 @@ from types import SimpleNamespace
 import pytest
 from test_carrying import binding
 
-from jev_mujoco import geometry_service
-from jev_mujoco.planning_settings import PlanningSettings
+from luna_mujoco import geometry_service
+from luna_mujoco.planning_settings import PlanningSettings
 
 
 def test_place_maps_offsets_and_returns_only_honest_pre_release_phases():
     from tianji_curobo.contracts import PlanPlaceRequest
 
-    from jev_mujoco.trajectory_postprocessing import PreReleasePlacePlan, RawTrajectory
+    from luna_mujoco.trajectory_postprocessing import PreReleasePlacePlan, RawTrajectory
 
     settings = PlanningSettings(place_approach_offset_m=.12, place_retreat_offset_m=.15)
     phase = RawTrajectory(positions_rad=((0.,) * 7, (.1,) * 7), joint_names=tuple(f"Joint{i}_L" for i in range(1, 8)),
@@ -47,7 +47,7 @@ def test_detached_pose_request_rejects_old_attachment():
         geometry_service.run_operation(runtime, "/tools/plan_to_pose", {"carrying_binding": binding()})
 
 
-def test_reset_clear_invalidates_scene_and_destroys_all_carried_backend_references():
+def test_reset_clear_invalidates_scene_but_preserves_resident_backends():
     runtime = geometry_service.GeometryRuntime()
     runtime.geometry_scene = {"scene_token": "old"}
     runtime.geometry_model = {"voxel": {}}
@@ -55,7 +55,7 @@ def test_reset_clear_invalidates_scene_and_destroys_all_carried_backend_referenc
     runtime._compound_backends["A"] = SimpleNamespace(destroy=lambda: destroyed.append(True))
     result = geometry_service.run_operation(runtime, "/carrying/clear", {})
     assert result["attached"] is False
-    assert destroyed == [True] and not runtime._compound_backends
+    assert destroyed == [] and runtime._compound_backends
     with pytest.raises(ValueError, match="RGBD"):
         runtime._scene_snapshot_unlocked()
 
@@ -65,7 +65,7 @@ def test_compound_derivatives_survive_later_sdk_buffer_reuse():
     from test_trajectory_postprocessing import Tensor
     from tianji_curobo.contracts import NativePlacePlan, NativeTrajectory
 
-    from jev_mujoco.trajectory_postprocessing import add_place_derivatives, build_execution_phases
+    from luna_mujoco.trajectory_postprocessing import add_place_derivatives, build_execution_phases
 
     phase = NativeTrajectory(positions_rad=((0.,) * 7, (.1,) * 7), joint_names=tuple(f"joint{i}" for i in range(7)),
                              interpolation_dt_s=.02, planning_time_s=.1, position_error_m=0., rotation_error_rad=0.)
@@ -87,8 +87,8 @@ def test_single_compound_builder_reaches_public_solver_with_carried_geometry(mon
 
     from test_backend_builder import ConfigFactory, profile
 
-    from jev_mujoco import backend_builder
-    from jev_mujoco.carrying import CarryingBinding
+    from luna_mujoco import backend_builder
+    from luna_mujoco.carrying import CarryingBinding
 
     constructed = []
     class BoundaryReached(Exception):
@@ -107,7 +107,8 @@ def test_single_compound_builder_reaches_public_solver_with_carried_geometry(mon
         "curobo.collision_checking": {"RobotCollisionChecker": object, "RobotCollisionCheckerCfg": CheckerConfig},
         "curobo.inverse_kinematics": {"InverseKinematics": Planner, "InverseKinematicsCfg": ConfigFactory},
         "curobo.kinematics": {"Kinematics": object, "KinematicsCfg": object},
-        "curobo.motion_planner": {"MotionPlannerCfg": ConfigFactory}, "curobo.scene": {"Cuboid": object},
+        "curobo.motion_planner": {"MotionPlannerCfg": ConfigFactory, "MotionPlanner": Planner},
+        "curobo.batch_motion_planner": {"BatchMotionPlanner": Planner}, "curobo.scene": {"Cuboid": object},
         "curobo.types": dict.fromkeys(("GoalToolPose", "JointState", "Pose", "ToolPoseCriteria"), object),
         "tianji_curobo.grasp_planner": {"GraspBatchMotionPlanner": Planner, "GraspMotionPlanner": Planner}}
     for name, exports in modules.items():
@@ -131,20 +132,17 @@ def test_single_compound_builder_reaches_public_solver_with_carried_geometry(mon
 def test_pinned_single_planner_forwards_only_supported_public_arguments():
     from test_backend_builder import profile
 
-    from jev_mujoco.backend_builder import SinglePlanningOverrides
+    from luna_mujoco.public_planner import PublicPlanner
 
     class PinnedPlanner:
         def plan_pose(self, goal, state, use_implicit_goal=True, max_attempts=5, enable_graph_attempt=1):
             return {"max_attempts": max_attempts, "enable_graph_attempt": enable_graph_attempt}
-    class Configured(SinglePlanningOverrides, PinnedPlanner):
-        pass
-    planner = Configured()
-    planner.planning_settings = profile(plan_max_attempts=3, finetune_attempts=7)
+    planner = PublicPlanner(PinnedPlanner(), profile(plan_max_attempts=3, finetune_attempts=7))
     assert planner.plan_pose("goal", "state") == {"max_attempts": 3, "enable_graph_attempt": 1}
 
 
 def test_attachment_detach_error_still_releases_public_planner_buffers():
-    from jev_mujoco.backend_builder import ValidatedSingleBackend
+    from luna_mujoco.backend_builder import ValidatedSingleBackend
 
     destroyed = []
     def broken_detach(**kwargs):
@@ -249,4 +247,4 @@ def test_support_frame_scope_clears_request_and_keeps_exact_configuration_after_
     assert runtime.support_frame is None and runtime.gripper_feedback is None
     assert runtime._compound_backends and destroyed == []
     runtime.clear_carrying()
-    assert not runtime._compound_backends and destroyed == [True]
+    assert runtime._compound_backends and destroyed == []

@@ -3,8 +3,8 @@ import pytest
 from scipy.spatial.transform import Rotation
 from test_region_placement import region_inputs
 
-from jev_mujoco.placement import release_candidates, release_endpoint_evidence
-from jev_mujoco.placement_layout import partition_region
+from luna_mujoco.placement import release_candidates, release_endpoint_evidence
+from luna_mujoco.placement_layout import partition_region
 
 
 @pytest.mark.parametrize('kind', ['marker', 'bin'])

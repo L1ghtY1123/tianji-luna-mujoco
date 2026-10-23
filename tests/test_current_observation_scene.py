@@ -5,7 +5,7 @@ from test_geometry_scene_reuse import mapped_runtime
 from test_perception_mapping import wire
 from test_route_observation import route_context
 
-from jev_mujoco.perception_mapping import decode_mapping_payload
+from luna_mujoco.perception_mapping import decode_mapping_payload
 
 
 @pytest.mark.parametrize('legacy', [

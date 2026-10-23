@@ -10,10 +10,10 @@ import numpy as np
 
 
 def main(folder, url):
-    from jev_mujoco.algorithms import AlgorithmError, Algorithms
-    from jev_mujoco.kinematics import robot_tcp
-    from jev_mujoco.placement import release_endpoint_evidence
-    from jev_mujoco.planning_settings import PlanningSettings
+    from luna_mujoco.algorithms import AlgorithmError, Algorithms
+    from luna_mujoco.kinematics import robot_tcp
+    from luna_mujoco.placement import release_endpoint_evidence
+    from luna_mujoco.planning_settings import PlanningSettings
 
     holding = json.loads((folder / 'stage-1.json').read_text())['holding']
     mapping = json.loads((folder / 'gpu-requests/017-perception-build.json').read_text())

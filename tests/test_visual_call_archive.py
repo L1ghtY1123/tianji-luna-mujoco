@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from test_experiments import begin
 
-from jev_mujoco.experiments import ExperimentStore
+from luna_mujoco.experiments import ExperimentStore
 
 
 def test_actual_visual_call_archive_preserves_inputs_images_and_failure(tmp_path):
@@ -38,7 +38,7 @@ def test_actual_visual_call_archive_preserves_inputs_images_and_failure(tmp_path
 def test_cancelled_run_keeps_inflight_call_archive_without_late_live_event(tmp_path):
     from test_rgbd_workflow import Choices, SensorRobot, VisionAlgorithms
 
-    from jev_mujoco.runner import Runner
+    from luna_mujoco.runner import Runner
 
     store = ExperimentStore(tmp_path / 'experiments')
     session = begin(store)
@@ -67,7 +67,7 @@ def test_cancelled_run_keeps_inflight_call_archive_without_late_live_event(tmp_p
 async def test_running_observe_owns_archive_across_cancel_and_reset(tmp_path):
     from test_rgbd_workflow import Choices, SensorRobot, VisionAlgorithms
 
-    from jev_mujoco.runner import Runner
+    from luna_mujoco.runner import Runner
 
     started, release = threading.Event(), threading.Event()
     event = {'request': {'input': [], 'questions': []}, 'response': {'answers': []},

@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from jev_mujoco.experiments import ExperimentOptions, ExperimentStore
+from luna_mujoco.experiments import ExperimentOptions, ExperimentStore
 
 
 def recorded(store, mode="auto"):
@@ -162,7 +162,7 @@ def test_failed_rename_preserves_record(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_http_file_response_pins_archive_until_interrupted_send_ends(tmp_path):
-    from jev_mujoco.experiment_api import experiment_router
+    from luna_mujoco.experiment_api import experiment_router
 
     store = ExperimentStore(tmp_path)
     session = recorded(store)
@@ -187,7 +187,7 @@ async def test_http_file_response_pins_archive_until_interrupted_send_ends(tmp_p
 @pytest.mark.asyncio
 @pytest.mark.parametrize("send_error", [RuntimeError, asyncio.CancelledError])
 async def test_http_export_pins_archive_through_transmission_and_cleans_interrupted_zip(tmp_path, send_error):
-    from jev_mujoco.experiment_api import experiment_router
+    from luna_mujoco.experiment_api import experiment_router
 
     store = ExperimentStore(tmp_path)
     session = recorded(store)
@@ -214,7 +214,7 @@ async def test_http_export_pins_archive_through_transmission_and_cleans_interrup
 async def test_cancelled_export_construction_cleans_package_after_writer_finishes(tmp_path, monkeypatch):
     from zipfile import ZipFile
 
-    from jev_mujoco.experiment_api import experiment_router
+    from luna_mujoco.experiment_api import experiment_router
 
     store = ExperimentStore(tmp_path)
     session = recorded(store)

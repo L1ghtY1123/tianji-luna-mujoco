@@ -2,11 +2,27 @@ import numpy as np
 import pytest
 
 
+def test_full_surface_bounds_include_extreme_discarded_by_preview_sampling():
+    from luna_mujoco.instance_mapping import surface_geometry_metadata
+
+    centers = np.zeros((20001, 3), dtype=np.float32)
+    centers[1] = [-.4, .7, 1.2]  # Odd index is omitted by the bounded preview.
+    original = centers.copy()
+    metadata = surface_geometry_metadata(centers, .02)
+    assert len(metadata["centers_base_m"]) <= 20000
+    assert np.max(np.asarray(metadata["centers_base_m"])[:, 2]) == 0.
+    np.testing.assert_allclose(metadata["surface_cell_bounds_world_m"],
+                               [[-.41, -.01, -.01], [.01, .71, 1.21]])
+    assert metadata["surface_cell_count"] == 20001
+    assert metadata["surface_cell_bounds_source"] == "all_native_surface_cells_before_preview_sampling"
+    np.testing.assert_array_equal(centers, original)
+
+
 def test_local_mapping_inputs_translate_cameras_and_table_without_changing_depth(monkeypatch):
     import sys
     from types import SimpleNamespace
 
-    from jev_mujoco.instance_mapping import local_mapping_inputs
+    from luna_mujoco.instance_mapping import local_mapping_inputs
 
     monkeypatch.setitem(sys.modules, 'curobo.types', SimpleNamespace(
         CameraObservation=SimpleNamespace, Pose=SimpleNamespace))
@@ -26,7 +42,7 @@ def test_local_mapping_inputs_translate_cameras_and_table_without_changing_depth
 
 
 def test_esdf_bounds_keep_query_halo_without_tsdf_allocation_slack():
-    from jev_mujoco.instance_mapping import instance_grid_layout
+    from luna_mujoco.instance_mapping import instance_grid_layout
     layout = instance_grid_layout(np.array([[.41, -.013, .61], [.45, .027, .65]]), .19, voxel_size_m=.01)
     np.testing.assert_allclose(layout['center'], [.43, .01, .63])
     np.testing.assert_allclose(layout['tsdf_extent'], [.16, .16, .16])
@@ -38,13 +54,13 @@ def test_esdf_bounds_keep_query_halo_without_tsdf_allocation_slack():
 
 @pytest.mark.parametrize('points', [[], [[np.nan, 0., 1.]], [[1., 2.]]])
 def test_invalid_measured_points_never_allocate_gpu_maps(points):
-    from jev_mujoco.instance_mapping import instance_grid_layout
+    from luna_mujoco.instance_mapping import instance_grid_layout
     with pytest.raises(ValueError, match='instance_points'):
         instance_grid_layout(np.array(points), .19)
 
 
 def test_grid_centers_preserve_native_tsdf_phase_for_asymmetric_measurements():
-    from jev_mujoco.instance_mapping import instance_grid_layout
+    from luna_mujoco.instance_mapping import instance_grid_layout
     points = np.array([[.403, -.127, .603], [.457, .069, .637]])
     layout = instance_grid_layout(points, .19, voxel_size_m=.01)
     center, extent = np.asarray(layout['center']), np.asarray(layout['esdf_extent'])
@@ -85,7 +101,7 @@ def test_semantic_crop_uses_measured_instance_samples_without_projecting_backgro
     from test_semantic_builder import Segmenter, request
     from tianji_curobo.robot_segmenter import FfsDepthObservationRequest, SemanticProjectionRequest
 
-    from jev_mujoco.semantic_builder import crop_instance_samples
+    from luna_mujoco.semantic_builder import crop_instance_samples
     segmenter = Segmenter()
     view = request()['views']['1']
     prepared = segmenter.remove_semantic_instances(
@@ -108,7 +124,7 @@ def test_preparation_failure_bounds_cache_and_waits_for_owned_streams(monkeypatc
     import sys
     from types import SimpleNamespace
 
-    from jev_mujoco.instance_mapping import InstanceMapper
+    from luna_mujoco.instance_mapping import InstanceMapper
 
     streams = []
 
@@ -157,7 +173,7 @@ def mapping_with_sync_failures(monkeypatch, sync_failures):
     import sys
     from types import SimpleNamespace
 
-    from jev_mujoco.instance_mapping import InstanceMapper
+    from luna_mujoco.instance_mapping import InstanceMapper
 
     streams = []
 
@@ -176,8 +192,21 @@ def mapping_with_sync_failures(monkeypatch, sync_failures):
                 raise self.failures.pop(0)
 
     class Surface:
+        def __init__(self, values=None):
+            self.values = np.array([[.2, 0., 1.]]) if values is None else values
+            self.shape = self.values.shape
+
         def __len__(self):
-            return 1
+            return len(self.values)
+
+        def __getitem__(self, item):
+            return Surface(self.values[item])
+
+        def amin(self, dim):
+            return Surface(self.values.min(axis=dim))
+
+        def amax(self, dim):
+            return Surface(self.values.max(axis=dim))
 
         def detach(self):
             return self
@@ -186,7 +215,7 @@ def mapping_with_sync_failures(monkeypatch, sync_failures):
             return self
 
         def numpy(self):
-            return np.array([[.2, 0., 1.]])
+            return self.values
 
     class Mapper:
         def __init__(self, config):

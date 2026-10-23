@@ -1,7 +1,7 @@
 """Explicit visual decisions for measured-geometry tests; never infer identity."""
 
-from jev_mujoco.perception import Perception
-from jev_mujoco.visual_inventory import VisualInventory
+from luna_mujoco.perception import Perception
+from luna_mujoco.visual_inventory import VisualInventory
 
 
 class ScriptedVisualInventory:

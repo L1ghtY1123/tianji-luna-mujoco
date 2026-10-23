@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from jev_mujoco.algorithms import AlgorithmError, Algorithms
+from luna_mujoco.algorithms import AlgorithmError, Algorithms
 
 
 def test_semantic_map_cannot_omit_an_unobserved_fixed_obstacle():
@@ -26,7 +26,7 @@ def test_target_cannot_stand_in_for_declared_same_color_environment_obstacle():
 
 
 def test_combined_target_quantity_is_offered_despite_environment_quantity():
-    from jev_mujoco.task_request import quantity_candidates
+    from luna_mujoco.task_request import quantity_candidates
 
     assert 5 in quantity_candidates('桌面有四个黑色障碍，把两个红色和三个绿色物体搬到盒子里')
 

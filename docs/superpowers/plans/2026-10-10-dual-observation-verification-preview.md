@@ -109,7 +109,7 @@ unknown 由 JEV 选择继续适用的观察、调用可选视觉辅助或结束�
 
 ### Task 1 — 双臂观察运动
 
-Files: `src/jev_mujoco/algorithms.py`, `geometry_service.py`, `runner.py`, `simulation.py`, `skills/move_to_observe/*`；扩展现有 observation/dual 测试。
+Files: `src/luna_mujoco/algorithms.py`, `geometry_service.py`, `runner.py`, `simulation.py`, `skills/move_to_observe/*`；扩展现有 observation/dual 测试。
 
 Interface: `plan_dual_observation_motion(snapshot, scene, goal_joints, planning_settings)` 返回统一 dt、A/B 轨迹、场景身份与联合碰撞证据；`execute_dual_trajectory(paths, dt, generation)` 原子提交双臂同一起始时刻。
 
@@ -144,7 +144,7 @@ Interface: 精简 skill 目录；JEV 在调度层选择 skill 及必要的 targe
 
 ### Task 4 — 可选视觉辅助
 
-Files: 新建 `src/jev_mujoco/visual_assistance.py`、`skills/inspect_visual_result/{SKILL.md,contract.json}`；修改 `runner.py`、配置与相应测试。
+Files: 新建 `src/luna_mujoco/visual_assistance.py`、`skills/inspect_visual_result/{SKILL.md,contract.json}`；修改 `runner.py`、配置与相应测试。
 
 - [ ] 测试未启用/无配置、图像上限、一次调用、结果缓存、超时和不可见返回 unknown。
 - [ ] 使用已有服务端 OpenAI 配置创建独立图像判断接口；不自动选择/切换型号，不导出凭据。

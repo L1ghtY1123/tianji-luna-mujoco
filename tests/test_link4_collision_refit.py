@@ -37,7 +37,7 @@ def test_measured_attachment_false_collision_is_removed_without_shrinking_attach
     assert config["self_collision_buffer"].get("gripL_Link4_R", 0.) == 0.
 
 
-def test_refit_changes_only_four_mirrored_link4_lists_and_stays_within_budget():
+def test_current_model_changes_only_four_link4_and_two_certified_base_lists():
     from replay_transfer_spheres import rebuild
 
     previous = yaml.safe_load(rebuild(ROOT / "data/next-revision-audit-20261012/spheres",
@@ -48,8 +48,8 @@ def test_refit_changes_only_four_mirrored_link4_lists_and_stays_within_budget():
     assert previous == current
     assert {link for link in before if before[link] != after[link]} == {
         f"grip{hand}_Link4_{side}" for hand in "LR" for side in "LR"
-    }
-    assert sum(map(len, after.values())) == 349
+    } | {"gripL_Base", "gripR_Base"}
+    assert sum(map(len, after.values())) == 365
     for side in "LR":
         assert after[f"gripL_Link4_{side}"] == after[f"gripR_Link4_{side}"]
         assert len(after[f"gripL_Link4_{side}"]) == 14
@@ -86,7 +86,12 @@ def test_recorded_cpu_fit_reproduces_the_configuration():
     from refit_link4_collision import build_candidate
 
     config = yaml.safe_load(CONFIG.read_bytes())
-    reproduced = build_candidate(config, json.loads(RECORD.read_text()))
+    # Replay the historical Link4 recipe with its original palm configuration
+    # and 350-sphere cap. The later primitive cover has its own certificate.
+    historical = yaml.safe_load(CONFIG.read_bytes())
+    palm_record = json.loads((ROOT / "tests/fixtures/gripper_base_first_contact.json").read_bytes())
+    historical["robot_cfg"]["kinematics"]["collision_spheres"].update(palm_record["previous_base_spheres"])
+    reproduced = build_candidate(historical, json.loads(RECORD.read_text()))
     for side in "LR":
         link = f"gripL_Link4_{side}"
         np.testing.assert_allclose(array(config["robot_cfg"]["kinematics"]["collision_spheres"][link]),
@@ -139,8 +144,8 @@ def test_postprocessing_cannot_publish_intersection_or_radius_overflow():
 
 
 @pytest.mark.parametrize("driver", [0., .4, .8])
-def test_closed_gripper_derivation_retains_all_link4_spheres_and_attachment_checks(driver):
-    from jev_mujoco.carrying import (
+def test_closed_gripper_retains_link4_world_spheres_and_exact_owner_touch_pairs(driver):
+    from luna_mujoco.carrying import (
         CarryingBinding,
         configure_gripper_feedback,
         create_carrying_robot_config,
@@ -157,11 +162,20 @@ def test_closed_gripper_derivation_retains_all_link4_spheres_and_attachment_chec
          "uncertainty_m": .005, "coverage": .6}, scene=scene, arm="A")
     carried, attached_link = create_carrying_robot_config(locked, binding)
     kin = carried["robot_cfg"]["kinematics"]
+    original = locked["robot_cfg"]["kinematics"]
+    touch_links = {"gripL_Base", *(f"gripL_Link{part}_{side}"
+                                  for part in range(1, 5) for side in "LR")}
     for hand in "LR":
         for side in "LR":
             link = f"grip{hand}_Link4_{side}"
             assert kin["collision_spheres"][link] == config["robot_cfg"]["kinematics"]["collision_spheres"][link]
             assert len(kin["collision_spheres"][link]) == 14
-            assert attached_link not in kin["self_collision_ignore"].get(link, [])
-            assert link not in kin["self_collision_ignore"][attached_link]
-    assert set(kin["self_collision_ignore"][attached_link]) == {"gripL_Link3_L", "gripL_Link3_R"}
+            assert link in kin["collision_link_names"]
+            assert (attached_link in kin["self_collision_ignore"].get(link, [])) == (hand == "L")
+    assert set(kin["self_collision_ignore"][attached_link]) == touch_links
+    for link in original["collision_link_names"]:
+        expected = set(original["self_collision_ignore"].get(link, []))
+        if link in touch_links:
+            expected.add(attached_link)
+        assert set(kin["self_collision_ignore"].get(link, [])) == expected
+        assert kin["collision_spheres"][link] == original["collision_spheres"][link]

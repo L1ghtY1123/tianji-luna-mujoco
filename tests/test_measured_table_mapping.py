@@ -5,10 +5,10 @@ import pytest
 
 
 def table_cache():
-    assert importlib.util.find_spec("jev_mujoco.measured_table_mapping"), "project table adapter missing"
+    assert importlib.util.find_spec("luna_mujoco.measured_table_mapping"), "project table adapter missing"
     from tianji_curobo.mixed_esdf_scene import TableCompletion
 
-    from jev_mujoco.measured_table_mapping import MeasuredTableCache
+    from luna_mujoco.measured_table_mapping import MeasuredTableCache
     calls = []
     def fit(groups, spheres, **kwargs):
         calls.append(kwargs)
@@ -66,7 +66,7 @@ def test_initial_downward_extension_is_bounded_by_robot_clearance():
 def test_crop_model_uses_plane_height_without_changing_collision_cuboid():
     cache, _ = table_cache()
     table = cache.build([], [], payload(), hard_clearance_m=.01)
-    from jev_mujoco.measured_table_mapping import table_surface_crop_model
+    from luna_mujoco.measured_table_mapping import table_surface_crop_model
     crop = table_surface_crop_model(table)
     assert crop["pose"][2] - crop["dims"][2] / 2 == pytest.approx(.6)
     assert crop["pose"][:2] == table.model["pose"][:2]

@@ -10,8 +10,8 @@ import yaml
 from tianji_curobo.contracts import CuroboToolError
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.carrying import CarryingBinding
-from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation
+from luna_mujoco.carrying import CarryingBinding
+from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation
 
 
 def summary(value):

@@ -1,0 +1,113 @@
+name: tianji-luna-mujoco-guangyu
+services:
+  sam3:
+    cpus: 0.5
+    image: jodell-sam3:0.2.0-guangyu
+    pull_policy: never
+    container_name: tianji-luna-sam3-guangyu
+    gpus: all
+    init: true
+    shm_size: 2gb
+    restart: unless-stopped
+    ports: ["8362:8022"]
+    environment:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request,msgpack; r=urllib.request.Request('http://127.0.0.1:8022',data=msgpack.packb({'operation':'health','payload':{}},use_bin_type=True),headers={'Content-Type':'application/msgpack'}); assert msgpack.unpackb(urllib.request.urlopen(r,timeout=5).read(),raw=False).get('ok')"]
+      interval: 10s
+      timeout: 10s
+      start_period: 180s
+  graspgen:
+    cpus: 0.5
+    image: jodell-graspgen:0.2.0-guangyu
+    pull_policy: never
+    container_name: tianji-luna-graspgen-guangyu
+    gpus: all
+    init: true
+    shm_size: 2gb
+    restart: unless-stopped
+    ports: ["8363:8323"]
+    volumes: ["../vendor:/opt/jev-vendor:ro"]
+    environment:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      PYTHONPATH: /opt/jev-vendor
+      GAP_GRASPGEN_HOST: 0.0.0.0
+      GAP_GRASPGEN_PORT: "8323"
+    entrypoint: [python3, -m, tianji_graspgen.service]
+    healthcheck:
+      test: [CMD, python3, -c, "from tianji_graspgen.client import GraspGenClient; assert GraspGenClient('http://127.0.0.1:8323').health().get('model_ready')"]
+      interval: 10s
+      timeout: 10s
+      start_period: 180s
+  curobo:
+    cpus: 1
+    image: jodell-curobo:0.2.0-guangyu
+    pull_policy: never
+    container_name: tianji-luna-curobo-guangyu
+    gpus: all
+    init: true
+    shm_size: 2gb
+    restart: unless-stopped
+    ports: ["8352:8310"]
+    volumes:
+      - ../:/opt/jev:ro
+      - demo-curobo-cache:/var/cache/jodell-curobo
+    environment:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      PYTHONPATH: /opt/jev/src:/opt/jev/vendor
+      LUNA_CUROBO_PORT: "8310"
+      LUNA_ROBOT_URDF: /opt/jev/assets/marvin_urdf/marvin_with_grippers.urdf
+      LUNA_MARVIN_MESHES: /opt/jev/assets/marvin_urdf/meshes
+      LUNA_RAG_MESHES: /opt/jev/assets/marvin_urdf/rag100_050/meshes
+    entrypoint: [python3, -m, luna_mujoco.geometry_service]
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8310/health',timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      start_period: 180s
+  web:
+    cpus: 2
+    image: tianji-jev-mujoco:0.4.0-experiments-guangyu
+    pull_policy: never
+    container_name: tianji-luna-web-guangyu
+    init: true
+    restart: unless-stopped
+    network_mode: host
+    user: "${LUNA_UID:-1000}:${LUNA_GID:-1000}"
+    environment:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      LP_NUM_THREADS: "2"
+      LUNA_DECISIONS_CONFIG_FILE: /opt/jev/openai-config/decisions.json
+      LUNA_DECISIONS_TIMEOUT_S: "${LUNA_DECISIONS_TIMEOUT_S:-90}"
+      LUNA_EXPERIMENT_DIR: /opt/jev/data/experiments
+      LUNA_CUROBO_URL: http://127.0.0.1:8352
+      LUNA_GRASPGEN_URL: http://127.0.0.1:8363
+      LUNA_SAM3_URL: http://127.0.0.1:8362
+    tmpfs:
+      - /opt/jev/web/node_modules:rw,exec,size=512m,uid=${LUNA_UID:-1000},gid=${LUNA_GID:-1000},mode=0755
+    volumes:
+      - ${OPENAI_CONFIG_DIR:-/home/guangyu/.config/openai-client}:/opt/jev/openai-config:ro
+      - ../.env:/opt/jev/.env:ro
+      - ../data:/opt/jev/data
+      - ../data/render_meshes:/opt/jev/assets/render_meshes
+      - ../src:/opt/jev/src:ro
+      - ../demo_skills:/opt/jev/demo_skills:ro
+      - ../resources:/opt/jev/resources:ro
+      - ../web:/opt/jev/web:ro
+      - ./run-demo.sh:/opt/jev/deploy/run-demo.sh:ro
+    command: [bash, /opt/jev/deploy/run-demo.sh]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8350/',timeout=5); urllib.request.urlopen('http://127.0.0.1:8351/api/state',timeout=5)"]
+      interval: 5s
+      timeout: 10s
+      start_period: 30s
+volumes:
+  demo-curobo-cache:

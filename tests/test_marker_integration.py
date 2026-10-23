@@ -6,9 +6,9 @@ import pytest
 from geometry_perception_fixture import GeometryPerception
 from test_perception import capture_fixture
 
-from jev_mujoco.observation_motion import initial_view_evidence, matching_instances
-from jev_mujoco.perception import PerceptionError, public_observation
-from jev_mujoco.placement import public_observation as public_placement
+from luna_mujoco.observation_motion import initial_view_evidence, matching_instances
+from luna_mujoco.perception import PerceptionError, public_observation
+from luna_mujoco.placement import public_observation as public_placement
 
 
 def marked_capture():

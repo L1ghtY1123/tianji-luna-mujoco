@@ -1,8 +1,12 @@
-# JEV MuJoCo web workbench
+# Tianji Luna MuJoCo web workbench
+
+The current Luna demo replay is documented in [the replay guide](../docs/demo-replay.md), including object timelines, archived model images, SAM3 masks and interactive candidate clouds. Local Vite development proxies to `LUNA_DEV_BACKEND_URL`, defaulting to `http://127.0.0.1:8351`. The older deployment and JEV workflow notes below describe the inherited workbench; use the project root README and current deployment scripts for Luna service configuration.
 
 Standalone Chinese workbench. The main Three.js viewport renders MuJoCo geometry and live poses; it does not compute or simulate robot motion in the browser. UI state, editable scene data, networking, trace rendering, and WebGL rendering are separate modules in `src/`.
 
 All visible text must be at least 20px, including form controls, auxiliary descriptions, status labels, trace JSON, metadata, legends, and narrow-screen rules. Headings use 24–30px. Keep this minimum when changing the layout; use wrapping, wider panels, or scrolling when space is limited.
+
+Replay defaults to the chronological workflow. `replay-story.js` derives display-only stages, capture/revision groups, model call labels, and inventory snapshots from archived events. Model evidence reads the original request/response; it never invokes inference or updates robot state. Inventory transitions distinguish stored snapshots from explicit `product_created` updates and never treat an observation's `objects` array as the task ledger. The inventory tab separates process states from physical entities, virtual regions, and aggregate bin collections. Raw events, full call graph and experiment management remain in expandable panels. See `docs/demo-replay.md` for evidence semantics.
 
 The center column orders the physical viewport and task controls first, followed by advanced settings, three RGBD cameras, and the folded point-cloud diagnostics. Both displayed task clocks use the same task-clock instance: idle/reset is zero, running advances, and terminal duration freezes. Internal sensor capture timestamps remain simulation timestamps and are not shown as task duration. Point-cloud diagnostics only display an existing mapping snapshot; opening them does not capture images or change filtering.
 

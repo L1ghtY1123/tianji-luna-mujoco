@@ -3,7 +3,7 @@ import json
 
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
+from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
 
 
 def main():

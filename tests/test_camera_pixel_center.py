@@ -5,7 +5,7 @@ from copy import deepcopy
 import mujoco
 import numpy as np
 
-from jev_mujoco.cameras import RgbdRenderer, deproject_view, install_cameras
+from luna_mujoco.cameras import RgbdRenderer, deproject_view, install_cameras
 
 
 def calibration():

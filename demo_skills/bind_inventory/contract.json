@@ -1,0 +1,15 @@
+{
+  "id": "bind_inventory",
+  "description": "校验来源和数量，固定ID及显示编号；按同帧RGBD质心到机器人基座的水平距离由近到远绑定执行队列，count选择最近N件，缺失深度停止；保留Responses原完整性，all用同帧Decisions必需身份union、左腕源对象覆盖和可信none建立独立source_inventory_resolution，原confirmed也须过此门；count须足够可信目标。两模式none置信度至少0.8，不证明隐藏处为空。",
+  "inputs": [
+    "已校验的Responses程序执行器上下文、当前观测/反馈及输入版本"
+  ],
+  "requires": {
+    "inventory_ready": true,
+    "inventory_finalized": false
+  },
+  "provides": [
+    "inventory_finalized",
+    "task_assessed"
+  ]
+}

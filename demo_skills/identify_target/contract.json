@@ -1,0 +1,18 @@
+{
+  "id": "identify_target",
+  "description": "校验并绑定已校验的Responses程序执行器选定的实测ID；拆包工序的$target初为固定粉输入ID，verify_unpack成功后为独立黑产物ID，禁止用粉ID代指黑几何；路线、集合及默认inventory顺序须先确认成员，Demo inventory须按bind_inventory实测由近到远的execution_rank依次选，显示编号仅用于身份，达到明确数量不得再选。direct explicit单目标以本次明确选择确认成员。",
+  "requires": {
+    "observed": true,
+    "target_selected": false,
+    "grasp_completed": false,
+    "task_assessed": true,
+    "recovery_needed": false
+  },
+  "provides": [
+    "target_selected"
+  ],
+  "inputs": [
+    "target_id",
+    "observation"
+  ]
+}

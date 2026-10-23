@@ -5,13 +5,13 @@ import numpy as np
 import pytest
 from test_region_placement import region_inputs
 
-from jev_mujoco import placement
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco import placement
+from luna_mujoco.task_progress import TaskProgress
 
 
 @pytest.mark.parametrize('count,sections', [(1, 2), (2, 2), (3, 4), (4, 4), (5, 6)])
 def test_partition_uses_area_centers_and_even_capacity(count, sections):
-    from jev_mujoco.placement_layout import partition_region
+    from luna_mujoco.placement_layout import partition_region
 
     polygon = [[0., 0.], [.4, 0.], [.4, .2], [0., .2]]
     layout = partition_region(polygon, count)
@@ -30,7 +30,7 @@ def test_partition_uses_area_centers_and_even_capacity(count, sections):
 
 
 def test_polygonal_circle_and_rotated_rectangle_have_equal_area_cells():
-    from jev_mujoco.placement_layout import partition_region
+    from luna_mujoco.placement_layout import partition_region
 
     angles = np.linspace(0, 2 * np.pi, 129)[:-1]
     circle = np.column_stack((np.cos(angles), np.sin(angles))) * .2 + [.6, -.1]

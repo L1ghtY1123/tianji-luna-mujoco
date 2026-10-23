@@ -1,6 +1,6 @@
 # cuRobo batch 与网页参数
 
-本项目锁定 NVIDIA cuRobo commit `8e734f3ced1df898990bcd92de40abce475907db`。参数定义集中在 `src/jev_mujoco/planning_settings.py`，网页通过该 Pydantic schema 生成控件，没有另一套手工维护的 YAML/JSON 参数目录。
+本项目锁定 NVIDIA cuRobo commit `8e734f3ced1df898990bcd92de40abce475907db`。参数定义集中在 `src/luna_mujoco/planning_settings.py`，网页通过该 Pydantic schema 生成控件，没有另一套手工维护的 YAML/JSON 参数目录。
 
 ## 当前 TCP 与放置间隙
 
@@ -36,7 +36,7 @@ JEV选择执行臂 → 原有batched IK → 原有每批最多16个plan_grasp_ba
 
 机器人模型、碰撞球及自碰撞忽略表相同；抓取的 IK、TrajOpt、hard world checker 使用固定张开夹爪；抓取完成后 attachment 和放置使用实测闭合 driver/mimic 球，保留原有机器人球与 link buffer；同一次运行的 scene token、target 排除、另一臂状态、TCP 变换相同。MuJoCo 的物体接触保持启用。实例 ESDF 单侧最小留白为 max(机器人最大球半径,目标 attachment 半径上界)+max(实际 IK 激活距离,轨迹激活距离,硬间距)+2 cm，再向外取整到各实例体素尺寸；不再使用 50 cm 参数上限。2 cm 是计算边界余量，不是碰撞阈值或物体膨胀。
 
-**IK 与轨迹容量分别固定为 100 和 16。** grasp/place 共用 `src/jev_mujoco/planning_batches.py` 的轨迹分批与补齐规则，每批最多 16 个真实候选。不足部分重复最后一个目标，返回后只处理真实项，避免 5、9 等候选数变化各自触发新的 CUDA 初始化。grasp 服务裁掉补齐项，`batch_size` 报告真实候选数；place 服务接收并返回 16 项，调用方在排序、失败与事件统计前排除补齐项。`batch_capacity` 报告实际容量。独立 batched IK 仍使用容量 100，和每个目标内部的 seeds 数量不同。共享的是公开 batch planner、求解器配置与分批规则；grasp 保留张开无 attachment 的三段，place 保留持物前两段和单独规划的张开空爪撤离，不新增或合并 JEV skill。
+**IK 与轨迹容量分别固定为 100 和 16。** grasp/place 共用 `src/luna_mujoco/planning_batches.py` 的轨迹分批与补齐规则，每批最多 16 个真实候选。不足部分重复最后一个目标，返回后只处理真实项，避免 5、9 等候选数变化各自触发新的 CUDA 初始化。grasp 服务裁掉补齐项，`batch_size` 报告真实候选数；place 服务接收并返回 16 项，调用方在排序、失败与事件统计前排除补齐项。`batch_capacity` 报告实际容量。独立 batched IK 仍使用容量 100，和每个目标内部的 seeds 数量不同。共享的是公开 batch planner、求解器配置与分批规则；grasp 保留张开无 attachment 的三段，place 保留持物前两段和单独规划的张开空爪撤离，不新增或合并 JEV skill。
 
 ## 轨迹规划参数
 
@@ -48,7 +48,7 @@ JEV选择执行臂 → 原有batched IK → 原有每批最多16个plan_grasp_ba
 | `finetune_attempts` | 1 | 1–10 | 轨迹时间细调尝试次数 |
 | `finetune_dt_scale` | 0.55 | >0 且 ≤1 | 内部细调 dt，缩放后限制在 0.002–0.2 s；不是执行时间伸长 |
 | SDK 采样频率 / `freq_hz` | 50 Hz | 整数 20–100 Hz | 实际设置 `interpolation_dt=1/freq_hz`，不是 MuJoCo 积分步频 |
-| 规划总时限 / `plan_timeout_s` | 180 s | >0 且 ≤1800 s | 整个 plan_grasp skill 的等待上限，包括全部 batch、初始化和复核；增加 seeds/attempts 后可相应提高 |
+| 规划总时限 / `plan_timeout_s` | 180 s | >0 且 ≤1800 s | 整个 plan_grasp skill 的等待上限，包括仅零源IK时的最多两轮追加采样、全部 batch、初始化和复核；每轮不重置；增加 seeds/attempts 后可相应提高 |
 
 TrajOpt 的位置/方向阈值、自碰撞和 random seed 也显式使用共享参数。关节限位、速度/加速度/jerk 约束、碰撞球等继续来自机器人配置；未开放网页修改。其他优化器权重、迭代数、graph planner 设置继续使用锁定 SDK / Tianji wrapper 的配置，不能声称网页已经覆盖全部 cuRobo 参数。
 
@@ -106,7 +106,7 @@ TrajOpt 的位置/方向阈值、自碰撞和 random seed 也显式使用共享�
 
 新版流程的验证输出保存在 `data/simplification-20261010/`，历史物理试验不作为新版验收。
 
-持物球使用抓前精细三相机可见点云，在闭合后的实际抓取 TCP 下转换一次；抓后观察只验证持物。默认最小分组尺寸 10 mm、附加余量 1 mm、最多 16 球。按最长轴最多切分15次；每组比较包围盒中心、均值中心、近似最远点对中点三种快速估计，选择覆盖半径最小者。达到尺寸阈值或球数上限即停止，结果缓存复用。每个球覆盖对应实测样本及测量不确定度，不额外叠加半体素空壳，不补隐藏表面。普通实例 TSDF/ESDF 为 10 mm；盒底测量存在时，该盒子使用 2 mm 并对齐底板采样中心，消除 10 mm 体素把底板上偏约5 mm的误差。仅配置官方 MapperCfg，不平移实测几何、不改写距离值、不增加释放高度。
+持物球使用抓前精细三相机可见点云，在闭合后的实际抓取 TCP 下转换一次；抓后观察只验证持物。默认最小分组尺寸 10 mm、附加余量 1 mm。球预算允许1–128，旧版默认16，demo无保存设置时默认128；合法保存值原样保留，当前持物仍使用绑定时冻结的预算。按最长轴最多切分127次（预算16时最多15次）；每组比较包围盒中心、均值中心、近似最远点对中点三种快速估计，选择覆盖半径最小者。达到尺寸阈值或球数上限即停止，结果按有效预算缓存复用，不保证各碰撞对间距随球数单调改善。每个球覆盖对应实测样本及测量不确定度，不额外叠加半体素空壳，不补隐藏表面。普通实例 TSDF/ESDF 为 10 mm；盒底测量存在时，该盒子使用 2 mm 并对齐底板采样中心，消除 10 mm 体素把底板上偏约5 mm的误差。仅配置官方 MapperCfg，不平移实测几何、不改写距离值、不增加释放高度。
 
 官方 attachment 的接口和语义见 [AttachmentManager 源码](https://github.com/NVlabs/curobo/blob/8e734f3ced1df898990bcd92de40abce475907db/curobo/_src/collision/attachment_manager.py) 和 [Mapper 文档](https://nvlabs.github.io/curobo/latest/api/curobo.perception.html)。SDK 源码未修改。
 

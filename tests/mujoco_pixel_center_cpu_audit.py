@@ -7,8 +7,8 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
-from jev_mujoco.cameras import load_calibration
-from jev_mujoco.kinematics import robot_model
+from luna_mujoco.cameras import load_calibration
+from luna_mujoco.kinematics import robot_model
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()

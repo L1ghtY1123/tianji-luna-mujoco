@@ -9,7 +9,7 @@ import numpy as np
 def main():
     from tianji_curobo.curobo_service import materialize_urdf
 
-    from jev_mujoco.perception_mapping import PerceptionMapper, create_feedback_segmenter
+    from luna_mujoco.perception_mapping import PerceptionMapper, create_feedback_segmenter
 
     root = Path("/opt/jev")
     urdf = materialize_urdf(root / "assets/marvin_urdf/marvin_with_grippers.urdf",

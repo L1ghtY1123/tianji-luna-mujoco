@@ -49,7 +49,7 @@ class Segmenter:
             camera.get_pointcloud(project_to_pose=True), intrinsics, Tensor(pose), 0)
 
     def remove_semantic_instances(self, value, projection, **kwargs):
-        from jev_mujoco.semantic_depth import partition_semantic_depth
+        from luna_mujoco.semantic_depth import partition_semantic_depth
         return partition_semantic_depth(value, projection, camera_observation_type=CameraObservation)
 
     def crop_semantic_observation(self, value, table):
@@ -108,10 +108,10 @@ class Scene:
 
 
 def builder(*, support=False):
-    assert importlib.util.find_spec("jev_mujoco.semantic_builder"), "empty-head semantic builder missing"
+    assert importlib.util.find_spec("luna_mujoco.semantic_builder"), "empty-head semantic builder missing"
     from tianji_curobo.mixed_esdf_scene import TableCompletion
 
-    from jev_mujoco.semantic_builder import ProjectSemanticBuilder
+    from luna_mujoco.semantic_builder import ProjectSemanticBuilder
     segmenter, mapper, table_inputs = Segmenter(), Mapper(), []
     def table_builder(groups, spheres, **kwargs):
         table_inputs.append((groups, spheres))

@@ -6,10 +6,10 @@ from pathlib import Path
 
 import numpy as np
 
-from jev_mujoco.algorithms import Algorithms
-from jev_mujoco.perception_mapping import decode_mapping_payload
-from jev_mujoco.placement import carrying_binding, public_observation
-from jev_mujoco.verification import verify_gripper_position
+from luna_mujoco.algorithms import Algorithms
+from luna_mujoco.perception_mapping import decode_mapping_payload
+from luna_mujoco.placement import carrying_binding, public_observation
+from luna_mujoco.verification import verify_gripper_position
 
 
 def main():

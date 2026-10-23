@@ -1,0 +1,19 @@
+{
+  "id": "build_scene",
+  "description": "粉件和黑件均必须双臂在观测位姿，capture/generation/实际关节与观测一致。用全部当前清单实体的三RGBD建立全局2cm TSDF/ESDF；首次RANSAC桌面cuboid复用，不建立新桌面体素。选中目标层按抓取政策禁用，其他实体保留碰撞。只维护最新全局场景，禁止VLA位姿全局重建。",
+  "inputs": [
+    "已校验的Responses程序执行器上下文、当前观测/反馈及输入版本"
+  ],
+  "requires": {
+    "observed": true,
+    "inventory_finalized": true,
+    "target_selected": true,
+    "arm_selected": true,
+    "destination_ready": true,
+    "grasp_completed": false
+  },
+  "provides": [
+    "scene_ready",
+    "views_ready"
+  ]
+}

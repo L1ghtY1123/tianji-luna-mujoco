@@ -3,8 +3,8 @@ import copy
 import pytest
 from test_rgbd_workflow import Choices, SensorRobot, VisionAlgorithms
 
-from jev_mujoco.runner import Runner
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco.runner import Runner
+from luna_mujoco.task_progress import TaskProgress
 
 
 class VisualIds(VisionAlgorithms):
@@ -130,7 +130,7 @@ def test_successful_segmentation_prompt_is_reused_literally():
 def test_visual_acceptance_cannot_silently_lose_an_object_in_geometry(monkeypatch):
     from test_perception import FrozenSegmenter, capture_fixture
 
-    from jev_mujoco import perception as module
+    from luna_mujoco import perception as module
     capture, masks = capture_fixture()
     class Inventory:
         def resolve(self, capture, detections, **kwargs):
@@ -152,26 +152,6 @@ def test_visual_acceptance_cannot_silently_lose_an_object_in_geometry(monkeypatc
 
 
 
-async def test_standalone_grasp_place_preserves_fixed_inventory(tmp_path):
-    import asyncio
-    choices = Choices('grasp')
-    algorithms = VisualIds()
-    runner = Runner(SensorRobot(), algorithms, lambda record: choices, tmp_path)
-    await runner.start('grasp red')
-    await asyncio.wait_for(runner.worker, 5)
-    assert runner.state['status'] == 'succeeded', runner.state.get('error')
-    reference_id = runner.holding_state['visual_inventory_reference']['observation_id']
-    scene_entities = copy.deepcopy(runner.holding_state['scene_entities'])
-    choices.task = 'place'
-    await runner.start('place in blue box')
-    await asyncio.wait_for(runner.worker, 5)
-    # The mock has no destination visual evidence, so completion stays unknown.
-    assert runner.state['status'] == 'needs_attention'
-    assert runner.task_progress.scene_entities.keys() == scene_entities.keys()
-    assert algorithms.source_hints[-1]['visual_reference']['observation_id'] == reference_id
-    assert set(algorithms.source_hints[-1]['scene_entities']) == set(scene_entities)
-    visual = algorithms.source_hints[-1]['visual_progress']['source']
-    assert visual['slot_id'] == visual['assigned_slot']['slot_id'] == 1
 
 
 async def test_confirmed_release_map_retry_reuses_confirmation_without_new_image(tmp_path):

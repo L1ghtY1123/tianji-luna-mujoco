@@ -8,8 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 from test_api import Algorithms, Simulation
 
-from jev_mujoco.app import create_app
-from jev_mujoco.runner import Runner
+from luna_mujoco.app import create_app
+from luna_mujoco.runner import Runner
 
 
 @pytest.mark.parametrize("new_generation", [False, True])

@@ -1,0 +1,10 @@
+{
+  "source_experiment": "9d005cbe636a4b9cacc0eceb9e802bcd",
+  "source_artifact": "event-00303.json/npz",
+  "observation_id": "rgbd-2-e7a7035172d946b0936561e73f65ebf3",
+  "instance_id": "instance-a8efb81ff9d94301",
+  "source": "sam3_rgb_mask_and_registered_depth",
+  "sampling": "numpy default_rng(0), 8000 without replacement from 72590, sorted source indices",
+  "fixture_sha256": "beb7fe19b75e27a0b2fa2745ebf7119f7269b2b2537250c148d10c6ac9207337",
+  "limitations": "Frozen registered observed surfaces, no simulator pose/dimensions/labels; runtime uses mapper post-robot-filter points. Contact witness in test is only an offline coverage assertion, never an input to fit."
+}

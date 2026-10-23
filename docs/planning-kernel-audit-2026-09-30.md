@@ -124,7 +124,7 @@ JEV 的 `GeometryRuntime.build_geometry` 已经把桌面放进 metadata。当前
 - 先运行新增回归测试，4 个测试都在旧代码上按预期失败；修正后相关模块 34 个测试通过。
 - Windows 全量复跑：`python -X utf8 -m pytest -q -ra`，229 passed、51 skipped。跳过项均为 Linux Bash / 容器进程测试，本轮没有改部署脚本。
 - 首次全量运行中，`test_planning_timeout_is_terminal_and_late_result_cannot_move_robot` 的 50 ms 计时断言记录 42.3 ms 而失败；单独及全量复跑均通过。未修改该测试或 runner，此偶发计时问题未在本轮修复。
-- `ruff check src/jev_mujoco/geometry_service.py tests/test_geometry_service.py` 通过。
+- `ruff check src/luna_mujoco/geometry_service.py tests/test_geometry_service.py` 通过。
 - 独立 GPU 测试 4 层 → 5 层 → 恢复 4 层全部 16/16 成功；实际观察到容量 4 → 8 → 8，并验证扩容重建、缩小后复用同一 backend。
 - 算法镜像没有 pytest，因此未安装依赖或修改镜像。按固定版本官方 ESDF 测试的构建方式，用公开 API 运行 standalone smoke，额外断言实际规划成功，验证通过。
 

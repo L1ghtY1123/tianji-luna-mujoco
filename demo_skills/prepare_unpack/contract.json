@@ -1,0 +1,18 @@
+{
+  "id": "prepare_unpack",
+  "description": "桌面放置视觉确认后，沿最近地图普通规划双臂到桌面上方自然位姿；无采图、无建图。运动中关节跟踪偏差超过0.03 rad时停止全部活动臂并报告证据。2026-10-22 VLA初始关节位姿（角度）：左A=[-86,76,88,-90,2,14,-24]，右B=[106,61,-113,-78,27,36,37]。使用现有双臂关节目标规划接口，保留最近场景、空爪与双臂碰撞检查；不使用TCP目标替代指定关节构型，不重建场景。",
+  "inputs": [
+    "frozen_task_item_lifecycle",
+    "current_robot_feedback",
+    "latest_collision_scene",
+    "versioned_execution_and_visual_evidence"
+  ],
+  "requires": {
+    "table_release_verified": true,
+    "grasp_held": false,
+    "scene_available": true
+  },
+  "provides": [
+    "vla_pose_ready"
+  ]
+}

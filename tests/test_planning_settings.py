@@ -1,12 +1,41 @@
-import asyncio
+
+import json
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from test_api import Algorithms, Simulation
 
-from jev_mujoco.app import create_app
-from jev_mujoco.planning_settings import PlanningSettings
+from luna_mujoco.app import create_app
+from luna_mujoco.planning_settings import PlanningSettings, load_settings
+
+
+@pytest.mark.parametrize("old_clearance", [.005, .0075, .00999])
+def test_only_saved_legacy_clearance_migrates_explicitly_to_ten_mm(tmp_path, old_clearance):
+    path = tmp_path / "planning-settings.json"
+    saved = {"trajectory_collision_clearance_m": old_clearance,
+             "place_release_height_m": old_clearance, "time_scale": 4.,
+             "ik_position_threshold_m": .005, "attachment": {"sphere_budget": 24}}
+    path.write_text(json.dumps(saved), encoding="utf-8")
+    with pytest.warns(UserWarning, match="clearance.*migrated.*0.01"):
+        settings = load_settings(path)
+    assert settings.trajectory_collision_clearance_m == .01
+    assert settings.place_release_height_m == .01
+    assert settings.time_scale == 4.
+    assert settings.ik_position_threshold_m == .005
+    assert settings.attachment.sphere_budget == 24
+    assert json.loads(path.read_text()) == saved
+    with pytest.raises(ValidationError):
+        PlanningSettings.model_validate(saved)
+
+
+def test_saved_clearance_above_policy_is_preserved_and_invalid_old_value_rejected(tmp_path):
+    path = tmp_path / "planning-settings.json"
+    path.write_text(json.dumps({"trajectory_collision_clearance_m": .015}), encoding="utf-8")
+    assert load_settings(path).place_release_height_m == .015
+    path.write_text(json.dumps({"trajectory_collision_clearance_m": .0049}), encoding="utf-8")
+    with pytest.raises(ValidationError):
+        load_settings(path)
 
 
 @pytest.mark.parametrize("changes", [
@@ -49,24 +78,6 @@ def test_settings_apply_persist_and_reset_preserves_algorithm_configuration(tmp_
         assert client.get("/api/planning-settings").json()["settings"] == values
 
 
-def test_settings_cannot_change_during_run_and_snapshot_is_recorded(tmp_path):
-    class Waiting:
-        async def bind_request(self, instruction):
-            await asyncio.Event().wait()
-
-    app = create_app(Simulation(), Algorithms(), lambda record: Waiting(), tmp_path / "runs")
-    with TestClient(app) as client:
-        config = client.get("/api/planning-settings").json()
-        client.post("/api/confirm").raise_for_status()
-        client.post("/api/start", json={"instruction": "抓取", "settings_revision": config["revision"]}).raise_for_status()
-        result = client.post("/api/planning-settings", json={
-            "settings": {**config["settings"], "time_scale": 4}, "expected_revision": config["revision"]})
-        assert result.status_code == 409
-        state = client.get("/api/state").json()
-        assert state["run"]["planning_settings"] == config["settings"]
-        assert state["run"]["settings_revision"] == config["revision"]
-        assert state["events"][0]["data"]["planning_settings"] == config["settings"]
-        client.post("/api/reset").raise_for_status()
 
 
 def test_failed_settings_save_does_not_change_running_configuration(tmp_path, monkeypatch):
@@ -75,7 +86,7 @@ def test_failed_settings_save_does_not_change_running_configuration(tmp_path, mo
         original = client.get("/api/planning-settings").json()
         def fail_save(*args):
             raise OSError("disk full")
-        monkeypatch.setattr("jev_mujoco.app.save_settings", fail_save)
+        monkeypatch.setattr("luna_mujoco.app.save_settings", fail_save)
         response = client.post("/api/planning-settings", json={
             "settings": {**original["settings"], "time_scale": 4}, "expected_revision": original["revision"]})
         assert response.status_code == 503

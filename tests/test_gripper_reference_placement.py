@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from jev_mujoco.placement import release_candidates, release_endpoint_evidence
+from luna_mujoco.placement import release_candidates, release_endpoint_evidence
 
 
 def tilted_marker_inputs(arm='A'):

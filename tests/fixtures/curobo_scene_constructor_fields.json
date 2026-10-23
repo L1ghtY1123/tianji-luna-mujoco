@@ -1,0 +1,8 @@
+{
+  "sdk_commit": "8e734f3ced1df898990bcd92de40abce475907db",
+  "source_path": "curobo/_src/geom/types.py",
+  "source_sha256": "b68cf243dab0940d7cdf2eb05e8d3ff77a81ad2eaa0241d962672fd3c440fe3e",
+  "extraction": "dataclasses.fields on installed public curobo.scene classes, 2026-10-21",
+  "cuboid": ["name", "pose", "scale", "color", "texture_id", "texture", "material", "device_cfg", "dims"],
+  "mesh": ["name", "pose", "scale", "color", "texture_id", "texture", "material", "device_cfg", "file_path", "file_string", "urdf_path", "vertices", "faces", "vertex_colors", "vertex_normals", "texture_uvs", "texture_image", "face_colors"]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "plan_place",
+  "description": "粉件保持抓取旋转，夹爪前端对准固定共享区域中心XY=[0.50160,0.11646]m，无分区。SDK目标用标定前端偏移转成法兰；不以点云中心对准、不要求整个附件投影包含。Z根据attachment与当前夹爪及实际世界碰撞选取尽量靠近10mm间隙的高度。直接官方plan_grasp派生plan_place，不使用plan_place_batch。前两段闭爪attachment，开爪后detach撤离；仅当前闭合/全开端点检查，无开爪扫掠。遵循高级设置，版本不符、无解、碰撞或反馈不满足时停止。",
+  "requires": {
+    "needs_place": true,
+    "grasp_held": true,
+    "target_selected": true,
+    "destination_selected": true,
+    "scene_ready": true,
+    "place_plan_ready": false,
+    "released": false,
+    "recovery_needed": false
+  },
+  "provides": [
+    "place_plan_ready"
+  ],
+  "inputs": [
+    "verified holding",
+    "scene",
+    "destination_id",
+    "planning_settings including frozen attachment sphere budget 1–31 (demo default256 without saved settings; ordinary default16; valid saved budgets including128/129–256 preserved)",
+    "object_id/object_display_id, region_id/slot_id, inventory_revision, measured region or existing frozen layout"
+  ]
+}

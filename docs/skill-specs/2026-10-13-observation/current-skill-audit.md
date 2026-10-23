@@ -2,7 +2,7 @@
 
 日期：2026-10-13。核对依据是本地 registry、contract、SKILL.md 与执行代码；此次不修改产品代码，不把静态审查当作运行验收。
 
-`src/jev_mujoco/skills.py` 只加载 `skills/*/contract.json` 对应技能，实际共 **19** 项。`close_gripper`、`execute_approach`、`execute_lift` 目录没有 contract/SKILL.md，不是三项额外可调用技能。
+`src/luna_mujoco/skills.py` 只加载 `skills/*/contract.json` 对应技能，实际共 **19** 项。`close_gripper`、`execute_approach`、`execute_lift` 目录没有 contract/SKILL.md，不是三项额外可调用技能。
 
 ## 逐项核对
 
@@ -44,7 +44,7 @@
 执行了一个不调用硬件、SAM3、GPU 或模型的输入探针：
 
 ```python
-from jev_mujoco.observation_motion import source_view_evidence
+from luna_mujoco.observation_motion import source_view_evidence
 
 evidence = source_view_evidence(
     {"source": "rgbd", "observation_id": "post-red-place"},
@@ -66,8 +66,8 @@ evidence = source_view_evidence(
 
 ## 源码定位
 
-- `src/jev_mujoco/skills.py`：真实 registry 与契约拒绝。
-- `src/jev_mujoco/observation_motion.py`：初始头部要求和源目标覆盖门槛。
-- `src/jev_mujoco/runner.py`：observe、capture_execution_result、move_to_observe、verify_place、recover_task、select_arguments、execute。
-- `src/jev_mujoco/algorithms.py`：build_scene 的 head_only 分支、指定臂 IK、place 候选批次。
-- `src/jev_mujoco/geometry_service.py`：观测空间 guard 的构造及当前使用范围。
+- `src/luna_mujoco/skills.py`：真实 registry 与契约拒绝。
+- `src/luna_mujoco/observation_motion.py`：初始头部要求和源目标覆盖门槛。
+- `src/luna_mujoco/runner.py`：observe、capture_execution_result、move_to_observe、verify_place、recover_task、select_arguments、execute。
+- `src/luna_mujoco/algorithms.py`：build_scene 的 head_only 分支、指定臂 IK、place 候选批次。
+- `src/luna_mujoco/geometry_service.py`：观测空间 guard 的构造及当前使用范围。

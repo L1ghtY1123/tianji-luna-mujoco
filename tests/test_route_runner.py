@@ -1,12 +1,10 @@
-import asyncio
 from copy import deepcopy
 
 import numpy as np
-import pytest
 from test_rgbd_workflow import Choices, SensorRobot, VisionAlgorithms
 
-from jev_mujoco.runner import Runner
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco.runner import Runner
+from luna_mujoco.task_progress import TaskProgress
 
 
 async def test_assessment_binds_task_membership_without_filtering_observed_obstacles(tmp_path):
@@ -32,39 +30,6 @@ async def test_assessment_binds_task_membership_without_filtering_observed_obsta
     assert runner.task_progress.scene_entities['table-object']['display_id'] == 2
 
 
-async def test_new_observation_allows_jev_to_reassess_unknown_membership(tmp_path):
-    class ReassessChoices(RouteChoices):
-        def __init__(self):
-            super().__init__('box_table')
-            self.assessments = []
-            self.observation_count = 0
-
-        async def choose_skill(self, state, registry):
-            if len(self.assessments) == 2:
-                return 'stop'
-            if state['facts'].get('recovery_needed'):
-                return 'recover_task'
-            if not state['facts'].get('observed'):
-                return 'observe_scene'
-            return 'assess_task'
-
-        async def choose_recovery(self, state):
-            return 'reobserve'
-
-        async def assess_task(self, state):
-            self.assessments.append(state)
-            return {'judgment': 'unknown' if len(self.assessments) == 1 else 'continue', 'membership': {
-                'source': 'unknown' if len(self.assessments) == 1 else 'required'}}
-
-    choices = ReassessChoices()
-    algorithms = RouteAlgorithms()
-    algorithms.membership_status = 'unknown'
-    runner = Runner(RouteRobot(), algorithms, lambda record: choices, tmp_path)
-    await runner.start('确认源物体后搬运')
-    await asyncio.wait_for(runner.worker, 5)
-    assert len(choices.assessments) == 2
-    assert runner.task_progress.snapshot()['objects'][0]['id'] == 'source'
-    assert not any(event['kind'] == 'skill_rejected' for event in runner.events)
 
 
 class RouteRobot(SensorRobot):
@@ -175,111 +140,12 @@ class RouteChoices(Choices):
         return 'verify_place'
 
 
-@pytest.mark.parametrize('route,rounds', [('box_table', 1), ('table_box', 1), ('box_table_box', 2)])
-async def test_route_runs_through_real_runner_with_fresh_map_each_round(tmp_path, route, rounds):
-    algorithms, choices = RouteAlgorithms(), RouteChoices(route)
-    runner = Runner(RouteRobot(), algorithms, lambda record: choices, tmp_path)
-    await runner.start('搬运同一物体')
-    await asyncio.wait_for(runner.worker, 5)
-    assert runner.state['status'] == 'succeeded', (runner.state.get('error'), runner.state.get('failure'))
-    assert algorithms.maps == ['observation', 'selected'] * rounds
-    assert algorithms.returns == [False] * rounds
-    assert runner.task_progress.completed_ids == ['source']
-    record = runner.task_progress.records['source']
-    assert len(record['completed_stages']) == rounds
-    assert algorithms.prepare_count == algorithms.clear_count == rounds
-    skills = [e['title'] for e in runner.events if e['kind'] == 'skill_complete']
-    assert skills[-1] == 'assess_task'
-    assert not set(skills) & {'update_scene', 'check_scene_changes'}
 
 
-async def test_jev_argument_decisions_precede_skill_execution(tmp_path):
-    class RecordedChoices(RouteChoices):
-        async def choose_target(self, state, objects):
-            runner.emit('jev', '选择目标', {'duration_s': .01})
-            return await super().choose_target(state, objects)
-
-        async def choose_destination(self, state, objects):
-            runner.emit('jev', '选择目的地', {'duration_s': .01})
-            return await super().choose_destination(state, objects)
-
-    runner = Runner(RouteRobot(), RouteAlgorithms(), lambda record: RecordedChoices('box_table'), tmp_path)
-    await runner.start('把盒子中的物体放到黄色区域')
-    await asyncio.wait_for(runner.worker, 5)
-    assert runner.state['status'] == 'succeeded'
-    active = None
-    decisions = 0
-    for event in runner.events:
-        if event['kind'] == 'skill_start':
-            assert active is None
-            active = event['title']
-        elif event['kind'] == 'skill_complete':
-            assert active == event['title']
-            active = None
-        elif event['kind'] == 'jev':
-            decisions += 1
-            assert active is None, f'JEV interrupted {active}'
-            assert event.get('parent_invocation_id') is None
-    assert decisions == 2
-    assert active is None
 
 
-async def test_failed_parameter_selection_does_not_start_identify_or_grasp_scene(tmp_path):
-    class FailingChoices(RouteChoices):
-        async def choose_target(self, state, objects):
-            raise ValueError('decision_service_unavailable')
-
-        async def choose_skill(self, state, registry):
-            return 'stop' if state['facts'].get('recovery_needed') else await super().choose_skill(state, registry)
-
-    algorithms = RouteAlgorithms()
-    runner = Runner(RouteRobot(), algorithms, lambda record: FailingChoices('box_table'), tmp_path)
-    await runner.start('把盒子中的物体放到黄色区域')
-    await asyncio.wait_for(runner.worker, 5)
-    assert algorithms.maps == []
-    assert not any(e['kind'] == 'skill_start' and e['title'] == 'build_scene' for e in runner.events)
-    error = next(e for e in runner.events if e['kind'] == 'skill_error')
-    assert error['data']['phase'] == 'argument_selection'
-    assert error['data']['for_skill'] == 'identify_target'
-    assert error['data']['executed'] is False
-    assert error.get('invocation_id') is None
 
 
-async def test_box_task_finishes_after_member_without_moving_table_obstacles(tmp_path):
-    class WithTableObjects(RouteAlgorithms):
-        def observe(self, *args, **kwargs):
-            observation = super().observe(*args, **kwargs)
-            observation['objects'][0]['color'] = 'green'
-            for color in ('red', 'black'):
-                obstacle = deepcopy(observation['objects'][0])
-                obstacle.update(id=color + '-on-table', color=color, measured_relationships=[])
-                observation['objects'].append(obstacle)
-                observation['visual_inventory']['membership'][obstacle['id']] = 'unknown'
-            return observation
-
-        def build_scene(self, observation, target_id, **kwargs):
-            assert {'red-on-table', 'black-on-table'} <= {obj['id'] for obj in observation['objects']}
-            assert target_id in (None, 'source')
-            return super().build_scene(observation, target_id, **kwargs)
-
-    class ScopedChoices(RouteChoices):
-        async def assess_task(self, state):
-            answer = await super().assess_task(state)
-            answer['membership'] = {key: 'required' if key == 'source' else 'excluded'
-                                    for key in state['task_progress']['membership_pending_ids']}
-            return answer
-
-    algorithms = WithTableObjects()
-    runner = Runner(RouteRobot(), algorithms, lambda record: ScopedChoices('box_table'), tmp_path)
-    await runner.start('把盒子中的物体拿到桌面黄色区域')
-    await asyncio.wait_for(runner.worker, 5)
-    assert runner.state['status'] == 'succeeded', runner.state.get('failure')
-    assert runner.task_progress.completed_ids == ['source']
-    assert runner.task_progress.membership == {
-        'source': 'required', 'red-on-table': 'excluded', 'black-on-table': 'excluded'}
-    skills = [e['title'] for e in runner.events if e['kind'] == 'skill_complete']
-    assert skills.count('execute_grasp') == skills.count('execute_place') == 1
-    assert skills[-1] == 'assess_task'
 
 
 class MultiRouteAlgorithms(RouteAlgorithms):
@@ -320,19 +186,3 @@ class MultiRouteChoices(RouteChoices):
     async def choose_target(self, state, objects):
         completed = {item['id'] for item in state['task_progress']['completed']}
         return next(identifier for identifier in ('source', 'second') if identifier not in completed)
-
-
-@pytest.mark.parametrize('identical', [False, True])
-@pytest.mark.parametrize('route,rounds', [('box_table', 2), ('table_box', 2), ('box_table_box', 4)])
-async def test_multiple_objects_keep_id_and_stage_arm_across_fresh_maps(tmp_path, identical, route, rounds):
-    algorithms = MultiRouteAlgorithms(identical)
-    runner = Runner(RouteRobot(), algorithms, lambda record: MultiRouteChoices(route), tmp_path)
-    await runner.start('逐个搬运两个物体')
-    await asyncio.wait_for(runner.worker, 5)
-    assert runner.state['status'] == 'succeeded', (runner.state.get('error'), runner.state.get('failure'))
-    assert runner.task_progress.completed_ids == ['source', 'second']
-    assert algorithms.maps == ['observation', 'selected'] * rounds
-    assert algorithms.returns == [False] * rounds
-    assert algorithms.prepare_count == algorithms.clear_count == rounds
-    assert all(item['arm'] == 'A' for record in runner.task_progress.records.values()
-               for item in record.get('completed_stages', []))

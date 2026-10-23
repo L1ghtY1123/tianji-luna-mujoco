@@ -25,6 +25,7 @@ function progressCount(value) {
 
 export function taskProgressSummary(progress) {
   if (!progress) return '';
+  if (progress.process_records) return `已完成 ${progressCount(progress.completed_process_ids)} 道工序 · 待拆包 ${progressCount(progress.pending_unpack_ids)} 件 · 处理中 ${progressCount(progress.processing_ids)} 件`;
   const reasons = {
     grasp_verification_failed: '抓取未通过验证', grasp_verification_unknown: '抓取结果待确认',
     place_verification_failed: '放置未通过验证', place_verification_unknown: '放置结果待确认',
@@ -68,7 +69,12 @@ export function runEvidence(run) {
       placement_regions: (run.task_progress.placement_regions ?? []).map(region => ({
         ...pick(region, ['region_id', 'destination_id', 'layout_revision', 'stage_index', 'target_count']),
         ...pick(region.layout, ['source', 'observation_id', 'floor_z_m', 'section_count', 'measurement_time'])})),
-      completed_count: progressCount(run.task_progress.completed),
+      completed_count: progressCount(run.task_progress.process_records ? run.task_progress.completed_process_ids : run.task_progress.completed),
+      ...(run.task_progress.process_records ? {
+        process_records: Object.fromEntries(Object.entries(run.task_progress.process_records).map(([id, value]) => [id,
+          pick(value, ['process_id', 'display_id', 'input_entity_id', 'output_entity_id', 'status', 'phase', 'to_table_arm', 'to_right_bin_arm'])])),
+        ...pick(run.task_progress, ['pending_unpack_ids', 'processing_ids', 'completed_process_ids', 'product_ids']),
+      } : {}),
       deferred_count: progressCount(run.task_progress.deferred),
       completed: progressItems(run.task_progress.completed).map(item => pick(item, ['id', 'kind', 'color', 'destination_id'])),
       deferred: progressItems(run.task_progress.deferred).map(item => pick(item, ['id', 'kind', 'color', 'reason'])),

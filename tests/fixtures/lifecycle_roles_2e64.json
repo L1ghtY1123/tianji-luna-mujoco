@@ -1,0 +1,98 @@
+{
+  "provenance": "Actual event00175 lifecycle/evidence allowlist; no action poses or simulator geometry. Geometry arrays reused from container_correspondence_2e64 fixture.",
+  "owner_id": "2e6487d72001407da7e87bc617e0fbed",
+  "item_lifecycle": {
+    "instance-56e81a7c27ae46e1": {
+      "phase": "wrapped_source",
+      "appearance": "wrapped",
+      "appearance_revision": 0,
+      "to_table_arm": "A",
+      "to_right_bin_arm": "B"
+    },
+    "instance-97001d1051374996": {
+      "phase": "unpacked_confirmed",
+      "appearance": "unpacked",
+      "appearance_revision": 1,
+      "to_table_arm": "A",
+      "to_right_bin_arm": "B",
+      "table_release_feedback_id": "feedback-2-123.02900000022339",
+      "mock_action": {
+        "source": "mock_vla",
+        "owner_id": "2e6487d72001407da7e87bc617e0fbed",
+        "target_id": "instance-97001d1051374996",
+        "generation": 2,
+        "action_id": "ddd786ce6e784cffb72d845e42e6966d",
+        "completed": true,
+        "completed_time": 134.1080000002763,
+        "table_release_feedback_id": "feedback-2-123.02900000022339"
+      },
+      "table_visual_evidence": {
+        "target_id": "instance-97001d1051374996",
+        "request_hash": "91c0da217ff73fa991dd73864361383aae030ca71e0e9a5f21813eaff7926dcb",
+        "binding_id": "50c65411e344d41b8e73003267a357721e43a7fb5fb2c70131676bf823079829",
+        "release_feedback_id": "feedback-2-123.02900000022339"
+      },
+      "unpacking_evidence": {
+        "source": "openai_decisions",
+        "observation_id": "rgbd-2-355108f690484b91822dff28f0a270de",
+        "request_hash": "0b060f264bf9108aa7e2a2cadd77ffcdbe261282815d790a1643eb006009388f",
+        "success": true,
+        "status": "confirmed",
+        "target_id": "instance-97001d1051374996",
+        "generation": 2,
+        "appearance": "unpacked",
+        "appearance_revision": 1,
+        "action_id": "ddd786ce6e784cffb72d845e42e6966d",
+        "visual_evidence": {
+          "source": "openai_decisions",
+          "observation_id": "rgbd-2-355108f690484b91822dff28f0a270de",
+          "request_hash": "0b060f264bf9108aa7e2a2cadd77ffcdbe261282815d790a1643eb006009388f",
+          "status": "confirmed",
+          "confidence": 0.96,
+          "target_id": "instance-97001d1051374996",
+          "action_id": "ddd786ce6e784cffb72d845e42e6966d",
+          "judgments": {
+            "black_core": "yes",
+            "same_item": "yes"
+          },
+          "table_release_request_hash": "91c0da217ff73fa991dd73864361383aae030ca71e0e9a5f21813eaff7926dcb",
+          "table_release_binding_id": "50c65411e344d41b8e73003267a357721e43a7fb5fb2c70131676bf823079829",
+          "answers": [
+            {
+              "name": "black_core",
+              "type": "choice",
+              "choice": "yes",
+              "confidence": 0.99
+            },
+            {
+              "name": "same_item",
+              "type": "choice",
+              "choice": "yes",
+              "confidence": 0.96
+            }
+          ]
+        }
+      }
+    }
+  },
+  "table_scope": {
+    "position": [
+      0.46025723218917847,
+      -2.9802322387695312e-08,
+      0.5600000023841858
+    ],
+    "size": [
+      0.5994220972061157,
+      0.8000023365020752,
+      0.006
+    ],
+    "surface_height_m": 0.5600000023841858,
+    "uncertainty_m": 0.006,
+    "estimated": true,
+    "source": "initial_inventory_ransac_table",
+    "id": "table",
+    "display_id": 3,
+    "table_revision": "78c1d62ba22868006860225d",
+    "source_observation_id": "rgbd-2-52b15c74e56d40c8bff61d6e40243308"
+  }
+}

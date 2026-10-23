@@ -5,7 +5,7 @@ import pytest
 from scipy.spatial.transform import Rotation
 from test_visible_placement import measured_inputs
 
-from jev_mujoco import placement
+from luna_mujoco import placement
 
 
 def tilted_inputs():

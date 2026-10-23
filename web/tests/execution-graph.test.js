@@ -1,6 +1,72 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildExecutionGraph, graphSvg, layoutExecutionGraph } from '../src/execution-graph.js';
+import * as executionGraph from '../src/execution-graph.js';
+
+test('a process route joins source and independent product without merging their entity IDs', () => {
+  const graph = buildExecutionGraph([
+    { id: 1, kind: 'skill_start', invocation_id: 'left', target_id: 'pink-a', process_id: 'job-a', data: { skill: 'plan_grasp' } },
+    { id: 2, kind: 'skill_complete', invocation_id: 'left', target_id: 'pink-a', process_id: 'job-a', data: { skill: 'plan_grasp' } },
+    { id: 3, kind: 'product_created', data: { process_id: 'job-a', input_entity_id: 'pink-a', output_entity_id: 'black-a' } },
+    { id: 4, kind: 'skill_start', invocation_id: 'right', target_id: 'black-a', process_id: 'job-a', data: { skill: 'plan_grasp' } },
+    { id: 5, kind: 'skill_complete', invocation_id: 'right', target_id: 'black-a', process_id: 'job-a', data: { skill: 'plan_grasp' } },
+    { id: 6, kind: 'run_end', data: { task_progress: { process_records: { 'job-a': { process_id: 'job-a',
+      display_id: 1, input_entity_id: 'pink-a', output_entity_id: 'black-a' } } } } },
+  ]);
+  const groups = executionGraph.buildObjectTimeline(graph);
+  const process = groups.find(group => group.processId === 'job-a');
+  assert.ok(process);
+  assert.equal(process.inputEntityId, 'pink-a');
+  assert.equal(process.outputEntityId, 'black-a');
+  assert.equal(process.displayId, 1);
+  assert.equal(process.stages.flatMap(stage => stage.nodes).filter(node => node.invocationId).length, 2);
+  assert.equal(groups.filter(group => group.processId).length, 1);
+});
+
+test('object timeline preserves causal target groups and pending verification state', () => {
+  assert.equal(typeof executionGraph.buildObjectTimeline, 'function');
+  const graph = buildExecutionGraph([
+    { id: 1, kind: 'visual_decisions_call', data: { endpoint: '/v1/responses' } },
+    { id: 2, kind: 'skill_start', title: 'generate_grasps', invocation_id: 'g1', data: { target_id: 'pink-1' } },
+    { id: 3, kind: 'skill_complete', title: 'generate_grasps', invocation_id: 'g1', artifact: 'artifacts/g1.json' },
+    { id: 4, kind: 'skill_start', title: 'verify_place', invocation_id: 'v1', data: { target_id: 'pink-1' } },
+    { id: 5, kind: 'skill_complete', title: 'verify_place', invocation_id: 'v1', data: { result: { status: 'unknown', success: false } } },
+    { id: 6, kind: 'skill_start', title: 'generate_grasps', invocation_id: 'g2', data: { target_id: 'pink-2' } },
+  ]);
+  const groups = executionGraph.buildObjectTimeline(graph);
+  assert.deepEqual(groups.map(group => group.targetId), [null, 'pink-1', 'pink-2']);
+  assert.deepEqual(groups[1].stages.map(stage => stage.phase), ['generate', 'verify']);
+  assert.equal(groups[1].stages[0].artifactCount, 1);
+  assert.equal(groups[1].stages[1].status, 'warning');
+});
+
+test('demo timeline distinguishes workspace arm selection, mapping and actual grasp planning', () => {
+  const skills = ['identify_target', 'identify_destination', 'choose_arm', 'build_scene',
+    'generate_grasps', 'plan_grasp', 'move_to_observe', 'observe_scene'];
+  const graph = buildExecutionGraph(skills.map((skill, i) => ({
+    id: i + 1, kind: 'skill_start', title: skill, invocation_id: `s${i}`,
+    data: { target_id: 'pink-1' },
+  })));
+  const stages = executionGraph.buildObjectTimeline(graph)[0].stages;
+  assert.deepEqual(stages.map(stage => stage.title), [
+    '目标 / 放置区', '执行臂选择', '场景建图', 'GraspGen',
+    'IK / 抓取规划', '返回观测位姿', '观测 / 清单',
+  ]);
+  assert.equal(stages[0].nodes.length, 2);
+  assert.equal(stages[1].events[0].title, 'choose_arm');
+  assert.equal(stages[4].events[0].title, 'plan_grasp');
+});
+
+test('object timeline uses archived display IDs without renumbering permanent targets', () => {
+  const graph = buildExecutionGraph([
+    { id: 1, kind: 'skill_start', title: 'generate_grasps', invocation_id: 's1', data: { target_id: 'opaque-a' } },
+    { id: 2, kind: 'skill_start', title: 'generate_grasps', invocation_id: 's2', data: { target_id: 'opaque-b' } },
+    { id: 3, kind: 'run_end', data: { task_progress: { objects: [{ id: 'opaque-a', display_id: 3 }] } } },
+  ]);
+  const groups = executionGraph.buildObjectTimeline(graph);
+  assert.equal(groups.find(group => group.targetId === 'opaque-a').displayId, 3);
+  assert.equal(groups.find(group => group.targetId === 'opaque-b').displayId, null);
+});
 
 test('retries remain separate calls and late stage events bind by invocation ID', () => {
   const events = [

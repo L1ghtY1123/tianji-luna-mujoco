@@ -15,9 +15,9 @@ import mujoco
 import numpy as np
 from PIL import Image
 
-from jev_mujoco.cameras import CALIBRATION_PATH, RgbdRenderer, clone_render_model
-from jev_mujoco.model_builder import ARM_JOINTS, ModelBuilder, normalize_scene
-from jev_mujoco.perception import Perception, PerceptionError, Sam3Client, public_observation
+from luna_mujoco.cameras import CALIBRATION_PATH, RgbdRenderer, clone_render_model
+from luna_mujoco.model_builder import ARM_JOINTS, ModelBuilder, normalize_scene
+from luna_mujoco.perception import Perception, PerceptionError, Sam3Client, public_observation
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENE = {"objects": [

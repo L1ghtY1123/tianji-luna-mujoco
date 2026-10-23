@@ -36,7 +36,7 @@ test('mixed run records visibly distinguish JEV calls, skill execution, algorith
   ];
   const view = render(events);
   assert.equal(view.counter.textContent, 7);
-  const categories = ['系统事件', 'JEV 决策', 'skill 执行', '算法计算', 'skill 执行', 'skill 执行', '系统事件'];
+  const categories = ['系统事件', '历史模型记录', 'skill 执行', '算法计算', 'skill 执行', 'skill 执行', '系统事件'];
   categories.forEach((category, index) => {
     const summary = view.container.children[index].children[0];
     const meta = summary.children[1].children.find(child => child.className === 'trace-meta');
@@ -45,7 +45,7 @@ test('mixed run records visibly distinguish JEV calls, skill execution, algorith
   });
   assert.match(view.cardText(1), /问题 · questions/);
   assert.match(view.cardText(1), /结构化输出 · output/);
-  assert.match(view.cardText(4), /阶段完成.*execute_grasp 内部阶段.*不调用 JEV/);
+  assert.match(view.cardText(4), /阶段完成.*execute_grasp 内部阶段.*内部顺序执行/);
   assert.match(view.cardText(5), /skill 完成/);
   assert.match(view.cardText(5), /"completed": true/);
 });
@@ -81,9 +81,9 @@ test('a planning attempt without a solution is a system outcome returned to JEV,
     skill: 'plan_grasp', arm: 'B', status: 'failed', code: 'planning_no_valid_candidate',
     error: 'no feasible lift', duration_s: 12.5, details: { failed_stages: ['lift'] },
   } }]);
-  assert.match(view.text, /规划无解，交回 JEV/);
+  assert.match(view.text, /规划无解/);
   assert.match(view.text, /系统事件/);
-  assert.match(view.text, /Arm B.*尚未执行运动.*JEV 决定重新选臂或停止/);
+  assert.match(view.text, /Arm B.*尚未执行运动.*后续行为以实际事件为准/);
   assert.match(view.text, /12\.50 s/);
   assert.match(view.text, /no feasible lift/);
   assert.match(view.text, /"failed_stages": \[/);

@@ -60,8 +60,8 @@ def projection(masks, *, intrinsics=None, transform=None):
 
 
 def partition(value, masks, **kwargs):
-    assert importlib.util.find_spec("jev_mujoco.semantic_depth"), "explicit semantic partition is missing"
-    from jev_mujoco.semantic_depth import partition_semantic_depth
+    assert importlib.util.find_spec("luna_mujoco.semantic_depth"), "explicit semantic partition is missing"
+    from luna_mujoco.semantic_depth import partition_semantic_depth
     return partition_semantic_depth(value, masks, camera_observation_type=CameraObservation, **kwargs)
 
 

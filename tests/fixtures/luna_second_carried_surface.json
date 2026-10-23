@@ -1,0 +1,22 @@
+{
+  "run_id": "3ce74663bad44c8db902f43561db4bfa",
+  "source": "frozen actual held attachment request and recorded gripper feedback; own URDF/YAML noncontact spheres in the same TCP frame",
+  "source_files": {
+    "data\\3ce-place-failure\\frozen-place-request.json": "6930b07b530f3c9000f79483ce0d2b8a9bfdfd8814ea1f221c606a4f64847dd1",
+    "assets\\marvin_urdf\\marvin_with_grippers.urdf": "cad92ac6d4dd94a9651c79b383520efe7fafadaabcd83aff5b17222e7eab0dea",
+    "resources\\curobo\\marvin_gui_dual.yml": "3b2566219c97f5570f3d5c1dec1618f08b215004d29012a36f9d9476255debe6"
+  },
+  "fixture_sha256": "a360d9c7dbb4b0dca5428b54ceab8f6b309ae578123062c19a6f3f830ba93234",
+  "measured_point_count": 1361,
+  "synthetic_point_count": 594,
+  "gripper_joint_positions_rad": {
+    "A": 0.4904145146428853,
+    "B": 1.935758394338917e-20
+  },
+  "excluded_contact_links": [
+    "gripL_Link3_L",
+    "gripL_Link3_R"
+  ],
+  "minimum_partition_size_m": 0.01,
+  "padding_m": 0.006
+}

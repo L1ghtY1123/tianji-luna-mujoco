@@ -2,6 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runEvidence, runStatusSummary, taskProgressSummary } from '../src/run-evidence.js';
 
+test('process completion counts do not double-count input and output entities', () => {
+  const progress = { process_records: { first: {}, second: {} }, completed_process_ids: ['first'],
+    pending_unpack_ids: ['pink-2'], processing_ids: [], product_ids: ['black-1'],
+    completed: [{ id: 'pink-1' }, { id: 'black-1' }] };
+  assert.equal(taskProgressSummary(progress), '已完成 1 道工序 · 待拆包 1 件 · 处理中 0 件');
+  assert.equal(runEvidence({ task_progress: progress }).task_progress.completed_count, 1);
+});
+
 test('run evidence displays holding, model stage, verification and preparation timing without raw clouds', () => {
   const run = { facts: { attached: true }, verification: { status: 'held', success: true, measurements: { matched_fraction: .9 } },
     collision_model: { mode: 'actual_closed', attached: true }, holding: { state: 'held', arm: 'A', verified: true, attached: true,

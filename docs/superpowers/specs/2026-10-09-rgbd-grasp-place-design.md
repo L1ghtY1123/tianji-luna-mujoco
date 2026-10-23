@@ -162,7 +162,7 @@ GraspGen 能产生受体抓姿候选，但当前服务只把目标物体点云�
 
 ## 文件边界与验收
 
-预计修改 src/jev_mujoco 的 runner、decisions、algorithms、geometry_service、backend_builder、planning_settings、model_builder、simulation、verification 与 app；新增相机、感知和放置几何模块。修改相关现有 skills 并新增四个 skill；修改 web 的场景编辑、参数分组、相机观测显示与任务状态。部署增加独立 SAM3 配置及网页 OSMesa 依赖。项目不运行时导入 tianji_base，不修改官方 SDK、vendor 快照或共享算法镜像。
+预计修改 src/luna_mujoco 的 runner、decisions、algorithms、geometry_service、backend_builder、planning_settings、model_builder、simulation、verification 与 app；新增相机、感知和放置几何模块。修改相关现有 skills 并新增四个 skill；修改 web 的场景编辑、参数分组、相机观测显示与任务状态。部署增加独立 SAM3 配置及网页 OSMesa 依赖。项目不运行时导入 tianji_base，不修改官方 SDK、vendor 快照或共享算法镜像。
 
 验收必须覆盖以下可重复行为：
 

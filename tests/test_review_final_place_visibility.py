@@ -2,7 +2,7 @@
 
 from test_rgbd_workflow import SensorRobot, VisionAlgorithms
 
-from jev_mujoco.runner import Runner
+from luna_mujoco.runner import Runner
 
 
 async def test_explicit_postplace_visual_result_survives_release_feedback_check(tmp_path):

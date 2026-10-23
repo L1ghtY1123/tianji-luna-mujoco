@@ -1,0 +1,387 @@
+{
+  "robot_sphere_count": 365,
+  "maximum_robot_spheres": 365,
+  "links": {
+    "gripL_Base": {
+      "link": "gripL_Base",
+      "source": "authored_urdf_collision_box",
+      "size_m": [
+        0.076,
+        0.092,
+        0.098
+      ],
+      "origin_xyz_m": [
+        0.0,
+        0.003362,
+        0.04855
+      ],
+      "origin_rpy_rad": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "divisions": [
+        2,
+        2,
+        3
+      ],
+      "numerical_padding_m": 1e-07,
+      "sphere_count": 12,
+      "radius_m": 0.03401153598523558,
+      "cells": [
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            0.04900000000000001
+          ]
+        }
+      ],
+      "proof": "Each sphere contains all eight vertices of its convex cell; cells tile the entire box."
+    },
+    "gripR_Base": {
+      "link": "gripR_Base",
+      "source": "authored_urdf_collision_box",
+      "size_m": [
+        0.076,
+        0.092,
+        0.098
+      ],
+      "origin_xyz_m": [
+        0.0,
+        0.003362,
+        0.04855
+      ],
+      "origin_rpy_rad": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "divisions": [
+        2,
+        2,
+        3
+      ],
+      "numerical_padding_m": 1e-07,
+      "sphere_count": 12,
+      "radius_m": 0.03401153598523558,
+      "cells": [
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            -0.046,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.0,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            -0.038,
+            0.0,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.0,
+            0.046,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            -0.046,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.0,
+            0.04900000000000001
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.049
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            -0.01633333333333333
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            -0.01633333333333333
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            0.01633333333333334
+          ]
+        },
+        {
+          "minimum_box_frame_m": [
+            0.0,
+            0.0,
+            0.01633333333333334
+          ],
+          "maximum_box_frame_m": [
+            0.038,
+            0.046,
+            0.04900000000000001
+          ]
+        }
+      ],
+      "proof": "Each sphere contains all eight vertices of its convex cell; cells tile the entire box."
+    }
+  },
+  "source_config_sha256": "3b2566219c97f5570f3d5c1dec1618f08b215004d29012a36f9d9476255debe6",
+  "urdf_sha256": "cad92ac6d4dd94a9651c79b383520efe7fafadaabcd83aff5b17222e7eab0dea",
+  "previous_robot_spheres": 349,
+  "historical_project_budget": 350,
+  "budget_reason": "The earlier project budget was not an SDK limit. Replacing only the two 4-sphere palms by 12-cell analytic covers requires 365 robot spheres; attachment remains separately bounded to 31.",
+  "sdk_commit": "8e734f3ced1df898990bcd92de40abce475907db",
+  "output_config_sha256": "8e03e5136f817be7ed49f9a95e66fa9ccc6c38e867d247741cd146eb2dc75385",
+  "sdk_capacity_verification": {
+    "api": "curobo.kinematics.KinematicsCfg.from_data_dict + Kinematics.compute_kinematics",
+    "robot_sphere_count": 365,
+    "sphere_shape": [
+      1,
+      1,
+      365,
+      4
+    ],
+    "all_finite": true,
+    "live_service_calls": 0,
+    "map_updates": 0,
+    "planning_calls": 0,
+    "motion_calls": 0,
+    "sdk_source_sha256": {
+      "_src/robot/kinematics/kinematics_cfg.py": "4ba4a4d2de8edf419ba6983e0aa2224b638928ad0fc23556c052e0539933e281",
+      "_src/robot/loader/kinematics_loader.py": "043c22e67a2148532ff3c2f27b05502f3d8c12ea1b627eebc958e09e8ae95f35",
+      "_src/robot/loader/kinematics_loader_cfg.py": "b0701b2ec636d02e3889b804c459ca8e1c0abf1b61b758aa85825fc5b189d133",
+      "_src/robot/types/self_collision_params.py": "970de953bb12f2854cc7e7354f1241419a5f44192acaf658d31a5d003b72d619",
+      "examples/getting_started/build_robot_model.py": "44051e0b11d83508ed6b9792002d956773eb417f3fef5971de4cb8ce1b822164"
+    }
+  },
+  "historical_budget_sources": [
+    "docs/superpowers/specs/2026-10-12-perception-policy-replay.md",
+    "scripts/refit_link4_collision.py"
+  ]
+}

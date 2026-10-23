@@ -4,8 +4,8 @@ import pytest
 from test_runner import Algorithms as FakeAlgorithms
 from test_runner import Sim
 
-from jev_mujoco.planning_settings import PlanningSettings
-from jev_mujoco.runner import Runner
+from luna_mujoco.planning_settings import PlanningSettings
+from luna_mujoco.runner import Runner
 
 
 class ObservationAlgorithms(FakeAlgorithms):

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from jev_mujoco import visual_assistance
+from luna_mujoco import visual_assistance
 
 
 def capture(identifier="scene"):
@@ -30,8 +30,8 @@ OBJECTS = [{"id": "cube-1", "kind": "cube", "color": "red", "position": [9, 8, 7
 async def test_runner_rejects_repeat_visual_input_but_accepts_new_masks(tmp_path):
     from test_rgbd_workflow import SensorRobot, VisionAlgorithms
 
-    from jev_mujoco.runner import Runner
-    from jev_mujoco.skills import SkillSelectionError
+    from luna_mujoco.runner import Runner
+    from luna_mujoco.skills import SkillSelectionError
 
     runner = Runner(SensorRobot(), VisionAlgorithms(), lambda record: None, tmp_path)
     calls = []
@@ -126,17 +126,17 @@ def test_visual_timeout_environment_preserves_provider_configuration(tmp_path, m
     path = tmp_path / "provider.json"
     path.write_text(json.dumps({"api_key": "private-test", "base_url": "https://existing.invalid/v1", "model": "existing"}))
     monkeypatch.setenv("OPENAI_CONFIG_FILE", str(path))
-    for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "JEV_VISION_MODEL", "JEV_VISUAL_TIMEOUT_S"):
+    for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "LUNA_VISION_MODEL", "LUNA_VISUAL_TIMEOUT_S"):
         monkeypatch.delenv(name, raising=False)
     service = visual_assistance.VisualAssistance.from_environment()
     assert service.timeout_s == 90.
-    monkeypatch.setenv("JEV_VISUAL_TIMEOUT_S", "120.5")
+    monkeypatch.setenv("LUNA_VISUAL_TIMEOUT_S", "120.5")
     service = visual_assistance.VisualAssistance.from_environment()
     assert service.timeout_s == 120.5
     assert service.base_url == "https://existing.invalid/v1" and service.model == "existing"
     assert service.api_key == "private-test"
     assert json.loads(path.read_text())["api_key"] == "private-test"
-    monkeypatch.setenv("JEV_VISUAL_TIMEOUT_S", "nan")
+    monkeypatch.setenv("LUNA_VISUAL_TIMEOUT_S", "nan")
     with pytest.raises(ValueError, match="visual_timeout_s_must_be_finite_between_1_and_180"):
         visual_assistance.VisualAssistance.from_environment()
 

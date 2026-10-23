@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 from test_region_placement import region_inputs
 
-from jev_mujoco import placement
-from jev_mujoco.placement_layout import partition_region
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco import placement
+from luna_mujoco.placement_layout import partition_region
+from luna_mujoco.task_progress import TaskProgress
 
 
 def inventory(count=3):
@@ -141,7 +141,7 @@ def test_measured_support_translation_preserves_slot_labels_and_invalidates_layo
 
 
 def test_congruent_visible_floor_patches_do_not_move_a_stationary_support_layout():
-    from jev_mujoco.measured_regions import supported_floor_rectangle
+    from luna_mujoco.measured_regions import supported_floor_rectangle
 
     progress, observation = inventory()
     _, destination, _, _ = region_inputs('bin')

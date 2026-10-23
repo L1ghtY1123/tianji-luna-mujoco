@@ -5,7 +5,7 @@ from zipfile import ZipFile
 import numpy as np
 import pytest
 
-from jev_mujoco.experiments import ExperimentOptions, ExperimentStore
+from luna_mujoco.experiments import ExperimentOptions, ExperimentStore
 
 
 def begin(store, mode="auto", name="实验一"):
@@ -129,34 +129,22 @@ def test_active_experiment_cannot_move_or_be_discarded(tmp_path):
 async def test_runner_failure_is_archived_with_causal_ids(tmp_path):
     from test_runner import Sim
 
-    from jev_mujoco.runner import Runner
-
-    class Decisions:
-        async def choose_visual_plan(self, state, skill, requests):
-            return dict(requests)
-
-        async def bind_request(self, instruction):
-            return {"task": "grasp", "arm": "auto", "scope": "single",
-                    "color": "red", "kind": "cube", "position": "any"}
-
-        async def choose_skill(self, state, registry):
-            return "recover_task" if state["facts"].get("recovery_needed") else "observe_scene"
-
-        async def choose_recovery(self, state):
-            return "stop"
+    from luna_mujoco.demo_runner import DemoRunner
+    from luna_mujoco.planning_settings import PlanningSettings
 
     class Algorithms:
         def observe(self, *args, **kwargs):
             raise ValueError("recorded_perception_failure")
 
     store = ExperimentStore(tmp_path / "experiments")
-    runner = Runner(Sim(), Algorithms(), lambda record: Decisions(), tmp_path / "runs", experiments=store)
+    runner = DemoRunner(Sim(), Algorithms(), None, tmp_path / "runs", experiments=store,
+        planning_settings=PlanningSettings(observation={"A": [0.] * 7, "B": [0.] * 7}))
     await runner.start("抓取红色方块", experiment=ExperimentOptions(record_video=False))
     await runner.worker
     store.close()
     saved = store.get(runner.run_id)
     events = store.events(runner.run_id)
-    assert saved["status"] == "failed"
+    assert saved["status"] == "needs_attention"
     start = next(e for e in events if e["kind"] == "skill_start")
     failure = next(e for e in events if e["kind"] == "skill_error")
     assert start["invocation_id"] == failure["invocation_id"]
@@ -169,7 +157,7 @@ def test_http_saved_archive_supports_video_range_and_pending_actions(tmp_path):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from jev_mujoco.experiment_api import experiment_router
+    from luna_mujoco.experiment_api import experiment_router
 
     store = ExperimentStore(tmp_path)
     session = begin(store, "ask")
@@ -189,7 +177,7 @@ def test_http_saved_archive_supports_video_range_and_pending_actions(tmp_path):
 
 
 def test_disk_error_does_not_leave_video_sampler_running(tmp_path, monkeypatch):
-    import jev_mujoco.experiments as module
+    import luna_mujoco.experiments as module
 
     session = begin(ExperimentStore(tmp_path))
 
@@ -221,7 +209,7 @@ def test_disk_error_does_not_leave_video_sampler_running(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("failure_stage", ["config", "events"])
 def test_initialization_failure_is_readable_terminal_archive(tmp_path, monkeypatch, failure_stage):
-    import jev_mujoco.experiments as module
+    import luna_mujoco.experiments as module
 
     store = ExperimentStore(tmp_path)
 

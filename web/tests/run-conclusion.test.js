@@ -6,6 +6,13 @@ test('uses the persisted evidence conclusion in live and replay views', () => {
   assert.equal(runConclusion({ conclusion: { summary: '缺少抓姿评估，原始失败保留。' } }), '缺少抓姿评估，原始失败保留。');
 });
 
+test('operator sees concise drop reason while full diagnostics remain stored', () => {
+  const run = { status: 'needs_attention', error_code: 'drop_carried_projection_outside_bin',
+    failed_step: { skill: 'plan_transport' } };
+  assert.match(runConclusion(run), /右盒投放规划.*尚未开始运输/);
+  assert.equal(runConclusion({ ...run, conclusion: { brief: '简短原因', summary: '完整诊断' } }), '简短原因');
+});
+
 test('legacy failures include stage, evidence limits and no duplicate code', () => {
   const text = runConclusion({ status: 'failed', error: 'unknown_error', error_code: 'unknown_error',
     failed_step: { skill: 'plan_place' } });

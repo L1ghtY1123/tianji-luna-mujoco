@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from test_planning_batch import batch_response, evaluated
 
-from jev_mujoco.algorithms import AlgorithmError, Algorithms
+from luna_mujoco.algorithms import AlgorithmError, Algorithms
 
 
 def set_path(item, segments, *, joint=0):
@@ -116,7 +116,7 @@ def test_joint_travel_does_not_wrap_across_joint_limits():
 
 
 def test_rank_returned_paths_before_interpolating_or_validating_candidates(monkeypatch):
-    from jev_mujoco import algorithms as algorithms_module
+    from luna_mujoco import algorithms as algorithms_module
 
     algorithms, state, scene, evaluations, _ = evaluated(16, scores=[.9] * 16)
     prepare = algorithms_module.build_execution_phases

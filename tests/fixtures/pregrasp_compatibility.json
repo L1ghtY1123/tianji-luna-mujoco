@@ -1,0 +1,2887 @@
+{
+  "3ce": {
+    "snapshot": {
+      "observation_id": "rgbd-2-15f28a61db00496f9a4ef76469c137d0",
+      "generation": 2
+    },
+    "target": {
+      "id": "instance-17efbc2f846c4d34",
+      "uncertainty_m": 0.005,
+      "geometry_completion": {
+        "source": "measured_surface_and_user_height_prior",
+        "height_prior_m": 0.1,
+        "height_prior_source": "user_specified_100mm",
+        "support_z_m": 0.41199854016304016,
+        "support_source": "measured_bin_floor",
+        "observation_id": "rgbd-2-15f28a61db00496f9a4ef76469c137d0",
+        "measurement_tolerance_m": 0.015,
+        "measured_point_count": 1361,
+        "measured_bounds_world_m": [
+          [
+            0.2119237333536148,
+            0.4818527102470398,
+            0.4346277117729187
+          ],
+          [
+            0.2682214379310608,
+            0.5199988484382629,
+            0.5119970440864563
+          ]
+        ],
+        "completed_bounds_world_m": [
+          [
+            0.2119237333536148,
+            0.4818527102470398,
+            0.41199854016304016
+          ],
+          [
+            0.2682214379310608,
+            0.5199988484382629,
+            0.5119985401630401
+          ]
+        ],
+        "synthetic_point_count": 594,
+        "synthetic_points_are_measured": false,
+        "xy_policy": "measured_convex_hull_extrusion",
+        "map_voxel_size_m": 0.02
+      }
+    },
+    "scene": {
+      "scene_token": "rgbd:653d8f58ce175b31062034e7",
+      "target_id": "instance-17efbc2f846c4d34",
+      "observation_id": "rgbd-2-15f28a61db00496f9a4ef76469c137d0",
+      "generation": 2
+    },
+    "settings": {
+      "experimental_semantic_only_mapping": true,
+      "holding_position_tolerance_fraction": 0.02,
+      "holding_stable_window_s": 0.2,
+      "ik_num_seeds": 16,
+      "ik_seed_solver_num_seeds": 32,
+      "ik_position_threshold_m": 0.005,
+      "ik_rotation_threshold_rad": 0.05,
+      "random_seed": 123,
+      "self_collision_check": true,
+      "trajectory_collision_clearance_m": 0.005,
+      "optimizer_collision_activation_distance_m": 0.03,
+      "trajopt_num_seeds": 2,
+      "plan_max_attempts": 1,
+      "finetune_attempts": 1,
+      "finetune_dt_scale": 0.55,
+      "freq_hz": 50,
+      "plan_timeout_s": 180.0,
+      "approach_axis": "z",
+      "approach_offset_m": -0.1,
+      "approach_in_tool_frame": true,
+      "lift_axis": "z",
+      "lift_offset_m": 0.1,
+      "lift_in_tool_frame": false,
+      "place_approach_axis": "z",
+      "place_approach_offset_m": 0.1,
+      "place_approach_in_tool_frame": false,
+      "place_retreat_axis": "z",
+      "place_retreat_offset_m": 0.1,
+      "place_retreat_in_tool_frame": false,
+      "place_release_height_m": 0.005,
+      "place_timeout_s": 180.0,
+      "time_scale": 3.0,
+      "dwell_approach_s": 1.0,
+      "dwell_grasp_s": 2.0,
+      "dwell_lift_s": 1.0,
+      "dwell_place_approach_s": 1.0,
+      "dwell_place_s": 2.0,
+      "dwell_release_s": 1.0,
+      "dwell_retreat_s": 1.0,
+      "pointcloud_filter": {
+        "enabled": false,
+        "method": "statistical",
+        "nb_neighbors": 20,
+        "std_ratio": 2.0,
+        "radius_m": 0.01,
+        "min_neighbors": 4,
+        "dbscan_preview": false,
+        "dbscan_eps_m": 0.02,
+        "dbscan_min_points": 10
+      },
+      "observation": {
+        "A": [
+          -0.5256233575306123,
+          0.9770702218514655,
+          0.3721391031102309,
+          -1.9186753533024064,
+          0.25532421627425045,
+          -0.5119574294874967,
+          -1.0574775404908443
+        ],
+        "B": [
+          0.5256233575306123,
+          0.9770702218514655,
+          -0.3721391031102309,
+          -1.9186753533024064,
+          -0.25532421627425045,
+          -0.5119574294874967,
+          1.0574775404908443
+        ]
+      },
+      "attachment": {
+        "minimum_partition_size_m": 0.01,
+        "margin_m": 0.001,
+        "sphere_budget": 128
+      }
+    },
+    "candidates": [
+      {
+        "sampling_round": 1,
+        "source_batch": 4,
+        "source_index": 66,
+        "candidate_index": 931,
+        "score": 0.8171878457069397,
+        "T_world_tcp": [
+          [
+            -0.5947487950325012,
+            -0.8036491870880127,
+            -0.020541012287139893,
+            0.24990399181842804
+          ],
+          [
+            -0.8039053678512573,
+            0.5946508646011353,
+            0.011250525712966919,
+            0.5074692368507385
+          ],
+          [
+            0.0031732534989714622,
+            0.023204267024993896,
+            -0.9997256994247437,
+            0.6810659170150757
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "ik": {
+          "candidate_index": 82,
+          "success": true,
+          "joints_rad": [
+            -1.4805675745010376,
+            0.5763165950775146,
+            1.9376647472381592,
+            -1.1840019226074219,
+            0.9677755236625671,
+            -0.6393058896064758,
+            -0.8248885869979858
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 1.0745380052412656e-07,
+          "rotation_error_rad": 1.745720545898166e-08,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:653d8f58ce175b31062034e7",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              -1.4805675745010376,
+              0.5763165950775146,
+              1.9376647472381592,
+              -1.1840019226074219,
+              0.9677755236625671,
+              -0.6393058896064758,
+              -0.8248885869979858
+            ],
+            "T_world_tcp": [
+              [
+                -0.5947487950325012,
+                -0.8036491870880127,
+                -0.020541012287139893,
+                0.24990399181842804
+              ],
+              [
+                -0.8039053678512573,
+                0.5946508646011353,
+                0.011250525712966919,
+                0.5074692368507385
+              ],
+              [
+                0.0031732534989714622,
+                0.023204267024993896,
+                -0.9997256994247437,
+                0.6810659170150757
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        },
+        "nominal_T_world_tcp": [
+          [
+            -0.5947487354278564,
+            -0.8036491870880127,
+            -0.020541023463010788,
+            0.2499040755736015
+          ],
+          [
+            -0.8039053678512573,
+            0.5946507453918457,
+            0.011250531300902367,
+            0.5074693062897117
+          ],
+          [
+            0.0031732553616166115,
+            0.02320428006350994,
+            -0.9997256994247437,
+            0.6810659050227612
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:653d8f58ce175b31062034e7",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            -1.4805675745010376,
+            0.5763165950775146,
+            1.9376647472381592,
+            -1.1840019226074219,
+            0.9677755236625671,
+            -0.6393058896064758,
+            -0.8248885869979858
+          ],
+          "T_world_tcp": [
+            [
+              -0.5947487950325012,
+              -0.8036491870880127,
+              -0.020541012287139893,
+              0.24990399181842804
+            ],
+            [
+              -0.8039053678512573,
+              0.5946508646011353,
+              0.011250525712966919,
+              0.5074692368507385
+            ],
+            [
+              0.0031732534989714622,
+              0.023204267024993896,
+              -0.9997256994247437,
+              0.6810659170150757
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "fk_goal_validation": {
+          "candidate_index": 931,
+          "accepted": true,
+          "reason": "accepted",
+          "position_error_m": 1.094555420126464e-07,
+          "rotation_error_rad": 0.0,
+          "position_threshold_m": 0.005,
+          "rotation_threshold_rad": 0.05,
+          "downward_dot": 0.9997256994247437,
+          "horizontal_away_from_robot_dot": 0.0013689102425450683,
+          "maximum_tilt_deg": 45.0,
+          "reference": "original_graspgen_tool_pose_after_single_1cm_insertion"
+        }
+      }
+    ],
+    "source": "3ce: event-00025 observation and event-00052 accepted source IK; no held state"
+  },
+  "5be": {
+    "snapshot": {
+      "observation_id": "rgbd-2-cd0b51adc0df44d4aeaf1d12b2f08a79",
+      "generation": 2
+    },
+    "target": {
+      "id": "instance-74ed366e2c6f4908",
+      "uncertainty_m": 0.005,
+      "geometry_completion": {
+        "source": "measured_surface_and_user_height_prior",
+        "height_prior_m": 0.1,
+        "height_prior_source": "user_specified_100mm",
+        "support_z_m": 0.41199854016304016,
+        "support_source": "measured_bin_floor",
+        "observation_id": "rgbd-2-cd0b51adc0df44d4aeaf1d12b2f08a79",
+        "measurement_tolerance_m": 0.015,
+        "measured_point_count": 1361,
+        "measured_bounds_world_m": [
+          [
+            0.2119237333536148,
+            0.4818527102470398,
+            0.4346277117729187
+          ],
+          [
+            0.2682214379310608,
+            0.5199988484382629,
+            0.5119970440864563
+          ]
+        ],
+        "completed_bounds_world_m": [
+          [
+            0.2119237333536148,
+            0.4818527102470398,
+            0.41199854016304016
+          ],
+          [
+            0.2682214379310608,
+            0.5199988484382629,
+            0.5119985401630401
+          ]
+        ],
+        "synthetic_point_count": 594,
+        "synthetic_points_are_measured": false,
+        "xy_policy": "measured_convex_hull_extrusion",
+        "map_voxel_size_m": 0.02
+      }
+    },
+    "scene": {
+      "scene_token": "rgbd:a35cf9dcc5ab5a446acb1e35",
+      "target_id": "instance-74ed366e2c6f4908",
+      "observation_id": "rgbd-2-cd0b51adc0df44d4aeaf1d12b2f08a79",
+      "generation": 2
+    },
+    "settings": {
+      "experimental_semantic_only_mapping": true,
+      "holding_position_tolerance_fraction": 0.02,
+      "holding_stable_window_s": 0.2,
+      "ik_num_seeds": 16,
+      "ik_seed_solver_num_seeds": 32,
+      "ik_position_threshold_m": 0.005,
+      "ik_rotation_threshold_rad": 0.05,
+      "random_seed": 123,
+      "self_collision_check": true,
+      "trajectory_collision_clearance_m": 0.005,
+      "optimizer_collision_activation_distance_m": 0.03,
+      "trajopt_num_seeds": 2,
+      "plan_max_attempts": 1,
+      "finetune_attempts": 1,
+      "finetune_dt_scale": 0.55,
+      "freq_hz": 50,
+      "plan_timeout_s": 180.0,
+      "approach_axis": "z",
+      "approach_offset_m": -0.1,
+      "approach_in_tool_frame": true,
+      "lift_axis": "z",
+      "lift_offset_m": 0.1,
+      "lift_in_tool_frame": false,
+      "place_approach_axis": "z",
+      "place_approach_offset_m": 0.1,
+      "place_approach_in_tool_frame": false,
+      "place_retreat_axis": "z",
+      "place_retreat_offset_m": 0.1,
+      "place_retreat_in_tool_frame": false,
+      "place_release_height_m": 0.005,
+      "place_timeout_s": 180.0,
+      "time_scale": 3.0,
+      "dwell_approach_s": 1.0,
+      "dwell_grasp_s": 2.0,
+      "dwell_lift_s": 1.0,
+      "dwell_place_approach_s": 1.0,
+      "dwell_place_s": 2.0,
+      "dwell_release_s": 1.0,
+      "dwell_retreat_s": 1.0,
+      "pointcloud_filter": {
+        "enabled": false,
+        "method": "statistical",
+        "nb_neighbors": 20,
+        "std_ratio": 2.0,
+        "radius_m": 0.01,
+        "min_neighbors": 4,
+        "dbscan_preview": false,
+        "dbscan_eps_m": 0.02,
+        "dbscan_min_points": 10
+      },
+      "observation": {
+        "A": [
+          -0.5256233575306123,
+          0.9770702218514655,
+          0.3721391031102309,
+          -1.9186753533024064,
+          0.25532421627425045,
+          -0.5119574294874967,
+          -1.0574775404908443
+        ],
+        "B": [
+          0.5256233575306123,
+          0.9770702218514655,
+          -0.3721391031102309,
+          -1.9186753533024064,
+          -0.25532421627425045,
+          -0.5119574294874967,
+          1.0574775404908443
+        ]
+      },
+      "attachment": {
+        "minimum_partition_size_m": 0.01,
+        "margin_m": 0.001,
+        "sphere_budget": 256
+      }
+    },
+    "candidates": [
+      {
+        "sampling_round": 2,
+        "source_batch": 4,
+        "source_index": 48,
+        "candidate_index": 508,
+        "score": 0.8497627377510071,
+        "T_world_tcp": [
+          [
+            -0.30166032910346985,
+            -0.9530288577079773,
+            -0.02714889496564865,
+            0.23945066332817078
+          ],
+          [
+            -0.9533831477165222,
+            0.30129316449165344,
+            0.016822515055537224,
+            0.5083683729171753
+          ],
+          [
+            -0.007852562703192234,
+            0.030957983806729317,
+            -0.9994898438453674,
+            0.6756894588470459
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "ik": {
+          "candidate_index": 72,
+          "success": true,
+          "joints_rad": [
+            0.5425971150398254,
+            -0.38941872119903564,
+            0.616538405418396,
+            -1.189561367034912,
+            0.06033524125814438,
+            -0.18191984295845032,
+            -0.4565318524837494
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.0,
+          "rotation_error_rad": 2.5170932005380564e-08,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:a35cf9dcc5ab5a446acb1e35",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              0.5425971150398254,
+              -0.38941872119903564,
+              0.616538405418396,
+              -1.189561367034912,
+              0.06033524125814438,
+              -0.18191984295845032,
+              -0.4565318524837494
+            ],
+            "T_world_tcp": [
+              [
+                -0.30166032910346985,
+                -0.9530288577079773,
+                -0.02714889496564865,
+                0.23945066332817078
+              ],
+              [
+                -0.9533831477165222,
+                0.30129316449165344,
+                0.016822515055537224,
+                0.5083683729171753
+              ],
+              [
+                -0.007852562703192234,
+                0.030957983806729317,
+                -0.9994898438453674,
+                0.6756894588470459
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        },
+        "nominal_T_world_tcp": [
+          [
+            -0.30166029930114746,
+            -0.9530288577079773,
+            -0.027148891240358353,
+            0.239450666170039
+          ],
+          [
+            -0.9533831477165222,
+            0.30129313468933105,
+            0.016822507604956627,
+            0.508368383012274
+          ],
+          [
+            -0.007852558977901936,
+            0.03095797635614872,
+            -0.9994897842407227,
+            0.675689486193797
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:a35cf9dcc5ab5a446acb1e35",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            0.5425971150398254,
+            -0.38941872119903564,
+            0.616538405418396,
+            -1.189561367034912,
+            0.06033524125814438,
+            -0.18191984295845032,
+            -0.4565318524837494
+          ],
+          "T_world_tcp": [
+            [
+              -0.30166032910346985,
+              -0.9530288577079773,
+              -0.02714889496564865,
+              0.23945066332817078
+            ],
+            [
+              -0.9533831477165222,
+              0.30129316449165344,
+              0.016822515055537224,
+              0.5083683729171753
+            ],
+            [
+              -0.007852562703192234,
+              0.030957983806729317,
+              -0.9994898438453674,
+              0.6756894588470459
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "fk_goal_validation": {
+          "candidate_index": 508,
+          "accepted": true,
+          "reason": "accepted",
+          "position_error_m": 2.928876967035826e-08,
+          "rotation_error_rad": 0.00023657708851380408,
+          "position_threshold_m": 0.005,
+          "rotation_threshold_rad": 0.05,
+          "downward_dot": 0.9994898438453674,
+          "horizontal_away_from_robot_dot": 0.003573893035147483,
+          "maximum_tilt_deg": 45.0,
+          "reference": "original_graspgen_tool_pose_after_single_1cm_insertion"
+        }
+      },
+      {
+        "sampling_round": 2,
+        "source_batch": 3,
+        "source_index": 74,
+        "candidate_index": 826,
+        "score": 0.8287906050682068,
+        "T_world_tcp": [
+          [
+            0.44908407330513,
+            0.8921564221382141,
+            0.04878639429807663,
+            0.23094601929187775
+          ],
+          [
+            0.8924159407615662,
+            -0.45055127143859863,
+            0.024438098073005676,
+            0.5031706094741821
+          ],
+          [
+            0.04378338158130646,
+            0.032562997192144394,
+            -0.9985102415084839,
+            0.6751404404640198
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "ik": {
+          "candidate_index": 0,
+          "success": true,
+          "joints_rad": [
+            0.1611158698797226,
+            -0.8164579272270203,
+            1.6330167055130005,
+            -1.2538574934005737,
+            2.767385721206665,
+            0.20239436626434326,
+            -0.12114621698856354
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.00313956500031054,
+          "rotation_error_rad": 0.020211391150951385,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:a35cf9dcc5ab5a446acb1e35",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              0.1611158698797226,
+              -0.8164579272270203,
+              1.6330167055130005,
+              -1.2538574934005737,
+              2.767385721206665,
+              0.20239436626434326,
+              -0.12114621698856354
+            ],
+            "T_world_tcp": [
+              [
+                0.44908407330513,
+                0.8921564221382141,
+                0.04878639429807663,
+                0.23094601929187775
+              ],
+              [
+                0.8924159407615662,
+                -0.45055127143859863,
+                0.024438098073005676,
+                0.5031706094741821
+              ],
+              [
+                0.04378338158130646,
+                0.032562997192144394,
+                -0.9985102415084839,
+                0.6751404404640198
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        },
+        "nominal_T_world_tcp": [
+          [
+            0.45110154151916504,
+            0.8914905190467834,
+            0.041859034448862076,
+            0.23272496831736786
+          ],
+          [
+            0.8921549916267395,
+            -0.45169591903686523,
+            0.005501534324139357,
+            0.5016010802141667
+          ],
+          [
+            0.023812120780348778,
+            0.03486299142241478,
+            -0.9991085529327393,
+            0.6730840282918424
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:a35cf9dcc5ab5a446acb1e35",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            0.1611158698797226,
+            -0.8164579272270203,
+            1.6330167055130005,
+            -1.2538574934005737,
+            2.767385721206665,
+            0.20239436626434326,
+            -0.12114621698856354
+          ],
+          "T_world_tcp": [
+            [
+              0.44908407330513,
+              0.8921564221382141,
+              0.04878639429807663,
+              0.23094601929187775
+            ],
+            [
+              0.8924159407615662,
+              -0.45055127143859863,
+              0.024438098073005676,
+              0.5031706094741821
+            ],
+            [
+              0.04378338158130646,
+              0.032562997192144394,
+              -0.9985102415084839,
+              0.6751404404640198
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "fk_goal_validation": {
+          "candidate_index": 826,
+          "accepted": true,
+          "reason": "accepted",
+          "position_error_m": 0.0031395720656191115,
+          "rotation_error_rad": 0.020210343832926282,
+          "position_threshold_m": 0.005,
+          "rotation_threshold_rad": 0.05,
+          "downward_dot": 0.9985102415084839,
+          "horizontal_away_from_robot_dot": 0.04297802898445046,
+          "maximum_tilt_deg": 45.0,
+          "reference": "original_graspgen_tool_pose_after_single_1cm_insertion"
+        }
+      },
+      {
+        "sampling_round": 2,
+        "source_batch": 10,
+        "source_index": 72,
+        "candidate_index": 991,
+        "score": 0.8138543963432312,
+        "T_world_tcp": [
+          [
+            -0.5003848671913147,
+            -0.8657704591751099,
+            0.007514532655477524,
+            0.2389020025730133
+          ],
+          [
+            -0.865801215171814,
+            0.5003827214241028,
+            -0.002268719021230936,
+            0.5027894377708435
+          ],
+          [
+            -0.0017959531396627426,
+            -0.007641324307769537,
+            -0.9999691843986511,
+            0.6678158044815063
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "ik": {
+          "candidate_index": 75,
+          "success": true,
+          "joints_rad": [
+            0.6230008006095886,
+            -0.392297625541687,
+            0.5280942320823669,
+            -1.1801304817199707,
+            0.2893468737602234,
+            -0.2648082673549652,
+            -0.37754568457603455
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.0022890428081154823,
+          "rotation_error_rad": 0.007862633094191551,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:a35cf9dcc5ab5a446acb1e35",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              0.6230008006095886,
+              -0.392297625541687,
+              0.5280942320823669,
+              -1.1801304817199707,
+              0.2893468737602234,
+              -0.2648082673549652,
+              -0.37754568457603455
+            ],
+            "T_world_tcp": [
+              [
+                -0.5003848671913147,
+                -0.8657704591751099,
+                0.007514532655477524,
+                0.2389020025730133
+              ],
+              [
+                -0.865801215171814,
+                0.5003827214241028,
+                -0.002268719021230936,
+                0.5027894377708435
+              ],
+              [
+                -0.0017959531396627426,
+                -0.007641324307769537,
+                -0.9999691843986511,
+                0.6678158044815063
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        },
+        "nominal_T_world_tcp": [
+          [
+            -0.5,
+            -0.8660253882408142,
+            0.0,
+            0.24009436443581503
+          ],
+          [
+            -0.8660253882408142,
+            0.5,
+            0.0,
+            0.5009582389514239
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.6671340619803876
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:a35cf9dcc5ab5a446acb1e35",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            0.6230008006095886,
+            -0.392297625541687,
+            0.5280942320823669,
+            -1.1801304817199707,
+            0.2893468737602234,
+            -0.2648082673549652,
+            -0.37754568457603455
+          ],
+          "T_world_tcp": [
+            [
+              -0.5003848671913147,
+              -0.8657704591751099,
+              0.007514532655477524,
+              0.2389020025730133
+            ],
+            [
+              -0.865801215171814,
+              0.5003827214241028,
+              -0.002268719021230936,
+              0.5027894377708435
+            ],
+            [
+              -0.0017959531396627426,
+              -0.007641324307769537,
+              -0.9999691843986511,
+              0.6678158044815063
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "fk_goal_validation": {
+          "candidate_index": 991,
+          "accepted": true,
+          "reason": "accepted",
+          "position_error_m": 0.00228905848897302,
+          "rotation_error_rad": 0.007873377342589182,
+          "position_threshold_m": 0.005,
+          "rotation_threshold_rad": 0.05,
+          "downward_dot": 0.9999691843986511,
+          "horizontal_away_from_robot_dot": 0.0011682974505167131,
+          "maximum_tilt_deg": 45.0,
+          "reference": "original_graspgen_tool_pose_after_single_1cm_insertion"
+        }
+      },
+      {
+        "sampling_round": 2,
+        "source_batch": 7,
+        "source_index": 75,
+        "candidate_index": 992,
+        "score": 0.8138425350189209,
+        "T_world_tcp": [
+          [
+            -0.5355644822120667,
+            -0.8444203734397888,
+            0.011174148879945278,
+            0.2377088963985443
+          ],
+          [
+            -0.844336211681366,
+            0.5356733798980713,
+            0.012261448428034782,
+            0.5014140009880066
+          ],
+          [
+            -0.016339510679244995,
+            -0.002867942675948143,
+            -0.9998623728752136,
+            0.6689834594726562
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "ik": {
+          "candidate_index": 76,
+          "success": true,
+          "joints_rad": [
+            0.7739105820655823,
+            -0.4917576014995575,
+            -2.7729625701904297,
+            0.9602400064468384,
+            -2.7750937938690186,
+            -0.36719241738319397,
+            -0.34562474489212036
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.0030793999321758747,
+          "rotation_error_rad": 0.044864922761917114,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:a35cf9dcc5ab5a446acb1e35",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              0.7739105820655823,
+              -0.4917576014995575,
+              -2.7729625701904297,
+              0.9602400064468384,
+              -2.7750937938690186,
+              -0.36719241738319397,
+              -0.34562474489212036
+            ],
+            "T_world_tcp": [
+              [
+                -0.5355644822120667,
+                -0.8444203734397888,
+                0.011174148879945278,
+                0.2377088963985443
+              ],
+              [
+                -0.844336211681366,
+                0.5356733798980713,
+                0.012261448428034782,
+                0.5014140009880066
+              ],
+              [
+                -0.016339510679244995,
+                -0.002867942675948143,
+                -0.9998623728752136,
+                0.6689834594726562
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        },
+        "nominal_T_world_tcp": [
+          [
+            -0.5,
+            -0.8660253882408142,
+            0.0,
+            0.24012631648353558
+          ],
+          [
+            -0.8660253882408142,
+            0.5,
+            0.0,
+            0.5009646615847291
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.6671295916320295
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:a35cf9dcc5ab5a446acb1e35",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            0.7739105820655823,
+            -0.4917576014995575,
+            -2.7729625701904297,
+            0.9602400064468384,
+            -2.7750937938690186,
+            -0.36719241738319397,
+            -0.34562474489212036
+          ],
+          "T_world_tcp": [
+            [
+              -0.5355644822120667,
+              -0.8444203734397888,
+              0.011174148879945278,
+              0.2377088963985443
+            ],
+            [
+              -0.844336211681366,
+              0.5356733798980713,
+              0.012261448428034782,
+              0.5014140009880066
+            ],
+            [
+              -0.016339510679244995,
+              -0.002867942675948143,
+              -0.9998623728752136,
+              0.6689834594726562
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "fk_goal_validation": {
+          "candidate_index": 992,
+          "accepted": true,
+          "reason": "accepted",
+          "position_error_m": 0.003079391455656012,
+          "rotation_error_rad": 0.044865983098748834,
+          "position_threshold_m": 0.005,
+          "rotation_threshold_rad": 0.05,
+          "downward_dot": 0.9998623728752136,
+          "horizontal_away_from_robot_dot": 0.015865732038954566,
+          "maximum_tilt_deg": 45.0,
+          "reference": "original_graspgen_tool_pose_after_single_1cm_insertion"
+        }
+      },
+      {
+        "sampling_round": 2,
+        "source_batch": 9,
+        "source_index": 75,
+        "candidate_index": 993,
+        "score": 0.8138169050216675,
+        "T_world_tcp": [
+          [
+            -0.5357316732406616,
+            -0.8442886471748352,
+            0.012964596971869469,
+            0.23844729363918304
+          ],
+          [
+            -0.8442299962043762,
+            0.5358650088310242,
+            0.011128383688628674,
+            0.5020612478256226
+          ],
+          [
+            -0.016342846676707268,
+            -0.0049832770600914955,
+            -0.9998540282249451,
+            0.668522298336029
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "ik": {
+          "candidate_index": 77,
+          "success": true,
+          "joints_rad": [
+            0.7744756937026978,
+            -0.4947826564311981,
+            -2.7725934982299805,
+            0.9537355899810791,
+            -2.7755024433135986,
+            -0.3705248236656189,
+            -0.3418319523334503
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.0024328110739588737,
+          "rotation_error_rad": 0.045250099152326584,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:a35cf9dcc5ab5a446acb1e35",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              0.7744756937026978,
+              -0.4947826564311981,
+              -2.7725934982299805,
+              0.9537355899810791,
+              -2.7755024433135986,
+              -0.3705248236656189,
+              -0.3418319523334503
+            ],
+            "T_world_tcp": [
+              [
+                -0.5357316732406616,
+                -0.8442886471748352,
+                0.012964596971869469,
+                0.23844729363918304
+              ],
+              [
+                -0.8442299962043762,
+                0.5358650088310242,
+                0.011128383688628674,
+                0.5020612478256226
+              ],
+              [
+                -0.016342846676707268,
+                -0.0049832770600914955,
+                -0.9998540282249451,
+                0.668522298336029
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        },
+        "nominal_T_world_tcp": [
+          [
+            -0.5,
+            -0.8660253882408142,
+            0.0,
+            0.24010337940550666
+          ],
+          [
+            -0.8660253882408142,
+            0.5,
+            0.0,
+            0.5009526722035648
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.6671269243241758
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:a35cf9dcc5ab5a446acb1e35",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            0.7744756937026978,
+            -0.4947826564311981,
+            -2.7725934982299805,
+            0.9537355899810791,
+            -2.7755024433135986,
+            -0.3705248236656189,
+            -0.3418319523334503
+          ],
+          "T_world_tcp": [
+            [
+              -0.5357316732406616,
+              -0.8442886471748352,
+              0.012964596971869469,
+              0.23844729363918304
+            ],
+            [
+              -0.8442299962043762,
+              0.5358650088310242,
+              0.011128383688628674,
+              0.5020612478256226
+            ],
+            [
+              -0.016342846676707268,
+              -0.0049832770600914955,
+              -0.9998540282249451,
+              0.668522298336029
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "fk_goal_validation": {
+          "candidate_index": 993,
+          "accepted": true,
+          "reason": "accepted",
+          "position_error_m": 0.0024328231765165516,
+          "rotation_error_rad": 0.04525446436466526,
+          "position_threshold_m": 0.005,
+          "rotation_threshold_rad": 0.05,
+          "downward_dot": 0.9998540282249451,
+          "horizontal_away_from_robot_dot": 0.015608680687897596,
+          "maximum_tilt_deg": 45.0,
+          "reference": "original_graspgen_tool_pose_after_single_1cm_insertion"
+        }
+      }
+    ],
+    "source": "5be: event-00025 observation and event-00070 accepted source IK; no held state"
+  },
+  "ffb": {
+    "snapshot": {
+      "observation_id": "rgbd-2-5f4a2e5306ac44a089d641995fbb2ba2",
+      "generation": 2
+    },
+    "target": {
+      "id": "instance-4e08e9f9cb56489f",
+      "uncertainty_m": 0.005,
+      "geometry_completion": {
+        "source": "measured_surface_and_user_height_prior",
+        "height_prior_m": 0.1,
+        "height_prior_source": "user_specified_100mm",
+        "support_z_m": 0.41199854016304016,
+        "support_source": "measured_bin_floor",
+        "observation_id": "rgbd-2-5f4a2e5306ac44a089d641995fbb2ba2",
+        "measurement_tolerance_m": 0.015,
+        "measured_point_count": 1361,
+        "measured_bounds_world_m": [
+          [
+            0.2119237333536148,
+            0.4818527102470398,
+            0.4346277117729187
+          ],
+          [
+            0.2682214379310608,
+            0.5199988484382629,
+            0.5119970440864563
+          ]
+        ],
+        "completed_bounds_world_m": [
+          [
+            0.2119237333536148,
+            0.4818527102470398,
+            0.41199854016304016
+          ],
+          [
+            0.2682214379310608,
+            0.5199988484382629,
+            0.5119985401630401
+          ]
+        ],
+        "synthetic_point_count": 594,
+        "synthetic_points_are_measured": false,
+        "xy_policy": "measured_convex_hull_extrusion",
+        "map_voxel_size_m": 0.02
+      }
+    },
+    "scene": {
+      "observation_id": "rgbd-2-5f4a2e5306ac44a089d641995fbb2ba2",
+      "generation": 2,
+      "target_id": "instance-4e08e9f9cb56489f",
+      "scene_token": "rgbd:29bbf3571657087c077fcb24"
+    },
+    "settings": {
+      "experimental_semantic_only_mapping": true,
+      "holding_position_tolerance_fraction": 0.02,
+      "holding_stable_window_s": 0.2,
+      "ik_num_seeds": 16,
+      "ik_seed_solver_num_seeds": 32,
+      "ik_position_threshold_m": 0.005,
+      "ik_rotation_threshold_rad": 0.05,
+      "random_seed": 123,
+      "self_collision_check": true,
+      "trajectory_collision_clearance_m": 0.005,
+      "optimizer_collision_activation_distance_m": 0.03,
+      "trajopt_num_seeds": 2,
+      "plan_max_attempts": 1,
+      "finetune_attempts": 1,
+      "finetune_dt_scale": 0.55,
+      "freq_hz": 50,
+      "plan_timeout_s": 180.0,
+      "approach_axis": "z",
+      "approach_offset_m": -0.1,
+      "approach_in_tool_frame": true,
+      "lift_axis": "z",
+      "lift_offset_m": 0.1,
+      "lift_in_tool_frame": false,
+      "place_approach_axis": "z",
+      "place_approach_offset_m": 0.1,
+      "place_approach_in_tool_frame": false,
+      "place_retreat_axis": "z",
+      "place_retreat_offset_m": 0.1,
+      "place_retreat_in_tool_frame": false,
+      "place_release_height_m": 0.005,
+      "place_timeout_s": 180.0,
+      "time_scale": 3.0,
+      "dwell_approach_s": 1.0,
+      "dwell_grasp_s": 2.0,
+      "dwell_lift_s": 1.0,
+      "dwell_place_approach_s": 1.0,
+      "dwell_place_s": 2.0,
+      "dwell_release_s": 1.0,
+      "dwell_retreat_s": 1.0,
+      "pointcloud_filter": {
+        "enabled": false,
+        "method": "statistical",
+        "nb_neighbors": 20,
+        "std_ratio": 2.0,
+        "radius_m": 0.01,
+        "min_neighbors": 4,
+        "dbscan_preview": false,
+        "dbscan_eps_m": 0.02,
+        "dbscan_min_points": 10
+      },
+      "observation": {
+        "A": [
+          -0.5256233575306123,
+          0.9770702218514655,
+          0.3721391031102309,
+          -1.9186753533024064,
+          0.25532421627425045,
+          -0.5119574294874967,
+          -1.0574775404908443
+        ],
+        "B": [
+          0.5256233575306123,
+          0.9770702218514655,
+          -0.3721391031102309,
+          -1.9186753533024064,
+          -0.25532421627425045,
+          -0.5119574294874967,
+          1.0574775404908443
+        ]
+      },
+      "attachment": {
+        "minimum_partition_size_m": 0.01,
+        "margin_m": 0.001,
+        "sphere_budget": 256
+      }
+    },
+    "candidates": [
+      {
+        "candidate_index": 971,
+        "sampling_round": 1,
+        "score": 0.8134658336639404,
+        "source_batch": 9,
+        "source_index": 87,
+        "nominal_T_world_tcp": [
+          [
+            0.5,
+            0.8660253882408142,
+            0.0,
+            0.24010344820696186
+          ],
+          [
+            0.8660253882408142,
+            -0.5,
+            0.0,
+            0.5009572477913738
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.667138472724101
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_world_tcp": [
+          [
+            0.5007613301277161,
+            0.8655850291252136,
+            0.0002787844277918339,
+            0.23996399343013763
+          ],
+          [
+            0.865578830242157,
+            -0.5007593035697937,
+            0.0036413692869246006,
+            0.5024004578590393
+          ],
+          [
+            0.0032915191259235144,
+            -0.0015821480192244053,
+            -0.9999933242797852,
+            0.6668896079063416
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:29bbf3571657087c077fcb24",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            -1.4804267883300781,
+            1.1535191535949707,
+            1.1256694793701172,
+            -1.1741254329681396,
+            -1.52053701877594,
+            1.0263066291809082,
+            1.0253719091415405
+          ],
+          "T_world_tcp": [
+            [
+              0.5007613301277161,
+              0.8655850291252136,
+              0.0002787844277918339,
+              0.23996399343013763
+            ],
+            [
+              0.865578830242157,
+              -0.5007593035697937,
+              0.0036413692869246006,
+              0.5024004578590393
+            ],
+            [
+              0.0032915191259235144,
+              -0.0015821480192244053,
+              -0.9999933242797852,
+              0.6668896079063416
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "ik": {
+          "candidate_index": 0,
+          "success": true,
+          "joints_rad": [
+            -1.4804267883300781,
+            1.1535191535949707,
+            1.1256694793701172,
+            -1.1741254329681396,
+            -1.52053701877594,
+            1.0263066291809082,
+            1.0253719091415405
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.0014711295953020453,
+          "rotation_error_rad": 0.003756610443815589,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:29bbf3571657087c077fcb24",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              -1.4804267883300781,
+              1.1535191535949707,
+              1.1256694793701172,
+              -1.1741254329681396,
+              -1.52053701877594,
+              1.0263066291809082,
+              1.0253719091415405
+            ],
+            "T_world_tcp": [
+              [
+                0.5007613301277161,
+                0.8655850291252136,
+                0.0002787844277918339,
+                0.23996399343013763
+              ],
+              [
+                0.865578830242157,
+                -0.5007593035697937,
+                0.0036413692869246006,
+                0.5024004578590393
+              ],
+              [
+                0.0032915191259235144,
+                -0.0015821480192244053,
+                -0.9999933242797852,
+                0.6668896079063416
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "candidate_index": 972,
+        "sampling_round": 1,
+        "score": 0.8134569525718689,
+        "source_batch": 4,
+        "source_index": 88,
+        "nominal_T_world_tcp": [
+          [
+            0.5,
+            0.8660253882408142,
+            0.0,
+            0.24010548174980353
+          ],
+          [
+            0.8660253882408142,
+            -0.5,
+            0.0,
+            0.5009460821650268
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.6671288018704862
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_world_tcp": [
+          [
+            0.5041741728782654,
+            0.8635982871055603,
+            -0.0025250129401683807,
+            0.23983734846115112
+          ],
+          [
+            0.8635969758033752,
+            -0.5041791200637817,
+            -0.0019221848342567682,
+            0.5029895305633545
+          ],
+          [
+            -0.002933054231107235,
+            -0.0012114776764065027,
+            -0.9999949932098389,
+            0.6667336225509644
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:29bbf3571657087c077fcb24",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            0.8365211486816406,
+            -0.3695295751094818,
+            0.2099572718143463,
+            -1.1688454151153564,
+            -2.749248743057251,
+            0.3008202016353607,
+            0.4617239534854889
+          ],
+          "T_world_tcp": [
+            [
+              0.5041741728782654,
+              0.8635982871055603,
+              -0.0025250129401683807,
+              0.23983734846115112
+            ],
+            [
+              0.8635969758033752,
+              -0.5041791200637817,
+              -0.0019221848342567682,
+              0.5029895305633545
+            ],
+            [
+              -0.002933054231107235,
+              -0.0012114776764065027,
+              -0.9999949932098389,
+              0.6667336225509644
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "ik": {
+          "candidate_index": 1,
+          "success": true,
+          "joints_rad": [
+            0.8365211486816406,
+            -0.3695295751094818,
+            0.2099572718143463,
+            -1.1688454151153564,
+            -2.749248743057251,
+            0.3008202016353607,
+            0.4617239534854889
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.002098487690091133,
+          "rotation_error_rad": 0.005780063569545746,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:29bbf3571657087c077fcb24",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              0.8365211486816406,
+              -0.3695295751094818,
+              0.2099572718143463,
+              -1.1688454151153564,
+              -2.749248743057251,
+              0.3008202016353607,
+              0.4617239534854889
+            ],
+            "T_world_tcp": [
+              [
+                0.5041741728782654,
+                0.8635982871055603,
+                -0.0025250129401683807,
+                0.23983734846115112
+              ],
+              [
+                0.8635969758033752,
+                -0.5041791200637817,
+                -0.0019221848342567682,
+                0.5029895305633545
+              ],
+              [
+                -0.002933054231107235,
+                -0.0012114776764065027,
+                -0.9999949932098389,
+                0.6667336225509644
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "candidate_index": 973,
+        "sampling_round": 1,
+        "score": 0.8134515285491943,
+        "source_batch": 7,
+        "source_index": 87,
+        "nominal_T_world_tcp": [
+          [
+            0.5,
+            0.8660253882408142,
+            0.0,
+            0.2401070234379105
+          ],
+          [
+            0.8660253882408142,
+            -0.5,
+            0.0,
+            0.500956722991103
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.6671306943179578
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_world_tcp": [
+          [
+            0.5012862086296082,
+            0.8652812838554382,
+            0.00010713166557252407,
+            0.2401001751422882
+          ],
+          [
+            0.8652741312980652,
+            -0.501282811164856,
+            0.0039968341588974,
+            0.5024242997169495
+          ],
+          [
+            0.003512089606374502,
+            -0.0019108603009954095,
+            -0.9999919533729553,
+            0.6667695641517639
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:29bbf3571657087c077fcb24",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            -2.4393491744995117,
+            0.5241947174072266,
+            0.5077656507492065,
+            0.9333574771881104,
+            0.25431638956069946,
+            0.3668685853481293,
+            0.3266867399215698
+          ],
+          "T_world_tcp": [
+            [
+              0.5012862086296082,
+              0.8652812838554382,
+              0.00010713166557252407,
+              0.2401001751422882
+            ],
+            [
+              0.8652741312980652,
+              -0.501282811164856,
+              0.0039968341588974,
+              0.5024242997169495
+            ],
+            [
+              0.003512089606374502,
+              -0.0019108603009954095,
+              -0.9999919533729553,
+              0.6667695641517639
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "ik": {
+          "candidate_index": 2,
+          "success": true,
+          "joints_rad": [
+            -2.4393491744995117,
+            0.5241947174072266,
+            0.5077656507492065,
+            0.9333574771881104,
+            0.25431638956069946,
+            0.3668685853481293,
+            0.3266867399215698
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.0015113834524527192,
+          "rotation_error_rad": 0.004265592433512211,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:29bbf3571657087c077fcb24",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              -2.4393491744995117,
+              0.5241947174072266,
+              0.5077656507492065,
+              0.9333574771881104,
+              0.25431638956069946,
+              0.3668685853481293,
+              0.3266867399215698
+            ],
+            "T_world_tcp": [
+              [
+                0.5012862086296082,
+                0.8652812838554382,
+                0.00010713166557252407,
+                0.2401001751422882
+              ],
+              [
+                0.8652741312980652,
+                -0.501282811164856,
+                0.0039968341588974,
+                0.5024242997169495
+              ],
+              [
+                0.003512089606374502,
+                -0.0019108603009954095,
+                -0.9999919533729553,
+                0.6667695641517639
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "candidate_index": 974,
+        "sampling_round": 1,
+        "score": 0.8134497404098511,
+        "source_batch": 1,
+        "source_index": 88,
+        "nominal_T_world_tcp": [
+          [
+            0.5,
+            0.8660253882408142,
+            0.0,
+            0.24010313656314533
+          ],
+          [
+            0.8660253882408142,
+            -0.5,
+            0.0,
+            0.5009630799661667
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.6671331083060712
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_world_tcp": [
+          [
+            0.5007649660110474,
+            0.865583062171936,
+            0.0005601280136033893,
+            0.24002861976623535
+          ],
+          [
+            0.8655791282653809,
+            -0.5007645487785339,
+            0.002750762039795518,
+            0.5025290846824646
+          ],
+          [
+            0.0026615052483975887,
+            -0.0008926501614041626,
+            -0.9999960660934448,
+            0.6668444871902466
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:29bbf3571657087c077fcb24",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            -2.4408986568450928,
+            0.5242046117782593,
+            0.5109010338783264,
+            0.9332263469696045,
+            0.2522308826446533,
+            0.3677074909210205,
+            0.3247862458229065
+          ],
+          "T_world_tcp": [
+            [
+              0.5007649660110474,
+              0.865583062171936,
+              0.0005601280136033893,
+              0.24002861976623535
+            ],
+            [
+              0.8655791282653809,
+              -0.5007645487785339,
+              0.002750762039795518,
+              0.5025290846824646
+            ],
+            [
+              0.0026615052483975887,
+              -0.0008926501614041626,
+              -0.9999960660934448,
+              0.6668444871902466
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "ik": {
+          "candidate_index": 3,
+          "success": true,
+          "joints_rad": [
+            -2.4408986568450928,
+            0.5242046117782593,
+            0.5109010338783264,
+            0.9332263469696045,
+            0.2522308826446533,
+            0.3677074909210205,
+            0.3247862458229065
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.0015941079473122954,
+          "rotation_error_rad": 0.0029432529117912054,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:29bbf3571657087c077fcb24",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              -2.4408986568450928,
+              0.5242046117782593,
+              0.5109010338783264,
+              0.9332263469696045,
+              0.2522308826446533,
+              0.3677074909210205,
+              0.3247862458229065
+            ],
+            "T_world_tcp": [
+              [
+                0.5007649660110474,
+                0.865583062171936,
+                0.0005601280136033893,
+                0.24002861976623535
+              ],
+              [
+                0.8655791282653809,
+                -0.5007645487785339,
+                0.002750762039795518,
+                0.5025290846824646
+              ],
+              [
+                0.0026615052483975887,
+                -0.0008926501614041626,
+                -0.9999960660934448,
+                0.6668444871902466
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "candidate_index": 975,
+        "sampling_round": 1,
+        "score": 0.8134422898292542,
+        "source_batch": 10,
+        "source_index": 87,
+        "nominal_T_world_tcp": [
+          [
+            0.5,
+            0.8660253882408142,
+            0.0,
+            0.24008879722229462
+          ],
+          [
+            0.8660253882408142,
+            -0.5,
+            0.0,
+            0.5009541788506598
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.667126939225337
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_world_tcp": [
+          [
+            0.5024366974830627,
+            0.8646090626716614,
+            0.002921228762716055,
+            0.23896950483322144
+          ],
+          [
+            0.8645893931388855,
+            -0.5024449229240417,
+            0.005850444547832012,
+            0.5021558403968811
+          ],
+          [
+            0.006526104640215635,
+            -0.0004138143267482519,
+            -0.9999786019325256,
+            0.6667863130569458
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:29bbf3571657087c077fcb24",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            0.7943271398544312,
+            -0.36959192156791687,
+            0.27366480231285095,
+            -1.1791110038757324,
+            -2.765994071960449,
+            0.27897799015045166,
+            0.4466404616832733
+          ],
+          "T_world_tcp": [
+            [
+              0.5024366974830627,
+              0.8646090626716614,
+              0.002921228762716055,
+              0.23896950483322144
+            ],
+            [
+              0.8645893931388855,
+              -0.5024449229240417,
+              0.005850444547832012,
+              0.5021558403968811
+            ],
+            [
+              0.006526104640215635,
+              -0.0004138143267482519,
+              -0.9999786019325256,
+              0.6667863130569458
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "ik": {
+          "candidate_index": 4,
+          "success": true,
+          "joints_rad": [
+            0.7943271398544312,
+            -0.36959192156791687,
+            0.27366480231285095,
+            -1.1791110038757324,
+            -2.765994071960449,
+            0.27897799015045166,
+            0.4466404616832733
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.0016771684167906642,
+          "rotation_error_rad": 0.007124146446585655,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:29bbf3571657087c077fcb24",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              0.7943271398544312,
+              -0.36959192156791687,
+              0.27366480231285095,
+              -1.1791110038757324,
+              -2.765994071960449,
+              0.27897799015045166,
+              0.4466404616832733
+            ],
+            "T_world_tcp": [
+              [
+                0.5024366974830627,
+                0.8646090626716614,
+                0.002921228762716055,
+                0.23896950483322144
+              ],
+              [
+                0.8645893931388855,
+                -0.5024449229240417,
+                0.005850444547832012,
+                0.5021558403968811
+              ],
+              [
+                0.006526104640215635,
+                -0.0004138143267482519,
+                -0.9999786019325256,
+                0.6667863130569458
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "candidate_index": 976,
+        "sampling_round": 1,
+        "score": 0.8134389519691467,
+        "source_batch": 3,
+        "source_index": 88,
+        "nominal_T_world_tcp": [
+          [
+            0.5,
+            0.8660253882408142,
+            0.0,
+            0.24009516735228967
+          ],
+          [
+            0.8660253882408142,
+            -0.5,
+            0.0,
+            0.5009621849651725
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.6671281909228772
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_world_tcp": [
+          [
+            0.5013588666915894,
+            0.8652390241622925,
+            0.0004468477563932538,
+            0.23981823027133942
+          ],
+          [
+            0.8652359247207642,
+            -0.5013586282730103,
+            0.0024722316302359104,
+            0.5024877190589905
+          ],
+          [
+            0.00236310251057148,
+            -0.0008528470643796027,
+            -0.9999968409538269,
+            0.6667697429656982
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:29bbf3571657087c077fcb24",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            -2.4767446517944336,
+            1.5178625583648682,
+            -0.46505361795425415,
+            -1.1733452081680298,
+            1.8191989660263062,
+            0.8270313143730164,
+            -0.6497681140899658
+          ],
+          "T_world_tcp": [
+            [
+              0.5013588666915894,
+              0.8652390241622925,
+              0.0004468477563932538,
+              0.23981823027133942
+            ],
+            [
+              0.8652359247207642,
+              -0.5013586282730103,
+              0.0024722316302359104,
+              0.5024877190589905
+            ],
+            [
+              0.00236310251057148,
+              -0.0008528470643796027,
+              -0.9999968409538269,
+              0.6667697429656982
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "ik": {
+          "candidate_index": 5,
+          "success": true,
+          "joints_rad": [
+            -2.4767446517944336,
+            1.5178625583648682,
+            -0.46505361795425415,
+            -1.1733452081680298,
+            1.8191989660263062,
+            0.8270313143730164,
+            -0.6497681140899658
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.0015913532115519047,
+          "rotation_error_rad": 0.0029628875199705362,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:29bbf3571657087c077fcb24",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              -2.4767446517944336,
+              1.5178625583648682,
+              -0.46505361795425415,
+              -1.1733452081680298,
+              1.8191989660263062,
+              0.8270313143730164,
+              -0.6497681140899658
+            ],
+            "T_world_tcp": [
+              [
+                0.5013588666915894,
+                0.8652390241622925,
+                0.0004468477563932538,
+                0.23981823027133942
+              ],
+              [
+                0.8652359247207642,
+                -0.5013586282730103,
+                0.0024722316302359104,
+                0.5024877190589905
+              ],
+              [
+                0.00236310251057148,
+                -0.0008528470643796027,
+                -0.9999968409538269,
+                0.6667697429656982
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        }
+      },
+      {
+        "candidate_index": 978,
+        "sampling_round": 2,
+        "score": 0.8134505748748779,
+        "source_batch": 9,
+        "source_index": 88,
+        "nominal_T_world_tcp": [
+          [
+            0.5,
+            0.8660253882408142,
+            0.0,
+            0.24012006067338657
+          ],
+          [
+            0.8660253882408142,
+            -0.5,
+            0.0,
+            0.5009467217508049
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0,
+            0.6671242272139997
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "T_world_tcp": [
+          [
+            0.5009188055992126,
+            0.8654942512512207,
+            -0.00019992177840322256,
+            0.24008940160274506
+          ],
+          [
+            0.8654896020889282,
+            -0.5009153485298157,
+            0.003403961658477783,
+            0.5024425387382507
+          ],
+          [
+            0.002845965325832367,
+            -0.0018781386315822601,
+            -0.999994158744812,
+            0.6669158935546875
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "source_ik_fk": {
+          "source": "curobo_public_compute_kinematics",
+          "frame": "world",
+          "arm": "A",
+          "tool_frame": "TCP_Link_L",
+          "scene_token": "rgbd:29bbf3571657087c077fcb24",
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "joints_rad": [
+            0.40301385521888733,
+            -1.0359458923339844,
+            -1.2995706796646118,
+            0.9336898922920227,
+            -0.6579092741012573,
+            0.4705851376056671,
+            -0.2100786566734314
+          ],
+          "T_world_tcp": [
+            [
+              0.5009188055992126,
+              0.8654942512512207,
+              -0.00019992177840322256,
+              0.24008940160274506
+            ],
+            [
+              0.8654896020889282,
+              -0.5009153485298157,
+              0.003403961658477783,
+              0.5024425387382507
+            ],
+            [
+              0.002845965325832367,
+              -0.0018781386315822601,
+              -0.999994158744812,
+              0.6669158935546875
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "ik": {
+          "candidate_index": 0,
+          "success": true,
+          "joints_rad": [
+            0.40301385521888733,
+            -1.0359458923339844,
+            -1.2995706796646118,
+            0.9336898922920227,
+            -0.6579092741012573,
+            0.4705851376056671,
+            -0.2100786566734314
+          ],
+          "joint_names": [
+            "Joint1_L",
+            "Joint2_L",
+            "Joint3_L",
+            "Joint4_L",
+            "Joint5_L",
+            "Joint6_L",
+            "Joint7_L"
+          ],
+          "position_error_m": 0.0015105853090062737,
+          "rotation_error_rad": 0.0035710830707103014,
+          "achieved_tool_pose": {
+            "source": "curobo_public_compute_kinematics",
+            "frame": "world",
+            "arm": "A",
+            "tool_frame": "TCP_Link_L",
+            "scene_token": "rgbd:29bbf3571657087c077fcb24",
+            "joint_names": [
+              "Joint1_L",
+              "Joint2_L",
+              "Joint3_L",
+              "Joint4_L",
+              "Joint5_L",
+              "Joint6_L",
+              "Joint7_L"
+            ],
+            "joints_rad": [
+              0.40301385521888733,
+              -1.0359458923339844,
+              -1.2995706796646118,
+              0.9336898922920227,
+              -0.6579092741012573,
+              0.4705851376056671,
+              -0.2100786566734314
+            ],
+            "T_world_tcp": [
+              [
+                0.5009188055992126,
+                0.8654942512512207,
+                -0.00019992177840322256,
+                0.24008940160274506
+              ],
+              [
+                0.8654896020889282,
+                -0.5009153485298157,
+                0.003403961658477783,
+                0.5024425387382507
+              ],
+              [
+                0.002845965325832367,
+                -0.0018781386315822601,
+                -0.999994158744812,
+                0.6669158935546875
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            ]
+          }
+        }
+      }
+    ],
+    "source": "ffb actual frozen observation plus all seven raw source-IK successes; no held/GT data"
+  }
+}

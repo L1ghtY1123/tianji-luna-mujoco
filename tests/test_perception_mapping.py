@@ -20,7 +20,7 @@ def wire():
 
 
 def test_registered_transport_preserves_pixels_and_release_enables_all_layers():
-    from jev_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload
 
     decoded, identity = decode_mapping_payload(wire() | {"planning_settings": {}, "exclusion_state": "released"})
     assert decoded["views"]["3"]["depth_left_m"].shape == (2, 3)
@@ -30,8 +30,11 @@ def test_registered_transport_preserves_pixels_and_release_enables_all_layers():
 
 
 def test_empty_head_sidecar_decodes_original_capture_and_exact_filter_identity():
-    from jev_mujoco.perception_mapping import decode_mapping_payload
-    from jev_mujoco.semantic_transport import decode_project_semantic_request, encode_project_semantic_request
+    from luna_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.semantic_transport import (
+        decode_project_semantic_request,
+        encode_project_semantic_request,
+    )
 
     original = decode_project_semantic_request({key: value for key, value in wire().items()
                                                if key != "gripper_joint_positions_rad"})
@@ -54,7 +57,7 @@ def test_empty_head_sidecar_decodes_original_capture_and_exact_filter_identity()
 def test_project_builder_receives_every_capture_with_original_head_semantics(state, empty):
     from types import SimpleNamespace
 
-    from jev_mujoco.perception_mapping import CaptureSegmenter, PerceptionMapper, decode_mapping_payload
+    from luna_mujoco.perception_mapping import CaptureSegmenter, PerceptionMapper, decode_mapping_payload
 
     decoded, _ = decode_mapping_payload(wire())
     decoded["exclusion_state"] = state
@@ -82,7 +85,7 @@ def test_project_builder_receives_every_capture_with_original_head_semantics(sta
 
 
 def test_mapping_policy_is_validated_and_bound_to_scene_identity():
-    from jev_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload
     payload = wire() | {"full_observation_complete": True, "mapping_max_sphere_radius_m": .2,
         "planning_settings": {"experimental_semantic_only_mapping": True,
                               "optimizer_collision_activation_distance_m": .06}}
@@ -99,7 +102,7 @@ def test_mapping_policy_is_validated_and_bound_to_scene_identity():
 
 @pytest.mark.parametrize("state", ["held", "released"])
 def test_empty_head_semantic_builder_preserves_genuine_zero_valid_head_view(state):
-    from jev_mujoco.perception_mapping import decode_mapping_payload, mapping_builder_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload, mapping_builder_payload
 
     decoded, _ = decode_mapping_payload(wire())
     decoded["exclusion_state"] = state
@@ -115,7 +118,7 @@ def test_empty_head_semantic_builder_preserves_genuine_zero_valid_head_view(stat
 
 
 def test_mapping_rejects_missing_selected_instance_and_mismatched_capture():
-    from jev_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload
 
     payload = wire()
     payload["confirmed_instance_id"] = "hidden-truth-id"
@@ -124,8 +127,11 @@ def test_mapping_rejects_missing_selected_instance_and_mismatched_capture():
 
 
 def test_targetless_background_map_is_allowed_only_for_observation_motion():
-    from jev_mujoco.perception_mapping import decode_mapping_payload
-    from jev_mujoco.semantic_transport import decode_project_semantic_request, encode_project_semantic_request
+    from luna_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.semantic_transport import (
+        decode_project_semantic_request,
+        encode_project_semantic_request,
+    )
 
     original = decode_project_semantic_request({k: v for k, v in wire().items() if k != 'gripper_joint_positions_rad'})
     original.update(mapping_mode='background', confirmed_instance_id='', sam3_generation=0)
@@ -144,7 +150,7 @@ def test_targetless_background_map_is_allowed_only_for_observation_motion():
 
 
 def test_mapping_binds_token_to_finite_actual_gripper_feedback():
-    from jev_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload
 
     payload = wire()
     _, first = decode_mapping_payload(payload)
@@ -162,8 +168,8 @@ def test_segmenter_factory_constructs_one_articulated_boundary(monkeypatch):
 
     import yaml
 
-    from jev_mujoco import raw_robot_depth
-    from jev_mujoco.perception_mapping import create_feedback_segmenter
+    from luna_mujoco import raw_robot_depth
+    from luna_mujoco.perception_mapping import create_feedback_segmenter
 
     root = Path(__file__).resolve().parents[1]
     from tianji_curobo import robot_segmenter
@@ -189,7 +195,7 @@ def test_segmenter_factory_constructs_one_articulated_boundary(monkeypatch):
 def test_held_and_released_mapping_updates_feedback_without_replacing_segmenter(monkeypatch):
     from types import SimpleNamespace
 
-    from jev_mujoco import geometry_service
+    from luna_mujoco import geometry_service
 
     feedback_configs = []
     feedback_updates = []
@@ -233,7 +239,7 @@ def test_segmentation_config_unlocks_only_measured_drivers_and_preserves_geometr
 
     import yaml
 
-    from jev_mujoco.raw_robot_depth import articulated_segmentation_config
+    from luna_mujoco.raw_robot_depth import articulated_segmentation_config
 
     root = Path(__file__).resolve().parents[1]
     original = yaml.safe_load((root / "resources/curobo/marvin_gui_dual.yml").read_bytes())
@@ -259,7 +265,7 @@ def test_filtered_png_boundary_preserves_depth_units_and_scales_intrinsics(monke
     from PIL import Image
     from test_semantic_depth import Tensor
 
-    from jev_mujoco.raw_robot_depth import RawRobotDepthBoundary
+    from luna_mujoco.raw_robot_depth import RawRobotDepthBoundary
 
     monkeypatch.setitem(sys.modules, "curobo.types", SimpleNamespace(CameraObservation=SimpleNamespace,
         Pose=SimpleNamespace(from_matrix=lambda matrix: matrix.numpy())))
@@ -285,7 +291,7 @@ def test_articulated_feedback_validates_before_replacing_measured_state():
 
     import yaml
 
-    from jev_mujoco.raw_robot_depth import RawRobotDepthBoundary
+    from luna_mujoco.raw_robot_depth import RawRobotDepthBoundary
 
     root = Path(__file__).resolve().parents[1]
     boundary = RawRobotDepthBoundary.__new__(RawRobotDepthBoundary)
@@ -301,7 +307,7 @@ def test_articulated_feedback_validates_before_replacing_measured_state():
 
 
 def test_free_space_guard_rejects_unknown_occluded_invalid_and_partial_sphere_coverage():
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
 
     view = {"depth_left_m": np.ones((32, 32)), "valid_left_mask": np.ones((32, 32)),
             "left_intrinsics": [[20, 0, 15.5], [0, 20, 15.5], [0, 0, 1]], "T_base_left_camera": np.eye(4)}
@@ -321,7 +327,7 @@ def test_free_space_guard_rejects_unknown_occluded_invalid_and_partial_sphere_co
 
 
 def test_source_outer_volume_does_not_certify_hidden_occupied_space():
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
 
     view = {"depth_left_m": np.ones((32, 32)), "valid_left_mask": np.ones((32, 32)),
             "left_intrinsics": [[20, 0, 15.5], [0, 20, 15.5], [0, 0, 1]], "T_base_left_camera": np.eye(4),
@@ -340,7 +346,7 @@ def test_source_outer_volume_does_not_certify_hidden_occupied_space():
 
 
 def test_conservative_capture_sphere_is_not_moving_robot_occupied_interior():
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
 
     view = {"depth_left_m": np.zeros((32, 32)), "valid_left_mask": np.zeros((32, 32)),
             "left_intrinsics": [[20, 0, 15.5], [0, 20, 15.5], [0, 0, 1]], "T_base_left_camera": np.eye(4)}
@@ -351,7 +357,7 @@ def test_conservative_capture_sphere_is_not_moving_robot_occupied_interior():
 
 @pytest.mark.parametrize("masked", [True, False])
 def test_source_occupied_interval_requires_selected_unmasked_depth(masked):
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
 
     view = {"depth_left_m": np.ones((32, 32)), "valid_left_mask": np.ones((32, 32)),
             "left_intrinsics": [[20, 0, 15.5], [0, 20, 15.5], [0, 0, 1]], "T_base_left_camera": np.eye(4),
@@ -372,7 +378,7 @@ def test_explicit_held_map_uses_background_without_current_target_segmentation()
         encode_semantic_esdf_request,
     )
 
-    from jev_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload
     original = wire()
     feedback = original.pop('gripper_joint_positions_rad')
     decoded = decode_semantic_esdf_request(original)

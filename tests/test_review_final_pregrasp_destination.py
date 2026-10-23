@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from jev_mujoco.algorithms import Algorithms
-from jev_mujoco.planning_settings import PlanningSettings
+from luna_mujoco.algorithms import Algorithms
+from luna_mujoco.planning_settings import PlanningSettings
 
 
 def test_combined_evaluation_keeps_grasp_candidates_when_open_hand_destination_ik_fails():

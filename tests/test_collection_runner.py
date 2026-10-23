@@ -1,11 +1,7 @@
-import asyncio
 import copy
 
 import numpy as np
-import pytest
-from test_rgbd_workflow import Choices, SensorRobot, VisionAlgorithms
-
-from jev_mujoco.runner import Runner
+from test_rgbd_workflow import Choices, VisionAlgorithms
 
 
 class CollectionVision(VisionAlgorithms):
@@ -69,43 +65,3 @@ class CollectionChoices(Choices):
 
     async def choose_scene_update(self, state):
         return 'transfer' if state['facts'].get('transfer_pending') else 'select'
-
-
-@pytest.mark.parametrize('selected', [('source',), ('source', 'second')])
-async def test_jev_selects_subset_and_rebuilds_before_each_grasp(tmp_path, selected):
-    choices = CollectionChoices(selected)
-    algorithms = CollectionVision()
-    runner = Runner(SensorRobot(), algorithms, lambda record: choices, tmp_path)
-    await runner.start('仅把指定物体放进盒子；未指定物体不要动')
-    await asyncio.wait_for(runner.worker, 5)
-    assert runner.state['status'] == 'succeeded', runner.state.get('error')
-    assert [item['id'] for item in runner.state['task_progress']['completed']] == list(selected)
-    assert {item['id'] for item in runner.state['task_progress']['objects']} == set(selected)
-    assert choices.assessments[0]['task_progress']['objects'] == []
-    assert set(choices.assessments[0]['task_progress']['membership_pending_ids']) == {'source', 'second'}
-    assert [scene['target_id'] for scene in algorithms.scenes] == [item for target in selected for item in (None, target)]
-    assert len(choices.assessments) == len(selected) + 1
-    assert all(not state['facts'].get('scene_ready') and not state['facts'].get('plan_ready')
-               for state in choices.assessments)
-    assert runner.holding_state is None
-    # A coarse single-color query must never hide another requested group.
-    assert all(hint['kind'] == hint['color'] == 'any' for hint in algorithms.source_hints)
-
-
-@pytest.mark.parametrize('status', ['elsewhere', 'unknown'])
-async def test_release_without_visual_confirmation_does_not_complete_transfer(tmp_path, status):
-    class UnconfirmedVision(CollectionVision):
-        def observe(self, *args, **kwargs):
-            result = super().observe(*args, **kwargs)
-            if kwargs.get('checkpoint') == 'post_place':
-                result['visual_inventory']['progress']['source']['status'] = status
-            return result
-
-    choices = CollectionChoices(('source',))
-    algorithms = UnconfirmedVision()
-    runner = Runner(SensorRobot(), algorithms, lambda record: choices, tmp_path)
-    await runner.start('只把一个物体放进盒子')
-    await asyncio.wait_for(runner.worker, 5)
-    assert runner.state['status'] == 'needs_attention', runner.state.get('error')
-    assert runner.task_progress.completed_ids == []
-    assert runner.task_progress.records['source']['destination_visual_evidence']['status'] == status

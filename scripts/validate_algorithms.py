@@ -4,12 +4,12 @@ import os
 import time
 from pathlib import Path
 
-from jev_mujoco.algorithms import Algorithms
-from jev_mujoco.simulation import Simulation
+from luna_mujoco.algorithms import Algorithms
+from luna_mujoco.simulation import Simulation
 
 
 def main():
-    output = Path(os.getenv("JEV_GPU_PROBE_OUTPUT", "data/algorithm-validation.json"))
+    output = Path(os.getenv("LUNA_GPU_PROBE_OUTPUT", "data/algorithm-validation.json"))
     output.parent.mkdir(parents=True, exist_ok=True)
     evidence = {"started": time.time(), "steps": {}}
     sim = Simulation()

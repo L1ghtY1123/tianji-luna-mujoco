@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 
-const backendUrl = process.env.JEV_DEV_BACKEND_URL || 'http://127.0.0.1:8340';
+const backendUrl = process.env.LUNA_DEV_BACKEND_URL || 'http://127.0.0.1:8351';
 const websocketUrl = backendUrl.replace(/^http/, 'ws');
 
 export default defineConfig({

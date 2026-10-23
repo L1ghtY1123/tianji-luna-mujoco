@@ -10,6 +10,7 @@ import copy
 import gzip
 import hashlib
 import json
+import sys
 import xml.etree.ElementTree as ET
 import zlib
 from pathlib import Path
@@ -31,7 +32,8 @@ from audit_collision_model import (
 )
 from scipy.spatial.transform import Rotation
 
-from jev_mujoco.geometry import primitive_sdf, rigid_matrix
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from luna_mujoco.geometry import primitive_sdf, rigid_matrix
 
 
 def validate_configuration(baseline, candidate):

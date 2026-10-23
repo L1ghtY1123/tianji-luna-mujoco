@@ -3,12 +3,12 @@ import copy
 import numpy as np
 import pytest
 
-from jev_mujoco.perception_mapping import filter_mapping_views
+from luna_mujoco.perception_mapping import filter_mapping_views
 
 
 @pytest.mark.parametrize("reject", [False, True])
 def test_mapping_preparation_preserves_every_valid_source_and_preview_alignment(monkeypatch, reject):
-    from jev_mujoco import pointcloud_filter
+    from luna_mujoco import pointcloud_filter
 
     depth = np.array([[1., 2., np.nan], [3., -1., 4.]], dtype=np.float32)
     valid = np.array([[1, 0, 1], [1, 1, 1]], dtype=np.uint8)

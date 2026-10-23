@@ -3,7 +3,7 @@ import mujoco
 import numpy as np
 import pytest
 
-from jev_mujoco.model_builder import DEFAULT_SCENE, ModelBuilder, normalize_scene
+from luna_mujoco.model_builder import DEFAULT_SCENE, ModelBuilder, normalize_scene
 
 
 def bin_scene(**changes):

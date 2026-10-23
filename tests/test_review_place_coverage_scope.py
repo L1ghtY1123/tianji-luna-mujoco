@@ -10,9 +10,9 @@ import pytest
 from test_trajectory_postprocessing import Tensor as BaseTensor
 from test_visible_surface_gpu_contract import measured_binding
 
-from jev_mujoco import carrying
-from jev_mujoco.backend_builder import ROOT
-from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+from luna_mujoco import carrying
+from luna_mujoco.backend_builder import ROOT
+from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
 
 
 class Tensor(BaseTensor):

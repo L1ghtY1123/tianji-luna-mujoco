@@ -11,9 +11,9 @@ const SKILL_EVENT_LABELS = {
   skill_error: 'skill 失败',
 };
 const SYSTEM_EVENT_LABELS = {
-  planning_attempt_failed: '规划无解，交回 JEV',
+  planning_attempt_failed: '规划无解',
 };
-const CATEGORY_LABELS = { jev: 'JEV 决策', skill: 'skill 执行', algorithm: '算法计算', system: '系统事件' };
+const CATEGORY_LABELS = { jev: '历史模型记录', visual: 'Responses / Decisions', skill: 'skill 执行', algorithm: '算法计算', system: '系统事件' };
 const PLANNING_BATCH_LABELS = {
   planning_batch_start: 'plan_grasp_batch 开始',
   planning_batch_complete: 'plan_grasp_batch 完成',
@@ -34,7 +34,7 @@ function candidateIndicesLabel(indices) {
   return '未提供';
 }
 
-// Display copy only: preserve the received events and JEV's original evidence.
+// Display copy only: preserve received events and their original model evidence.
 function summarizeIkCandidateIds(value) {
   if (Array.isArray(value)) return value.map(summarizeIkCandidateIds);
   if (value === null || typeof value !== 'object') return value;
@@ -70,7 +70,7 @@ export function createTraceList(container, counter) {
     if (!events.length) {
       container.replaceChildren();
       const empty = element('div', 'trace-empty');
-      empty.append(element('div', 'trace-empty-icon', '⌘'), element('strong', '', '等待第一条指令'), element('p', '', '任务开始后，这里按时间记录 JEV 决策、skill 执行、算法计算和系统事件。'));
+      empty.append(element('div', 'trace-empty-icon', '⌘'), element('strong', '', '等待第一条指令'), element('p', '', '任务开始后，这里按时间记录 Responses / Decisions、skill 执行、算法计算和系统事件。'));
       container.append(empty);
       return;
     }
@@ -90,7 +90,7 @@ export function createTraceList(container, counter) {
         event.kind.startsWith('planning_batch_') ? event.title ?? PLANNING_BATCH_LABELS[event.kind] : PLANNING_BATCH_LABELS[event.kind]);
       const ikBatch = ['ik_batch_start', 'ik_batch_complete'].includes(event.kind);
       const ikSkill = skillLabel && [event.title, event.data?.skill, event.data?.id].includes('evaluate_arms');
-      const category = isJev ? 'jev' : stageLabel || skillLabel ? 'skill' : batchLabel || algorithmEvent || placementLabel ? 'algorithm' : 'system';
+      const category = isJev ? 'jev' : event.kind === 'visual_decisions_call' ? 'visual' : stageLabel || skillLabel ? 'skill' : batchLabel || algorithmEvent || placementLabel ? 'algorithm' : 'system';
       const batchFailed = ['planning_batch_complete', 'ik_batch_complete'].includes(event.kind) && event.data?.success_count === 0;
       const card = element('details', `trace-card ${failed ? 'trace-error' : batchFailed || event.kind === 'planning_attempt_failed' ? 'trace-warning' : ''}`);
       card.open = expanded.has(key);
@@ -125,7 +125,7 @@ export function createTraceList(container, counter) {
         text.append(element('p', 'trace-event-note', `已找到最高 score 可行轨迹，停止后续批次${remaining}。`));
       }
       if (event.kind === 'planning_attempt_failed') {
-        text.append(element('p', 'trace-event-note', `Arm ${event.data?.arm ?? '—'} 本次规划无解，尚未执行运动；JEV 决定重新选臂或停止。`));
+        text.append(element('p', 'trace-event-note', `Arm ${event.data?.arm ?? '—'} 本次规划无解，尚未执行运动；后续行为以实际事件为准。`));
       }
       if (event.kind === 'placement_layout') {
         const layout = event.data;
@@ -147,13 +147,13 @@ export function createTraceList(container, counter) {
       card.append(summary);
       const content = element('div', 'trace-content');
       if (stageLabel) {
-        content.append(element('p', 'trace-value-note', `该阶段由 ${stageSkill} skill 内部顺序执行，不调用 JEV。`));
+        content.append(element('p', 'trace-value-note', `该阶段由 ${stageSkill} skill 内部顺序执行。`));
         addJson(content, '阶段数据', event.data ?? null);
       } else if (isJev) {
         addJson(content, '输入状态 · state', data.state);
         addJson(content, '问题 · questions', data.questions);
         addJson(content, '结构化输出 · output', data.output);
-        addJson(content, 'JEV 返回详情 · probabilities / confidence', data.provider_details);
+        addJson(content, '历史模型返回详情 · probabilities / confidence', data.provider_details);
         content.append(element('p', 'trace-value-note', `置信度：${confidenceLabel(data.confidence)} · 耗时：${data.duration_s === null ? '未提供' : `${data.duration_s.toFixed(3)} s`}`));
         addJson(content, '完整事件数据（含错误与用量）', event.data);
       } else {

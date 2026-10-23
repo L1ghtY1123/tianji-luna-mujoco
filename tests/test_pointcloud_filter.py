@@ -8,8 +8,8 @@ import pytest
 
 
 def filter_module():
-    assert importlib.util.find_spec("jev_mujoco.pointcloud_filter") is not None, "optional filter is missing"
-    return importlib.import_module("jev_mujoco.pointcloud_filter")
+    assert importlib.util.find_spec("luna_mujoco.pointcloud_filter") is not None, "optional filter is missing"
+    return importlib.import_module("luna_mujoco.pointcloud_filter")
 
 
 def samples():

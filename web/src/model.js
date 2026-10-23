@@ -15,6 +15,7 @@ export function buildScene(draft) {
   const table = {
     position: finiteVector(draft.table.position, '桌面位置'),
     size: finiteVector(draft.table.size, '桌面尺寸', true),
+    color: String(draft.table.color ?? 'white').trim(),
   };
   const objects = draft.objects.map(object => {
     const id = String(object.id).trim();
@@ -31,6 +32,26 @@ export function buildScene(draft) {
       size: finiteVector(object.size, `${id} 的尺寸`, true),
       yaw_deg: yaw,
     };
+    if (object.fixed !== undefined) {
+      if (typeof object.fixed !== 'boolean') throw new Error(`${id} 的固定属性必须为布尔值。`);
+      normalized.fixed = object.fixed;
+    }
+    if (object.kind === 'cad') {
+      if (typeof object.asset_id !== 'string' || !object.asset_id) throw new Error(`${id} 缺少 CAD 资产。`);
+      normalized.asset_id = object.asset_id;
+      if (object.pitch_deg !== undefined) {
+        const pitch = Number(object.pitch_deg);
+        if (!Number.isFinite(pitch)) throw new Error(`${id} 的俯仰角必须为有限数值。`);
+        normalized.pitch_deg = pitch;
+      }
+      if (object.mass_kg !== undefined) {
+        const mass = Number(object.mass_kg);
+        if (!Number.isFinite(mass) || mass <= 0) throw new Error(`${id} 的 CAD 质量必须大于零。`);
+        normalized.mass_kg = mass;
+      }
+    }
+    if (object.visual_style === 'cup') normalized.visual_style = 'cup';
+    if (object.kind === 'cylinder' && object.cross_section === 'ellipse') normalized.cross_section = 'ellipse';
     if (normalized.kind === 'marker') {
       if (!['red', 'orange', 'yellow', 'green', 'blue'].includes(normalized.color) || markerColors.has(normalized.color)) {
         throw new Error('每个桌面标记需使用不同的红、橙、黄、绿或蓝颜色。');
@@ -62,12 +83,19 @@ export function buildScene(draft) {
   return {
     objects,
     table,
+    ...(draft.support_tables ? { support_tables: draft.support_tables.map(item => ({
+      id: item.id, position: finiteVector(item.position, '小桌位置'),
+      size: finiteVector(item.size, '小桌尺寸', true),
+    })) } : {}),
   };
 }
 
 export function sceneFromSnapshot(snapshot) {
   return {
-    table: { position: [...snapshot.table.position], size: [...snapshot.table.size] },
+    table: { position: [...snapshot.table.position], size: [...snapshot.table.size], color: snapshot.table.color ?? 'white' },
+    ...(snapshot.support_tables ? { support_tables: snapshot.support_tables.map(item => ({
+      id: item.id, position: [...item.position], size: [...item.size],
+    })) } : {}),
     objects: snapshot.objects.map(object => {
       const [w, x, y, z] = object.quaternion ?? [1, 0, 0, 0];
       const item = {
@@ -78,13 +106,37 @@ export function sceneFromSnapshot(snapshot) {
         size: [...object.size],
         yaw_deg: Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)) * 180 / Math.PI,
       };
+      if (object.fixed !== undefined) item.fixed = object.fixed;
+      if (object.kind === 'cad') {
+        item.asset_id = object.asset_id;
+        if (object.pitch_deg !== undefined) {
+          item.pitch_deg = object.pitch_deg;
+          // The local Y axis retains heading even at the flat pitch=90 pose.
+          item.yaw_deg = Math.atan2(2 * (w * z - x * y), 1 - 2 * (x * x + z * z)) * 180 / Math.PI;
+        }
+        if (object.mass_kg !== undefined) item.mass_kg = object.mass_kg;
+      }
       if (object.kind === 'bin') {
         item.wall_thickness_m = object.wall_thickness_m ?? .01;
         item.mass_kg = object.mass_kg ?? .4;
       }
+      if (object.visual_style === 'cup') item.visual_style = 'cup';
+      if (object.kind === 'cylinder' && object.cross_section === 'ellipse') item.cross_section = 'ellipse';
       return item;
     }),
   };
+}
+
+export function createCadObject(draft, asset) {
+  if (!asset?.id) throw new Error('请选择 CAD 资产。');
+  const size = finiteVector(asset.size_m, 'CAD 尺寸', true);
+  let number = 1;
+  while (draft.objects.some(object => object.id === `${asset.id}_${number}`)) number += 1;
+  const table = draft.table;
+  return { id: `${asset.id}_${number}`, kind: 'cad', asset_id: asset.id,
+    color: asset.default_color, size, yaw_deg: 0,
+    position: [Number(table.position[0]), Number(table.position[1]),
+      Number(table.position[2]) + Number(table.size[2]) / 2 + size[2] / 2 + .02] };
 }
 
 export function controlsForState({ connected, busy, dirty, confirmed, status, instruction }) {
@@ -167,11 +219,14 @@ export function confidenceLabel(confidence) {
   return '未提供';
 }
 
-export function performanceSummary(metrics) {
+export function performanceSummary(metrics, events = []) {
+  const calls = events.filter(event => event.kind === 'visual_decisions_call');
+  const durations = calls.map(event => event.data?.elapsed_s).filter(Number.isFinite);
+  const total = durations.reduce((sum, seconds) => sum + seconds, 0);
   return {
-    count: Number.isFinite(metrics.decision_count) ? String(metrics.decision_count) : '—',
-    mean: Number.isFinite(metrics.jev_mean_duration_s) ? `${(metrics.jev_mean_duration_s * 1000).toFixed(0)} ms` : '—',
-    total: Number.isFinite(metrics.jev_total_duration_s) ? `${metrics.jev_total_duration_s.toFixed(2)} s` : '—',
+    count: String(calls.length),
+    mean: durations.length ? `${(total / durations.length * 1000).toFixed(0)} ms` : '—',
+    total: durations.length ? `${total.toFixed(2)} s` : '—',
     run: Number.isFinite(metrics.run_duration_s) ? `${metrics.run_duration_s.toFixed(2)} s` : '—',
   };
 }

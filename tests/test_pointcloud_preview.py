@@ -3,9 +3,9 @@ import json
 import numpy as np
 from fastapi.testclient import TestClient
 
-from jev_mujoco.app import create_app
-from jev_mujoco.pointcloud_preview import pointcloud_preview
-from jev_mujoco.simulation import Simulation
+from luna_mujoco.app import create_app
+from luna_mujoco.pointcloud_preview import pointcloud_preview
+from luna_mujoco.simulation import Simulation
 
 
 def test_preview_preserves_rejected_samples_without_changing_points():

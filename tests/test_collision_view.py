@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import yaml
 
-from jev_mujoco.simulation import Simulation
+from luna_mujoco.simulation import Simulation
 
 
 def test_collision_view_uses_configured_spheres_and_never_changes_live_grippers():

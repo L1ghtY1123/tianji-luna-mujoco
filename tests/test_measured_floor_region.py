@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 from test_perception import bin_cloud
 
-from jev_mujoco.perception import measured_bin_reference
-from jev_mujoco.placement import measured_source_relationships, region_contains_xy
+from luna_mujoco.perception import measured_bin_reference
+from luna_mujoco.placement import measured_source_relationships, region_contains_xy
 
 
 @pytest.mark.parametrize('partial', [False, True])

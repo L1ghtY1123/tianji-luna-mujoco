@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 from geometry_perception_fixture import GeometryPerception
 
-from jev_mujoco.cameras import deproject_view
-from jev_mujoco.perception import _remove_own_robot_surface
-from jev_mujoco.robot_surface import _own_visual_model, first_surface_matches, own_robot_surface_pixels
+from luna_mujoco.cameras import deproject_view
+from luna_mujoco.perception import _remove_own_robot_surface
+from luna_mujoco.robot_surface import _own_visual_model, first_surface_matches, own_robot_surface_pixels
 
 DATA = Path(__file__).resolve().parents[1] / "data/visible-cloud-work/grasp-place-left-14"
 CAPTURE_ID = "rgbd-2-fcb89d19e8984906b74f4a2bf82dd8af"

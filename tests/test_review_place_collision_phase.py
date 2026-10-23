@@ -7,7 +7,7 @@ import pytest
 from test_release_clearance import backend, request
 from tianji_curobo.contracts import CuroboToolError
 
-from jev_mujoco import backend_builder
+from luna_mujoco import backend_builder
 
 
 @pytest.mark.parametrize("failed_phase", ["approach", "place"])

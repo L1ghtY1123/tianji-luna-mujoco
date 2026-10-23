@@ -10,8 +10,8 @@ import pytest
 from PIL import Image
 from test_visual_inventory import client_with_answers, fixture
 
-from jev_mujoco.observation_labels import make_object_labels, project_placement_regions
-from jev_mujoco.visual_inventory import VisualInventory, VisualInventoryError
+from luna_mujoco.observation_labels import make_object_labels, project_placement_regions
+from luna_mujoco.visual_inventory import VisualInventory, VisualInventoryError
 
 
 def scoped_scene():
@@ -81,7 +81,7 @@ def test_decisions_images_and_metadata_exclude_mask_interior_and_depth():
         inventory.resolve(capture, [detection], instruction='move red', entities=entities, reference=reference)
     assert len(calls) == 2
     assert calls[0] == calls[1]
-    assert sum(part['type'] == 'input_image' for part in calls[0]['input'][0]['content']) == 4
+    assert sum(part['type'] == 'input_image' for part in calls[0]['input'][0]['content']) == 3
 
 
 def test_assigned_slot_is_in_question_and_confirmation_evidence():

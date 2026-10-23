@@ -9,8 +9,8 @@ import yaml
 from curobo.types import JointState
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.carrying import CarryingBinding
-from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
+from luna_mujoco.carrying import CarryingBinding
+from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--input-folder", default="data/visible-cloud-work/grasp-place-left-14/gpu-requests")

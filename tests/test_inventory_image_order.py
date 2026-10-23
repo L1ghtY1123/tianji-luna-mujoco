@@ -3,7 +3,7 @@ import copy
 import numpy as np
 import pytest
 
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco.task_progress import TaskProgress
 
 
 def head_observation():
@@ -102,7 +102,7 @@ def test_group_quota_rejects_three_red_members_instead_of_two_red_and_one_green(
 
 
 def test_build_scene_contract_rejects_unfinalized_inventory_and_missing_region():
-    from jev_mujoco.skills import Registry, SkillSelectionError
+    from luna_mujoco.skills import Registry, SkillSelectionError
     registry = Registry()
     facts = {'observed': True, 'target_selected': True, 'arm_selected': True}
     with pytest.raises(SkillSelectionError) as failure:

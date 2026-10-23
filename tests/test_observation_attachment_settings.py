@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from jev_mujoco.observation_motion import observation_poses
-from jev_mujoco.planning_settings import PlanningSettings, load_settings, save_settings
+from luna_mujoco.observation_motion import observation_poses
+from luna_mujoco.planning_settings import PlanningSettings, load_settings, save_settings
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,7 +16,7 @@ def test_calibrated_observation_defaults_and_attachment_settings_roundtrip(tmp_p
     settings = PlanningSettings()
     calibrated = json.loads((ROOT / 'resources/observation_poses.json').read_text())['joints_rad']
     assert observation_poses(settings.model_dump()) == calibrated
-    assert settings.attachment.model_dump() == {'voxel_size_m': .01, 'margin_m': .001, 'sphere_budget': 16}
+    assert settings.attachment.model_dump() == {'minimum_partition_size_m': .01, 'margin_m': .001, 'sphere_budget': 24}
     values = settings.model_dump()
     values['observation']['A'] = list(values['observation']['A'])
     values['observation']['A'][0] += .01
@@ -35,7 +35,7 @@ def test_calibrated_observation_defaults_and_attachment_settings_roundtrip(tmp_p
 
 @pytest.mark.parametrize('changes', [
     {'voxel_size_m': .0009}, {'voxel_size_m': .051}, {'margin_m': -.001},
-    {'margin_m': .031}, {'sphere_budget': 0}, {'sphere_budget': 17}, {'sphere_budget': 1.5},
+    {'margin_m': .031}, {'sphere_budget': 0}, {'sphere_budget': 32}, {'sphere_budget': 1.5},
 ])
 def test_attachment_settings_reject_invalid_geometry(changes):
     with pytest.raises(ValidationError):
@@ -74,5 +74,5 @@ def test_observation_execution_boundary_rejects_unvalidated_dictionary():
 
 def test_new_settings_preserve_legacy_release_migration():
     settings = PlanningSettings.model_validate({'release_margin_m': .02})
-    assert settings.place_release_height_m == settings.trajectory_collision_clearance_m + .002
-    assert settings.attachment.sphere_budget == 16
+    assert settings.place_release_height_m == settings.trajectory_collision_clearance_m
+    assert settings.attachment.sphere_budget == 24

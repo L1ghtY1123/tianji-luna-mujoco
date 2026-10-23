@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from jev_mujoco.algorithms import Algorithms
-from jev_mujoco.geometry_service import GeometryRuntime, run_operation
+from luna_mujoco.algorithms import Algorithms
+from luna_mujoco.geometry_service import GeometryRuntime, run_operation
 
 
 def test_arm_prefilter_reads_both_measured_centers_without_gpu():
@@ -32,7 +32,7 @@ def test_arm_prefilter_reads_both_measured_centers_without_gpu():
 
 
 def test_gpu_reachability_is_scene_independent_and_reuses_solver(monkeypatch):
-    from jev_mujoco import reachability
+    from luna_mujoco import reachability
 
     created, queries = [], []
 

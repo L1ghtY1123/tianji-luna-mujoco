@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from test_region_placement import region_inputs
 
-from jev_mujoco.placement import release_candidates, release_endpoint_evidence
+from luna_mujoco.placement import release_candidates, release_endpoint_evidence
 
 
 @pytest.mark.parametrize('kind', ['bin', 'marker'])

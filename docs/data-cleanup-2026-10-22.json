@@ -1,0 +1,1625 @@
+{
+  "root": "/home/guangyu/projects/tianji-luna-mujoco/data",
+  "targets": [
+    {
+      "path": "profile_planner_cpu.py",
+      "bytes": 1626,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "aef77-drop-diagnostic",
+      "bytes": 17674196,
+      "file_count": 19,
+      "directory": true
+    },
+    {
+      "path": "sixth-endpoint-collision-check.json",
+      "bytes": 11037,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.62--0.20.png",
+      "bytes": 45660,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "probe_local_clearance.py",
+      "bytes": 2524,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "4c2d-identity-diagnostic",
+      "bytes": 20757027,
+      "file_count": 54,
+      "directory": true
+    },
+    {
+      "path": "unpack-visibility-update.tar",
+      "bytes": 292352,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "4c2d-identity-split-input.tar.gz",
+      "bytes": 11440,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "inspect_public_update_api.py",
+      "bytes": 376,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.62--0.08.png",
+      "bytes": 45911,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "b15c_release_probe.py",
+      "bytes": 5966,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "before-dual-retry-deploy.json",
+      "bytes": 3856525,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "audit_sdk_image.py",
+      "bytes": 1376,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.56--0.20.png",
+      "bytes": 45545,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "cad-v3-role-diagnostic",
+      "bytes": 1381946,
+      "file_count": 29,
+      "directory": true
+    },
+    {
+      "path": "unpack-probe-0.62--0.28.png",
+      "bytes": 45559,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.52--0.12.png",
+      "bytes": 46022,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "bc67-transport-failure",
+      "bytes": 116621,
+      "file_count": 6,
+      "directory": true
+    },
+    {
+      "path": "lifecycle-role-input",
+      "bytes": 18392394,
+      "file_count": 9,
+      "directory": true
+    },
+    {
+      "path": "2e64-identity-diagnostic",
+      "bytes": 4791330,
+      "file_count": 67,
+      "directory": true
+    },
+    {
+      "path": "sdk-public-updates.txt",
+      "bytes": 19725,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "fff-remaining-inventory",
+      "bytes": 2208075,
+      "file_count": 68,
+      "directory": true
+    },
+    {
+      "path": "probe_unpack_fusion.py",
+      "bytes": 5721,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "planner-profile-input.json",
+      "bytes": 1203370,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "d9ce-unpack-visual-probe-v2",
+      "bytes": 73237,
+      "file_count": 3,
+      "directory": true
+    },
+    {
+      "path": "unpack-probe-0.58--0.08.png",
+      "bytes": 45960,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.56--0.28.png",
+      "bytes": 45380,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "2f1-postplace-diagnostic",
+      "bytes": 303822,
+      "file_count": 15,
+      "directory": true
+    },
+    {
+      "path": "88d-tracking-comparison-upload.tar.gz",
+      "bytes": 554761,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "fused-probes",
+      "bytes": 11388904,
+      "file_count": 164,
+      "directory": true
+    },
+    {
+      "path": "cad-v3-role-probe.tar.gz",
+      "bytes": 635497,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "local-obstacle-clearances.json",
+      "bytes": 5062,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "probe_unpack_visibility.py",
+      "bytes": 3796,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "79639-before-probe-package.tar.gz",
+      "bytes": 7219195,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "transition-endpoints.json",
+      "bytes": 1687,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "lifecycle-role-probe",
+      "bytes": 542112,
+      "file_count": 13,
+      "directory": true
+    },
+    {
+      "path": "v22-negative-result.json",
+      "bytes": 1235,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.58--0.28.png",
+      "bytes": 45395,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "inspect_warmup.py",
+      "bytes": 1019,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "latest-transition-failure.json",
+      "bytes": 581025,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "cad-v4-role-probe.tar.gz",
+      "bytes": 644983,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "failed-closure-contacts.jsonl",
+      "bytes": 1019,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "local-obstacle-fix.tar.gz",
+      "bytes": 162152,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "pre-luna-package-1792505125",
+      "bytes": 11819233,
+      "file_count": 383,
+      "directory": true
+    },
+    {
+      "path": "dual-replay-input.json",
+      "bytes": 1203396,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "ik_valid_profile.py",
+      "bytes": 2018,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "88d-independent-comparison",
+      "bytes": 873033,
+      "file_count": 28,
+      "directory": true
+    },
+    {
+      "path": "inspect_sdk_public_updates.py",
+      "bytes": 1089,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "v10-outcome",
+      "bytes": 1001940,
+      "file_count": 15,
+      "directory": true
+    },
+    {
+      "path": "resident-audit-final-sync.tar",
+      "bytes": 532480,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "probe_initial_responses_timeout.py",
+      "bytes": 2344,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "failed-closure-approach.jsonl",
+      "bytes": 1333,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "dual-retry-update.tar",
+      "bytes": 269312,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "b15c-release-diagnostic",
+      "bytes": 889246,
+      "file_count": 24,
+      "directory": true
+    },
+    {
+      "path": "sixth-cpu-ik-diagnostic.json",
+      "bytes": 31344,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "probe_unpack_visual.py",
+      "bytes": 2133,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "public-planner-comparison.txt",
+      "bytes": 2054,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "luna-source-manifest.json",
+      "bytes": 92993,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.58--0.12.png",
+      "bytes": 45980,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "workspace-sphere365",
+      "bytes": 152761712,
+      "file_count": 14,
+      "directory": true
+    },
+    {
+      "path": "unpack-visibility-probe.json",
+      "bytes": 2416,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "official_motion_planner_batch.py",
+      "bytes": 26663,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "local-object-timings-v6.json",
+      "bytes": 8581,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "9522-continuity-input.tar.gz",
+      "bytes": 16044542,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "appearance",
+      "bytes": 549465,
+      "file_count": 5,
+      "directory": true
+    },
+    {
+      "path": "unpack-probe-0.58--0.20.png",
+      "bytes": 45503,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.52--0.20.png",
+      "bytes": 45780,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "resident-public-api-run.json",
+      "bytes": 8249106,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "current-failure-state.json",
+      "bytes": 401672,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.52--0.28.png",
+      "bytes": 45677,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.56--0.12.png",
+      "bytes": 45973,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "cad-v9-unpack-diagnostic",
+      "bytes": 1304158,
+      "file_count": 22,
+      "directory": true
+    },
+    {
+      "path": "dual-exact-replay.log",
+      "bytes": 1127,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "ik-frozen-profile.json",
+      "bytes": 278,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "4c2d-drop-diagnostic",
+      "bytes": 6648827,
+      "file_count": 18,
+      "directory": true
+    },
+    {
+      "path": "30dd-postplace-diagnostic",
+      "bytes": 929093,
+      "file_count": 28,
+      "directory": true
+    },
+    {
+      "path": "probe_transition_endpoints.py",
+      "bytes": 1388,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "ik-valid-profile.json",
+      "bytes": 276,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "positive-request.json",
+      "bytes": 322426,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "official_motion_example.py",
+      "bytes": 22887,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "demo-run13-update.tar.gz",
+      "bytes": 27593,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "f7305-response-timeout-probe.json",
+      "bytes": 18841,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "set_official_retry_budget.py",
+      "bytes": 527,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "ik_frozen_profile.py",
+      "bytes": 1891,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "replay-repair-queue-status.json",
+      "bytes": 1006,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "resident-final-run.json",
+      "bytes": 1586499,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "fff-paired-comparison-upload.tar.gz",
+      "bytes": 898125,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "validate_demo_run.py",
+      "bytes": 4302,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "resident-final-sync-manifest.json",
+      "bytes": 3175,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "batch_vla_profile.py",
+      "bytes": 3491,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "resident-geometry-gpu.log",
+      "bytes": 422,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "read_sdk_geometry_api.py",
+      "bytes": 833,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "profile_collision_mesh_cost.py",
+      "bytes": 1766,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "f7305-response-timeout-probe.started",
+      "bytes": 0,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.62--0.12.png",
+      "bytes": 45841,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "probe_failed_closure.py",
+      "bytes": 1969,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "inspect_local_depth_failure.py",
+      "bytes": 1393,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "local-object-acceptance-v2.json",
+      "bytes": 8649804,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "inspect_dual_evidence.py",
+      "bytes": 398,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "replay_repair_queue.py",
+      "bytes": 1483,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "probe_fused_decisions.py",
+      "bytes": 6225,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "official-grasp-example.log",
+      "bytes": 206,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "inventory-update.tar",
+      "bytes": 241664,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "lifecycle_role_probe.py",
+      "bytes": 6073,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "frozen_release_probe.py",
+      "bytes": 4941,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "79639-unpack-probe-package.tar.gz",
+      "bytes": 2761775,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "local-object-acceptance-v3.json",
+      "bytes": 10980038,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "public-single-planner-comparison.txt",
+      "bytes": 1592,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "v22-positive-result.json",
+      "bytes": 1234,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "capture_planner_profile_input.py",
+      "bytes": 2001,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "compare_public_planner.py",
+      "bytes": 3556,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "audit_installed_sdk.py",
+      "bytes": 692,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-failed-camera-2.png",
+      "bytes": 28477,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "local-object-acceptance-v4.json",
+      "bytes": 3215834,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "9522-continuity-diagnostic",
+      "bytes": 21855526,
+      "file_count": 34,
+      "directory": true
+    },
+    {
+      "path": "local-object-acceptance.json",
+      "bytes": 8656336,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "luna-deploy-current.tar.gz",
+      "bytes": 26797704,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "79639-unpack-frozen-probe",
+      "bytes": 3248921,
+      "file_count": 13,
+      "directory": true
+    },
+    {
+      "path": "3a98-postplace-comparison",
+      "bytes": 333119,
+      "file_count": 5,
+      "directory": true
+    },
+    {
+      "path": "batch-vla-profile.json",
+      "bytes": 2501,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "v18-unpack-negative-before-result.json",
+      "bytes": 909,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "4c2d-identity-input.tar.gz",
+      "bytes": 11520348,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "d9ce-unpack-visual-probe",
+      "bytes": 72997,
+      "file_count": 3,
+      "directory": true
+    },
+    {
+      "path": "wrong-color-control",
+      "bytes": 549448,
+      "file_count": 5,
+      "directory": true
+    },
+    {
+      "path": "compare_cad_mesh_representation.py",
+      "bytes": 1660,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "30dd-lighting-audit",
+      "bytes": 214996,
+      "file_count": 7,
+      "directory": true
+    },
+    {
+      "path": "b71b-drop-diagnostic",
+      "bytes": 6654730,
+      "file_count": 18,
+      "directory": true
+    },
+    {
+      "path": "v18-unpack-proposed-request.json",
+      "bytes": 216562,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "d4a85-immutable-render-meshes.tar.gz",
+      "bytes": 7528810,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "lifecycle-role-input.tar.gz",
+      "bytes": 13755122,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "resident-planner-update.tar",
+      "bytes": 369152,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.52--0.08.png",
+      "bytes": 46058,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "decision-contract-probes",
+      "bytes": 14517879,
+      "file_count": 143,
+      "directory": true
+    },
+    {
+      "path": "probe_resident_geometry_api.py",
+      "bytes": 1259,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "88d-second-observation",
+      "bytes": 924079,
+      "file_count": 22,
+      "directory": true
+    },
+    {
+      "path": "probe_drop_visual.py",
+      "bytes": 6020,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "compare_public_single_planner.py",
+      "bytes": 3923,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "cad-surface-update.tar",
+      "bytes": 546304,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "mesh-cost-profile.txt",
+      "bytes": 456,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-probe-0.56--0.08.png",
+      "bytes": 45971,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "cad-mesh-comparison.log",
+      "bytes": 818,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "v10-fusion",
+      "bytes": 1003602,
+      "file_count": 15,
+      "directory": true
+    },
+    {
+      "path": "capture_dual_replay.py",
+      "bytes": 1043,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "local-object-acceptance-v6.json",
+      "bytes": 8327922,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "current-failure-manifest.json",
+      "bytes": 22318,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "demo-scene-verification-update.tar.gz",
+      "bytes": 11611,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "unpack-failed-camera-3.png",
+      "bytes": 45487,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "run13-views",
+      "bytes": 32716,
+      "file_count": 3,
+      "directory": true
+    },
+    {
+      "path": "complete-grasp-search-profile.json",
+      "bytes": 7333,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "vla-joints-update.tar.gz",
+      "bytes": 133647,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "v18-unpack-positive-result.json",
+      "bytes": 903,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "cad-v4-role-diagnostic",
+      "bytes": 1437949,
+      "file_count": 33,
+      "directory": true
+    },
+    {
+      "path": "unpack-failed-camera-1.png",
+      "bytes": 39810,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "d9ce-unpack-visual-probe-v3",
+      "bytes": 89999,
+      "file_count": 3,
+      "directory": true
+    },
+    {
+      "path": "planner-cprofile.txt",
+      "bytes": 11535,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "fff-camera-comparison-upload.tar.gz",
+      "bytes": 493721,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "replay_dual_failure.py",
+      "bytes": 2019,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "stale-source-20261020T193439087905Z.tar.gz",
+      "bytes": 40344,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "visible-inventory-f0fe-diagnostic",
+      "bytes": 853619,
+      "file_count": 20,
+      "directory": true
+    },
+    {
+      "path": "profile_complete_grasp_search.py",
+      "bytes": 5466,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "79639-unpack-before-probe",
+      "bytes": 8329753,
+      "file_count": 26,
+      "directory": true
+    },
+    {
+      "path": "identity-requested3-diagnostic",
+      "bytes": 880649,
+      "file_count": 20,
+      "directory": true
+    },
+    {
+      "path": "negative-request.json",
+      "bytes": 322960,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "cad-v7-role-diagnostic",
+      "bytes": 1504959,
+      "file_count": 18,
+      "directory": true
+    },
+    {
+      "path": "warmup-fix.tar.gz",
+      "bytes": 156841,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "resident-final-update.tar",
+      "bytes": 308736,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "local-object-acceptance-v5.json",
+      "bytes": 1610676,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "place-result-cc543b/update.tar",
+      "bytes": 12318720,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "place-result-cc543b/sync-manifest.json",
+      "bytes": 6305,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "place-result-cc543b/production-prompt-template.json",
+      "bytes": 18614,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "place-result-cc543b/verify_frozen_request.py",
+      "bytes": 3688,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "place-result-cc543b/feedback-context-probe.json",
+      "bytes": 346539,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "place-result-cc543b/head-last-probe.json",
+      "bytes": 345671,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "place-result-cc543b/question-clarification-probe.json",
+      "bytes": 346266,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/e6f4edb5eb8b44e7ad0e422601423cbf.jsonl",
+      "bytes": 22253,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/bc67995339284c3fa4e5f2c8fd48ded8.jsonl",
+      "bytes": 3482910,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/d4a85b18a4a343f3a3b0892f82202b35.jsonl",
+      "bytes": 10575387,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/f4198879562140fe9cb631438a6b307a.jsonl",
+      "bytes": 870905,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/dcab1de3bb9343529f89bd378a494ae5.jsonl",
+      "bytes": 1449870,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/074b2c01be11495698ebf268bb9c8a98.jsonl",
+      "bytes": 606963,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/69d2d713d51d487b99ff20478a5ad3db.jsonl",
+      "bytes": 5261965,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/1060c911ffc147d3988ed3c7c746c198.jsonl",
+      "bytes": 603514,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/9975165c6b7d4f97bb6a5fc914b314c0.jsonl",
+      "bytes": 623605,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/f9354f1db30e4d5ba0ad62be4f84f2e0.jsonl",
+      "bytes": 784827,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/f2df7d1915db41e287f2265ff3540cb2.jsonl",
+      "bytes": 20751439,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/7a2c2273acf24f72a6e65b5a33ed116f.jsonl",
+      "bytes": 573405,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/fff15d94e982471399a605188ba9d0c4.jsonl",
+      "bytes": 2135033,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/3a98f6544d9245a9a49437069ffa586f.jsonl",
+      "bytes": 1519502,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/d9cebe60018546519a0ac428ef706e19.jsonl",
+      "bytes": 1909531,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/f0fe4476f61440739a5f0270b4f41b8f.jsonl",
+      "bytes": 78012,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/a05756ba3888449cbe4f4586d6d20476.jsonl",
+      "bytes": 21746645,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/447f622ba13d45c29e81a6cea1fc6ab4.jsonl",
+      "bytes": 91910,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/8a644e8e568c4a4dae40d412fbf3c7a4.jsonl",
+      "bytes": 8161163,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/9d005cbe636a4b9cacc0eceb9e802bcd.jsonl",
+      "bytes": 5489190,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/ac6c87630d1f44e090dfb5a35a4578d1.jsonl",
+      "bytes": 1800532,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/de106298e4044b60b3f2a95ee9d6c72d.jsonl",
+      "bytes": 100717,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/b40a2b4e20414daa9ab6462b6043a577.jsonl",
+      "bytes": 3819548,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/8d77fbd337394092a92d9d8273d2936b.jsonl",
+      "bytes": 20793887,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/963cb12d3be84fa2bab8b8414f7fdd45.jsonl",
+      "bytes": 1450058,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/3ce74663bad44c8db902f43561db4bfa.jsonl",
+      "bytes": 1096281,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/a979c5b951a64b89a46da495ccb39813.jsonl",
+      "bytes": 488777,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/88d3725210b54ccbb46eff5c276a4240.jsonl",
+      "bytes": 1570621,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/453c58a0829a466dbd89913650b14bb4.jsonl",
+      "bytes": 28482,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/a76ce4d1bd224983bda5ca391bf0f9fe.jsonl",
+      "bytes": 416014,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/30dd72b14f9b4eac811be2520492025d.jsonl",
+      "bytes": 1378736,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/de905929e78b4f54ab16211695dd87d8.jsonl",
+      "bytes": 323770,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/45334fbd9aa4449f833d8cfb608ac2b5.jsonl",
+      "bytes": 4801958,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/012f50147bc24430aa9dce12ff19e55f.jsonl",
+      "bytes": 27379817,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/f5158f7382344acfb846b4b33b5e0565.jsonl",
+      "bytes": 10231248,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/b8906cac23ea4b76a35dc6bbb2353ca5.jsonl",
+      "bytes": 611380,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/2e6487d72001407da7e87bc617e0fbed.jsonl",
+      "bytes": 1867943,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/250b9e93985f480c826bf9105bce83a6.jsonl",
+      "bytes": 4168180,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/bbf7eefabc9e4e46a663035942d03bab.jsonl",
+      "bytes": 39447,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/6316357da2bc42d3b4b67b27e931b0e4.jsonl",
+      "bytes": 760187,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/aef77e04c1c14f7a81ab7fe7319586b8.jsonl",
+      "bytes": 3753748,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/c167ee2447de4be3b8f3d4697d83e0f3.jsonl",
+      "bytes": 1598484,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/4c7607c8eb4a4c63be958ea29b4bfdd5.jsonl",
+      "bytes": 8818142,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/f969fd6147724fdab16ecf22465ac81d.jsonl",
+      "bytes": 10952626,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/b15ca817bee244c4b1eea821e6ad8cce.jsonl",
+      "bytes": 1532892,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/b71baed8ea21427c9405f9796380c0fb.jsonl",
+      "bytes": 3822334,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/15301c79bb174427ad75a9d56b5377f2.jsonl",
+      "bytes": 72941,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/8bfd28e58f12479bbbf33741f835ea85.jsonl",
+      "bytes": 24819,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/d5955b115db74cbbb305c99da68d32cb.jsonl",
+      "bytes": 90599,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/ef356390f2a04c2b9d025532a4369ec5.jsonl",
+      "bytes": 698129,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/5be7f5b58fa84f2ea2671e1b200b82a3.jsonl",
+      "bytes": 1340899,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/cff2921c9c9e41a2a7bb12486a65c5ca.jsonl",
+      "bytes": 80795,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/740f04940c184776b27658219bddb1b7.jsonl",
+      "bytes": 4550351,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/82f98c1c9be54aef8857f5068101f385.jsonl",
+      "bytes": 1455778,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/c6b5e999ebdd41b8ac85a54b5cb1516e.jsonl",
+      "bytes": 274478,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/0ce94a9193c54f3bad6a6531abb6a4fc.jsonl",
+      "bytes": 861711,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/90bf5096bf094cdba361f2be75e85328.jsonl",
+      "bytes": 9829,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/5d00857b2d8e497ab5c1bb3c1dceb06a.jsonl",
+      "bytes": 774595,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/e4213c28c6084730b5383a226467f307.jsonl",
+      "bytes": 89409,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/3c71dcfe72c44739bb62fc5ab88599db.jsonl",
+      "bytes": 5564646,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/7b3303f7ed5d48d68fbe29dd2a76c38b.jsonl",
+      "bytes": 1426530,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/5ea9de56ce4042d8ab76495468603e55.jsonl",
+      "bytes": 12420,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/5f8ce17e1ae540b4810fb30bb8870480.jsonl",
+      "bytes": 46891,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/300b1dcae6104c94b1997b72335e5f4c.jsonl",
+      "bytes": 603647,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/f7305c78a585407f82a00bc0f48667ce.jsonl",
+      "bytes": 12412,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/2f1dfc9905864546b1e9a4feb65c353d.jsonl",
+      "bytes": 1420339,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/42b5b24b83b44497b1ed8f4183703eff.jsonl",
+      "bytes": 2342386,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/9bc1756a98454b9ab66e263eb460b787.jsonl",
+      "bytes": 287632,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/7eb776a7c6904df3919cca09370bd570.jsonl",
+      "bytes": 23476,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/3c5879a7dfea43dd8b4bd01a7ea127c4.jsonl",
+      "bytes": 44962,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/08d7e50ef77f45d6aec6aa29677185d5.jsonl",
+      "bytes": 607178,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/fcdc8828e6844ebca557d4ec8738b542.jsonl",
+      "bytes": 8744729,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/908fd4671f2b4832a0b32624c69a86e3.jsonl",
+      "bytes": 468845,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/af9752221a174e028614fb4def661e81.jsonl",
+      "bytes": 25252631,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/060b4a1259ce479996e2f12f6fa772cd.jsonl",
+      "bytes": 709776,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/dafba328595f4a1994115377f7d1a13b.jsonl",
+      "bytes": 1350612,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/4c2d4d17e8e04ddab23c2a9727ccc687.jsonl",
+      "bytes": 3726736,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/f9bd13b344f34743a8d1125ab6e71d50.jsonl",
+      "bytes": 1796544,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/142a98e9d20142eaafbd17567c22a3c7.jsonl",
+      "bytes": 224540,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/808a6c279f194b668c195a9379102727.jsonl",
+      "bytes": 3803767,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/2e473e106e50411d9004191ccf36b242.jsonl",
+      "bytes": 929249,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/7d698139b96e4c46bdc39eee544faf8c.jsonl",
+      "bytes": 3195555,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/ac49a5e9489b4542b9cc220d3a33f8d7.jsonl",
+      "bytes": 19386607,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/bec5139ba27241f3b014d0fcfae0a9a3.jsonl",
+      "bytes": 846539,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/9522a33826374aef985c98980d771210.jsonl",
+      "bytes": 1953798,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/8361129a445543908cbe481b0186e33a.jsonl",
+      "bytes": 30122,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/79639ade65ce47da9baf773eefd83963.jsonl",
+      "bytes": 1917074,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/d5cd32f0311441cf9eec673a77d36ef7.jsonl",
+      "bytes": 7518948,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/5293d3215d19474fb5f230e0a5e1d55e.jsonl",
+      "bytes": 4122460,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/ffb2bc40b00e4a398767c0922667f1b3.jsonl",
+      "bytes": 983367,
+      "file_count": 1,
+      "directory": false
+    },
+    {
+      "path": "runs/2cac60078b3b487ba45b877802e77c74.jsonl",
+      "bytes": 600448,
+      "file_count": 1,
+      "directory": false
+    }
+  ],
+  "delete_bytes": 793505776,
+  "delete_files": 1600,
+  "preserved_top_level": [
+    "runs",
+    "audit_official_package.py",
+    "planning-settings.json",
+    "official-all-files-manifest.json",
+    "resident-geometry-final-gpu.log",
+    "validate_resident_geometry_gpu.py",
+    "place-result-cc543b",
+    "strict-sdk-source-audit.json",
+    "6316357-physical-diagnostic.json",
+    "final-warmup-validation.json",
+    "experiments",
+    "render_meshes"
+  ],
+  "completed_at": "2026-10-22T23:08:04.032159+08:00",
+  "protected_files_verified": 896,
+  "remaining_bytes": 1279984015,
+  "remaining_run_logs": 6,
+  "health_after": {
+    "8351": {
+      "status": "succeeded",
+      "algorithm_pending": false
+    },
+    "8352": {
+      "ready": true,
+      "warmup_ready": true
+    }
+  }
+}

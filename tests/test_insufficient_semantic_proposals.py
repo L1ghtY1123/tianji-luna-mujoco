@@ -7,7 +7,7 @@ import pytest
 from geometry_perception_fixture import GeometryPerception
 from test_perception import capture_fixture
 
-from jev_mujoco.perception import PerceptionError
+from luna_mujoco.perception import PerceptionError
 
 
 def fixture(*, retained=3, reject_target=False, on_table=False):
@@ -91,7 +91,7 @@ def test_unnamed_depth_remains_unassigned():
 
 
 def test_other_perception_errors_are_not_suppressed(monkeypatch):
-    from jev_mujoco import perception
+    from luna_mujoco import perception
 
     capture, _, _, engine = fixture()
 

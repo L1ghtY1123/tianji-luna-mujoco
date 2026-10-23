@@ -1,0 +1,20 @@
+{
+  "id": "execute_grasp",
+  "description": "固定执行接近、抓取闭爪、提升；不采集结果RGBD。完成后由verify_grasp读取夹爪反馈判定。运动中关节跟踪偏差超过0.03 rad时停止全部活动臂并报告证据。",
+  "requires": {
+    "plan_ready": true,
+    "arm_selected": true,
+    "lifted": false,
+    "grasp_completed": false,
+    "recovery_needed": false
+  },
+  "provides": [
+    "lifted"
+  ],
+  "inputs": [
+    "plan",
+    "arm",
+    "scene",
+    "planning_settings"
+  ]
+}

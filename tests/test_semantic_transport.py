@@ -24,8 +24,8 @@ def payload():
 
 
 def codec():
-    assert importlib.util.find_spec("jev_mujoco.semantic_transport"), "optional-head transport missing"
-    from jev_mujoco import semantic_transport
+    assert importlib.util.find_spec("luna_mujoco.semantic_transport"), "optional-head transport missing"
+    from luna_mujoco import semantic_transport
     return semantic_transport
 
 

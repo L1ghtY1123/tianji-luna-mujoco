@@ -1,10 +1,11 @@
+from copy import deepcopy
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from jev_mujoco.carrying import CarryingBinding, carrying_spheres, create_carrying_robot_config
-from jev_mujoco.geometry_service import GeometryRuntime
+from luna_mujoco.carrying import CarryingBinding, carrying_spheres, create_carrying_robot_config
+from luna_mujoco.geometry_service import GeometryRuntime
 
 
 def measured_binding():
@@ -28,15 +29,34 @@ def test_surface_budget_keeps_last_observed_voxel():
     binding = measured_binding()
     from dataclasses import replace
     points = np.array([[x, y, .04] for x in np.linspace(-.15, .15, 40) for y in np.linspace(-.15, .15, 40)])
-    spheres = np.asarray(carrying_spheres(replace(binding, points_tool_m=tuple(map(tuple, points))), maximum_spheres=32))
-    assert len(spheres) <= 32
+    spheres = np.asarray(carrying_spheres(replace(binding, points_tool_m=tuple(map(tuple, points))), maximum_spheres=31))
+    assert len(spheres) <= 31
     assert np.all(np.min(np.linalg.norm(points[:, None] - spheres[None, :, :3], axis=2) - spheres[None, :, 3], axis=1) <= -.004)
 
 
-def test_attachment_exempts_only_pads():
-    config = {"robot_cfg": {"kinematics": {"collision_link_names": ["TCP_Link_L", "gripL_Base", "gripL_Link3_L", "gripL_Link3_R"], "collision_spheres": {}, "self_collision_ignore": {}}}}
-    config, link = create_carrying_robot_config(config, measured_binding())
-    assert config["robot_cfg"]["kinematics"]["self_collision_ignore"][link] == ["gripL_Link3_L", "gripL_Link3_R"]
+def test_attachment_exempts_exact_owner_hand_without_removing_world_or_other_self_checks():
+    touch_links = ["gripL_Base", *(f"gripL_Link{part}_{side}"
+                                 for part in range(1, 5) for side in "LR")]
+    checked_links = ["TCP_Link_L", "Link7_L", "gripR_Base", "gripR_Link4_L", "gripL_new_camera"]
+    names = touch_links + checked_links
+    config = {"robot_cfg": {"kinematics": {
+        "collision_link_names": names,
+        "collision_spheres": {name: [{"center": [0., 0., 0.], "radius": .01}] for name in names},
+        "self_collision_ignore": {"gripL_Link1_L": ["gripL_Link2_L"]},
+    }}}
+    original = deepcopy(config)
+    carried, link = create_carrying_robot_config(config, measured_binding())
+    kin = carried["robot_cfg"]["kinematics"]
+    assert set(kin["self_collision_ignore"][link]) == set(touch_links)
+    for name in names:
+        expected = set(original["robot_cfg"]["kinematics"]["self_collision_ignore"].get(name, []))
+        if name in touch_links:
+            expected.add(link)
+        assert set(kin["self_collision_ignore"].get(name, [])) == expected
+        assert name in kin["collision_link_names"]
+        assert kin["collision_spheres"][name] == original["robot_cfg"]["kinematics"]["collision_spheres"][name]
+    assert kin["collision_spheres"][link]
+    assert config == original
 
 
 def test_scope_reuses_exact_configuration_and_preserves_logical_binding():
@@ -52,7 +72,7 @@ def test_scope_reuses_exact_configuration_and_preserves_logical_binding():
         assert isinstance(runtime._ik_batch_backends, OrderedDict)
         runtime._backends["dummy"] = SimpleNamespace(destroy=lambda: destroyed.append(True))
     with runtime.carrying_scope(None, {"A": 0., "B": 0.}):
-        assert "dummy" not in runtime._backends
+        assert "dummy" in runtime._backends
     with pytest.raises(RuntimeError), runtime.carrying_scope(binding, {"A": .4, "B": 0.}):
         raise RuntimeError("planner failed")
     assert destroyed == []
@@ -61,7 +81,7 @@ def test_scope_reuses_exact_configuration_and_preserves_logical_binding():
     assert runtime.logical_carrying_binding == binding
     with runtime.carrying_scope(binding, {"A": .40001, "B": 0.}):
         pass
-    assert destroyed == [True]
+    assert destroyed == []
 
 
 def test_support_departure_does_not_replace_open_grasp_and_observation_solvers():
@@ -83,10 +103,10 @@ def test_support_departure_does_not_replace_open_grasp_and_observation_solvers()
     runtime.detach_carrying()
     with runtime.carrying_scope(None, feedback):
         assert runtime._backends['open'] is ordinary
-    assert destroyed == ['departure']
+    assert destroyed == []
 
 
-def test_carrying_metadata_change_reuses_identical_geometry_but_new_spheres_do_not():
+def test_carrying_metadata_and_new_spheres_retain_fixed_capacity_solver():
     from dataclasses import replace
     runtime = GeometryRuntime()
     binding = measured_binding()
@@ -101,14 +121,14 @@ def test_carrying_metadata_change_reuses_identical_geometry_but_new_spheres_do_n
         assert runtime.carrying_binding is later
     moved = replace(later, points_tool_m=tuple((x, y, z + .01) for x, y, z in later.points_tool_m))
     with runtime.carrying_scope(moved, feedback):
-        assert 'ik' not in runtime._ik_batch_backends
-    assert destroyed == [True]
+        assert runtime._ik_batch_backends['ik'] is backend
+    assert destroyed == []
 
 
 def test_mapping_surface_identity_and_observation_retains_target():
     from test_perception_mapping import wire
 
-    from jev_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload
     _, identity = decode_mapping_payload(wire() | {"exclusion_state": "observation", "selected_surface_world_m": [[0, 0, 1], [.01, 0, 1]]})
     assert identity["disabled_obstacle_names"] == ()
     assert "selected_object_estimate" not in identity
@@ -116,7 +136,7 @@ def test_mapping_surface_identity_and_observation_retains_target():
 
 
 def test_table_roi_does_not_certify_outside_unknown_space():
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
     view = {"depth_left_m": np.full((21, 21), .5), "valid_left_mask": np.ones((21, 21)),
             "left_intrinsics": [[10, 0, 10], [0, 10, 10], [0, 0, 1]],
             "T_base_left_camera": np.eye(4), "instance_masks": {}}
@@ -133,8 +153,8 @@ def test_table_roi_does_not_certify_outside_unknown_space():
 def test_rejected_mapper_depth_cannot_carve_free_space(monkeypatch):
     from test_perception_mapping import wire
 
-    from jev_mujoco import pointcloud_filter
-    from jev_mujoco.perception_mapping import decode_mapping_payload, filter_mapping_views
+    from luna_mujoco import pointcloud_filter
+    from luna_mujoco.perception_mapping import decode_mapping_payload, filter_mapping_views
     decoded, _ = decode_mapping_payload(wire())
     def reject_first(points, sources, *, settings):
         rejected = np.zeros(len(points), dtype=bool)
@@ -157,7 +177,7 @@ def test_detach_retains_scene_and_releases_native_slots():
     assert runtime.detach_carrying() == {"ok": True, "attached": False}
     assert runtime.geometry_scene == {"scene_token": "scene"}
     assert runtime.logical_carrying_binding is None
-    assert detached == [True]
+    assert detached == [] and 'dummy' in runtime._backends
 
 
 def test_native_planner_can_acquire_gpu_lock_inside_scope():
@@ -171,7 +191,7 @@ def test_native_planner_can_acquire_gpu_lock_inside_scope():
 
 @pytest.mark.parametrize("scene_state", ["selected", "held", "released"])
 def test_retreat_validation_uses_shared_manipulation_scene(monkeypatch, scene_state):
-    from jev_mujoco import geometry_service
+    from luna_mujoco import geometry_service
 
     runtime = GeometryRuntime()
     runtime.geometry_scene = {"exclusion_state": scene_state, "scene_token": "scene"}
@@ -192,7 +212,7 @@ def test_retreat_validation_uses_shared_manipulation_scene(monkeypatch, scene_st
 
 
 def test_selected_pixels_have_contact_intent_evidence_only():
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
     view = {"depth_left_m": np.ones((21, 21)), "valid_left_mask": np.ones((21, 21)),
             "left_intrinsics": [[10, 0, 10], [0, 10, 10], [0, 0, 1]],
             "T_base_left_camera": np.eye(4), "instance_masks": {"selected": np.ones((21, 21))}}
@@ -212,7 +232,7 @@ def test_selected_pixels_have_contact_intent_evidence_only():
 
 
 def test_observation_phase_is_detached_actual_geometry():
-    from jev_mujoco.carrying import validate_phase_request
+    from luna_mujoco.carrying import validate_phase_request
     assert validate_phase_request({"phase": "observation", "gripper_geometry_mode": "actual"}) == "observation"
     with pytest.raises(ValueError, match="detached"):
         validate_phase_request({"phase": "observation", "carrying_binding": {}})
@@ -221,7 +241,7 @@ def test_observation_phase_is_detached_actual_geometry():
 def test_mapping_token_binds_effective_nested_filter_settings():
     from test_perception_mapping import wire
 
-    from jev_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload
     payload = wire()
     _, original = decode_mapping_payload(payload | {"planning_settings": {"pointcloud_filter": {"enabled": False}}})
     _, changed = decode_mapping_payload(payload | {"planning_settings": {"pointcloud_filter": {"enabled": True}}})
@@ -234,7 +254,7 @@ def test_mapping_token_binds_effective_nested_filter_settings():
 def held_source_guard():
     from dataclasses import replace
 
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
     view = {"depth_left_m": np.ones((41, 41)), "valid_left_mask": np.ones((41, 41)),
             "left_intrinsics": [[100, 0, 20], [0, 100, 20], [0, 0, 1]],
             "T_base_left_camera": np.eye(4), "instance_masks": {"object": np.ones((41, 41))}}
@@ -282,7 +302,7 @@ def test_held_source_certificate_rejects_unmeasured_space(change):
 def test_observation_head_only_uses_native_background_without_fabricated_views():
     from test_perception_mapping import wire
 
-    from jev_mujoco.perception_mapping import decode_mapping_payload, mapping_builder_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload, mapping_builder_payload
     decoded, _ = decode_mapping_payload(wire() | {"exclusion_state": "observation"})
     for camera in ("1", "2"):
         decoded["views"][camera]["depth_left_m"][:] = 0
@@ -300,7 +320,7 @@ def test_observation_head_only_uses_native_background_without_fabricated_views()
 def test_blank_views_do_not_weaken_selected_object_mapping():
     from test_perception_mapping import wire
 
-    from jev_mujoco.perception_mapping import decode_mapping_payload, mapping_builder_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload, mapping_builder_payload
     decoded, _ = decode_mapping_payload(wire())
     decoded["views"]["1"]["valid_left_mask"][:] = 0
     with pytest.raises(ValueError, match="observation"):
@@ -308,7 +328,7 @@ def test_blank_views_do_not_weaken_selected_object_mapping():
 
 
 def test_table_roi_requires_camera_frustum_but_invalid_inside_stays_unknown():
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
     view = {"depth_left_m": np.ones((21, 21)), "valid_left_mask": np.ones((21, 21)),
             "left_intrinsics": [[100, 0, 10], [0, 100, 10], [0, 0, 1]],
             "T_base_left_camera": np.eye(4), "instance_masks": {}}
@@ -326,7 +346,7 @@ def test_table_roi_requires_camera_frustum_but_invalid_inside_stays_unknown():
 
 
 def test_guard_registers_rgb_masks_to_depth_using_capture_calibration():
-    from jev_mujoco.perception_mapping import registered_source_masks
+    from luna_mujoco.perception_mapping import registered_source_masks
     depth = np.ones((5, 5))
     rgb_mask = np.zeros((3, 3), dtype=bool)
     rgb_mask[1, 1] = True
@@ -340,7 +360,7 @@ def test_guard_registers_rgb_masks_to_depth_using_capture_calibration():
 
 
 def test_camera_scope_applies_without_fitted_support_plane():
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
     view = {"depth_left_m": np.ones((21, 21)), "valid_left_mask": np.ones((21, 21)),
             "left_intrinsics": [[100, 0, 10], [0, 100, 10], [0, 0, 1]],
             "T_base_left_camera": np.eye(4), "instance_masks": {}}
@@ -359,7 +379,7 @@ def test_camera_scope_applies_without_fitted_support_plane():
 
 
 def test_partial_camera_footprint_checks_visible_invalid_pixels():
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
     view = {"depth_left_m": np.ones((21, 21)), "valid_left_mask": np.ones((21, 21)),
             "left_intrinsics": [[100, 0, 10], [0, 100, 10], [0, 0, 1]],
             "T_base_left_camera": np.eye(4), "instance_masks": {}}
@@ -377,7 +397,7 @@ def test_partial_camera_footprint_checks_visible_invalid_pixels():
 
 
 def test_partial_clear_sliver_cannot_override_available_full_footprint():
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
     partial = {"depth_left_m": np.ones((21, 21)), "valid_left_mask": np.ones((21, 21)),
                "left_intrinsics": [[100, 0, 10], [0, 100, 10], [0, 0, 1]],
                "T_base_left_camera": np.eye(4), "instance_masks": {}}
@@ -393,24 +413,24 @@ def test_partial_clear_sliver_cannot_override_available_full_footprint():
 def test_attachment_knobs_change_budget_margin_and_report_effective_cells():
     from dataclasses import asdict
 
-    from jev_mujoco.carrying import carrying_geometry
+    from luna_mujoco.carrying import carrying_geometry
     original = measured_binding()
     scene = {"scene_token": "scene", "observation_id": "obs", "generation": 1, "target_id": "object"}
     value = CarryingBinding.from_mapping(asdict(original) | {"voxel_size_m": .004, "margin_m": .003, "sphere_budget": 1}, scene=scene, arm="A")
     result = carrying_geometry(value)
     assert len(result["spheres"]) == result["sphere_count"] == 1
     assert result["sphere_budget"] == 1
-    assert result["voxel_size_m"] == .004
-    assert result["effective_occupied_voxel_size_m"] >= .004
+    assert result["minimum_partition_size_m"] == .004
+    assert result["maximum_group_extent_m"] >= .004
     assert result["margin_m"] == .003
     for changes in ({"voxel_size_m": 0}, {"voxel_size_m": .051}, {"margin_m": -.001},
-                    {"margin_m": .031}, {"sphere_budget": 257}, {"sphere_budget": True}):
+                    {"margin_m": .031}, {"sphere_budget": 32}, {"sphere_budget": True}):
         with pytest.raises(ValueError, match="attachment"):
             CarryingBinding.from_mapping(asdict(original) | changes, scene=scene, arm="A")
 
 
 def test_robot_removed_return_still_certifies_only_raw_front_interval():
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
     view = {"depth_left_m": np.ones((21, 21)), "valid_left_mask": np.ones((21, 21)),
             "left_intrinsics": [[20, 0, 10], [0, 20, 10], [0, 0, 1]],
             "T_base_left_camera": np.eye(4), "instance_masks": {}}
@@ -427,7 +447,7 @@ def test_robot_removed_return_still_certifies_only_raw_front_interval():
 
 
 def task_height_guard(*, tall=False, rejected=False, robot_removed=False):
-    from jev_mujoco.perception_mapping import ObservedFreeSpaceGuard
+    from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
     depth = np.full((21, 21), .7)
     valid = np.ones((21, 21))
     depth[2, 2] = .95 if tall else .7
@@ -489,7 +509,7 @@ def test_current_selected_returns_restore_robot_masked_source_only():
     assert guard.measured_table_task_scope["measured_max_z_m"] == .7
 
 def test_configured_attachment_is_disabled_even_before_manager_upload(monkeypatch):
-    from jev_mujoco.backend_builder import ValidatedSingleBackend, _NativeCuroboBackend
+    from luna_mujoco.backend_builder import ValidatedSingleBackend, _NativeCuroboBackend
     calls = []
     backend = object.__new__(ValidatedSingleBackend)
     backend.configured_carrying_link = "jev_carried_object_A"

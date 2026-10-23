@@ -9,7 +9,7 @@ import numpy as np
 import trimesh
 import yaml
 
-from jev_mujoco.carrying import configure_gripper_feedback
+from luna_mujoco.carrying import configure_gripper_feedback
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("own_robot_audit", ROOT / "scripts/audit_collision_model.py")

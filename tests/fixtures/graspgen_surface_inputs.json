@@ -1,0 +1,116 @@
+{
+  "new9bc1": {
+    "source": "measured_surface_and_user_height_prior",
+    "height_prior_m": 0.1,
+    "height_prior_source": "user_specified_100mm",
+    "support_z_m": 0.4119982123374939,
+    "support_source": "measured_bin_floor",
+    "observation_id": "rgbd-4-e3a4d05b6230467ea734f4d156b67d02",
+    "measurement_tolerance_m": 0.015,
+    "measured_point_count": 1243,
+    "measured_bounds_world_m": [
+      [
+        0.17164652049541473,
+        0.5616417527198792,
+        0.511996865272522
+      ],
+      [
+        0.22793662548065186,
+        0.5985793471336365,
+        0.51199871301651
+      ]
+    ],
+    "completed_bounds_world_m": [
+      [
+        0.17164652049541473,
+        0.5616417527198792,
+        0.4119982123374939
+      ],
+      [
+        0.22793662548065186,
+        0.5985793471336365,
+        0.51199871301651
+      ]
+    ],
+    "synthetic_point_count": 273,
+    "synthetic_points_are_measured": false,
+    "xy_policy": "measured_convex_hull_extrusion",
+    "map_voxel_size_m": 0.02
+  },
+  "olda979": {
+    "source": "measured_surface_and_user_height_prior",
+    "height_prior_m": 0.1,
+    "height_prior_source": "user_specified_100mm",
+    "support_z_m": 0.4119982123374939,
+    "support_source": "measured_bin_floor",
+    "observation_id": "rgbd-2-f4d45e0214fc4f25b47b34fbc4ce20e1",
+    "measurement_tolerance_m": 0.015,
+    "measured_point_count": 1242,
+    "measured_bounds_world_m": [
+      [
+        0.17164652049541473,
+        0.5616417527198792,
+        0.5119968056678772
+      ],
+      [
+        0.22793662548065186,
+        0.5985793471336365,
+        0.51199871301651
+      ]
+    ],
+    "completed_bounds_world_m": [
+      [
+        0.17164652049541473,
+        0.5616417527198792,
+        0.4119982123374939
+      ],
+      [
+        0.22793662548065186,
+        0.5985793471336365,
+        0.51199871301651
+      ]
+    ],
+    "synthetic_point_count": 280,
+    "synthetic_points_are_measured": false,
+    "xy_policy": "measured_convex_hull_extrusion",
+    "map_voxel_size_m": 0.02
+  },
+  "historicalc6b5": {
+    "source": "measured_surface_and_user_height_prior",
+    "height_prior_m": 0.1,
+    "height_prior_source": "user_specified_100mm",
+    "support_z_m": 0.4119982123374939,
+    "support_source": "measured_bin_floor",
+    "observation_id": "rgbd-2-db7c965d69c14da1b956b501fbc51653",
+    "measurement_tolerance_m": 0.015,
+    "measured_point_count": 1242,
+    "measured_bounds_world_m": [
+      [
+        0.17164652049541473,
+        0.5616417527198792,
+        0.5119968056678772
+      ],
+      [
+        0.22793662548065186,
+        0.5985793471336365,
+        0.51199871301651
+      ]
+    ],
+    "completed_bounds_world_m": [
+      [
+        0.17164652049541473,
+        0.5616417527198792,
+        0.4119982123374939
+      ],
+      [
+        0.22793662548065186,
+        0.5985793471336365,
+        0.51199871301651
+      ]
+    ],
+    "synthetic_point_count": 280,
+    "synthetic_points_are_measured": false,
+    "xy_policy": "measured_convex_hull_extrusion",
+    "map_voxel_size_m": 0.02
+  }
+}

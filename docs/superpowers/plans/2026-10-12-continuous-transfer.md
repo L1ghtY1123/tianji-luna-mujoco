@@ -17,7 +17,7 @@ Identical error with distinct JEV recovery answers; lost/ambiguous object identi
 ## Tasks
 
 - [x] 1. Establish baseline snapshot, local suites and remote hash/status evidence.
-- [x] 2. Task state and decisions: src/jev_mujoco/task_progress.py, decisions.py, tests/test_task_progress.py. Tests first: explicit arm bypass, quotas/exclusions through JEV candidate questions, deferred/completed IDs and bounded context. Preserve single-object compatibility.
+- [x] 2. Task state and decisions: src/luna_mujoco/task_progress.py, decisions.py, tests/test_task_progress.py. Tests first: explicit arm bypass, quotas/exclusions through JEV candidate questions, deferred/completed IDs and bounded context. Preserve single-object compatibility.
 - [x] 3. Runner recovery/iteration: runner.py and skills contracts. Tests first: verification failure returns to JEV, different decisions produce different actions, no automatic retry/defer, next-target scene invalidation, partial completion and unknown result.
 - [x] 4. Camera-visible marker: model_builder.py, table_markers.py, relevant web scene/editor modules and tests. Interface: detector returns measured marker instance with kind=marker and placement_reference from RGBD. No runner/decisions edits by worker.
 - [x] 5. Visual assistance: visual_assistance.py and tests. Interface: inspect_scene(capture, objects, instruction, *, reference=None, call_budget=None) returns grounded visual observations, not commands; preserve inspect result compatibility. No runner/perception edits by worker.

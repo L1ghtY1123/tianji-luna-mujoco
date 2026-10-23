@@ -2,7 +2,7 @@ import httpx
 import numpy as np
 import pytest
 
-from jev_mujoco.visual_inventory import VisualInventory, VisualInventoryError
+from luna_mujoco.visual_inventory import VisualInventory, VisualInventoryError
 
 
 def fixture():

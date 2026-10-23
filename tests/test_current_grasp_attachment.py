@@ -7,11 +7,11 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from jev_mujoco.algorithms import Algorithms
-from jev_mujoco.carrying import CarryingBinding
-from jev_mujoco.placement import carrying_binding, observed_object
-from jev_mujoco.planning_settings import PlanningSettings
-from jev_mujoco.runner import Runner
+from luna_mujoco.algorithms import Algorithms
+from luna_mujoco.carrying import CarryingBinding
+from luna_mujoco.placement import carrying_binding, observed_object
+from luna_mujoco.planning_settings import PlanningSettings
+from luna_mujoco.runner import Runner
 
 
 def fixture(tmp_path, *, closed_fraction=.6, shift=.012, stationary=False, duplicate=False):
@@ -93,7 +93,7 @@ async def test_postgrasp_sampling_does_not_change_attachment_point_count(tmp_pat
 
 
 async def test_grasp_reference_records_actual_closure_tcp_and_feedback_source(tmp_path):
-    from jev_mujoco.geometry import TOOL_PROFILE
+    from luna_mujoco.geometry import TOOL_PROFILE
 
     runner, context, current, _, _, _ = fixture(tmp_path)
     expected = copy.deepcopy(current['arms']['A']['tcp'])

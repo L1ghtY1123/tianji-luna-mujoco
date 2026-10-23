@@ -9,7 +9,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def simulation():
-    from jev_mujoco.simulation import Simulation
+    from luna_mujoco.simulation import Simulation
 
     instance = Simulation()
     instance.start()
@@ -30,7 +30,7 @@ def test_gravity_settles_objects_on_a_fixed_table(simulation):
 
 
 def test_reset_restores_confirmed_scene_and_rejects_old_generation(simulation):
-    from jev_mujoco.simulation import StaleCommandError
+    from luna_mujoco.simulation import StaleCommandError
 
     baseline = simulation.confirm()
     scene = {"objects": [dict(baseline["objects"][0], position=[0.45, 0.15, 0.85], yaw_deg=35)]}
@@ -47,7 +47,7 @@ def test_reset_restores_confirmed_scene_and_rejects_old_generation(simulation):
 
 
 def test_reset_cancels_active_motor_trajectory_and_restores_controls(simulation):
-    from jev_mujoco.simulation import StaleCommandError
+    from luna_mujoco.simulation import StaleCommandError
 
     baseline = simulation.confirm()
     start = np.array(baseline["arms"]["A"]["joints_rad"])
@@ -95,7 +95,7 @@ def test_render_manifest_and_snapshot_share_geometry_ids(simulation):
 
 
 def test_dwell_uses_wall_time_and_reset_interrupts_it(simulation):
-    from jev_mujoco.simulation import StaleCommandError
+    from luna_mujoco.simulation import StaleCommandError
 
     baseline = simulation.reset()
     result = simulation.dwell(.05, baseline["generation"])
@@ -113,7 +113,7 @@ def test_dwell_does_not_stretch_when_physics_runs_below_real_time(monkeypatch):
     import threading
     from types import SimpleNamespace
 
-    from jev_mujoco.simulation import Simulation
+    from luna_mujoco.simulation import Simulation
 
     clock = SimpleNamespace(now=0.)
     data = SimpleNamespace(time=10.)
@@ -144,7 +144,7 @@ def test_dwell_does_not_stretch_when_physics_runs_below_real_time(monkeypatch):
 def test_physics_step_refreshes_cartesian_poses_only_when_read(monkeypatch):
     import mujoco
 
-    from jev_mujoco.simulation import Simulation
+    from luna_mujoco.simulation import Simulation
 
     instance = Simulation()
     step = mujoco.mj_step
@@ -258,7 +258,7 @@ def test_dual_commands_have_same_start_time_and_reset_cancels_both(simulation):
             future.result(timeout=1)
             pytest.fail('dual commands were not submitted together')
         simulation.reset()
-        from jev_mujoco.simulation import StaleCommandError
+        from luna_mujoco.simulation import StaleCommandError
         with pytest.raises(StaleCommandError):
             future.result(timeout=3)
         assert not simulation._commands

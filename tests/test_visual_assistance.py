@@ -4,7 +4,7 @@ import httpx
 import pytest
 from test_visual_scene_assistance import OBJECTS, capture, scene_reply
 
-from jev_mujoco import visual_assistance
+from luna_mujoco import visual_assistance
 
 
 def test_disabled_assistance_never_sends():

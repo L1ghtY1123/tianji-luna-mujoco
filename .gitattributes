@@ -6,6 +6,7 @@ resources/** -text
 vendor/** -text
 *.stl binary
 *.STL binary
+*.step binary
 *.npz binary
 *.png binary
 *.jpg binary

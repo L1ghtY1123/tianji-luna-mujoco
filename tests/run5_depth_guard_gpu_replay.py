@@ -3,7 +3,7 @@ import time
 
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
+from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
 
 folder=ROOT/'data/visible-cloud-work/run5-replay'
 mapping=json.loads((folder/'007-perception-build.json').read_text())
@@ -16,7 +16,7 @@ started=time.perf_counter()
 result=run_operation(runtime,validation['path'],validation['body'])
 import numpy as np
 
-from jev_mujoco.perception_mapping import decode_mapping_payload
+from luna_mujoco.perception_mapping import decode_mapping_payload
 
 views=decode_mapping_payload(mapping['body'])[0]['views']
 table=scene['table']

@@ -10,7 +10,7 @@ import numpy as np
 
 def recorded_views(directory):
     """Restore masks only from saved SAM3 measured point/pixel provenance."""
-    from jev_mujoco.semantic_transport import encode_project_semantic_request
+    from luna_mujoco.semantic_transport import encode_project_semantic_request
     capture = json.loads((directory / 'capture.json').read_text())
     observed = json.loads((directory / 'observation.json').read_text())
     for camera, view in capture['views'].items():
@@ -115,8 +115,8 @@ def main():
     import torch
     from tianji_curobo.curobo_service import materialize_urdf
 
-    from jev_mujoco.geometry_service import ROOT, sdk_identity
-    from jev_mujoco.perception_mapping import (
+    from luna_mujoco.geometry_service import ROOT, sdk_identity
+    from luna_mujoco.perception_mapping import (
         PerceptionMapper,
         create_feedback_segmenter,
         decode_mapping_payload,

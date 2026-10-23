@@ -9,11 +9,11 @@ from scipy.spatial.transform import Rotation
 from tianji_curobo.contracts import CuroboToolError
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.algorithms import AlgorithmError, Algorithms
-from jev_mujoco.carrying import CarryingBinding
-from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
-from jev_mujoco.placement import release_goal
-from jev_mujoco.trajectory_postprocessing import build_execution_phases
+from luna_mujoco.algorithms import AlgorithmError, Algorithms
+from luna_mujoco.carrying import CarryingBinding
+from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
+from luna_mujoco.placement import release_goal
+from luna_mujoco.trajectory_postprocessing import build_execution_phases
 
 
 def main():

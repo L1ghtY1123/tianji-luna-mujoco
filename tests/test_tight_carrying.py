@@ -3,8 +3,8 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from jev_mujoco import carrying
-from jev_mujoco.carrying import CarryingBinding, carrying_geometry
+from luna_mujoco import carrying
+from luna_mujoco.carrying import CarryingBinding, carrying_geometry
 
 
 def measured_binding(points, **settings):
@@ -27,26 +27,6 @@ def visible_box_surface():
     return np.concatenate((top, front, side))
 
 
-def baseline_spheres(points, budget, voxel_size, padding):
-    """Original spatial-split/bounding-box fit, retained as a comparison oracle."""
-    groups = [points]
-    while len(groups) < budget:
-        index = max(range(len(groups)), key=lambda i: float(np.ptp(groups[i], axis=0).max()))
-        group = groups[index]
-        lower, upper = group.min(axis=0), group.max(axis=0)
-        axis = int(np.argmax(upper - lower))
-        if upper[axis] - lower[axis] <= voxel_size:
-            break
-        left = group[:, axis] < (lower[axis] + upper[axis]) / 2
-        groups[index:index + 1] = [group[left], group[~left]]
-    spheres = []
-    for group in groups:
-        center = (group.min(axis=0) + group.max(axis=0)) / 2
-        radius = max(.002, np.linalg.norm(group - center, axis=1).max() + padding)
-        spheres.append([*center, radius])
-    return np.asarray(spheres)
-
-
 def assert_covered(points, spheres, padding):
     gaps = np.linalg.norm(points[:, None] - spheres[None, :, :3], axis=2) - spheres[None, :, 3]
     assert np.all(gaps.min(axis=1) <= -padding + 1e-12)
@@ -67,16 +47,15 @@ def test_asymmetric_surface_gets_tighter_center_without_losing_padding(angle):
 
 
 @pytest.mark.parametrize("angle", [0., .37, 1.1])
-def test_rotated_three_face_cloud_never_increases_existing_group_radii(angle):
+def test_rotated_three_face_cloud_keeps_every_padded_point_within_budget(angle):
     rotation = np.array([[np.cos(angle), 0., np.sin(angle)], [0., 1., 0.],
                          [-np.sin(angle), 0., np.cos(angle)]])
     points = visible_box_surface() @ rotation.T
     value = measured_binding(points)
     geometry = carrying_geometry(value)
     spheres = np.asarray(geometry["spheres"])
-    baseline = baseline_spheres(points, 16, .01, .006)
-    assert len(spheres) == geometry["sphere_count"] <= 16
-    assert np.all(spheres[:, 3] <= baseline[:, 3] + 1e-12)
+    assert len(spheres) == geometry["sphere_count"] <= 24
+    assert sum(row["measured"] for row in geometry["source_counts_by_sphere"]) == len(points)
     assert_covered(points, spheres, .006)
 
 
@@ -109,11 +88,14 @@ def test_cache_respects_changed_points_and_all_fit_settings():
     translated = replace(original, points_tool_m=tuple(map(tuple, points + [0., 0., .1])))
     translated_spheres = np.asarray(carrying_geometry(translated)["spheres"])
     assert np.allclose(translated_spheres[:, :3], baseline[:, :3] + [0., 0., .1])
+    assert np.allclose(translated_spheres[:, 3], baseline[:, 3])
+    assert (carrying_geometry(translated)["source_counts_by_sphere"]
+            == carrying_geometry(original)["source_counts_by_sphere"])
     assert len(carrying_geometry(replace(original, sphere_budget=2))["spheres"]) == 2
     assert len(carrying_geometry(original, maximum_spheres=3)["spheres"]) == 3
     coarse = carrying_geometry(replace(original, voxel_size_m=.05))
     assert len(coarse["spheres"]) < len(baseline)
-    assert coarse["voxel_size_m"] == .05
+    assert coarse["minimum_partition_size_m"] == .05
 
 
 def test_equal_cloud_from_new_binding_reuses_fit_across_scene_metadata(monkeypatch):

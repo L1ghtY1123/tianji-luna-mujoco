@@ -3,11 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from jev_mujoco.backend_builder import (
-    BatchPlanningOverrides,
+from luna_mujoco.backend_builder import (
     create_solver_configs,
     validate_grasp_batch,
 )
+from luna_mujoco.public_planner import PublicPlanner
 
 
 def profile(**updates):
@@ -70,11 +70,7 @@ def test_public_plan_pose_receives_configured_attempts_and_finetuning():
         def plan_pose(self, goal, state, *args, **kwargs):
             return kwargs
 
-    class Configured(BatchPlanningOverrides, Planner):
-        pass
-
-    planner = Configured()
-    planner.planning_settings = profile()
+    planner = PublicPlanner(Planner(), profile(), batch=True)
     result = planner.plan_pose("goal", "start")
     assert result == {"max_attempts": 2, "finetune_attempts": 3, "finetune_dt_scale": .7}
 
@@ -91,27 +87,24 @@ def native_batch():
 
 
 @pytest.mark.parametrize('no_solution', [False, True])
-def test_batch_reports_public_pose_call_costs_without_retaining_sdk_results(no_solution):
+def test_batch_reports_outer_cost_without_intercepting_internal_pose_calls(no_solution):
     from types import SimpleNamespace
 
-    from jev_mujoco.backend_builder import BatchPlanningOverrides
-    class PublicPlanner:
+    calls = []
+    class OfficialPlanner:
         def plan_pose(self, *args, **kwargs):
+            calls.append(kwargs)
             return None if no_solution else SimpleNamespace(total_time=.125)
         def plan_grasp(self, *args, **kwargs):
             self.plan_pose('goal', 'start')
             self.plan_pose('approach', 'start')
             return 'done'
-    class Configured(BatchPlanningOverrides, PublicPlanner):
-        planning_settings = profile()
-    planner = Configured()
+    planner = PublicPlanner(OfficialPlanner(), profile(), batch=True)
     assert planner.plan_grasp() == 'done'
-    assert len(planner.pose_call_timings) == 2
-    assert [row['phase'] for row in planner.pose_call_timings] == ['goalset_preflight', 'approach']
-    assert all(row['wall_s'] >= 0 and row['sdk_total_s'] == (None if no_solution else .125)
-               for row in planner.pose_call_timings)
+    assert calls == [{}, {}]
+    assert planner.last_grasp_wall_s >= 0
     planner.plan_grasp()
-    assert len(planner.pose_call_timings) == 2
+    assert calls == [{}, {}, {}, {}]
 
 
 def test_batch_hard_check_rejects_one_candidate_without_losing_other():
@@ -171,13 +164,14 @@ def test_standalone_config_uses_same_profile_with_different_batch_capacity():
 
 @pytest.mark.parametrize("arm", ["A", "B"])
 @pytest.mark.parametrize("ik_only", [True, False])
-def test_optimizer_and_hard_checker_receive_original_open_gripper_spheres(monkeypatch, arm, ik_only):
+@pytest.mark.parametrize("direct_factory", [False, True])
+def test_optimizer_and_hard_checker_receive_original_open_gripper_spheres(monkeypatch, arm, ik_only, direct_factory):
     import sys
     from types import ModuleType
 
     import yaml
 
-    from jev_mujoco import backend_builder
+    from luna_mujoco import backend_builder
 
     root = backend_builder.ROOT
     robot_path = root / "resources/curobo/marvin_gui_dual.yml"
@@ -208,7 +202,8 @@ def test_optimizer_and_hard_checker_receive_original_open_gripper_spheres(monkey
                                       "RobotCollisionCheckerCfg": CheckerConfig},
         "curobo.inverse_kinematics": {"InverseKinematics": Planner, "InverseKinematicsCfg": ConfigFactory},
         "curobo.kinematics": {"Kinematics": object, "KinematicsCfg": object},
-        "curobo.motion_planner": {"MotionPlannerCfg": ConfigFactory},
+        "curobo.motion_planner": {"MotionPlannerCfg": ConfigFactory, "MotionPlanner": Planner},
+        "curobo.batch_motion_planner": {"BatchMotionPlanner": Planner},
         "curobo.scene": {"Cuboid": object},
         "curobo.types": dict.fromkeys(("GoalToolPose", "JointState", "Pose", "ToolPoseCriteria"), object),
         "tianji_curobo.grasp_planner": {"GraspBatchMotionPlanner": Planner},
@@ -225,16 +220,26 @@ def test_optimizer_and_hard_checker_receive_original_open_gripper_spheres(monkey
                               _scene_model=None, _collision_cache={})
     with pytest.raises(PublicCheckerBoundaryReached):
         backend_builder.build_geometry_backend(runtime, arm, batch_size=100 if ik_only else 16,
-                                               ik_only=ik_only)
+                                               ik_only=ik_only,
+                                               batch_planner_type=Planner if direct_factory else None)
 
     planner = captured["planner"]
     checker = captured["checker"]
     if not ik_only:
         assert planner.config.ik_solver_config.robot is planner.config.robot
+        assert type(planner) is Planner
     for config in (planner.config.robot, checker["robot_config"]):
         actual = config["robot_cfg"]["kinematics"]
-        assert actual["collision_spheres"] == original["collision_spheres"]
-        assert actual["collision_sphere_buffer"] == original["collision_sphere_buffer"]
+        for link, spheres in actual["collision_spheres"].items():
+            if link.startswith('jev_carried_object_'):
+                assert len(spheres) == 31 and all(s['radius'] < 0 for s in spheres)
+                continue
+            for sphere, source in zip(spheres, original["collision_spheres"][link], strict=True):
+                assert sphere['center'] == source['center']
+                padding = 1e-9 if link.startswith(('gripL_', 'gripR_')) else 0.
+                assert sphere['radius'] == source['radius'] + padding
+        assert {k: v for k, v in actual["collision_sphere_buffer"].items()
+                if not k.startswith('jev_carried_object_')} == original["collision_sphere_buffer"]
         assert actual["lock_joints"]["gripL_finger_joint"] == 0
         assert actual["lock_joints"]["gripR_finger_joint"] == 0
     assert checker["scene_collision_checker"] is planner.scene_collision_checker
@@ -244,7 +249,7 @@ def test_optimizer_and_hard_checker_receive_original_open_gripper_spheres(monkey
 def test_esdf_radius_uses_authored_spheres_and_buffer_without_closure_inflation(tmp_path):
     import yaml
 
-    from jev_mujoco import backend_builder
+    from luna_mujoco import backend_builder
 
     root = backend_builder.ROOT
     original = yaml.safe_load((root / "resources/curobo/marvin_gui_dual.yml").read_text(encoding="utf-8"))
@@ -264,7 +269,7 @@ def test_esdf_radius_uses_authored_spheres_and_buffer_without_closure_inflation(
 def test_support_departure_strengthens_public_linear_criteria_without_terminal_imbalance():
     from dataclasses import dataclass
 
-    from jev_mujoco.backend_builder import support_departure_criteria
+    from luna_mujoco.backend_builder import support_departure_criteria
 
     @dataclass
     class Criteria:
@@ -287,7 +292,7 @@ def test_support_departure_strengthens_public_linear_criteria_without_terminal_i
 def test_support_frame_config_is_temporary_fixed_tcp_child_with_no_collision_changes():
     from copy import deepcopy
 
-    from jev_mujoco.backend_builder import create_support_frame_robot_config
+    from luna_mujoco.backend_builder import create_support_frame_robot_config
 
     original = {"robot_cfg": {"kinematics": {"extra_links": {}, "tool_frames": ["TCP_Link_L"],
                                              "collision_spheres": {"arm": [1]}, "collision_link_names": ["arm"]}}}

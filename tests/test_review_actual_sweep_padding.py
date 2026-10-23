@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 import yaml
 
-from jev_mujoco.carrying import configure_gripper_feedback
-from jev_mujoco.kinematics import robot_model
+from luna_mujoco.carrying import configure_gripper_feedback
+from luna_mujoco.kinematics import robot_model
 
 ROOT = Path(__file__).resolve().parents[1]
 URDF = ROOT / "assets/marvin_urdf/marvin_with_grippers.urdf"
@@ -22,7 +22,7 @@ def configured_robot():
 
 
 def padding(robot, arm, step, urdf=URDF):
-    from jev_mujoco.gripper_sweep import gripper_sweep_padding
+    from luna_mujoco.gripper_sweep import gripper_sweep_padding
 
     return gripper_sweep_padding(robot, arm, urdf, step)
 

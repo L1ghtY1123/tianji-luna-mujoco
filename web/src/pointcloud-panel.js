@@ -54,6 +54,13 @@ export function validatePointcloudPreview(payload) {
       layer.surface_centers_world_m.some(point => !vector(point, 3))) ||
       !vector(scene.table?.model?.pose, 7) || !vector(scene.table?.model?.dims, 3) ||
       scene.table.provenance !== 'inferred_ransac_support_completion') throw new Error('碰撞场景网格或推断桌体无效。');
+    if (scene.cuboid_layers !== undefined && (!Array.isArray(scene.cuboid_layers) || scene.cuboid_layers.some(layer =>
+      layer.role !== 'bin_shell_completion' || layer.provenance !== 'measured_planes_and_user_bin_dimensions' ||
+      typeof layer.enabled !== 'boolean' || typeof layer.instance_id !== 'string' || !layer.instance_id ||
+      layer.observation_id !== payload.observation_id || layer.generation !== payload.generation ||
+      !vector(layer.model?.pose, 7) || !vector(layer.model?.dims, 3) || layer.model.dims.some(value => value <= 0)))) {
+      throw new Error('盒壁补全缺少有效尺寸先验来源，或不属于当前观测。');
+    }
   }
 }
 
@@ -85,6 +92,16 @@ function addCollisionLayers(object, scene) {
     bounds.name = `${layer.name}:esdf-bounds`;
     poseObject(bounds, layer.pose_wxyz);
     object.add(bounds);
+  }
+  for (const layer of scene.cuboid_layers ?? []) {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshBasicMaterial({color: '#78b6ff', transparent: true,
+        opacity: layer.enabled ? .35 : .1, depthWrite: false}));
+    wall.name = layer.name;
+    wall.userData = {provenance: layer.provenance, instanceId: layer.instance_id, enabled: layer.enabled};
+    poseObject(wall, layer.model.pose);
+    wall.scale.set(...layer.model.dims);
+    object.add(wall);
   }
   const table = scene.table;
   const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
@@ -297,6 +314,9 @@ export function createPointcloudPanel(container, status, {
           for (const layer of scene.voxel_layers) {
             mapEvidence.append(element('p', 'helper-text', `${layer.enabled ? '参与碰撞' : '已排除'} · ${layer.name} · ${layer.position_source === 'action_prediction' ? '按释放反馈迁移的预测位置' : 'RGBD 建立'} · ${layer.voxel_size_m * 1000} mm 网格 · 显示 ${layer.displayed_surface_count} / Mapper 预览 ${layer.mapper_surface_preview_count} 个表面体素 · ESDF ${layer.esdf.cell_count} 单元。显示抽样不缩减规划网格。`));
           }
+          for (const layer of scene.cuboid_layers ?? []) {
+            mapEvidence.append(element('p', 'helper-text', `${layer.enabled ? '参与碰撞' : '已排除'} · ${layer.name} · 盒壁补全（实测平面 + 已知盒子尺寸） · ${layer.model.dims.map(value => value.toFixed(3)).join(' × ')} m；蓝色薄壳是推导几何，盒内空腔不填充。`));
+          }
           mapEvidence.append(element('p', 'helper-text', `推断桌体：RANSAC ${scene.table.ransac_inlier_count} 个内点，体积 ${scene.table.model.dims.map(value => value.toFixed(3)).join(' × ')} m；桌下延伸与边界扩展属于模型假设。`));
         } else {
           mapEvidence.append(element('p', 'helper-text', `实际碰撞地图暂不可用：${scene?.reason ?? '旧快照未导出地图，请等待下一次建图'}。原始点云不代表最终碰撞障碍。`));
@@ -308,6 +328,7 @@ export function createPointcloudPanel(container, status, {
             camera_id: camera, pixel_rc: payload.pixels_rc[index], point_world_m: payload.points_world_m[index] })),
           table: scene?.table, esdf_layers: scene?.voxel_layers?.map(layer => ({ name: layer.name,
             pose_wxyz: layer.pose_wxyz, dims_m: layer.dims_m, esdf: layer.esdf })),
+          derived_bin_walls: scene?.cuboid_layers,
         }, null, 2);
         const total = payload.counts;
         counts.textContent = `全量点数：原始 ${total.input.toLocaleString()} · 保留 ${total.kept.toLocaleString()} · 剔除 ${total.rejected.toLocaleString()}`;

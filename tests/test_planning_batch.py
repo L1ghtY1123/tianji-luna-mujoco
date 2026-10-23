@@ -4,8 +4,8 @@ from copy import deepcopy
 import numpy as np
 import pytest
 
-from jev_mujoco.algorithms import AlgorithmError, Algorithms
-from jev_mujoco.planning_settings import PlanningSettings
+from luna_mujoco.algorithms import AlgorithmError, Algorithms
+from luna_mujoco.planning_settings import PlanningSettings
 
 
 def inputs(count=2):
@@ -97,21 +97,21 @@ def test_plan_stops_at_first_feasible_batch_and_uses_score_only_for_equal_travel
     assert [path for path, _ in calls] == ["/tools/plan_grasp_batch"]
     assert [len(body["goal_matrices_world"]) for _, body in calls] == [16]
     assert [pose[0][3] for pose in calls[0][1]["goal_matrices_world"]] == [i / 100 for i in range(34, 18, -1)]
-    assert evaluations == original
+    np.testing.assert_equal(evaluations, original)
     assert result["candidate_index"] == 134
     assert result["score"] == pytest.approx(34 / 35)
     assert all(body["planning_settings"] == ik_calls[0][1]["planning_settings"] for _, body in calls)
-    assert result["time_scale"] == 3
+    assert result["time_scale"] == 2
     assert result["raw_duration_s"] == pytest.approx(.075)
-    assert result["command_duration_s"] == pytest.approx(.225)
+    assert result["command_duration_s"] == pytest.approx(.15)
     for index, phase in enumerate(result["phases"].values()):
         assert phase["raw_dt"] == .025
         assert phase["dt"] == .025
-        expected = (np.array([0., 17 / 81, 64 / 81, 1.])[:, None] + index) * np.arange(1, 8)[None, :] * .01
+        expected = (np.array([0., .5, 1.])[:, None] + index) * np.arange(1, 8)[None, :] * .01
         np.testing.assert_allclose(phase["positions_rad"], expected)
-        assert len(phase["positions_rad"]) == 4
+        assert len(phase["positions_rad"]) == 3
     assert result["time_stretch_method"] == "quintic_hermite_point_insertion"
-    assert [kind for kind, _, _ in events] == ["planning_batch_start", "planning_batch_complete"]
+    assert [kind for kind, _, _ in events] == ["planning_batch_start", "planning_batch_replay", "planning_batch_complete"]
     assert events[-1][2]["candidate_indices"] == list(range(134, 118, -1))
     assert events[-1][2]["success_count"] == 16
     assert events[-1][2]["stopped_early"] is True
@@ -152,8 +152,8 @@ def test_failed_batch_continues_and_preserves_selected_raw_derivatives():
     assert result["unplanned_candidate_indices"] == [102, 101, 100]
     assert [item["candidate_index"] for item in result["prior_failures"]] == list(range(134, 118, -1))
     assert result["batches"][0]["stopped_early"] is False
-    # At u=1/3, q term = .01*(17/81), v term = .025*.4*(16/81).
-    assert result["phases"]["approach"]["positions_rad"][1][0] == pytest.approx(.01 * 33 / 81)
+    # At u=1/2 for the default 2x stretch, q term=.005, v term=.0015625.
+    assert result["phases"]["approach"]["positions_rad"][1][0] == pytest.approx(.0065625)
 
 
 def test_plan_submits_only_ik_survivors_with_identical_frozen_joints_and_poses():
@@ -200,7 +200,7 @@ def test_equal_score_candidates_keep_original_order_across_batch_boundary():
 
 
 def test_all_failed_batches_report_every_failure_without_interpolating(monkeypatch):
-    from jev_mujoco import algorithms as algorithms_module
+    from luna_mujoco import algorithms as algorithms_module
 
     def reject_interpolation(*args):
         raise AssertionError("No executable trajectory exists")

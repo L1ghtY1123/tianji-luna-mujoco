@@ -15,8 +15,8 @@ from PIL import Image
 
 
 def perception_module():
-    assert importlib.util.find_spec("jev_mujoco.perception") is not None, "RGBD perception is missing"
-    return importlib.import_module("jev_mujoco.perception")
+    assert importlib.util.find_spec("luna_mujoco.perception") is not None, "RGBD perception is missing"
+    return importlib.import_module("luna_mujoco.perception")
 
 
 def capture_fixture():
@@ -288,7 +288,7 @@ def bin_cloud():
 
 def test_real_rgbd_bin_floor_excludes_nearby_vertical_outer_wall_samples():
     module = perception_module()
-    from jev_mujoco.cameras import deproject_view
+    from luna_mujoco.cameras import deproject_view
 
     root = Path(__file__).parent / "artifacts" / "rgbd" / "perception-windows"
     result = json.loads((root / "result.json").read_text(encoding="utf-8"))
@@ -303,7 +303,7 @@ def test_real_rgbd_bin_floor_excludes_nearby_vertical_outer_wall_samples():
 
 def test_real_cube_mask_table_boundary_does_not_expand_the_measured_grasp_cloud():
     module = perception_module()
-    from jev_mujoco.cameras import deproject_view
+    from luna_mujoco.cameras import deproject_view
 
     root = Path(__file__).parent / "artifacts" / "rgbd" / "perception-windows"
     result = json.loads((root / "result.json").read_text(encoding="utf-8"))

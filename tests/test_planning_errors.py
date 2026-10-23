@@ -6,7 +6,7 @@ import httpx
 import pytest
 from test_planning_batch import batch_response, evaluated
 
-from jev_mujoco.algorithms import AlgorithmError, Algorithms
+from luna_mujoco.algorithms import AlgorithmError, Algorithms
 
 
 def planning_inputs():
@@ -98,8 +98,9 @@ def test_candidate_failures_reported_as_batch_results_without_serial_retry():
     first = events[0][2]
     assert first == {"arm": "A", "planning_stage": "grasp", "batch_index": 1, "batch_count": 1,
                      "candidate_indices": [101, 100], "duration_s": 0., "success_count": 0}
-    assert events[1][2]["duration_s"] >= 0
-    assert events[1][2]["failures"][0]["candidate_index"] == 101
+    completed = next(event[2] for event in events if event[0] == "planning_batch_complete")
+    assert completed["duration_s"] >= 0
+    assert completed["failures"][0]["candidate_index"] == 101
 
 
 @pytest.mark.parametrize("code", [

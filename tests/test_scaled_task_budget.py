@@ -3,8 +3,8 @@
 import pytest
 from test_rgbd_workflow import SensorRobot, VisionAlgorithms
 
-from jev_mujoco.runner import Runner
-from jev_mujoco.task_progress import TaskProgress
+from luna_mujoco.runner import Runner
+from luna_mujoco.task_progress import TaskProgress
 
 
 @pytest.mark.parametrize('count,route', [(8, 'table_box'), (4, 'box_table_box')])

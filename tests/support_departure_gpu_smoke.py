@@ -12,7 +12,7 @@ def main():
     from tianji_curobo.curobo_service import materialize_urdf
     from tianji_curobo.support_contact import SUPPORT_NAME, build_support_plane
 
-    from jev_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
+    from luna_mujoco.geometry_service import ROOT, GeometryRuntime, run_operation, sdk_identity
 
     urdf = materialize_urdf(ROOT / "assets/marvin_urdf/marvin_with_grippers.urdf",
         marvin_meshes=ROOT / "assets/marvin_urdf/meshes", rag_meshes=ROOT / "assets/marvin_urdf/rag100_050/meshes")

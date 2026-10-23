@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from jev_mujoco.algorithms import AlgorithmError, Algorithms
+from luna_mujoco.algorithms import AlgorithmError, Algorithms
 
 
 def observed_scene():
@@ -42,7 +42,7 @@ def test_build_scene_uploads_rgbd_and_masks_not_primitive_truth():
 
 @pytest.mark.parametrize('head_only', [True, False])
 def test_observation_map_keeps_all_requested_camera_instances_without_target_exclusion(head_only):
-    from jev_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.perception_mapping import decode_mapping_payload
 
     calls = []
     def request(path, body):
@@ -130,8 +130,8 @@ def test_place_uses_attached_source_native_phases_and_place_specific_parameters(
     path, payload = calls[1]
     assert path == "/tools/plan_place_batch"
     assert len(payload["goal_matrices_world"]) == 16
-    assert payload["approach_offset_m"] == .10 and payload["approach_in_tool_frame"] is False
-    assert payload["lift_offset_m"] == .10 and payload["lift_in_tool_frame"] is False
+    assert payload["approach_offset_m"] == .05 and payload["approach_in_tool_frame"] is False
+    assert payload["lift_offset_m"] == .05 and payload["lift_in_tool_frame"] is False
     assert payload["carrying_binding"]["owner_id"] == "owner-1"
     assert payload["gripper_joint_positions_rad"] == {"A": .3, "B": .3}
     assert set(result["phases"]) == {"approach", "place", "retreat"}
@@ -198,7 +198,7 @@ def test_grasp_plan_defers_attachment_and_formal_place_until_after_grasp(monkeyp
 
 
 def test_attachment_uses_actual_postlift_tcp_feedback_and_measured_surface():
-    from jev_mujoco.placement import carrying_binding
+    from luna_mujoco.placement import carrying_binding
 
     observation = observed_scene()
     actual = np.eye(4)

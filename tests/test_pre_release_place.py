@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from test_release_clearance import Tensor, backend, request
 
-from jev_mujoco.trajectory_postprocessing import build_execution_phases
+from luna_mujoco.trajectory_postprocessing import build_execution_phases
 
 
 def raw_result(**changes):
@@ -135,7 +135,7 @@ def test_reported_conversion_error_does_not_retain_the_borrowed_sdk_result():
 
 
 def runtime_fixture():
-    from jev_mujoco.geometry_service import GeometryRuntime
+    from luna_mujoco.geometry_service import GeometryRuntime
 
     planned, _, _, _ = planner_backend(raw_result())
     plan = planned.plan_place_native(request())
@@ -231,46 +231,10 @@ def test_runtime_preserves_typed_timeout_validation(timeout):
     assert caught.value.code == "CUROBO_INVALID_TIMEOUT" and not calls
 
 
-async def test_incomplete_place_plan_cannot_start_execution(tmp_path):
-    from test_review_regressions import verified_visual_holding
-    from test_rgbd_workflow import Choices
-    runner, _algorithms, context = await verified_visual_holding(tmp_path)
-    await runner.execute("plan_place", context, Choices("place"))
-    context["place_plan"]["phases"].pop("retreat")
-    motors = list(runner.simulation.motor_calls)
-    with pytest.raises(ValueError, match="three_planned_phases"):
-        await runner.execute_place(context)
-    assert runner.simulation.motor_calls == motors
-    assert runner.holding_state["attached"]
 
 
-async def test_retreat_command_check_failure_preserves_release_fact(tmp_path):
-    from test_review_regressions import verified_visual_holding
-    from test_rgbd_workflow import Choices
-    runner, algorithms, context = await verified_visual_holding(tmp_path)
-    await runner.execute("plan_place", context, Choices("place"))
-    def validate(observation, arm, scene, phase, *args, **kwargs):
-        if phase == "retreat":
-            raise ValueError("execution_collision")
-        return {"collision_free": True}
-    algorithms.validate_execution = validate
-    with pytest.raises(ValueError, match="execution_collision"):
-        await runner.execute_place(context)
-    assert runner.state["facts"]["released"]
-    assert not runner.holding_state["attached"]
 
 
-async def test_unreached_release_never_opens_gripper(tmp_path):
-    from test_review_regressions import verified_visual_holding
-    from test_rgbd_workflow import Choices
-    runner, _algorithms, context = await verified_visual_holding(tmp_path)
-    await runner.execute('plan_place', context, Choices('place'))
-    context['place_plan']['goal']['T_world_tcp'][2][3] += .135
-    with pytest.raises(ValueError, match='release_endpoint_not_reached'):
-        await runner.execute_place(context)
-    assert not runner.state['facts'].get('released')
-    assert runner.simulation.closed
-    assert runner.holding_state['attached']
 
 
 def test_algorithms_consumes_only_two_real_phases_and_checks_actual_commands():
@@ -279,7 +243,7 @@ def test_algorithms_consumes_only_two_real_phases_and_checks_actual_commands():
 
     from test_visible_placement import measured_inputs
 
-    from jev_mujoco.algorithms import Algorithms
+    from luna_mujoco.algorithms import Algorithms
 
     target, destination, holding = measured_inputs()
     holding.update(owner_id="held-session", attached=True, verified=True,

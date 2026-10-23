@@ -9,9 +9,9 @@ from curobo.types import DeviceCfg
 from tianji_curobo.curobo_robot_config import create_dual_arm_robot_config
 from tianji_curobo.curobo_service import materialize_urdf
 
-from jev_mujoco.carrying import configure_gripper_feedback
-from jev_mujoco.geometry_service import ROOT, sdk_identity
-from jev_mujoco.perception_mapping import create_feedback_segmenter
+from luna_mujoco.carrying import configure_gripper_feedback
+from luna_mujoco.geometry_service import ROOT, sdk_identity
+from luna_mujoco.perception_mapping import create_feedback_segmenter
 
 arms=json.loads(Path('/tmp/run4-capture-feedback.json').read_text())
 feedback={arm:arms[arm]['gripper_position_rad'] for arm in ('A','B')}

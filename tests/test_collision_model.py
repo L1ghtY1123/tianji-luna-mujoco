@@ -15,12 +15,17 @@ PREVIOUS_REVIEWED_CONFIG = CONFIG_PATH.parents[2] / "data/collision-avoidance-re
 
 def test_web_mounts_the_same_collision_resources_as_the_planner():
     project = CONFIG_PATH.parents[2]
-    compose = yaml.safe_load((project / "deploy/web.compose.yaml").read_text(encoding="utf-8"))
-    mounts = {item["target"]: item for item in compose["services"]["web"]["volumes"]}
-    resource_mount = mounts["/opt/jev/resources"]
-    assert resource_mount["source"] == "../resources"
-    assert resource_mount["read_only"] is True
-    assert resource_mount["bind"]["create_host_path"] is False
+    compose_path = project / "deploy/demo.compose.yaml"
+    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    web_mounts = [item.split(":") for item in compose["services"]["web"]["volumes"]]
+    planner_mounts = [item.split(":") for item in compose["services"]["curobo"]["volumes"]]
+    web_source, _, web_mode = next(item for item in web_mounts if item[1] == "/opt/jev/resources")
+    planner_source, _, planner_mode = next(item for item in planner_mounts if item[1] == "/opt/jev")
+    web_config = (compose_path.parent / web_source / "curobo/marvin_gui_dual.yml").resolve()
+    planner_config = (compose_path.parent / planner_source / "resources/curobo/marvin_gui_dual.yml").resolve()
+    assert web_config == planner_config == CONFIG_PATH.resolve()
+    assert web_config.is_file()
+    assert web_mode == planner_mode == "ro"
 
 
 @pytest.mark.parametrize("point,maximum_gap_m", [
