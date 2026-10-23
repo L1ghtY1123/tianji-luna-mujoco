@@ -9,6 +9,25 @@ from luna_mujoco.demo_runner import DemoRunner
 from luna_mujoco.demo_unpack_workflow import UnpackWorkflow
 
 
+def test_mock_action_does_not_publish_a_black_obstacle_from_simulator_pose():
+    lifecycle = {'phase': 'table_released', 'table_release_feedback_id': 'release'}
+    receipt = {'action_id': 'mock', 'commanded_pose': {
+        'position': [.56, -.22, .595], 'yaw_deg': 30., 'pitch_deg': 90.}}
+    runner = SimpleNamespace(current_lifecycle=lambda: lifecycle,
+        region={'region_polygon_world_xy_m': [[.3, -.1], [.6, .2]], 'center_world_xy_m': [.45, .05]},
+        check_generation=Mock(), state={'generation': 1, 'target_id': 'pink'}, run_id='run',
+        simulation=SimpleNamespace(mock_unpack=Mock(return_value=receipt)),
+        sync_lifecycle=Mock(), emit=Mock(), call_algorithm=AsyncMock(),
+        algorithms=SimpleNamespace(publish_action_envelope=Mock()))
+    scene = {'scene_token': 'retained'}
+    context = {'vla_pose_execution': {'success': True},
+               'observation': {'table': {'surface_height_m': .572}}, 'scene': scene}
+    result = asyncio.run(UnpackWorkflow._mock_unpack(runner, context))
+    assert result['success'] and lifecycle['phase'] == 'unpack_pending'
+    assert context['scene'] is scene
+    runner.call_algorithm.assert_not_awaited()
+
+
 @pytest.mark.parametrize('mutation', ['missing', 'wrong_primary', 'wrong_source', 'rotated'])
 def test_unpack_crop_requires_the_cached_measured_destination_table(mutation):
     from luna_mujoco.demo_lifecycle_perception import unpack_table_support

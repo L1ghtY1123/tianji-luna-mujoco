@@ -130,7 +130,7 @@ class PlanningSettings(BaseModel):
                                              "place", unit="mm", scale=1000, ge=-.5, le=.5)
     place_approach_in_tool_frame: bool = setting(False, "Place approach 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
     place_retreat_axis: Literal["x", "y", "z"] = setting("z", "Place retreat 轴", "释放后撤离的坐标轴。", "place")
-    place_retreat_offset_m: float = setting(.05, "Place retreat 偏移", "默认沿 world +Z 撤离 50 mm；保持碰撞检查，不能为零。",
+    place_retreat_offset_m: float = setting(.075, "Place retreat 偏移", "默认沿 world +Z 撤离 75 mm，为释放后RGBD局部障碍余量留出空间；保持碰撞检查，不能为零。",
                                             "place", unit="mm", scale=1000, ge=-.5, le=.5)
     place_retreat_in_tool_frame: bool = setting(False, "Place retreat 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
     place_release_height_m: float = setting(.01, "持物球底最小间隙", "只读，等于hard clearance，默认10mm。固定抓取旋转，考虑attachment与夹爪最低点及实际碰撞场计算尽量低的安全Z；实际物体包络在目标区域内即可，不设置2mm位置误差上限。",

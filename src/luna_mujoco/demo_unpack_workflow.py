@@ -12,7 +12,7 @@ from .demo_bin_geometry import published_bin_shell_layers
 from .demo_grasp import transport_tcp_height
 from .demo_process import create_product, process_snapshot
 from .geometry import front_tcp_offset, front_tcp_pose, rigid_matrix
-from .placement import observed_object
+from .placement import observed_object, region_contains_xy
 from .verification import gripper_open_confirmed
 
 
@@ -88,8 +88,13 @@ def right_bin_transport_region(destination, scene, observation):
     if polygon.ndim != 2 or polygon.shape[1] != 2 or len(polygon) < 3 or not np.isfinite(polygon).all():
         raise ValueError('drop_requires_finite_bin_and_carried_geometry')
     center = (polygon.min(axis=0) + polygon.max(axis=0)) / 2
-    # Robot +X points forward. Aim the finger front at the near half's centre.
+    # Robot +X points forward. Stay in the near half and move the finger-front
+    # target toward the robot midline to avoid stretching the outer arm.
     center[0] -= .25 * np.ptp(polygon[:, 0])
+    inset = center.copy()
+    inset[1] += np.clip(-center[1], -.32 * np.ptp(polygon[:, 1]), .32 * np.ptp(polygon[:, 1]))
+    if bool(region_contains_xy(inset[None], polygon)[0]):
+        center = inset
     return {'center_world_xy_m': center.tolist(), 'target_reference': 'finger_front',
         'polygon_world_xy_m': polygon.tolist(), 'source': region_source,
         'occupied_top_z_m': evidence['maximum_world_m'][2],
@@ -229,17 +234,8 @@ class UnpackWorkflow:
         receipt['table_release_feedback_id'] = lifecycle['table_release_feedback_id']
         lifecycle.update(phase='unpack_pending', mock_action=copy.deepcopy(receipt))
         self.sync_lifecycle(context)
-        # Conservative command envelope, not a new sensor map or visual assertion.
-        center = np.asarray(receipt['commanded_pose']['position'], float)
-        dimensions = np.asarray(cad_asset('black_core')['size_m'], float)
-        from .geometry import scene_object_rotation
-
-        rotation = scene_object_rotation(receipt['commanded_pose'])
-        half_extent = np.abs(rotation) @ (dimensions / 2) + .01
-        bounds = {'minimum_world_m': (center - half_extent).tolist(),
-                  'maximum_world_m': (center + half_extent).tolist()}
-        context['scene'] = await self.call_algorithm(self.algorithms.publish_action_envelope,
-            context['scene'], self.state['target_id'], bounds, receipt['action_id'])
+        # Only verify_unpack may add black geometry, after visual confirmation
+        # and same-capture RGBD measurement. The mock pose is not a map input.
         self.emit('mock_vla_completed', '模拟 VLA：粉色包装变为黑色内件', receipt)
         return {'success': True, 'receipt': receipt, 'rgbd_remapped': False}
 

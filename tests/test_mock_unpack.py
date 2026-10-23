@@ -69,7 +69,7 @@ def test_mock_unpack_preserves_run_robot_controls_other_objects_and_baseline(sim
         item = next(obj for obj in sim.snapshot()["objects"] if obj["id"] == physical_id)
         assert item["kind"] == "cad" and item["asset_id"] == "black_core" and item["color"] == "black"
         assert item["size"] == [.044, .056, .0745]
-        np.testing.assert_allclose(item["position"], [.58, -.08, .595], atol=1e-12)
+        np.testing.assert_allclose(item["position"], [.56, -.22, .595], atol=1e-12)
         np.testing.assert_allclose(np.asarray(item["T_world_object"])[:3, :3],
                                    scene_object_rotation(receipt["after"]), atol=1e-12)
         assert sim._model.geom("object_visual_" + physical_id).type == mujoco.mjtGeom.mjGEOM_MESH
@@ -190,7 +190,7 @@ def test_mock_unpack_does_not_select_floating_or_partially_outside_entity(simula
 def test_mock_unpack_rejects_output_collision_without_partial_swap(simulation):
     with simulation._condition:
         q = int(simulation._model.joint("free_pink_cylinder_2").qposadr[0])
-        simulation._data.qpos[q:q + 3] = [.58, -.08, .61]
+        simulation._data.qpos[q:q + 3] = [.56, -.22, .61]
         before, model = integration_state(simulation), simulation._model
         with pytest.raises(ValueError, match="output_collides"):
             simulation.mock_unpack(AREA, generation=simulation._generation)
@@ -247,7 +247,7 @@ def test_mock_output_clears_vla_hands_including_local_mapping_padding(simulation
             assert gap >= .01, (link, gap)
 
 
-def test_mock_output_visible_to_head_at_fixed_vla_pose(simulation):
+def test_mock_output_visible_to_head_at_required_observation_pose(simulation):
     """Scene-authoring check: actual occlusion, not only projection into the frame."""
     from luna_mujoco.cameras import CAMERA_NAMES
     from luna_mujoco.model_builder import ARM_JOINTS
@@ -255,9 +255,8 @@ def test_mock_output_visible_to_head_at_fixed_vla_pose(simulation):
     with simulation._condition:
         simulation.mock_unpack(AREA, generation=simulation._generation)
         model, data = simulation._model, simulation._data
-        for arm, angles in {'A': [-86, 76, 88, -90, 2, 14, -24],
-                            'B': [106, 61, -113, -78, 27, 36, 37]}.items():
-            for name, value in zip(ARM_JOINTS[arm], np.deg2rad(angles), strict=True):
+        for arm, angles in demo_observation_poses().items():
+            for name, value in zip(ARM_JOINTS[arm], angles, strict=True):
                 data.qpos[int(model.joint(name).qposadr[0])] = value
         address = int(model.joint('free_pink_cylinder_1').qposadr[0])
         geometry = model.geom('object_visual_pink_cylinder_1').id

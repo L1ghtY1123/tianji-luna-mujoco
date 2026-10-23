@@ -1,6 +1,6 @@
 {
   "id": "mock_unpack",
-  "description": "双臂自然位姿到位后，MuJoCo模拟VLA拆包：当前粉色CAD包装件替换为右臂工作区的黑色CAD工件（原始X/Y/Z为44/56/74.5mm）。黑件局部Y旋转90°，长轴水平，yaw相对粉件增加30°；位置改变并保留重力。此动作仍绑定当前输入工序；verify_unpack视觉确认后才创建独立产物ID。只记录旋转后CAD包围盒的动作推导包络，不重建RGBD场景。",
+  "description": "双臂自然位姿到位后，MuJoCo模拟VLA拆包：当前粉色CAD包装件替换为右臂工作区的黑色CAD工件（原始X/Y/Z为44/56/74.5mm）。黑件局部Y旋转90°，长轴水平，yaw相对粉件增加30°；位置改变并保留重力。此动作仍绑定当前输入工序；verify_unpack视觉确认后才创建独立产物ID。仅记录模拟动作，不从模拟坐标发布黑件碰撞；黑件局部障碍必须由verify_unpack视觉确认及同次RGBD测量后建立。",
   "inputs": [
     "frozen_task_item_lifecycle",
     "current_robot_feedback",

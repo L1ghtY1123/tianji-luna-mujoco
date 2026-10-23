@@ -24,6 +24,7 @@ REASONS = {
     'planning_no_valid_candidate': '已尝试的抓取候选未得到完整可执行轨迹。',
     'grasp_no_downward_candidate': '本轮抓姿均未通过向下45度以内且不朝机器人的方向筛选，尚未进入IK。',
     'grasp_no_fixed_slot_reachable_candidate': '方向合格的抓姿未通过桌面放置可达性预筛选，尚未进入IK。',
+    'no_collision_free_source_ik': '三轮抓姿均未得到可用的抓取IK解，尚未进入轨迹规划。',
     'place_no_valid_candidate': '已尝试的放置位置和 yaw 未得到完整通过碰撞检查的放置及撤离轨迹。',
     'placement_region_no_supported_candidate': '实测放置区域无法容纳当前持物包络及安全余量，未进入 IK 或轨迹计算；需要核对目标点云、持物包络和区域边界。',
     'placement_region_no_free_candidate': '本次有限放置候选与已占用位置或盒壁重叠，未进入 IK 或执行放置；不会通过抬高释放位置叠放。这不证明整个区域没有空位，由 任务程序 决定下一步。',
@@ -73,6 +74,7 @@ def brief_error(code, skill=None, message=None, details=None):
         'CUROBO_TRAJECTORY_COLLISION': '规划轨迹未通过碰撞检查，未执行该次移动。',
         'CUROBO_NO_SOLUTION': '本次规划未找到可执行轨迹，未开始移动。',
         'CUROBO_TRAJOPT_FAILED': '轨迹优化未得到可执行路径，未执行该次移动。',
+        'CUROBO_NO_VALID_TRAJECTORY': '该目标位姿未得到可执行轨迹，尚未移动或松爪。',
         'program_stopped': code.partition(':')[2] or '流程成功条件未满足。',
     }
     reason = reasons.get(key) or REASONS.get(key, '').split('；')[0].split('。')[0]

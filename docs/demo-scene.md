@@ -7,34 +7,28 @@ primitive bins and pink/black objects; only tables retain primitive geometry.
 
 ## Current scene and asset boundaries
 
-`resources/demo-config.json` and `demo_scene(object_count=None)` define two
-pink wrapped CAD objects by default and retain convenient count 1–4 presets.
-The editor can add any number of instances; normalization has no old 30-object
-limit. Existing primitive definitions remain loadable for historical records.
+`resources/demo-config.json` and `demo_scene(object_count=None)` default to one
+pink wrapped CAD object and retain convenient count 1–4 presets. The editor can
+add any number of instances; an existing user-edited scene takes precedence.
 
-- Main table: 0.60×0.80 m, top Z=0.56 m, center XY=[0.46,0].
-- Two small tables: 0.30×0.30 m, top Z=0.40 m, center XY=[0.315,±0.605].
-- Blue CAD bins: native X/Y/Z=0.410/0.310/0.145 m. Default left/right yaw
-  is +90/−90 degrees, so the world footprint is 0.310×0.410 m. Centers are
-  [0.315,±0.605,0.4725]; the inner-side exterior edges meet the desk at Y=±0.40.
-  The robot is toward smaller X: both bins' near edges and the desk's near edge
-  are X=0.16 m. The supports follow the bin centers; the unchanged bin exterior
-  overhangs each 0.30 m support by 5 mm in X and 55 mm in Y on either side.
-  The inner floor is Z=0.405 m and the rim Z=0.545 m. Walls taper outward,
-  with real rounded corners, ribs and an upper lip.
-- Pink CAD: native size 0.111085350×0.062787369×0.110 m. The default pair
-  has X=0.315 and Y=0.525/0.685 m, 16 cm apart, initially centered at Z=0.461 m
-  with a 1 mm settling gap. This leaves 97.213 mm between their Y AABBs.
-  Each complete projected visual CAD lies inside the actual rounded bottom
-  cavity section with a minimum vertex-to-boundary distance of 74.687 mm,
-  using zero geometric tolerance. The outward-tapering walls make this a
-  conservative footprint check; it is not a gripper-clearance or grasp claim.
-  The pair is configured by `two_object_offsets_xy_m`; no runtime perception
-  receives these simulator coordinates. Counts 1/3 retain the explicit
-  [0.355,0.50], [0.315,0.57], [0.275,0.64] row; count 4 uses the
-  X=0.245/0.365, Y=0.49/0.61 grid. These layouts preserve their offsets from
-  the translated box center. These extra presets do not claim grasp success.
-- Black CAD: 0.044×0.056×0.0745 m, upright +Z, used by the authorized mock.
+- Main table: fixed cuboid, size [0.60,0.80,0.08] m, center [0.572,-0.026,0.532] m,
+  top Z=0.572 m, white by default. No small tables.
+- Blue CAD bins: native size [0.410,0.310,0.145] m, fixed in the world with collision.
+  Default centers are [0.481,0.573,0.571] and [0.481,-0.625,0.571] m, symmetric
+  about table Y=-0.026 m; default yaws +90/-90 degrees. Their complete cavity,
+  tapered walls, rounded corners, ribs and lip come from CAD.
+- Pink CAD: size [0.111085350,0.062787369,0.110] m, yaw 180 degrees, with gravity.
+  The one-object preset uses offset [0,-0.08] m from the left-bin center; the pair
+  uses [0,-0.08] and [0,0.08] m. Z follows the CAD inner floor plus half object
+  height and a 1 mm settling gap. Other preset offsets are defined in the config.
+  These scene-authoring coordinates never enter runtime visual perception.
+- Black CAD: native size [0.044,0.056,0.0745] m. The mock rotates local Y by 90
+  degrees so the part lies flat, changes yaw by 30 degrees, and outputs center
+  XY=[0.56,-0.22] m. Z is tabletop+0.023 m, leaving a 1 mm settling gap; gravity
+  remains enabled. Decisions and current RGBD must independently confirm it.
+- The invisible square table target is 0.32 m wide, center XY=[0.50160,0.11646] m.
+  Release XY refers to the gripper front, not the held point-cloud centroid.
+
 
 `cad_assets.cad_catalog()` returns the UI asset list, dimensions, default
 colors and declared demo masses; `cad_asset(id)` returns copied provenance and

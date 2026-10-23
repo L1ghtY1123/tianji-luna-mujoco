@@ -188,8 +188,9 @@ Frozen rendered registered-depth fixtures contain 59,965 and 60,980 points. Both
 
 ### Default place approach (2026-10-21)
 
-The default approach and detached retreat are world +Z 50 mm above release, with explicit advanced
-settings preserved. A frozen v8 failure reached the release goal but failed its
+The default approach is world +Z 50 mm above release; the detached retreat is 75 mm as of
+2026-10-23, allowing room for the subsequently measured local object envelope. Explicit advanced
+settings are preserved. A frozen v8 failure reached the release goal but failed its
 100 mm approach; the same attached request with 50 mm passed both native phases.
 This changes neither release XY/R/Z nor the 10 mm collision threshold. The
 quintic command validation and detached retreat still run before execution.
@@ -221,3 +222,5 @@ Evidence: data/v8-place-diagnostic. This frozen test is not an executed transfer
 2026-10-22 GPU复核（冻结归档fcdc8828e6844ebca557d4ec8738b542，无仿真运动）：最终版本启动9个常用profile预热35.1秒，首次加载CAD地图、重置与黑件新地图后未再出现求解器构建/容量失效日志。预热后首次IK100容量（16真实目标）核心17.1ms，复用12.0ms。完整搜索交替4/16两轮：粉件4为10.77/8.31秒、16为28.57/29.58秒；黑件4为7.42/6.74秒、16为23.05/23.28秒，均第一批找到通过末端/命令碰撞验证的抓取。强制处理同样16候选的吞吐对照：4次4=32.71秒（16成功），1次16=25.82秒（8成功）；求解器随机状态自然推进，不能假定各次解完全相同。当前默认4适用于首批成功的样本，不宣称大批量总是更慢。证据data/complete-grasp-search-profile.json、data/final-warmup-validation.json；最终部署后另核验粉/黑完整搜索11.49/7.34秒。CPU配额不变，111项相关测试通过。未在本轮重跑物理抓放全流程；动态持物几何、超容量场景或求解参数变化仍可能需要新的实例，启动预热不代表这些未知配置也已预热。
 
 2026-10-22 官方抓取调用及GPU剖析核对：锁定commit 8e734f3的公开BatchMotionPlanner.plan_grasp没有外部IK解参数；当前请求只传目标矩阵，未复用前序batched IK关节解。官方Stage1实际执行完整plan_pose，然后执行approach/grasp/lift，不能把Stage1描述成仅IK或廉价预检。官方getting_started/motion_planning.py抓取示例采用单问题多goalset选择，当前批处理为B个独立问题、每个goalset=1；两种工作量不可混为同一benchmark。同镜像运行未修改官方grasp示例成功。冻结4候选GPU剖析：self CUDA约6.894秒，主要场景运动碰撞kernel5.295秒、另一场景碰撞kernel1.027秒（约92%，不叠加嵌套NVTX区间）；不是开爪扫掠检查。仅在隔离诊断进程中禁用98个CAD mesh障碍，4候选耗时由完整世界warm9.10秒降至2.05秒，恢复完整世界11.64秒；随机状态自然推进，此实验只用于定位碰撞表示的计算代价，不证明禁用后轨迹安全。诊断轨迹没有执行，生产碰撞世界和1cm阈值未改变。证据data/planner-cprofile.txt、data/mesh-cost-profile.txt、data/official-grasp-example.log。本轮skill行为无变化，不能宣称性能修复已完成。
+
+2026-10-23 current drop target: finger-front X stays at the robot-near half center; Y is inset toward robot Y=0 by 32% of the complete cavity Y span, if that point remains inside the measured cavity. Otherwise retain the near-half center. This selects an allowed endpoint within the user region; it adds no carried-cloud projection constraint. Preserve actual lift orientation, attached plan_pose and 10 mm collision checks.

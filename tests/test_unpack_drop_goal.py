@@ -75,7 +75,10 @@ def test_drop_uses_front_target_without_held_projection_gate(frozen):
     polygon = np.asarray(frozen['destination']['placement_reference']['region_polygon_world_xy_m'])
     center = (polygon.min(0) + polygon.max(0)) / 2
     center[0] -= .25 * np.ptp(polygon[:, 0])
-    np.testing.assert_allclose(goal[:2, 3], center)
+    assert goal[0, 3] == pytest.approx(center[0])
+    assert center[1] < goal[1, 3] < polygon[:, 1].max()
+    from luna_mujoco.placement import region_contains_xy
+    assert region_contains_xy(goal[None, :2, 3], polygon)[0]
     assert proof['xy_policy'] == 'finger_front_at_robot_near_bin_half'
     assert 'carried_projection' not in proof
     # Held extent cannot create an extra XY containment requirement.

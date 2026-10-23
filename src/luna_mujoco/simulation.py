@@ -463,10 +463,10 @@ class Simulation:
         top = table["position"][2] + table["size"][2] / 2
         if output_pose is not None and set(output_pose) != {"position", "yaw_deg"}:
             raise ValueError("mock_unpack_output_requires_position_and_yaw_only")
-        # Keep the unpacked part clear of the fixed VLA hand posture, including
-        # the head-RGBD obstacle padding and the 10mm planning clearance. The
-        # central-right location stays visible above/between the VLA hands.
-        pose = ({"position": [.58, -.08, top + half[0] + .001], "yaw_deg": target["yaw_deg"] + 30}
+        # Keep the output on the right tabletop with room for the right wrist.
+        # Visibility and collision are checked from RGBD after the mock action;
+        # an occluded current view still requires the observation-pose return.
+        pose = ({"position": [.56, -.22, top + half[0] + .001], "yaw_deg": target["yaw_deg"] + 30}
                 if output_pose is None else output_pose)
         position = np.asarray(pose["position"], dtype=float)
         yaw = float(pose["yaw_deg"])
