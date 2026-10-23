@@ -20,6 +20,18 @@ test('all generated poses remain distinct from the budgeted and prefiltered pool
   } }).candidates.length, 1, 'historical runs cannot invent unarchived raw poses');
 });
 
+test('all raw outputs are screened before the surviving IK pool is capped', () => {
+  const replay = { stage: 'before_ik', filter_all_generated: true, requested_candidate_count: 1,
+    all_generated_candidates: [{ index: 0 }, { index: 1 }, { index: 2 }],
+    candidates_before_ik: [{ index: 0 }, { index: 1 }, { index: 2 }],
+    pre_budget_eligible_indices: [1, 2], pre_ik_eligible_indices: [1],
+  };
+  assert.deepEqual(evidence.candidateRows(replay).map(row => row.status), ['failed', 'passed', 'unknown']);
+  assert.match(evidence.candidateRows(replay)[2].reason, /预筛选通过.*未提交/);
+  assert.ok(evidence.candidateRows({ ...replay, stage: 'raw_graspgen' })
+    .every(row => row.reason === '进入本轮预筛选'));
+});
+
 test('model inputs keep archived image order and refuse external image references', () => {
   assert.equal(typeof evidence.extractReplayEvidence, 'function');
   const result = evidence.extractReplayEvidence({ endpoint: '/v1/responses', request: { input: [{ content: [

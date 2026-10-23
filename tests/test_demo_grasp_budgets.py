@@ -33,13 +33,13 @@ def test_increasing_pools_keep_identical_inference_inputs_and_bound_service_call
         assert result["requested_candidate_count"] == expected_count
         assert result["candidate_count"] == expected_count
         assert result["raw_candidate_count"] == expected_calls * 100
-        assert len(result["candidate_replay"]["candidates_before_ik"]) == expected_count
+        assert len(result["candidate_replay"]["candidates_before_ik"]) == expected_calls * 100
         assert result["candidate_replay"]["requested_candidate_count"] == expected_count
         assert result["candidate_replay"]["raw_candidate_count"] == expected_calls * 100
         assert [candidate["index"] for candidate in result["candidates"]] == list(range(expected_count))
         evidence = round_evidence(result, {"valid_candidates": [], "batches": []}, sampling_round)
         assert evidence["requested_candidate_count"] == expected_count
-        assert evidence["generated_candidate_count"] == expected_count
+        assert evidence["generated_candidate_count"] == expected_calls * 100
         assert evidence["raw_candidate_count"] == expected_calls * 100
         current_identity = grasp_input_identity(result)
         if identity is None:
@@ -51,6 +51,20 @@ def test_increasing_pools_keep_identical_inference_inputs_and_bound_service_call
         assert payload["gripper_config_id"] == "robotiq_2f_140"
         for field in ("scene_points_camera_m", "object_points_camera_m"):
             np.testing.assert_array_equal(payload[field], client.calls[0][field])
+
+
+def test_direction_screen_runs_before_score_budget_discards_lower_scoring_downward_grasps():
+    class MixedClient(DownwardClient):
+        def generate(self, payload):
+            result = super().generate(payload)
+            for row in result['candidates'][:-1]:
+                row['T_camera_grasp'] = np.eye(4).tolist()
+            return result
+    result = DemoAlgorithms(graspgen_client=MixedClient()).generate_grasps(
+        observed_scene(), 'seen-red', arm='A', placement_request=grasp_placement())
+    assert result['candidate_count'] == 3
+    assert [row['index'] for row in result['candidates']] == [297, 298, 299]
+    assert result['downward_filter']['input_count'] == 300
 
 
 @pytest.mark.parametrize("sampling_round", [0, 4, -1, True, 1., "1", None])

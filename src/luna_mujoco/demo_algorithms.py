@@ -267,13 +267,14 @@ class DemoAlgorithms(Algorithms):
                 "synthetic_point_count": len(input_points) - len(target["points_world_m"]),
                 "completion_provenance": deepcopy(provenance),
                 "graspgen_input_sampling": input_sampling}
-        candidates, accepted, evidence = prepare_grasp_candidates(result["candidates"],
+        all_generated = result.pop('all_generated_candidates', result['candidates'])
+        candidates, accepted, evidence = prepare_grasp_candidates(all_generated,
             robot_base_world_m=reach_context["robot_base_world_m"],
             target_reference_world_m=reach_context["measured_reference_world_m"],
             reference_tcp=(snapshot.get('arms', {}).get(arm, {}).get('tcp')
                            if unpacked else None))
         replay = {"stage": "before_ik", "target_id": target_id, "sampling_round": sampling_round,
-            "all_generated_candidates": result.pop('all_generated_candidates', []),
+            "all_generated_candidates": all_generated, "filter_all_generated": True,
             "requested_candidate_count": candidate_count, "raw_candidate_count": result["raw_candidate_count"],
             "measured_points_world_m": np.asarray(target["points_world_m"]).copy(),
             "T_world_cloud": result.get("T_world_cloud"), "candidates_before_ik": candidates,
@@ -293,6 +294,8 @@ class DemoAlgorithms(Algorithms):
             accepted, reach_evidence = filter_transport_reach(accepted, object_geometry, arm, placement_request)
         else:
             accepted, reach_evidence = filter_fixed_slot_reach(accepted, reach_context)
+        replay['pre_budget_eligible_indices'] = [candidate['index'] for candidate in accepted]
+        accepted = accepted[:candidate_count]
         replay['pre_ik_eligible_indices'] = [candidate['index'] for candidate in accepted]
         replay['reach_filter'] = deepcopy(reach_evidence)
         if not accepted and not unpacked:

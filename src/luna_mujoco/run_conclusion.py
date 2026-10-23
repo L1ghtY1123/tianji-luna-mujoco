@@ -22,6 +22,8 @@ REASONS = {
     'workspace_model_mismatch': '离线工作空间与当前机器人模型不匹配，需要重新生成；当前不能判断机械臂是否可达。',
     'invalid_workspace_artifact': '离线工作空间文件不完整或格式无效，需要重新生成；当前不能判断机械臂是否可达。',
     'planning_no_valid_candidate': '已尝试的抓取候选未得到完整可执行轨迹。',
+    'grasp_no_downward_candidate': '本轮抓姿均未通过向下45度以内且不朝机器人的方向筛选，尚未进入IK。',
+    'grasp_no_fixed_slot_reachable_candidate': '方向合格的抓姿未通过桌面放置可达性预筛选，尚未进入IK。',
     'place_no_valid_candidate': '已尝试的放置位置和 yaw 未得到完整通过碰撞检查的放置及撤离轨迹。',
     'placement_region_no_supported_candidate': '实测放置区域无法容纳当前持物包络及安全余量，未进入 IK 或轨迹计算；需要核对目标点云、持物包络和区域边界。',
     'placement_region_no_free_candidate': '本次有限放置候选与已占用位置或盒壁重叠，未进入 IK 或执行放置；不会通过抬高释放位置叠放。这不证明整个区域没有空位，由 任务程序 决定下一步。',
