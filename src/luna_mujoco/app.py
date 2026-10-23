@@ -66,9 +66,6 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
         {**settings.model_dump(), "observation": demo_observation_poses(),
          "attachment": {**settings.attachment.model_dump(),
                         **({"sphere_budget": 24} if not settings_path.exists() else {})}})
-    if not settings_path.exists() and os.environ.get("LUNA_PLAN_TIMEOUT_S"):
-        settings = PlanningSettings.model_validate(
-            {**settings.model_dump(), "plan_timeout_s": float(os.environ["LUNA_PLAN_TIMEOUT_S"])})
     from .visual_assistance import VisualAssistance
     visual_assistance = None if default_visual_inventory else VisualAssistance.from_environment()
     experiment_root = experiment_dir or os.environ.get("LUNA_EXPERIMENT_DIR") or (

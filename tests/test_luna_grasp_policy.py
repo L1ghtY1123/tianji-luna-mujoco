@@ -1,4 +1,4 @@
-"""The user-specified approach cone, robot direction and 10 mm insertion."""
+"""Direction filtering preserves GraspGen positions without extra insertion."""
 from copy import deepcopy
 
 import numpy as np
@@ -33,15 +33,12 @@ def test_cone_boundary_and_radial_direction_reject_before_ik():
     assert candidates == original
     for source, prepared in zip(original, shifted):
         before, after = np.array(source["T_world_tcp"]), np.array(prepared["T_world_tcp"])
-        expected = .01 * before[:3, 2] if source['index'] in (0, 1) else np.zeros(3)
-        np.testing.assert_allclose(after[:3, 3] - before[:3, 3], expected, atol=1e-12)
+        np.testing.assert_array_equal(after[:3, 3], before[:3, 3])
         np.testing.assert_array_equal(after[:3, :3], before[:3, :3])
-        assert prepared['insertion_applied'] is (source['index'] in (0, 1))
-        if prepared['insertion_applied']:
-            assert prepared["T_world_tcp_before_insertion"] == source["T_world_tcp"]
-        else:
-            assert 'T_world_tcp_before_insertion' not in prepared
-    assert evidence['operation_order'] == ['direction_filter', 'tool_positive_z_insertion', 'batched_ik']
+        assert not prepared.get('insertion_applied', False)
+        assert 'T_world_tcp_before_insertion' not in prepared
+    assert evidence['insertion_m'] == 0.
+    assert evidence['operation_order'] == ['direction_filter', 'arm_jaw_symmetry', 'batched_ik']
 
 
 @pytest.mark.parametrize("side", [-1., 1.])

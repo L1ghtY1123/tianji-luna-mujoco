@@ -1,6 +1,6 @@
 import { modelCallInfo, modelResult } from './replay-story.js';
 
-const STAGE_NAMES = { raw_graspgen: '① GraspGen 全部生成位姿', before_ik: '② 预筛选与深入 1 cm', after_ik: '③ Batched IK 筛选', after_plan_grasp_batch: '④ plan_grasp_batch 筛选' };
+const STAGE_NAMES = { raw_graspgen: '① GraspGen 全部生成位姿', before_ik: '② 方向与执行臂预筛选', after_ik: '③ Batched IK 筛选', after_plan_grasp_batch: '④ plan_grasp_batch 筛选' };
 const STATUS_NAMES = { passed: '通过', failed: '未通过', unknown: '未记录判定' };
 
 export function safeArchivePath(path) {

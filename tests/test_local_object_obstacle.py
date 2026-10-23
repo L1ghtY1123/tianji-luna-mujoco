@@ -6,6 +6,43 @@ import pytest
 from luna_mujoco.local_object_obstacle import object_bounds
 
 
+def test_plain_black_object_prompt_recovers_surface_when_qualified_prompts_are_empty(monkeypatch):
+    from luna_mujoco.local_object_obstacle import measure_object_obstacle
+
+    size = (10, 10)
+    rgb = np.zeros((*size, 3), np.uint8)
+    view = {'rgb': rgb, 'depth_m': np.ones(size), 'valid_depth': np.ones(size, bool)}
+    calls = []
+    def segment(image, prompt, timestamp):
+        calls.append(prompt)
+        return [{'mask': np.ones(size, bool), 'score': .9}] if prompt == 'black object' else []
+    monkeypatch.setattr('luna_mujoco.local_object_obstacle.own_robot_surface_pixels',
+        lambda capture, masks: {'status': 'measured', 'masks': {'3': np.zeros(size, bool)}})
+    monkeypatch.setattr('luna_mujoco.local_object_obstacle.deproject_view',
+        lambda view, mask: np.tile([.5, 0., .59], (int(mask.sum()), 1)))
+    result = measure_object_obstacle({'views': {'3': view}, 'time': 1., 'generation': 1,
+        'observation_id': 'frozen'}, SimpleNamespace(segment=segment),
+        {'region_polygon_world_xy_m': [[.3, -.2], [.7, -.2], [.7, .2], [.3, .2]], 'floor_z_m': .57},
+        'unpacked')
+    assert result['bounds']['point_count'] == 100
+    assert 'black object' in calls
+
+
+async def test_program_stop_retains_specific_failed_skill_reason(tmp_path):
+    from test_runner import Sim
+
+    from luna_mujoco.algorithms import AlgorithmError
+    from luna_mujoco.demo_program import Stop
+    from luna_mujoco.demo_runner import DemoRunner
+
+    runner = DemoRunner(Sim(), SimpleNamespace(), None, tmp_path)
+    runner.state['generation'] = 1
+    runner.last_program_result = {'success': False, 'status': 'unknown',
+        'reason': 'unpack_depth_unconfirmed_after_observation'}
+    with pytest.raises(AlgorithmError, match='unpack_depth_unconfirmed_after_observation'):
+        await runner._execute_program([Stop(type='stop', reason='Unpacking failed')], {})
+
+
 def test_bounds_keep_only_table_roi_and_cover_known_height():
     points = np.array([[.4, .1, .61], [.45, .14, .63], [1., 1., 2.]])
     bounds = object_bounds(points, [.3, 0.], [.6, .3], .55, .11)

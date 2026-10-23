@@ -3,7 +3,6 @@ import asyncio
 import copy
 import json
 import logging
-import math
 import threading
 import time
 import uuid
@@ -73,7 +72,7 @@ def public_summary(value):
 
 
 class Runner:
-    def __init__(self, simulation, algorithms, decisions_factory, data_dir, *, plan_timeout_s=None,
+    def __init__(self, simulation, algorithms, decisions_factory, data_dir, *,
                  planning_settings=None, visual_assistance=None, experiments=None):
         self.simulation = simulation
         self.algorithms = algorithms
@@ -92,10 +91,6 @@ class Runner:
         self.invocation_count = 0
         self.algorithm_call_count = 0
         self.recorded_observations = set()
-        if plan_timeout_s is not None:
-            if not math.isfinite(plan_timeout_s) or plan_timeout_s <= 0:
-                raise ValueError("plan_timeout_must_be_positive_and_finite")
-            self.plan_timeout_s = plan_timeout_s
         self.planning_worker = None
         self.planning_cancelled = None
         self.algorithm_cleanup_worker = None
@@ -138,15 +133,6 @@ class Runner:
                 "arm": None, "destination_id": None, "facts": {}, "error": None, "error_code": None,
                 "current_step": None, "failed_step": None,
                 "planning_attempts": []}
-
-    @property
-    def plan_timeout_s(self):
-        return self.planning_settings.plan_timeout_s
-
-    @plan_timeout_s.setter
-    def plan_timeout_s(self, value):
-        self.planning_settings = PlanningSettings.model_validate(
-            {**self.planning_settings.model_dump(), "plan_timeout_s": value})
 
     @property
     def active(self):
@@ -212,8 +198,6 @@ class Runner:
         elif skill in {"move_to_observe", "plan_place", "execute_place"}:
             self.state["collision_model"] = {"gripper": "actual_feedback",
                                               "attached": bool(self.holding_state and self.holding_state.get("attached"))}
-        if skill == "plan_grasp":
-            self.state["current_step"]["timeout_s"] = self.state["planning_settings"]["plan_timeout_s"]
 
     async def start(self, instruction, *, experiment=None):
         if self.active:
@@ -577,14 +561,13 @@ class Runner:
     async def _run(self, run_id, initial):
         raise NotImplementedError("Use the Responses program runner")
 
-    async def evaluate_grasp_candidates(self, snapshot, target, arm, context, deadline):
+    async def evaluate_grasp_candidates(self, snapshot, target, arm, context):
         evaluations = context.get('evaluations')
         if evaluations is None or self.state['facts'].get('center_reachability_enabled'):
             evaluations = await self.call_algorithm(self.algorithms.evaluate_arms, snapshot,
                 target, context['grasps'], context['scene'], requested_arm=arm,
                 **({'destination_id': self.state['destination_id']} if self.state['destination_id'] else {}),
-                planning_settings=context['planning_settings'], report_progress=True,
-                timeout_s=max(0., deadline - time.monotonic()))
+                planning_settings=context['planning_settings'], report_progress=True)
         return evaluations
 
     async def plan_grasp(self, snapshot, target, arm, context):
@@ -592,13 +575,10 @@ class Runner:
         if authorized_arm != arm and any(attempt["arm"] == arm for attempt in self.state["planning_attempts"]):
             raise ValueError("arm_already_attempted:" + arm)
         attempt = {"arm": arm, "status": "running"}
-        timeout = context["planning_settings"]["plan_timeout_s"]
-        attempt["effective_timeout_s"] = timeout
         self.state["planning_attempts"].append(attempt)
         started = time.monotonic()
-        deadline = started + timeout
         try:
-            result = await self.plan_grasp_candidates(snapshot, target, arm, context, deadline)
+            result = await self.plan_grasp_candidates(snapshot, target, arm, context)
             attempt["status"] = "succeeded"
             return result
         except asyncio.CancelledError:
@@ -615,16 +595,13 @@ class Runner:
         finally:
             attempt["duration_s"] = time.monotonic() - started
 
-    async def plan_grasp_candidates(self, snapshot, target, arm, context, deadline):
-        evaluations = await self.evaluate_grasp_candidates(snapshot, target, arm, context, deadline)
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise RuntimeError(f'plan_grasp_timeout:{context["planning_settings"]["plan_timeout_s"]:g}s')
+    async def plan_grasp_candidates(self, snapshot, target, arm, context):
+        evaluations = await self.evaluate_grasp_candidates(snapshot, target, arm, context)
         return await self.call_algorithm(
             self.algorithms.plan_grasp, snapshot, target, arm, evaluations, context["scene"],
             planning_settings=context["planning_settings"], report_progress=True,
             **({"destination_id": self.state["destination_id"]}
-               if self.state["task"] == "grasp_place" else {}), timeout_s=remaining)
+               if self.state["task"] == "grasp_place" else {}))
 
     async def call_algorithm(self, function, *args, report_progress=False, timeout_s=None, **kwargs):
         """Bound the task wait without pretending a remote GPU request can be killed."""
@@ -1734,7 +1711,7 @@ class Runner:
                 self.state["destination_id"], planning_settings=context["planning_settings"],
                 placement_request=self.task_progress.placement_request(self.state['destination_id'])
                 if self.task_progress is not None else None,
-                report_progress=True, timeout_s=context["planning_settings"]["place_timeout_s"])
+                report_progress=True)
             context["place_plan_observation_id"] = context["observation"]["observation_id"]
             return context["place_plan"]
         if skill == "execute_place":

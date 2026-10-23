@@ -183,8 +183,8 @@ class DemoRunner(UnpackWorkflow, Runner):
         result = await super().plan_grasp(planning_snapshot, target, arm, context)
         return {**result, "sampling_evidence": copy.deepcopy(context["sampling_evidence"])}
 
-    async def plan_grasp_candidates(self, snapshot, target, arm, context, deadline):
-        # IK and trajectory exhaustion spend the same three pools and deadline.
+    async def plan_grasp_candidates(self, snapshot, target, arm, context):
+        # IK and trajectory exhaustion share the same three bounded candidate pools.
         settings = copy.deepcopy(context["planning_settings"])
         placement = copy.deepcopy(context.get("grasp_placement_request"))
         token = context["scene"]["scene_token"]
@@ -202,17 +202,13 @@ class DemoRunner(UnpackWorkflow, Runner):
                     or self.state["arm"] != arm or self.state["target_id"] != target
                     or self.state["destination_id"] != destination):
                 raise AlgorithmError("grasp_sampling_input_changed", code="planning_stale_evaluation")
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise RuntimeError(f'plan_grasp_timeout:{settings["plan_timeout_s"]:g}s')
-            return remaining
 
         for sampling_round in range(1, MAX_SAMPLING_ROUNDS + 1):
-            remaining = check_current()
+            check_current()
             if sampling_round > 1:
                 context["grasps"] = await self.call_algorithm(self.algorithms.generate_grasps,
                     snapshot, target, arm=arm, placement_request=placement, planning_settings=settings,
-                    sampling_round=sampling_round, report_progress=True, timeout_s=remaining)
+                    sampling_round=sampling_round, report_progress=True)
                 check_current()
             if (type(context["grasps"].get("sampling_round")) is not int
                     or context["grasps"]["sampling_round"] != sampling_round):
@@ -236,7 +232,7 @@ class DemoRunner(UnpackWorkflow, Runner):
                                'transport_reach_filter': copy.deepcopy(filtered)})
                 context['sampling_evidence'] = {'rounds': copy.deepcopy(rounds),
                     'maximum_sampling_rounds': MAX_SAMPLING_ROUNDS, 'arm': arm, 'target_id': target,
-                    'scene_token': token, 'shared_plan_timeout_s': settings['plan_timeout_s'],
+                    'scene_token': token,
                     'total_requested_candidate_count': sum(row['requested_candidate_count'] for row in rounds),
                     'total_tested_count': sum(row['tested_count'] for row in rounds),
                     'trajectory_attempt_count': trajectory_attempt_count}
@@ -246,14 +242,14 @@ class DemoRunner(UnpackWorkflow, Runner):
                     raise AlgorithmError('no transport-reachable grasp in the bounded candidate pools',
                         code='grasp_no_transport_reachable_candidate', details=context['sampling_evidence'])
                 continue
-            remaining = check_current()
+            check_current()
             if sampling_round == 1:
-                evaluations = await super().evaluate_grasp_candidates(snapshot, target, arm, context, deadline)
+                evaluations = await super().evaluate_grasp_candidates(snapshot, target, arm, context)
             else:
                 evaluations = await self.call_algorithm(self.algorithms.evaluate_arms, snapshot, target,
                     context["grasps"], context["scene"], requested_arm=arm,
                     **({"destination_id": destination} if destination else {}),
-                    planning_settings=settings, report_progress=True, timeout_s=remaining)
+                    planning_settings=settings, report_progress=True)
             check_current()
             evaluation = evaluations.get(arm, {})
             if not isinstance(evaluation.get("valid_candidates"), list):
@@ -264,8 +260,7 @@ class DemoRunner(UnpackWorkflow, Runner):
             evidence = {"rounds": copy.deepcopy(rounds), "maximum_sampling_rounds": MAX_SAMPLING_ROUNDS,
                         "total_requested_candidate_count": sum(row["requested_candidate_count"] for row in rounds),
                         "total_tested_count": sum(row["tested_count"] for row in rounds),
-                        "arm": arm, "target_id": target, "scene_token": token,
-                        "shared_plan_timeout_s": settings["plan_timeout_s"]}
+                        "arm": arm, "target_id": target, "scene_token": token}
             context["sampling_evidence"] = evidence
             if evaluation["valid_candidates"]:
                 trajectory_attempt_count += 1
@@ -276,7 +271,7 @@ class DemoRunner(UnpackWorkflow, Runner):
                     result = await self.call_algorithm(self.algorithms.plan_grasp,
                         snapshot, target, arm, evaluations, context["scene"],
                         planning_settings=settings, report_progress=True,
-                        **({"destination_id": destination} if destination else {}), timeout_s=check_current())
+                        **({"destination_id": destination} if destination else {}))
                 except AlgorithmError as error:
                     check_current()
                     if not validate_planning_exhaustion(error, evaluation):
@@ -570,8 +565,7 @@ class DemoRunner(UnpackWorkflow, Runner):
             context["place_plan"] = await self.call_algorithm(self.algorithms.plan_place, observation,
                 self.state["target_id"], self.state["arm"], context["scene"], context["holding"],
                 DESTINATION_ID, planning_settings=context["planning_settings"],
-                placement_request=self._bind_region(context["observation"]), report_progress=True,
-                timeout_s=context["planning_settings"]["place_timeout_s"])
+                placement_request=self._bind_region(context["observation"]), report_progress=True)
             context["place_plan_observation_id"] = context["observation"]["observation_id"]
             return context["place_plan"]
         if skill == "execute_place":
@@ -684,6 +678,10 @@ class DemoRunner(UnpackWorkflow, Runner):
         for node in nodes:
             self.check_generation()
             if isinstance(node, Stop):
+                result = self.last_program_result or {}
+                if result.get('success') is False and result.get('reason'):
+                    reason = str(result['reason'])
+                    raise AlgorithmError(reason, code=reason, details={'program_stop_reason': node.reason})
                 raise ValueError("program_stopped:" + node.reason[:500])  # noqa: TRY004 — explicit stop node
             if isinstance(node, IfResult):
                 if self.last_program_result is None:

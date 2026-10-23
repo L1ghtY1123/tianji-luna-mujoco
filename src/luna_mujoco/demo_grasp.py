@@ -13,13 +13,12 @@ from .placement import observed_object
 
 MEASUREMENT_RESERVE_M = .005
 GEOMETRY_PADDING_M = .000001
-GRASP_INSERTION_M = .01
 MAX_GRASP_TILT_DEG = 45.
 
 
 def prepare_grasp_candidates(candidates, *, robot_base_world_m, target_reference_world_m,
                              reference_tcp=None):
-    """Reject invalid directions, then insert surviving tool poses once before IK."""
+    """Filter directions and choose jaw symmetry without translating GraspGen poses."""
     away = (np.asarray(target_reference_world_m, dtype=float)
             - np.asarray(robot_base_world_m, dtype=float))[:2]
     length = np.linalg.norm(away)
@@ -36,7 +35,6 @@ def prepare_grasp_candidates(candidates, *, robot_base_world_m, target_reference
         away_dot = float(pose[:2, 2] @ away)
         tilt_ok = downward >= minimum_down - 1e-9
         direction_ok = away_dot >= -1e-9
-        prepared['insertion_applied'] = tilt_ok and direction_ok
         if tilt_ok and direction_ok:
             # Parallel jaws have a half-turn equivalent about their approach Z.
             # Choose in the EXECUTING arm's frame, before IK/collision planning.
@@ -48,8 +46,6 @@ def prepare_grasp_candidates(candidates, *, robot_base_world_m, target_reference
                 prepared['jaw_symmetry_half_turn'] = bool(flip)
                 if flip:
                     pose[:3, :3] = alternative
-            prepared["T_world_tcp_before_insertion"] = pose.tolist()
-            pose[:3, 3] += GRASP_INSERTION_M * pose[:3, 2]
             prepared["T_world_tcp"] = pose.tolist()
             accepted.append(prepared)
         shifted.append(prepared)
@@ -59,8 +55,8 @@ def prepare_grasp_candidates(candidates, *, robot_base_world_m, target_reference
     return shifted, accepted, {
         "axis": "actual_tool_positive_z_in_world", "maximum_tilt_deg": MAX_GRASP_TILT_DEG,
         "minimum_downward_dot": minimum_down, "robot_base_world_m": list(robot_base_world_m),
-        "horizontal_robot_to_target_unit_vector": away.tolist(), "insertion_m": GRASP_INSERTION_M,
-        "operation_order": ["direction_filter", "tool_positive_z_insertion", "batched_ik"],
+        "horizontal_robot_to_target_unit_vector": away.tolist(), "insertion_m": 0.,
+        "operation_order": ["direction_filter", "arm_jaw_symmetry", "batched_ik"],
         "input_count": len(candidates), "accepted_count": len(accepted),
         "rejected_count": len(candidates) - len(accepted),
         "rejected_tilt_count": sum(not row["tilt_passed"] for row in evidence),

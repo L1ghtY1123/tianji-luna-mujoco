@@ -1,8 +1,8 @@
 const GROUPS = {
   shared: ['共享 IK 参数', '机械臂评估与 plan_grasp_batch 共用 IK 参数。IK 优化 seeds 与 LM 初始解 seeds 分别控制优化起点数和初始解生成预算；random seed 是复现随机序列的编号，不是搜索数量。'],
-  planner: ['plan_grasp_batch', 'TrajOpt seeds 是轨迹优化的初始轨迹数量。它与 IK 优化 seeds、LM 初始解 seeds 属于三个不同阶段的搜索预算。'],
-  grasp: ['抓取几何与候选', '设置抓取候选和接近、抓取、提升的几何条件。'],
-  place: ['放置位姿', '粉件放到共享目标区域中心，保持抓取姿态，attachment参与规划，Z靠近10mm碰撞阈值。黑件普通plan_pose到右盒中心上方，保持lift姿态，Z允许较大余量。'],
+  planner: ['cuRobo 规划参数', '按当前官方接口支持范围生效：seeds控制搜索预算，max attempts用于普通plan_pose；plan_grasp内部阶段使用官方默认。'],
+  grasp: ['抓取 Approach / Lift', '设置抓取候选和接近、抓取、提升的几何条件。'],
+  place: ['放置 Approach / Lift', '粉件放到共享目标区域中心，保持抓取姿态，attachment参与规划，Z靠近10mm碰撞阈值。黑件普通plan_pose到右盒中心上方，保持lift姿态，Z允许较大余量。'],
   filter: ['可见点云过滤（默认关闭）', '只处理 RGBD 实测点；统计或半径过滤不能保证去除密集浮岛。DBSCAN 仅诊断点簇，不按点簇大小或桌面连通性删除障碍。'],
   observation: ['空手观察位姿 · 只读', 'A、B 臂各 7 个已标定参考关节角，用于计算观察 TCP 目标。校准值在此只读；运行仍须通过碰撞规划与 RGBD 覆盖检查。'],
   attachment: ['持物碰撞球', '允许1–31个球，默认24。覆盖实测及明确标注的尺寸先验补全，保留不确定度和余量；允许与同手夹爪组件接触，继续检查相机支架、上游、异臂和世界。'],

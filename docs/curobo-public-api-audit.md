@@ -46,7 +46,7 @@
 | `plan_place_batch` 兼容入口 | `BatchMotionPlanner.plan_grasp`，同上两阶段模式 | 当前demo不调用；保留输入/释放位置/结果检查 |
 | 普通持物或空爪位姿运动 | `MotionPlanner.plan_pose` | 公开 max_attempts；原始轨迹返回后五次插值与执行时间伸长 |
 | 双臂观测/VLA移动 | `MotionPlanner.plan_cspace` 或 `plan_pose` | 14关节/双TCP目标、官方求解、10mm验证 |
-| 轴向移动/支撑法向撤离 | `ToolPoseCriteria.linear_motion` + `plan_pose` | 有界配置参数尝试；支撑撤离显式采用较强 non_terminal_scale。属于公开配置，不是官方默认权重，也不改优化器 |
+| 轴向移动/支撑法向撤离 | `ToolPoseCriteria.linear_motion` + `plan_pose` | 当前place Lift采用官方默认scale=1。旧支撑兼容入口仍有有界参数尝试，但已删除额外100000倍放大；该入口不由当前demo调用，不冒充官方plan_grasp |
 | 固定对侧手臂、夹爪反馈、附件 | `compute_kinematics`、`update_link_spheres`、`update_kinematics_config`、`AttachmentManager.update/detach` | 测得关节/球转换为公开输入；几何更新后公开 `graph_planner.reset_buffer` 清除过期路径 |
 | 世界地图上传 | `Scene.create`、`update_world`、公开 `VoxelData.load_batch` | 清理已替换mesh缓存、一次加载全部命名体素层、显式目标层开关 |
 | 碰撞与执行复核 | `RobotCollisionChecker`、`get_kinematics/get_collision_distance/get_self_collision_distance/get_bound`；图搜索可行性API | 关节采样、返回值判定、10mm约束，保留世界/自碰撞检查 |

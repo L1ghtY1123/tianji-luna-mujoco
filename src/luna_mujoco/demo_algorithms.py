@@ -95,7 +95,7 @@ class DemoAlgorithms(Algorithms):
                 "rotation_threshold_rad": settings["ik_rotation_threshold_rad"],
                 "downward_dot": downward, "horizontal_away_from_robot_dot": away_dot,
                 "maximum_tilt_deg": MAX_GRASP_TILT_DEG,
-                "reference": "original_graspgen_tool_pose_after_single_1cm_insertion"}
+                "reference": "original_graspgen_tool_pose_with_arm_jaw_symmetry"}
 
     def _grasp_ik_candidate(self, candidate, snapshot, target_id, arm, scene, settings):
         item = candidate["ik"]
@@ -369,13 +369,18 @@ class DemoAlgorithms(Algorithms):
         from .local_object_obstacle import measure_object_obstacle
 
         cameras = ['3', '2', '1']
+        attempts = []
         for camera_id in cameras:
             try:
                 measured = measure_object_obstacle(capture, self.perception.detector, work_area,
                                                     appearance, camera_id=camera_id)
                 return measured
             except ValueError as error:
-                if str(error) != 'local_object_depth_missing' or camera_id == cameras[-1]:
+                if str(error) != 'local_object_depth_missing':
+                    raise
+                attempts.append(getattr(error, 'details', {'camera_id': camera_id}))
+                if camera_id == cameras[-1]:
+                    error.details = {'camera_attempts': attempts}
                     raise
 
     def measured_object_workspace(self, measurement, arm):

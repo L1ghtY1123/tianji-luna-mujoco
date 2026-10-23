@@ -368,7 +368,7 @@ class UnpackWorkflow:
         self.emit('transport_goal_derived', '从当前右盒完整体素层推导运输高度', evidence)
         plan = await self.call_algorithm(self.algorithms.plan_attached_pose,
             observation, target, arm, context['scene'], context['holding'], goal.tolist(),
-            planning_settings=context['planning_settings'], timeout_s=context['planning_settings']['place_timeout_s'])
+            planning_settings=context['planning_settings'])
         plan['transport_goal_evidence'] = evidence
         context['transport_plan'] = plan
         self.current_lifecycle()['phase'] = 'black_held'

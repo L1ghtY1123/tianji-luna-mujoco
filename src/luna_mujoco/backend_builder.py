@@ -291,7 +291,7 @@ class ValidatedBatchBackend(_NativeCuroboBackend):
 
 def support_departure_criteria(criteria_type, request, non_terminal_scale):
     criteria = criteria_type.linear_motion(axis=request.axis,
-        non_terminal_scale=non_terminal_scale * 100000,
+        non_terminal_scale=non_terminal_scale,
         project_distance_to_goal=request.reference_frame == "tool")
     return criteria
 

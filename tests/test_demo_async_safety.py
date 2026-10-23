@@ -4,7 +4,6 @@ The service doubles model an uninterruptible remote request. Scheduling, deadlin
 generation checks, cancellation, contracts, and the program interpreter stay real.
 """
 import asyncio
-import copy
 import threading
 
 import pytest
@@ -93,28 +92,20 @@ async def test_reset_cancels_current_demo_request_and_discards_late_result(tmp_p
 
 
 @pytest.mark.parametrize("phase", ["ik", "plan"])
-async def test_demo_deadline_stops_without_executing_late_service_success(tmp_path, phase):
+async def test_pending_demo_plan_has_no_extra_wall_deadline_and_can_be_cancelled(tmp_path, phase):
     robot, algorithms = RecordedRobot(), WaitingVision(phase)
     runner = DemoRunner(robot, algorithms, None, tmp_path, planning_settings=TEST_SETTINGS)
-    runner.plan_timeout_s = .15
     await runner.start("把一个粉色物体放到指定区域")
     try:
         assert await asyncio.to_thread(algorithms.entered.wait, 2)
-        await asyncio.wait_for(runner.worker, 2)
-        assert runner.state["status"] == "needs_attention"
-        assert runner.state["error"].startswith("plan_grasp_timeout:")
-        assert runner.state["failed_step"]["skill"] == "plan_grasp"
-        assert algorithms.cancelled.is_set()
-        assert runner.algorithm_pending
+        await asyncio.sleep(.2)
+        assert runner.state["status"] == "running"
+        assert "timeout_s" not in runner.state["current_step"]
         assert not runner.state["facts"].get("plan_ready")
-        terminal = copy.deepcopy(runner.state)
-        events = copy.deepcopy(runner.events)
-        with pytest.raises(ValueError, match="algorithm_request_pending"):
-            await runner.start("把一个粉色物体放到指定区域")
+        await runner.cancel()
+        assert algorithms.cancelled.is_set()
     finally:
         await finish_service(runner, algorithms)
-    assert runner.state == terminal
-    assert runner.events == events
     assert robot.motor_commands == []
     assert not runner.algorithm_pending
 

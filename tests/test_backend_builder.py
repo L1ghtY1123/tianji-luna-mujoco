@@ -266,7 +266,7 @@ def test_esdf_radius_uses_authored_spheres_and_buffer_without_closure_inflation(
     assert backend_builder.maximum_world_sphere_radius(runtime) == pytest.approx(.205)
 
 
-def test_support_departure_strengthens_public_linear_criteria_without_terminal_imbalance():
+def test_support_departure_passes_public_linear_scale_without_hidden_multiplier():
     from dataclasses import dataclass
 
     from luna_mujoco.backend_builder import support_departure_criteria
@@ -285,7 +285,7 @@ def test_support_departure_strengthens_public_linear_criteria_without_terminal_i
 
     actual = support_departure_criteria(Criteria, SimpleNamespace(axis="z", reference_frame="world"), 2.)
     assert actual.terminal_pose_axes_weight_factor == [1.] * 6
-    assert actual.non_terminal_pose_axes_weight_factor == [200000., 200000., 0., 200000., 200000., 200000.]
+    assert actual.non_terminal_pose_axes_weight_factor == [2., 2., 0., 2., 2., 2.]
     assert actual.project_distance_to_goal is False
 
 

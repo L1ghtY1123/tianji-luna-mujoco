@@ -7,3 +7,5 @@
 输出：place_plan_ready。
 
 放下到空手Lift跨接口保留官方优化轨迹末端JointState的dt、velocity、acceleration；dt来自grasp_trajectory，绝不能替换为控制周期或乘时间伸长。SDK用dt启用速度相关IK种子约束，丢失dt会改成全局IK搜索。输入关节位置仍取实际待执行放下末端，释放后全开、detach；不修改SDK内部算法。
+
+Approach与Lift偏移默认均100mm，实验界面同类参数名称与抓取一致。不设置封装层放置规划总时限；前两段使用实际闭爪及attachment，Lift全开且detach并保留原生JointState.dt。

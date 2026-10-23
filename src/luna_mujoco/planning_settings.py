@@ -113,8 +113,6 @@ class PlanningSettings(BaseModel):
                                        "planner", step=.05, gt=0, le=1)
     freq_hz: int = setting(50, "SDK 轨迹采样频率", "实际映射 cuRobo interpolation_dt=1/frequency；不是 MuJoCo 物理步频。",
                            "planner", unit="Hz", ge=20, le=100, strict=True)
-    plan_timeout_s: float = setting(180., "规划总时限", "覆盖全部 batch、初始化和轨迹复核；增大 seeds / attempts 时可提高。超时结果不执行。",
-                                    "planner", unit="s", step=30, gt=0, le=1800)
 
     approach_axis: Literal["x", "y", "z"] = setting("z", "Approach 轴", "生成接近位姿的坐标轴。", "grasp")
     approach_offset_m: float = setting(-.1, "Approach 偏移", "沿指定坐标轴相对抓取位姿偏移；不能为零。",
@@ -125,18 +123,16 @@ class PlanningSettings(BaseModel):
                                    "grasp", unit="mm", scale=1000, ge=-.5, le=.5)
     lift_in_tool_frame: bool = setting(False, "Lift 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "grasp")
 
-    place_approach_axis: Literal["x", "y", "z"] = setting("z", "Place approach 轴", "独立于抓取接近轴。", "place")
-    place_approach_offset_m: float = setting(.05, "Place approach 偏移", "默认在放置位姿上方 world +Z 50 mm；保持持物碰撞检查，不能为零。",
+    place_approach_axis: Literal["x", "y", "z"] = setting("z", "Approach 轴", "官方grasp_approach_axis；放置接近段使用。", "place")
+    place_approach_offset_m: float = setting(.1, "Approach 偏移", "官方grasp_approach_offset；默认在放置位姿上方 world +Z 100 mm，不能为零。",
                                              "place", unit="mm", scale=1000, ge=-.5, le=.5)
-    place_approach_in_tool_frame: bool = setting(False, "Place approach 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
-    place_retreat_axis: Literal["x", "y", "z"] = setting("z", "Place retreat 轴", "释放后撤离的坐标轴。", "place")
-    place_retreat_offset_m: float = setting(.075, "Place retreat 偏移", "默认沿 world +Z 撤离 75 mm，为释放后RGBD局部障碍余量留出空间；保持碰撞检查，不能为零。",
+    place_approach_in_tool_frame: bool = setting(False, "Approach 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
+    place_retreat_axis: Literal["x", "y", "z"] = setting("z", "Lift 轴", "官方grasp_lift_axis语义；开爪detach后的提升段使用。", "place")
+    place_retreat_offset_m: float = setting(.1, "Lift 偏移", "官方grasp_lift_offset语义；默认沿 world +Z 提升100 mm，不能为零。",
                                             "place", unit="mm", scale=1000, ge=-.5, le=.5)
-    place_retreat_in_tool_frame: bool = setting(False, "Place retreat 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
+    place_retreat_in_tool_frame: bool = setting(False, "Lift 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
     place_release_height_m: float = setting(.01, "持物球底最小间隙", "只读，等于hard clearance，默认10mm。固定抓取旋转，考虑attachment与夹爪最低点及实际碰撞场计算尽量低的安全Z；实际物体包络在目标区域内即可，不设置2mm位置误差上限。",
                                        "place", unit="mm", scale=1000, step=1, ge=0, le=.502)
-    place_timeout_s: float = setting(180., "放置规划总时限", "覆盖持物状态下的放置规划和碰撞复核；超时结果不执行。",
-                                      "place", unit="s", step=30, gt=0, le=1800)
 
     time_scale: float = setting(2., "时间伸长／补点倍率（三段共用）", "cuRobo 完成后用 q/v/a 做五次 Hermite 补点；默认 2 倍，执行点间隔保持 SDK dt。",
                                 "execution", unit="倍", step=.1, ge=1, le=10)
@@ -168,7 +164,7 @@ class PlanningSettings(BaseModel):
         # The fixed-open pregrasp place preflight was removed. Retire its
         # saved option instead of exposing an advanced setting with no effect.
         migrated.pop("place_max_candidates", None)
-        for legacy_name in ("release_margin_m", "place_release_margin_m"):
+        for legacy_name in ("release_margin_m", "place_release_margin_m", "plan_timeout_s", "place_timeout_s"):
             migrated.pop(legacy_name, None)
         migrated['place_release_height_m'] = migrated.get('trajectory_collision_clearance_m', .01)
         return migrated

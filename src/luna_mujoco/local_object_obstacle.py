@@ -9,6 +9,12 @@ from .cameras import deproject_view
 from .robot_surface import own_robot_surface_pixels
 
 
+class LocalObjectDepthError(ValueError):
+    def __init__(self, details):
+        super().__init__('local_object_depth_missing')
+        self.details = details
+
+
 def object_bounds(points, lower_xy, upper_xy, floor, height):
     points = np.asarray(points, float).reshape(-1, 3)
     valid = (np.isfinite(points).all(axis=1)
@@ -37,7 +43,7 @@ def measure_object_obstacle(capture, detector, work_area, appearance, *, camera_
     floor = float(work_area['floor_z_m'])
     height = workpiece_height_prior('pink_wrapped' if appearance == 'wrapped' else 'black_core')
     prompts = (['pink object', 'pink foam wrapped object on the table'] if appearance == 'wrapped'
-               else ['black object on the table', 'black workpiece'])
+               else ['black object', 'black object on the table', 'black workpiece'])
     mask = np.zeros(view['depth_m'].shape, bool)
     attempts = []
     for prompt in prompts:
@@ -49,26 +55,33 @@ def measure_object_obstacle(capture, detector, work_area, appearance, *, camera_
                 raise ValueError('local_object_mask_shape_invalid')
             if float(proposal['score']) >= .5:
                 mask |= proposed
+    counts = {'segmented_pixels': int(mask.sum())}
     mask &= view['valid_depth'] & np.isfinite(view['depth_m']) & (view['depth_m'] > 0)
+    counts['valid_depth_pixels'] = int(mask.sum())
     ownership = own_robot_surface_pixels(capture, {camera_id: mask})
     if ownership['status'] != 'measured':
         raise ValueError('local_object_robot_feedback_missing')
     mask &= ~ownership['masks'][camera_id]
+    counts['non_robot_pixels'] = int(mask.sum())
     points = deproject_view(view, mask)
     keep = ((points[:, :2] >= polygon.min(axis=0)).all(axis=1)
             & (points[:, :2] <= polygon.max(axis=0)).all(axis=1)
             & (points[:, 2] > floor + .005) & (points[:, 2] < floor + height + .03))
     points = points[keep]
+    counts['table_points'] = len(points)
+    diagnostics = {'camera_id': camera_id, 'observation_id': capture['observation_id'],
+        'segmentation_attempts': attempts, 'point_counts': counts}
     if len(points) < 30:
-        raise ValueError('local_object_depth_missing')
+        raise LocalObjectDepthError(diagnostics)
     # Remove isolated returns, not surfaces based on a simulator object pose.
     neighbors = cKDTree(points).query_ball_point(points, .01, return_length=True)
     points = points[neighbors >= 4]
+    counts['dense_table_points'] = len(points)
     if len(points) < 30:
-        raise ValueError('local_object_depth_missing')
+        raise LocalObjectDepthError(diagnostics)
     bounds = object_bounds(points, polygon.min(axis=0), polygon.max(axis=0), floor, height)
     return {'bounds': bounds, 'camera_id': camera_id, 'observation_id': capture['observation_id'],
             'generation': capture['generation'], 'source': ('head_rgbd_object_surface_with_height_prior'
                 if camera_id == '3' else 'wrist_rgbd_object_surface_with_height_prior'),
-            'appearance': appearance, 'segmentation_attempts': attempts, 'mask': mask,
+            'appearance': appearance, 'segmentation_attempts': attempts, 'point_counts': counts, 'mask': mask,
             'points_world_m': points, 'wall_s': time.perf_counter() - started}

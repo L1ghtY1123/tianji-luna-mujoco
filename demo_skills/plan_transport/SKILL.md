@@ -5,3 +5,5 @@
 前提：grasp_completed=true, grasp_held=true, scene_ready=true, unpack_verified=true。
 
 输出事实：transport_plan_ready。完整原始输入、视觉请求、版本及失败证据保存回放；unknown不作为成功。
+
+普通plan_pose不套用额外的放置规划总时限；使用SDK公开尝试预算，网络超时和用户取消仍有效。

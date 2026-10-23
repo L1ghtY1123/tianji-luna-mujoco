@@ -6,4 +6,6 @@ mock VLA后，当前三RGB合并一次Decisions，判断unpack_result（主桌�
 
 输出：unpack_verified、grasp_view_ready、observation_pose_ready。
 
+局部黑件分割包含基础描述`black object`，并保留位置描述和工件描述作为补充。分割为空与深度筛选不足分别记录各阶段点数；停止提示保留`unpack_depth_unconfirmed_after_observation`等具体原因，不用模型生成的笼统拆包失败文字覆盖。
+
 observation_sufficient只针对同次请求明确列出的结果条件，不自我判断、不额外要求跨外观身份匹配或每个相机都看清；允许按结果问题比较BEFORE与CURRENT。概率阈值、补充观测上限和三相机一次请求保持原规则。

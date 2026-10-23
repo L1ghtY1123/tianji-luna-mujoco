@@ -55,13 +55,12 @@ def test_settings_apply_persist_and_reset_preserves_algorithm_configuration(tmp_
     app = create_app(Simulation(), Algorithms(), lambda record: None, tmp_path / "runs")
     with TestClient(app) as client:
         original = client.get("/api/planning-settings").json()
-        values = {**original["settings"], "time_scale": 4, "ik_num_seeds": 24, "plan_timeout_s": 360}
+        values = {**original["settings"], "time_scale": 4, "ik_num_seeds": 24}
         response = client.post("/api/planning-settings", json={
             "settings": values, "expected_revision": original["revision"]})
         response.raise_for_status()
         applied = response.json()
         assert applied["settings"] == values
-        assert app.state.runner.plan_timeout_s == 360
         assert applied["revision"] != original["revision"]
         assert client.get("/api/state").json()["planning_settings"]["revision"] == applied["revision"]
         client.post("/api/reset").raise_for_status()

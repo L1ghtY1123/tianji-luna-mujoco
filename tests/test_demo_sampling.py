@@ -67,12 +67,12 @@ def sampling_case(tmp_path, monkeypatch, outcomes):
     return runner, snapshot, context, calls, clock, call
 
 
-async def test_zero_ik_draws_one_fresh_pool_under_the_original_deadline(tmp_path, monkeypatch):
+async def test_zero_ik_draws_one_fresh_pool_without_wrapper_deadline(tmp_path, monkeypatch):
     runner, snapshot, context, calls, _, _ = sampling_case(tmp_path, monkeypatch, [False, True])
     result = await runner.plan_grasp(snapshot, "source", "A", context)
     assert result["sampling_round"] == 2
     assert [call[0] for call in calls] == ["evaluate_arms", "generate_grasps", "evaluate_arms", "plan_grasp"]
-    assert [call[2]["timeout_s"] for call in calls] == [180., 175., 170., 165.]
+    assert all('timeout_s' not in call[2] for call in calls)
     assert calls[1][2]["report_progress"] is True
     assert calls[1][2]["placement_request"] == context["grasp_placement_request"]
     assert calls[1][2]["planning_settings"] == context["planning_settings"]
@@ -186,8 +186,8 @@ async def test_changed_or_unknown_inputs_cannot_authorize_another_pool(tmp_path,
     assert len(calls) == 1
 
 
-async def test_no_next_call_after_shared_deadline(tmp_path, monkeypatch):
-    runner, snapshot, context, calls, clock, original = sampling_case(tmp_path, monkeypatch, [False])
+async def test_slow_sampling_is_bounded_by_pool_count_not_wrapper_deadline(tmp_path, monkeypatch):
+    runner, snapshot, context, calls, clock, original = sampling_case(tmp_path, monkeypatch, [False, False, False])
 
     async def call(function, *args, **kwargs):
         result = await original(function, *args, **kwargs)
@@ -195,9 +195,10 @@ async def test_no_next_call_after_shared_deadline(tmp_path, monkeypatch):
         return result
 
     runner.call_algorithm = call
-    with pytest.raises(RuntimeError, match="plan_grasp_timeout"):
+    with pytest.raises(AlgorithmError, match="no eligible source grasp target in the bounded candidate pools"):
         await runner.plan_grasp(snapshot, "source", "A", context)
-    assert len(calls) == 1
+    assert len(calls) == 5
+    assert all('timeout_s' not in call[2] for call in calls)
 
 
 @pytest.mark.parametrize("field,changed", [
