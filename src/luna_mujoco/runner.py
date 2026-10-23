@@ -1305,7 +1305,8 @@ class Runner:
         for phase in ("approach", "grasp"):
             command = self.prepare_command(plan["phases"][phase])
             check_phase = "approach_grasp" if phase == "approach" else "grasp"
-            await self.validate_motion(context, check_phase, command, contact_goal_pose_world=plan["T_world_tcp"])
+            await self.validate_motion(context, check_phase, command, contact_goal_pose_world=plan["T_world_tcp"],
+                                       previous_check=plan.get('command_checks', {}).get(phase))
             results[phase] = await self.execution_stage(context, phase, self.motor,
                 self.simulation.execute_trajectory, arm, command["positions_rad"], command["dt"])
             if phase == "approach":
@@ -1318,12 +1319,15 @@ class Runner:
         results["capture_reference"] = await self.execution_stage(context, "capture_reference",
             self.capture_holding_reference, context)
         command = self.prepare_command(plan["phases"]["lift"])
+        # Closure changes finger geometry after the official open-hand plan.
+        # Check that new model once; attachment still begins only after lift.
+        await self.validate_motion(context, 'grasp_lift', command)
         results["lift"] = await self.execution_stage(context, "lift", self.motor,
             self.simulation.execute_trajectory, arm, command["positions_rad"], command["dt"])
         results["dwell_lift"] = await self.execution_stage(context, "dwell_lift", self.motor,
             self.simulation.dwell, settings["dwell_lift_s"])
         return {"arm": arm, "candidate_index": plan.get("candidate_index"), "stages": results,
-                "lift_carried_collision_checked": False}
+                "lift_carried_collision_checked": False, "lift_closed_gripper_collision_checked": True}
 
     async def execute_place(self, context):
         plan, settings = context["place_plan"], context["planning_settings"]
@@ -1343,7 +1347,8 @@ class Runner:
         results = {}
         for phase in ("approach", "place"):
             command = self.prepare_command(plan["phases"][phase])
-            await self.validate_motion(context, phase, command, binding)
+            await self.validate_motion(context, phase, command, binding,
+                                       previous_check=plan.get('command_checks', {}).get(phase))
             results[phase] = await self.execution_stage(context, phase, self.motor,
                 self.simulation.execute_trajectory, arm, command["positions_rad"], command["dt"])
             key = "dwell_place_approach_s" if phase == "approach" else "dwell_place_s"
@@ -1377,7 +1382,8 @@ class Runner:
         await self.execution_stage(context, "dwell_release", self.motor,
                                    self.simulation.dwell, settings["dwell_release_s"])
         command = self.prepare_command(plan["phases"]["retreat"])
-        await self.validate_motion(context, "retreat", command)
+        await self.validate_motion(context, "retreat", command,
+                                   previous_check=plan.get('command_checks', {}).get('retreat'))
         results["retreat"] = await self.execution_stage(context, "retreat", self.motor,
             self.simulation.execute_trajectory, arm, command["positions_rad"], command["dt"])
         await self.execution_stage(context, "dwell_retreat", self.motor,

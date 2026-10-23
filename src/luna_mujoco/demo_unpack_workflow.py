@@ -381,7 +381,8 @@ class UnpackWorkflow:
         plan_id = transport_plan_key(plan)
         await self.verify_scene(context)
         command = self.prepare_command(plan['command'])
-        await self.validate_motion(context, 'transport', command, plan['carrying_binding'])
+        await self.validate_motion(context, 'transport', command, plan['carrying_binding'],
+                                   previous_check=plan.get('command_check'))
         result = await self.execution_stage(context, 'transport', self.motor,
             self.simulation.execute_trajectory, self.state['arm'], command['positions_rad'], command['dt'])
         if transport_plan_key(context['transport_plan']) != plan_id:

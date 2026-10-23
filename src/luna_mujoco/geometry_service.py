@@ -594,7 +594,9 @@ class GeometryRuntime(CuroboRuntime):
                 return PreReleasePlacePlan(approach=replace(result.approach, scene_token=token),
                     place=replace(result.place, scene_token=token))
             except Exception as error:
-                if isinstance(error, CuroboToolError) and error.code == "CUROBO_SCENE_CHANGED":
+                if isinstance(error, CuroboToolError) and (
+                        error.code in {'CUROBO_SCENE_CHANGED', 'release_clearance_conflict'}
+                        or error.code == 'CUROBO_GRASP_FAILED' and error.details.get('phase') in {'approach', 'grasp'}):
                     raise
                 self._discard_compound_backend_unlocked(arm=request.arm,
                     trajectory_collision_clearance_m=request.trajectory_collision_clearance_m,
@@ -1003,6 +1005,9 @@ def run_operation(runtime, path, payload):
             validate_phase_request(payload)
             runtime.configure_planning(settings)
             return runtime.validate_execution(payload, binding)
+        feedback = payload.get('gripper_joint_positions_rad')
+        if not isinstance(feedback, dict) or set(feedback) != {'A', 'B'}:
+            raise ValueError('pose and place planning requires measured A and B gripper feedback')
         if path in ("/tools/plan_place", "/tools/resolve_release_height") and binding is None:
             raise ValueError("plan_place requires measured or scoped preflight carrying geometry")
         if path == "/tools/plan_carried_pose":
@@ -1056,10 +1061,7 @@ def run_operation(runtime, path, payload):
                     "trajectory": asdict(native), "collision_evidence": evidence,
                     "attached": True, "planning_settings_revision": settings.revision()}
         if path == "/tools/plan_place":
-            if feedback is None:
-                native, evidence = runtime.plan_place_scoped(request, binding)
-            else:
-                native, evidence = runtime.plan_place_scoped(request, binding, feedback)
+            native, evidence = runtime.plan_place_scoped(request, binding, feedback)
             return {"ok": True, "planner": "curobo_place", "scene_token": native.scene_token,
                     "phases": {name: asdict(getattr(native, name)) for name in ("approach", "place")},
                     "carrying_binding": asdict(binding), "collision_evidence": evidence,
@@ -1102,7 +1104,11 @@ def run_operation(runtime, path, payload):
                           + (request.goal_matrices_world[-1],) * (IK_BATCH_CAPACITY - candidate_count)))
         carrying = payload.get("carrying_binding")
         if carrying is None:
-            result = runtime.solve_ik_batch_native(request, lock_timeout_s=600).to_payload()
+            feedback = payload.get('gripper_joint_positions_rad')
+            if not isinstance(feedback, dict) or set(feedback) != {'A', 'B'}:
+                raise ValueError('grasp IK requires measured A and B gripper feedback')
+            with runtime.carrying_scope(None, {**feedback, request.arm: 0.}):
+                result = runtime.solve_ik_batch_native(request, lock_timeout_s=600).to_payload()
         else:
             feedback = payload.get("gripper_joint_positions_rad")
             if not isinstance(feedback, dict) or set(feedback) != {"A", "B"}:
@@ -1125,7 +1131,11 @@ def run_operation(runtime, path, payload):
         if candidate_count < capacity:
             request = replace(request, goal_matrices_world=pad_trajectory_batch(request.goal_matrices_world, capacity))
         started = time.perf_counter()
-        native = runtime.plan_grasp_batch_native(request, lock_timeout_s=600)
+        feedback = payload.get('gripper_joint_positions_rad')
+        if not isinstance(feedback, dict) or set(feedback) != {'A', 'B'}:
+            raise ValueError('grasp planning requires measured A and B gripper feedback')
+        with runtime.carrying_scope(None, {**feedback, request.arm: 0.}):
+            native = runtime.plan_grasp_batch_native(request, lock_timeout_s=600)
         LOGGER.info("cuRobo grasp batch complete: arm=%s candidates=%d capacity=%d wall_s=%.3f",
                     request.arm, candidate_count, native.batch_capacity, time.perf_counter() - started)
         items = []

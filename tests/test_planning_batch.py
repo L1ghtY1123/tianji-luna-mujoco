@@ -9,7 +9,7 @@ from luna_mujoco.planning_settings import PlanningSettings
 
 
 def inputs(count=2):
-    state = {"generation": 1, "arms": {arm: {"joints_rad": [0.] * 7} for arm in ("A", "B")},
+    state = {"generation": 1, "arms": {arm: {"joints_rad": [0.] * 7, 'gripper_position_rad': 0.} for arm in ("A", "B")},
              "objects": [{"id": "red", "points_world_m": np.array([
                  [x, y, 0.] for x in np.linspace(-.02, .02, 5) for y in np.linspace(-.02, .02, 5)])}]}
     scene = {"generation": 1, "target_id": "red", "scene_token": "scene-1"}

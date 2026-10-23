@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -147,6 +148,7 @@ def test_small_batches_reuse_one_backend_without_exposing_padding(monkeypatch, a
 
 def request_payload(settings):
     return {"arm": "A", "start_joints_deg": [0] * 7, "other_joints_deg": [0] * 7,
+            'gripper_joint_positions_rad': {'A': 0., 'B': 0.},
             "goal_matrices_world": [[[1, 0, 0, .4], [0, 1, 0, .1], [0, 0, 1, .7], [0, 0, 0, 1]]],
             "scene_token": "scene", "planning_settings": settings.model_dump()}
 
@@ -162,6 +164,11 @@ class Runtime:
 
     def configure_planning(self, settings):
         self.settings = settings
+
+    @contextmanager
+    def carrying_scope(self, binding, feedback):
+        assert binding is None and feedback == {'A': 0., 'B': 0.}
+        yield
 
     def solve_ik_batch_native(self, request, lock_timeout_s):
         assert request.trajectory_collision_clearance_m == self.settings.trajectory_collision_clearance_m

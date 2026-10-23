@@ -1,4 +1,27 @@
-# cuRobo 调用审计（2026-10-22）
+# cuRobo 调用审计（2026-10-23）
+
+## 本轮发现与边界
+
+本轮287项回归、56组GPU几何对照、13配置启动预热及未验收边界，见[2026-10-23验证记录](verification/2026-10-23-planner-call-and-geometry.md)。后文2026-10-22的时间/实验结果保留其历史范围。
+
+先前“所有功能完全遵循官方”表述不准确。官方SDK源码一致、使用公开API、项目调用流程和官方示例一致，是三个不同结论。下面列出的项目后处理不是官方算法内部修改，但也不能描述成只有高级参数与插值。
+
+- 抓取IK和批量规划请求曾漏传夹爪反馈；`fixed_open`检查还把两侧都当成全开。现在必须提交A/B实测开度，只把执行臂设为张开，保持对侧实测状态。
+- 官方抓取三段共享规划时的几何。执行闭爪后，原lift轨迹以实际闭合模型检查；此时无attachment，符合用户要求的lift后才附物。没有重写官方三段式算法。
+- 删除单臂原始规划轨迹的额外整段检查，保留最终五次插值命令的10mm硬净距验证。执行阶段只复用完整请求哈希一致的结果；新增起点连接、对侧关节、夹爪、附件或场景改变都会重新检查。不能承诺不再发生执行前检查。
+- `plan_place`正常无解曾销毁已预热compound规划器；已改为保留。SDK异常仍清理异常实例。vendor保留的单目标抓取方法仍有旧的失败清缓存行为，但本服务未注册`/tools/plan_grasp`，当前demo使用`plan_grasp_batch`。它不是已经修复或开放的功能。
+- 双臂移动仍有服务端和客户端的最终命令验证；支撑法向撤离兼容路径使用公开criterion参数及分段规划，当前demo运输不进入此分支。这些都不能描述为官方示例原样执行。SDK默认配置与项目配置亦不相同。
+
+| 阶段 | 执行手夹爪几何 | attachment | 对侧手 |
+|---|---|---|---|
+| 抓取IK、接近、下降 | 完全张开 | 无 | 实测开度及关节 |
+| 抓取lift | 实测闭合，检查原lift命令 | 无；核验后才附物 | 实测开度及关节 |
+| place接近、下降 | 实测闭合 | 有 | 实测开度及关节 |
+| place释放后lift | 完全张开 | 无 | 实测开度及关节 |
+| 黑件运输plan_pose | 实测闭合 | 有 | 实测开度及关节 |
+| 松爪后空手运动 | 实测张开 | 无 | 实测开度及关节 |
+
+附件默认24球、最多31球，允许与同手全部9个夹爪link接触；TCP、相机、前臂、另一臂和世界碰撞继续检查。不做开爪扫掠。数值对照脚本`scripts/audit_planning_geometry.py`先生成MuJoCo FK参考，再在cuRobo GPU环境核对IK、优化器、图搜索及检查器；它不执行机器人运动。测试结果在本轮完成后单独记录，不以脚本存在代替验证通过。
 
 锁定版本：`8e734f3ced1df898990bcd92de40abce475907db`。审计范围为本项目生产服务、兼容规划入口及离线工作空间生成；不是只检查 SDK 文件是否改变。
 
@@ -17,8 +40,8 @@
 |---|---|---|
 | batched IK | `InverseKinematics.solve_pose` | 独立位姿批、公开 seed 配置；返回后按10mm世界距离筛选解并记录FK |
 | 单目标 IK 兼容入口 | `planner.ik_solver.solve_pose` | 类型、关节顺序、场景版本和结果有效性检查 |
-| `plan_grasp_batch` | `BatchMotionPlanner.plan_grasp` | 官方全部阶段；返回后挑选成功候选、复制轨迹数据并检查碰撞 |
-| `plan_grasp` | `MotionPlanner.plan_grasp` | 官方全部阶段；没有内部方法替换 |
+| `plan_grasp_batch` | `BatchMotionPlanner.plan_grasp` | 官方全部阶段；挑选成功候选、保留官方导数，最终插值命令检查碰撞 |
+| `plan_grasp` | `MotionPlanner.plan_grasp` | vendor历史方法，不注册为本服务HTTP入口；当前单目标抓放求解器用于下行place调用 |
 | `plan_place` | `MotionPlanner.plan_grasp`，公开 `plan_grasp_to_lift=False` | 前两段保持attachment；松爪detach后另调公开规划撤离 |
 | `plan_place_batch` 兼容入口 | `BatchMotionPlanner.plan_grasp`，同上两阶段模式 | 当前demo不调用；保留输入/释放位置/结果检查 |
 | 普通持物或空爪位姿运动 | `MotionPlanner.plan_pose` | 公开 max_attempts；原始轨迹返回后五次插值与执行时间伸长 |

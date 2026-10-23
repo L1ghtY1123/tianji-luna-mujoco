@@ -249,18 +249,8 @@ class ValidatedBatchBackend(_NativeCuroboBackend):
                     continue
                 if not item["success"]:
                     continue
-                for phase_name in ("approach", "place"):
-                    try:
-                        points = item["phases"][phase_name]["positions_rad"]
-                        self.validate_trajectory_native(SimpleNamespace(points_deg=np.rad2deg(points).tolist()))
-                    except CuroboToolError as error:
-                        if error.code != "CUROBO_TRAJECTORY_COLLISION":
-                            raise
-                        item.update(success=False, phases={}, status=error.code,
-                            error={"code": error.code, "message": str(error), "compound_phase": phase_name,
-                                   "details": error.details})
-                        item[phase_name + "_success"] = False
-                        break
+                # The SDK has already checked its raw path. The application
+                # checks the final, time-scaled command after interpolation.
             return {"items": items, "batch_size": PLACE_BATCH_CAPACITY, "batch_capacity": PLACE_BATCH_CAPACITY,
                 "pose_call_timings": list(getattr(self.motion_planner, "pose_call_timings", []))}
         finally:
@@ -294,11 +284,9 @@ class ValidatedBatchBackend(_NativeCuroboBackend):
                 **{field.name: getattr(item, field.name) for field in fields(NativeGraspBatchItem)},
                 grasp_endpoint_fk=evidence))
         fk_done = time.perf_counter()
-        checked = validate_grasp_batch(replace(result, items=tuple(items)), self.validate_trajectory_native)
-        logging.getLogger(__name__).info("grasp timing arm=%s count=%d native_s=%.4f fk_s=%.4f dense_check_s=%.4f pose_calls=%s",
-            self.arm, len(items), native_done - started, fk_done - native_done, time.perf_counter() - fk_done,
-            getattr(self.motion_planner, "pose_call_timings", []))
-        return checked
+        logging.getLogger(__name__).info("grasp timing arm=%s count=%d native_s=%.4f fk_s=%.4f",
+            self.arm, len(items), native_done - started, fk_done - native_done)
+        return replace(result, items=tuple(items))
 
 
 def support_departure_criteria(criteria_type, request, non_terminal_scale):
@@ -433,14 +421,6 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
                 raise CuroboToolError("release_clearance_conflict: attached surface spheres violate hard world clearance at the requested release goal",
                     code="release_clearance_conflict", stage="validation", status=422, details=evidence)
             retained = self._plan_pre_release_native(request)
-            for phase_name in ("approach", "place"):
-                phase = getattr(retained, phase_name)
-                try:
-                    self.validate_trajectory_native(SimpleNamespace(points_deg=np.rad2deg(phase.positions_rad).tolist()))
-                except CuroboToolError as error:
-                    raise CuroboToolError(str(error), code=error.code, stage=error.stage,
-                        retryable=error.retryable, status=error.status,
-                        details={**error.details, "compound_phase": phase_name}) from error
             return retained
         finally:
             self.motion_planner.last_grasp_result = None
@@ -465,7 +445,6 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
                         details=error.details) from error
                 raise
             retained = add_pose_derivatives(result, self.motion_planner.last_pose_result)
-            self.validate_trajectory_native(SimpleNamespace(points_deg=np.rad2deg(retained.positions_rad).tolist()))
             return retained
         finally:
             self.motion_planner.last_pose_result = None

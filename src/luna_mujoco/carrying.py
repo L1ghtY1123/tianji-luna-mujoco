@@ -242,7 +242,7 @@ def validate_phase_request(payload):
         raise ValueError("unknown gripper_geometry_mode")
     if mode == "fixed_open" and (payload.get("carrying_binding") is not None or phase not in ("open_grasp", "approach_grasp", "grasp", "close")):
         raise ValueError("fixed_open requires a detached grasp phase")
-    if phase not in ("observation", "open_grasp", "approach_grasp", "grasp", "lift", "approach", "place", "transport", "close", "open", "retreat"):
+    if phase not in ("observation", "open_grasp", "approach_grasp", "grasp", "grasp_lift", "lift", "approach", "place", "transport", "close", "open", "retreat"):
         raise ValueError("unknown carrying validation phase")
     policy = payload.get("support_contact_policy")
     if policy is not None and (phase != "lift" or policy != "observed_plane_normal_departure"):
@@ -252,7 +252,7 @@ def validate_phase_request(payload):
         raise ValueError("observation requires detached geometry")
     if phase == "retreat" and carrying is not None:
         raise ValueError("retreat requires detached carrying geometry")
-    if phase in ("open_grasp", "approach_grasp", "grasp") and carrying is not None:
+    if phase in ("open_grasp", "approach_grasp", "grasp", "grasp_lift") and carrying is not None:
         raise ValueError("grasp phases require detached geometry")
     if phase in ("lift", "approach", "place", "transport", "open") and carrying is None:
         raise ValueError(f"{phase} requires a measured carrying binding")
@@ -459,7 +459,8 @@ def check_command_path(runtime, planner, payload, binding):
     original = yaml.safe_load(runtime._robot_config_path.read_bytes())
     robot = create_dual_arm_robot_config(original, urdf_path=runtime._urdf_path,
                                          asset_root_path=runtime._asset_root_path)
-    robot = configure_gripper_feedback(robot, None if fixed_open else feedback, runtime._urdf_path)
+    modeled_feedback = {**feedback, payload['arm']: 0.} if fixed_open else feedback
+    robot = configure_gripper_feedback(robot, modeled_feedback, runtime._urdf_path)
     detached_robot = deepcopy(robot)
     if binding is not None:
         robot, _ = create_carrying_robot_config(robot, binding)
@@ -526,6 +527,7 @@ def check_command_path(runtime, planner, payload, binding):
             "collision_scope": "measured_obstacles_and_both_robot_arms",
             "geometry_coverage": "visible_surface_only", "full_object_coverage": False,
             "gripper_joint_positions_rad": dict(feedback),
+            "modeled_gripper_joint_positions_rad": dict(modeled_feedback),
             "gripper_configuration_source": "configured_open_gripper" if fixed_open else "holding_or_open_feedback",
             "failure_reason": "collision_or_joint_bounds" if invalid is not None else None,
             "max_joint_check_step_rad": np.deg2rad(.25),

@@ -440,6 +440,7 @@ class Algorithms:
                      if bound_arm is not None else grasp_targets(world, arm))
             request = {"arm": arm, "start_joints_deg": np.rad2deg(snapshot["arms"][arm]["joints_rad"]).tolist(),
                        "other_joints_deg": np.rad2deg(snapshot["arms"][peer]["joints_rad"]).tolist(),
+                       "gripper_joint_positions_rad": {a: snapshot['arms'][a]['gripper_position_rad'] for a in ('A', 'B')},
                        "scene_token": scene["scene_token"], "planning_settings": settings,
                        "trajectory_collision_clearance_m": settings["trajectory_collision_clearance_m"]}
             valid, batches = [], []
@@ -591,7 +592,7 @@ class Algorithms:
 
     def validate_execution(self, observation, arm, scene, phase, command, binding=None, *,
                            planning_settings=None, gripper_end_position_rad=None,
-                           contact_goal_pose_world=None):
+                           contact_goal_pose_world=None, previous_check=None):
         self._binding(observation, scene["target_id"], scene)
         settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
         peer = "B" if arm == "A" else "A"
@@ -614,6 +615,13 @@ class Algorithms:
             payload["gripper_end_position_rad"] = gripper_end_position_rad
         expected = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
                                             allow_nan=False).encode()).hexdigest()
+        # Reuse only a proof for the identical final command and geometry.
+        # Any changed path, peer, fingers, attachment or scene sends a fresh query.
+        if (previous_check is not None and previous_check.get('binding_sha256') == expected
+                and previous_check.get('scene_token') == scene['scene_token']
+                and previous_check.get('collision_free') is True
+                and previous_check.get('attached') is (binding is not None)):
+            return {**deepcopy(previous_check), 'reused': True}
         result = self.request("/carrying/validate", payload)
         if result.get("scene_token") != scene["scene_token"] or result.get("binding_sha256") != expected:
             raise AlgorithmError("collision proof differs from submitted command", code="collision_proof_mismatch")
@@ -947,6 +955,7 @@ class Algorithms:
                           "trajectory_collision_clearance_m", "optimizer_collision_activation_distance_m")
         request_base = {"arm": arm, "start_joints_deg": evaluation["start_joints_deg"],
                         "other_joints_deg": evaluation["other_joints_deg"], "scene_token": scene["scene_token"],
+                        "gripper_joint_positions_rad": {a: snapshot['arms'][a]['gripper_position_rad'] for a in ('A', 'B')},
                         "planning_settings": effective_settings,
                         **{key: effective_settings[key] for key in planner_fields}}
         planned_count = 0

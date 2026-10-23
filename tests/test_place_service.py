@@ -25,12 +25,14 @@ def test_place_maps_offsets_and_returns_only_honest_pre_release_phases():
             return {"scene_token": "scene-2", "observation_id": "rgbd-2", "generation": 2, "target_id": "sam-source"}
         def configure_planning(self, settings):
             pass
-        def plan_place_scoped(self, request, carrying):
+        def plan_place_scoped(self, request, carrying, feedback):
+            assert feedback == {'A': .4, 'B': .2}
             assert isinstance(request, PlanPlaceRequest)
             assert request.approach_offset_m == .12 and request.approach_in_tool_frame is False
             assert request.lift_offset_m == .15 and request.lift_in_tool_frame is False
             return PreReleasePlacePlan(approach=phase, place=phase), {"optimizer_attachment": True}
     payload = {"arm": "A", "start_joints_deg": [0.] * 7, "other_joints_deg": [0.] * 7,
+               "gripper_joint_positions_rad": {'A': .4, 'B': .2},
                "goal_position_m": [.5, 0, .7], "goal_quaternion_wxyz": [1, 0, 0, 0],
                "scene_token": "scene-2", "planning_settings": settings.model_dump(), "carrying_binding": binding()}
     result = geometry_service.run_operation(Runtime(), "/tools/plan_place", payload)

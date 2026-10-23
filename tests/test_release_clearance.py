@@ -121,7 +121,7 @@ def test_zero_cost_preserves_native_path_failure_and_does_not_change_release_goa
     assert goal.goal_position_m == (.5, .2, .7)
 
 
-def test_zero_cost_keeps_native_planning_derivatives_and_all_final_phase_checks(monkeypatch):
+def test_zero_cost_keeps_native_derivatives_without_rechecking_raw_paths(monkeypatch):
     calls = []
     phases = SimpleNamespace(**{name: SimpleNamespace(positions_rad=[[0.] * 7, [.1] * 7])
                                for name in ("approach", "place")})
@@ -132,7 +132,7 @@ def test_zero_cost_keeps_native_planning_derivatives_and_all_final_phase_checks(
     value = backend([[[0.]]])
     value.validate_trajectory_native = lambda phase: calls.append("hard_phase_check")
     assert value.plan_place_native(request()) is phases
-    assert calls == ["native", "hard_phase_check", "hard_phase_check"]
+    assert calls == ["native"]
 
 
 def test_missing_attachment_cannot_be_used_for_endpoint_proof(monkeypatch):

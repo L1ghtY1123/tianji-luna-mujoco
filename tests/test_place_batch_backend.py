@@ -84,7 +84,7 @@ def test_release_conflict_rejects_only_one_candidate_and_two_phase_batch_copies_
     assert failed["success"] is False and failed["status"] == "release_clearance_conflict"
     assert failed["release_clearance"]["conflicting_sphere_indices"] == [0]
     assert passed["success"] is True and set(passed["phases"]) == {"approach", "place"}
-    assert len(checked) == 2 * (16 - 1)
+    assert checked == []  # Only final interpolated commands get the extra hard check.
     raw.grasp_interpolated_trajectory.velocity.values[:] = 99.
     assert len(passed["phases"]["place"]["positions_rad"]) == 3
     assert passed["phases"]["place"]["velocities_rad_s"][0] == (1.,) * 7
@@ -338,9 +338,7 @@ def test_held_backend_construction_reserves_shared_geometry_before_measured_upda
         assert len(reserved) == 31 and all(row['radius'] < 0 for row in reserved)
 
 
-def test_batch_hard_check_failure_is_local_and_sdk_exception_is_fatal():
-    from tianji_curobo.contracts import CuroboToolError
-
+def test_batch_leaves_final_command_check_to_caller_and_sdk_exception_is_fatal():
     class Position:
         def repeat(self, count, axis):
             return np.zeros((count, 7))
@@ -349,12 +347,11 @@ def test_batch_hard_check_failure_is_local_and_sdk_exception_is_fatal():
     checked = []
     def check(phase):
         checked.append(phase)
-        if len(checked) == 1:
-            raise CuroboToolError("collision", code="CUROBO_TRAJECTORY_COLLISION", stage="validation", status=422)
+        raise AssertionError('raw path checked before execution interpolation')
     value.validate_trajectory_native = check
     result = value.plan_place_batch_native(request())
-    assert result["items"][1]["status"] == "CUROBO_TRAJECTORY_COLLISION"
-    assert result["items"][1]["error"]["compound_phase"] == "approach"
+    assert result["items"][1]["success"] is True
+    assert checked == []
     assert result["items"][2]["success"] is True
     def crash(*args, **kwargs):
         raise RuntimeError("SDK broken")

@@ -255,5 +255,5 @@ def test_backend_releases_public_result_after_success_or_failure(monkeypatch, fa
         result = backend.plan_grasp_batch_native(request)
         assert result.items[0].approach.command_positions_rad is None
         assert len(result.items[0].approach.velocities_rad_s) == 2
-        assert [len(points) for points in checked] == [6, 6]
+        assert checked == []  # Final execution interpolation is checked at the caller.
     assert backend.motion_planner.last_grasp_result is None

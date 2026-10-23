@@ -54,7 +54,7 @@ def test_attached_retreat_failure_does_not_gate_real_approach_place_or_create_a_
     assert calls[0][2]["plan_grasp_to_lift"] is False
     assert calls[0][2]["disable_collision_links"] == []
     assert restored == [{"tcp": "default_criteria"}]
-    assert len(checked) == 2 and not hasattr(plan, "retreat")
+    assert not checked and not hasattr(plan, "retreat")  # Check final interpolated commands in Algorithms.
     assert plan.scene_token is None
     assert len(plan.place.positions_rad) == 2  # SDK padding is not execution.
     raw.grasp_interpolated_trajectory.velocity.values[:] = 99

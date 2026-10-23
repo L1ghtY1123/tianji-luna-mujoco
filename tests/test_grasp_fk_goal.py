@@ -244,6 +244,9 @@ def test_original_runtime_and_service_preserve_fk_at_both_api_boundaries(monkeyp
     runtime = GeometryRuntime()
     runtime.geometry_scene = {"scene_token": "scene"}
     runtime.geometry_solver_profile = PlanningSettings().solver_payload()
+    runtime.gripper_feedback = {'A': 0., 'B': 0.}
+    with runtime.carrying_scope(None, runtime.gripper_feedback):
+        pass
     runtime.effective_config = {"A": {"ik": {}, "plan": {}}}
     monkeypatch.setattr(runtime, "_prepare_scene_cache_unlocked", dict)
     monkeypatch.setattr(runtime, "_refresh_scene_unlocked", lambda **kwargs: "scene")
@@ -251,6 +254,7 @@ def test_original_runtime_and_service_preserve_fk_at_both_api_boundaries(monkeyp
     monkeypatch.setattr(runtime, "_create_real_backend_unlocked", lambda *args, **kwargs: backend)
     monkeypatch.setattr(runtime, "_batch_backend_unlocked", lambda *args: backend)
     payload = {"arm": "A", "start_joints_deg": [0.] * 7, "other_joints_deg": [0.] * 7,
+               "gripper_joint_positions_rad": {'A': 0., 'B': 0.},
                "goal_matrices_world": [pose().tolist()], "scene_token": "scene",
                "planning_settings": PlanningSettings().model_dump()}
     ik_payload = run_operation(runtime, "/tools/solve_ik_batch", payload)
