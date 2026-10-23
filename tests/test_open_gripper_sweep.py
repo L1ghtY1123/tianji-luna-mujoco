@@ -22,11 +22,11 @@ def boundary(monkeypatch, arm, failure=None):
         def __init__(self, config):
             configs.append(config["robot_config"])
             self.kin = config["robot_config"]["robot_cfg"]["kinematics"]
-            self.angle = self.kin["lock_joints"][driver]
-            self.kinematics = SimpleNamespace(joint_names=names)
+            self.kinematics = SimpleNamespace(joint_names=names + ['gripL_finger_joint', 'gripR_finger_joint'])
             self.collision_cost = self.self_collision_cost = object()
 
         def get_kinematics(self, q):
+            self.angle = q.values[0, 0, self.kinematics.joint_names.index(driver)]
             self.count = q.values.shape[1]
             return SimpleNamespace(robot_spheres=Tensor(np.zeros((1, self.count, 1, 4))))
 

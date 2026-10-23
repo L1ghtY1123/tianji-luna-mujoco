@@ -34,7 +34,9 @@ def raw_result():
     return SimpleNamespace(approach_success=Tensor([1] * 16), grasp_success=Tensor([1] * 16),
         status="completed", planning_time=.2, approach_interpolated_trajectory=trajectory,
         grasp_interpolated_trajectory=trajectory, approach_interpolated_last_tstep=Tensor([2] * 16),
-        grasp_interpolated_last_tstep=Tensor([3] * 16))
+        grasp_interpolated_last_tstep=Tensor([3] * 16),
+        approach_trajectory=SimpleNamespace(**vars(trajectory), dt=Tensor([[.047]] * 16)),
+        grasp_trajectory=SimpleNamespace(**vars(trajectory), dt=Tensor([[.047]] * 16)))
 
 
 def backend(raw):

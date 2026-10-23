@@ -309,6 +309,17 @@ def linear_retreat_criteria(backend, axis, in_tool_frame):
 
 
 class ValidatedSingleBackend(_NativeCuroboBackend):
+    def _state(self, joints_deg):
+        state = super()._state(joints_deg)
+        terminal = getattr(self, 'release_start_state', None)
+        if terminal is not None:
+            # Public JointState input, not solver internals. Official plan_grasp
+            # retains dt here; dropping it disables the SDK's velocity-aware IK.
+            for name in ('velocity', 'acceleration'):
+                setattr(state, name, self._torch.as_tensor([terminal[name]], device=self._device, dtype=self._dtype))
+            state.dt = self._torch.as_tensor([terminal['dt']], device=self._device, dtype=self._dtype)
+        return state
+
     def warmup(self):
         return self.motion_planner.warmup(enable_graph=True,
             num_warmup_iterations=self._warmup_iterations)

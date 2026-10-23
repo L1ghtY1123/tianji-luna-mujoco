@@ -19,7 +19,9 @@ def raw_result(**changes):
     return SimpleNamespace(approach_success=True, grasp_success=True, lift_success=False,
         status="success", planning_time=.2, approach_interpolated_trajectory=trajectory,
         grasp_interpolated_trajectory=trajectory, approach_interpolated_last_tstep=Tensor([2]),
-        grasp_interpolated_last_tstep=Tensor([2]), **changes)
+        grasp_interpolated_last_tstep=Tensor([2]),
+        approach_trajectory=SimpleNamespace(**vars(trajectory), dt=Tensor([[.047]])),
+        grasp_trajectory=SimpleNamespace(**vars(trajectory), dt=Tensor([[.047]])), **changes)
 
 
 def planner_backend(result=None, error=None):
@@ -57,6 +59,8 @@ def test_attached_retreat_failure_does_not_gate_real_approach_place_or_create_a_
     assert not checked and not hasattr(plan, "retreat")  # Check final interpolated commands in Algorithms.
     assert plan.scene_token is None
     assert len(plan.place.positions_rad) == 2  # SDK padding is not execution.
+    assert plan.place.terminal_state['dt'] == pytest.approx(.047)  # Native optimization dt, not command dt.
+    assert plan.place.terminal_state['velocity'] == [1.] * 7
     raw.grasp_interpolated_trajectory.velocity.values[:] = 99
     assert plan.place.velocities_rad_s == ((1.,) * 7,) * 2
     assert set(build_execution_phases({name: asdict(getattr(plan, name))

@@ -1563,3 +1563,9 @@ mock VLA后，当前三RGB合并一次Decisions，判断unpack_result（主桌�
 2026-10-23 用户纠正后收敛：撤销本轮未完成验证的“撤离前建障”改动，不保留release_geometry分支或场景更新链兼容代码。粉件先裁去侧凸条再取包围盒；保存旧CAD尺寸的场景仅对该资产已知旧尺寸自动迁移，不接受任意缩放。立方体外观、物理接触、目录尺寸、补高先验、归档与UI采用同一派生资产。
 
 2026-10-23 验证记录：完整单件实验0e64a57e013b400caad9be480e7e856c通过，明确记录lift完成→Decisions补充观测及确认→局部粉件障碍→VLA移动。耗时318.640秒，三分钟目标未达成；另一次原生建图退出139尚无稳定复现，未声明修复。完整证据和限制见[本次验证](verification/2026-10-23-observation-and-collision.md)。本条为验证记录，skill行为无变化。
+
+2026-10-23 建图/放置/拆包复核：放置阶段的1秒按墙钟计时，检查包含在停留预算内，不乘时间伸长倍率；检查超时则记录overrun_s并等待检查完成，绝不跳过碰撞检查。检查器按几何结构缓存，将两夹爪驱动关节保留为官方FK的活动输入，每次传入实际角度；不反复重建锁定关节模型。附件、场景或净距改变仍区分模型。执行检查只上传所需世界，不刷新未参与检查的IK/规划器几何。 observation_sufficient只针对同次请求明确列出的结果条件，不自我判断、不额外要求跨外观身份匹配或每个相机都看清；允许按结果问题比较BEFORE与CURRENT。概率阈值、补充观测上限和三相机一次请求保持原规则。 TSDF与ESDF主流程均为0.02m，使用官方Mapper.integrate和公开integrator.compute_esdf/get_voxel_grid，未修改SDK距离场内核；局部物体包围体和桌面cuboid是明确的项目几何输入。
+
+放下到空手Lift跨接口保留官方优化轨迹末端JointState的dt、velocity、acceleration；dt来自grasp_trajectory，绝不能替换为控制周期或乘时间伸长。SDK用dt启用速度相关IK种子约束，丢失dt会改成全局IK搜索。输入关节位置仍取实际待执行放下末端，释放后全开、detach；不修改SDK内部算法。
+
+verify_drop 的 observation_sufficient 同样仅评估 current_item_added，允许该问题要求的 BEFORE/CURRENT 比较；融合请求测试更新为明确包含现有充分性条件，不能删除该条件来通过旧测试。最新实测通过粉件放置、回观测位姿后的拆包确认，但黑件闭爪后的指端球净距不足10mm，整条任务仍未通过。建图、放置和视觉核验的证据与限制见[本轮审计](verification/2026-10-23-mapping-place-unpack.md)。

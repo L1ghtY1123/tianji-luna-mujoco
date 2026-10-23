@@ -570,6 +570,8 @@ class Algorithms:
                 result[name] = {key: array[:, order].tolist() for key, array in zip(
                     ("positions_rad", "velocities_rad_s", "accelerations_rad_s2"), arrays)}
                 result[name]["interpolation_dt_s"] = dt
+                if phase.get('terminal_state') is not None:
+                    result[name]['terminal_state'] = deepcopy(phase['terminal_state'])
             except (KeyError, TypeError, ValueError, IndexError) as error:
                 raise AlgorithmError("invalid native phase " + name + ": " + str(error),
                                      code="algorithm_invalid_response") from error
@@ -830,16 +832,19 @@ class Algorithms:
             offset = release_tcp[:3, :3] @ offset
         retreat_goal[:3, 3] += offset
         self._check_cancelled(cancelled)
-        retreat = self.plan_retreat(checking, arm, scene, retreat_goal.tolist(), planning_settings=settings)
+        retreat = self.plan_retreat(checking, arm, scene, retreat_goal.tolist(), planning_settings=settings,
+                                    start_state=raw['place'].get('terminal_state'))
         self._check_cancelled(cancelled)
         phases["retreat"], checks["retreat"] = retreat["command"], retreat["check"]
         return phases, checks
 
-    def plan_retreat(self, observation, arm, scene, goal, *, planning_settings=None):
+    def plan_retreat(self, observation, arm, scene, goal, *, planning_settings=None, start_state=None):
         settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
         payload = self._motion_request(observation, arm, scene, goal, settings)
         payload.update(departure_axis=settings['place_retreat_axis'],
                        departure_in_tool_frame=settings['place_retreat_in_tool_frame'])
+        if start_state is not None:
+            payload['departure_start_state'] = deepcopy(start_state)
         response = self.request("/tools/plan_to_pose", payload)
         if response.get("scene_token") != scene["scene_token"] or response.get("attached") is not False:
             raise AlgorithmError("retreat requires a detached current scene")

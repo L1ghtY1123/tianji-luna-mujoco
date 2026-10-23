@@ -5,3 +5,5 @@
 前提：needs_place=true、grasp_held=true、target_selected=true、destination_selected=true、scene_ready=true、place_plan_ready=false、released=false、recovery_needed=false。
 
 输出：place_plan_ready。
+
+放下到空手Lift跨接口保留官方优化轨迹末端JointState的dt、velocity、acceleration；dt来自grasp_trajectory，绝不能替换为控制周期或乘时间伸长。SDK用dt启用速度相关IK种子约束，丢失dt会改成全局IK搜索。输入关节位置仍取实际待执行放下末端，释放后全开、detach；不修改SDK内部算法。

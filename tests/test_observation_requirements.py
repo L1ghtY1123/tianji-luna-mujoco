@@ -20,3 +20,13 @@ def test_success_requires_sufficient_evidence_not_only_positive_result():
     assert result['needs_observation'] and result['status'] == 'unknown'
     result = assessment({'on_support': 'yes', 'observation_sufficient': 'yes'}, {'on_support': 'yes'}, 'frame')
     assert not result['needs_observation'] and result['status'] == 'confirmed'
+
+
+def test_sufficiency_names_only_node_conditions_and_permits_required_reference_comparison():
+    question = sufficiency_question(['unpack_result', 'wrapper_removed'])
+    instructions = question['instructions']
+    assert 'unpack_result, wrapper_removed' in instructions
+    assert 'Do not assess this sufficiency question itself' in instructions
+    assert 'BEFORE' in instructions
+    assert 'unresolved object identity' not in instructions
+    assert 'all the visual conditions' not in instructions

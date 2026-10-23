@@ -19,7 +19,10 @@ def test_validation_reuses_current_planner_world_but_still_checks_exact_command(
         raise AssertionError('validation must not create another full trajectory planner')
     monkeypatch.setattr(runtime, '_compound_backend_unlocked', unexpected)
     refreshed, checked = [], []
-    monkeypatch.setattr(runtime, '_refresh_scene_unlocked', lambda **kwargs: refreshed.append(kwargs['backend']))
+    def refresh(**kwargs):
+        assert kwargs['update_robot_geometry'] is False
+        refreshed.append(kwargs['backend'])
+    monkeypatch.setattr(runtime, '_refresh_scene_unlocked', refresh)
     payload = {'arm': 'A', 'phase': 'retreat', 'scene_token': 'scene'}
     def check(owner, actual_planner, command, binding):
         assert owner is runtime and actual_planner is planner

@@ -5,3 +5,5 @@
 前提：needs_place=true、released=true、place_execution_completed=true、place_verification_completed=false。
 
 输出：place_verification_completed。
+
+observation_sufficient只针对同次请求明确列出的结果条件，不自我判断、不额外要求跨外观身份匹配或每个相机都看清；允许按结果问题比较BEFORE与CURRENT。概率阈值、补充观测上限和三相机一次请求保持原规则。

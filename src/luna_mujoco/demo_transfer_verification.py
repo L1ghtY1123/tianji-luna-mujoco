@@ -327,7 +327,7 @@ def release_result_payload(capture, binding, reference, instruction=""):
             'attachment/contact supporting the workpiece; appearing between open fingers in the wrist '
             'camera, or overlapping the robot in the head camera, is not evidence of retention. '
             'A separate object resting below the open gripper on the tabletop is not held.'))
-        questions.append(sufficiency_question())
+        questions.append(sufficiency_question(['place_result', 'workpiece_still_held']))
     cameras = ("2", "3", "1")
     if wrapped:
         content.extend(reference_content(reference))

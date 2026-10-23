@@ -49,7 +49,7 @@ def command_boundary(monkeypatch, phase, failure=None):
                 balls.extend([[0., 0., 1., .02]] * len(indices[link]))
             self.balls = np.asarray(balls)
             self.indices = indices
-            self.kinematics = SimpleNamespace(joint_names=names, kinematics_config=SimpleNamespace(
+            self.kinematics = SimpleNamespace(joint_names=names + ['gripL_finger_joint', 'gripR_finger_joint'], kinematics_config=SimpleNamespace(
                 get_sphere_index_from_link_name=lambda link: Tensor(indices[link])))
             self.collision_cost = self.self_collision_cost = object()
 
@@ -137,6 +137,6 @@ def test_dual_command_checks_both_moving_chains_and_measured_grippers(monkeypatc
     payload.pop('other_joints_deg')
     result = carrying.check_command_path(runtime, planner, payload, None)
     checker = next(iter(runtime._command_checkers.values()))
-    np.testing.assert_allclose(checker.q[0, -1], [.02] * 7 + [-.04] * 7)
+    np.testing.assert_allclose(checker.q[0, -1], [.02] * 7 + [-.04] * 7 + [.04, 0.])
     assert result['collision_free'] is (failure is None)
     assert {kind for _, kind in calls} == {'world', 'self', 'bounds'}

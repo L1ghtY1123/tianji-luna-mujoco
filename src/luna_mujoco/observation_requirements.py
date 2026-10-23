@@ -2,14 +2,19 @@
 from .decision_conditions import condition
 
 
-def sufficiency_question():
+def sufficiency_question(criteria=()):
+    scope = ', '.join(criteria) if criteria else 'the other named outcome questions in this request'
     return condition('observation_sufficient',
-        'The combined CURRENT views provide enough evidence to confirm OR rule out all the visual '
-        'conditions asked in this request for the active task and state. A clearly visible failed '
-        'action still has sufficient evidence. Occlusion, an unseen relevant area, unresolved object '
-        'identity, or conflicting views make the evidence insufficient. One useful view may suffice; '
-        'three cameras alone do not prove sufficiency. Historical images and action records cannot '
-        'fill missing CURRENT pixels. Do not assess kinematic reachability or hidden depth from RGB.')
+        f'The combined CURRENT views provide enough evidence to confirm OR rule out ONLY: {scope}. '
+        'Do not assess this sufficiency question itself or add conditions. Use exactly the scope and '
+        'evidence rules of those named questions. A clearly visible failed action still has sufficient '
+        'evidence. Occlusion matters only when it prevents judging one of those conditions across ALL '
+        'CURRENT views; one useful view is enough. Do not require all cameras to see the object, a '
+        'complete object silhouette, hidden surfaces, or identities that the outcome questions exclude. '
+        'When a named question asks for a change, compare its labeled BEFORE reference with CURRENT; '
+        'this is valid comparison evidence, although BEFORE alone cannot prove the current outcome. '
+        'Action records alone cannot prove visual success. Do not assess kinematic reachability or hidden '
+        'depth from RGB. Request another observation only for a missing or ambiguous required visual fact.')
 
 
 def assessment(judgments, expected, observation_id):

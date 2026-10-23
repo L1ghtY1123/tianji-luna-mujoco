@@ -609,7 +609,8 @@ class GeometryRuntime(CuroboRuntime):
         finally:
             self.gpu_lock.release()
 
-    def plan_retreat_scoped(self, request, feedback=None, *, departure_axis=None, departure_in_tool_frame=False):
+    def plan_retreat_scoped(self, request, feedback=None, *, departure_axis=None, departure_in_tool_frame=False,
+                           departure_start_state=None):
         if self.geometry_scene.get("exclusion_state") not in {"selected", "held", "released"}:
             raise ValueError("retreat requires a manipulation scene")
         with self.carrying_scope(None, feedback):
@@ -620,11 +621,13 @@ class GeometryRuntime(CuroboRuntime):
                     self._prepare_scene_cache_unlocked()
                     backend = self._backend_unlocked(request.arm)
                     backend.release_departure = (departure_axis, departure_in_tool_frame)
+                    backend.release_start_state = departure_start_state
                 try:
                     native = self.plan_to_pose_native(request, lock_timeout_s=600)
                 finally:
                     with self.gpu_lock:
                         backend.release_departure = None
+                        backend.release_start_state = None
             evidence = dict(self.effective_config[request.arm]["plan"])
         return native, evidence
 
@@ -757,7 +760,7 @@ class GeometryRuntime(CuroboRuntime):
                     if backend is not None:
                         break
                 if backend is not None:
-                    self._refresh_scene_unlocked(arm=payload["arm"], backend=backend)
+                    self._refresh_scene_unlocked(arm=payload["arm"], backend=backend, update_robot_geometry=False)
                     result = check_command_path(self, backend.motion_planner, payload, binding)
                     self._require_scene_token_unchanged_unlocked(payload["scene_token"])
                     return result
@@ -863,8 +866,8 @@ class GeometryRuntime(CuroboRuntime):
         self._scene_model = self.geometry_model
         return snapshot
 
-    def _refresh_scene_unlocked(self, *, arm, backend, snapshot=None, **kwargs):
-        if hasattr(backend, 'resident_geometry'):
+    def _refresh_scene_unlocked(self, *, arm, backend, snapshot=None, update_robot_geometry=True, **kwargs):
+        if update_robot_geometry and hasattr(backend, 'resident_geometry'):
             backend.resident_geometry.update(backend, self.gripper_feedback, self.carrying_binding)
         # A warmed arm owns several batch shapes. Report the backend actually
         # selected for this call, rather than the last one constructed.
@@ -1072,10 +1075,19 @@ def run_operation(runtime, path, payload):
             if (departure_axis != settings.place_retreat_axis
                     or payload.get('departure_in_tool_frame') is not settings.place_retreat_in_tool_frame):
                 raise ValueError('retreat direction conflicts with planning_settings')
+            terminal = payload.get('departure_start_state')
+            if terminal is not None and (
+                        not isinstance(terminal, dict) or set(terminal) != {'position', 'velocity', 'acceleration', 'dt'}
+                        or type(terminal['dt']) not in (int, float) or not np.isfinite(terminal['dt']) or terminal['dt'] <= 0
+                        or any(np.asarray(terminal[name]).shape != (7,) or not np.isfinite(terminal[name]).all()
+                               for name in ('position', 'velocity', 'acceleration'))):
+                raise ValueError('invalid native release JointState')
             native, evidence = runtime.plan_retreat_scoped(request, feedback, departure_axis=departure_axis,
-                departure_in_tool_frame=settings.place_retreat_in_tool_frame)
+                departure_in_tool_frame=settings.place_retreat_in_tool_frame, departure_start_state=terminal)
             evidence = {**evidence, 'departure_criterion': 'official_ToolPoseCriteria.linear_motion',
-                'axis': departure_axis, 'in_tool_frame': settings.place_retreat_in_tool_frame}
+                'axis': departure_axis, 'in_tool_frame': settings.place_retreat_in_tool_frame,
+                'native_release_state_preserved': terminal is not None,
+                'native_release_dt_s': None if terminal is None else terminal['dt']}
         else:
             native, evidence = runtime.plan_retreat_scoped(request, feedback)
         return {"ok": True, "planner": "curobo_pose", "scene_token": native.scene_token,

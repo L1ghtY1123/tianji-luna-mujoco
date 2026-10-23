@@ -1,6 +1,6 @@
 {
   "id": "verify_place",
-  "description": "撤离完成后采当前三RGB，单次Decisions联合判断place_result（桌面独立粉件）、workpiece_still_held（仍被夹持）、observation_sufficient（当前证据是否足够确认或否定这些条件）。前两项分别须yes/no，充分性须yes；概率≥0.8为yes、≤0.2为no，其余unknown。释放XY由实际前端反馈数值核验，不能拿动作历史替代当前像素。证据不足时沿最近的保留场景回固定观测位姿，采新三图再核验一次；没有确认放置成功前不建立粉件局部碰撞。仍不足停止。明确失败不重复观察。全过程绑定原始持物、释放与场景更新链；成功仅推进table_released。确认后刷新局部粉件障碍，首次桌面及背景地图复用。",
+  "description": "撤离完成后采当前三RGB，单次Decisions联合判断place_result（桌面独立粉件）、workpiece_still_held（仍被夹持）、observation_sufficient（当前证据是否足够确认或否定这些条件）。前两项分别须yes/no，充分性须yes；概率≥0.8为yes、≤0.2为no，其余unknown。释放XY由实际前端反馈数值核验，不能拿动作历史替代当前像素。证据不足时沿最近的保留场景回固定观测位姿，采新三图再核验一次；没有确认放置成功前不建立粉件局部碰撞。仍不足停止。明确失败不重复观察。全过程绑定原始持物、释放与场景更新链；成功仅推进table_released。确认后刷新局部粉件障碍，首次桌面及背景地图复用。 observation_sufficient只针对同次请求明确列出的结果条件，不自我判断、不额外要求跨外观身份匹配或每个相机都看清；允许按结果问题比较BEFORE与CURRENT。概率阈值、补充观测上限和三相机一次请求保持原规则。",
   "requires": {
     "needs_place": true,
     "released": true,

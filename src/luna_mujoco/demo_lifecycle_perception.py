@@ -269,7 +269,8 @@ def unpack_result_questions():
             'table has been unpacked: its black inner workpiece is exposed as a separate object, no longer '
             'enclosed by the pink wrapper. Pink wrappers or other pink workpieces may remain elsewhere. '
             'Use the visible change and single active process; do not demand matching pink/black visual '
-            'identity or infer success solely from the VLA action record.'), sufficiency_question()]
+            'identity or infer success solely from the VLA action record.'),
+        sufficiency_question(['unpack_result', 'wrapper_removed'])]
 
 
 def unpack_result_evidence(body, minimum_confidence):
@@ -532,7 +533,8 @@ def verify_right_bin_drop(client, capture, *, target_id, lifecycle, action_evide
                         'Exclude robot parts, shadows, and objects on the table or outside this bin. '
                         'If occlusion leaves no positive visual evidence of addition, remain uncertain. '
                         'Historical counts and action records alone do not prove arrival. '
-                        'No exact pose or identity of individual dropped pieces is required.'), sufficiency_question()]
+                        'No exact pose or identity of individual dropped pieces is required.'),
+        sufficiency_question(['current_item_added'])]
     payload = {'model': 'gpt-6-luna', 'input': [{'role': 'user', 'content': content}], 'questions': questions}
 
     def parse(body, evidence):

@@ -1,6 +1,6 @@
 {
   "id": "plan_place",
-  "description": "粉件保持抓取旋转，夹爪前端对准固定共享区域中心XY=[0.50160,0.11646]m，无分区。Z根据attachment、当前夹爪与世界碰撞选择接近10mm间隙的高度。直接调用官方plan_grasp的接近/放下两阶段，不使用plan_place_batch；两段均闭爪attachment。第三段按全开夹爪、detach规划，使用官方plan_pose配合ToolPoseCriteria.linear_motion，沿高级设置撤离轴lift，避免自由绕弯扫过刚释放的物体。只检查当前闭合与全开端点，不检查开爪扫掠，不加2mm终点上限。",
+  "description": "粉件保持抓取旋转，夹爪前端对准固定共享区域中心XY=[0.50160,0.11646]m，无分区。Z根据attachment、当前夹爪与世界碰撞选择接近10mm间隙的高度。直接调用官方plan_grasp的接近/放下两阶段，不使用plan_place_batch；两段均闭爪attachment。第三段按全开夹爪、detach规划，使用官方plan_pose配合ToolPoseCriteria.linear_motion，沿高级设置撤离轴lift，避免自由绕弯扫过刚释放的物体。只检查当前闭合与全开端点，不检查开爪扫掠，不加2mm终点上限。 放下到空手Lift跨接口保留官方优化轨迹末端JointState的dt、velocity、acceleration；dt来自grasp_trajectory，绝不能替换为控制周期或乘时间伸长。SDK用dt启用速度相关IK种子约束，丢失dt会改成全局IK搜索。输入关节位置仍取实际待执行放下末端，释放后全开、detach；不修改SDK内部算法。",
   "requires": {
     "needs_place": true,
     "grasp_held": true,

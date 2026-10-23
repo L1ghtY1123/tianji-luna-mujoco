@@ -5,7 +5,7 @@ from dataclasses import asdict
 import numpy as np
 
 from .planning_batches import TRAJECTORY_BATCH_CAPACITY
-from .trajectory_postprocessing import RawTrajectory, _phase_samples
+from .trajectory_postprocessing import RawTrajectory, _phase_samples, phase_terminal_state
 
 PLACE_BATCH_CAPACITY = TRAJECTORY_BATCH_CAPACITY
 
@@ -47,6 +47,7 @@ def place_batch_items_from_result(result, joint_names, interpolation_dt_s):
                     values[index, 0, :int(length)][:, order].copy() for values in (q, v, a)]
                 phase = RawTrajectory(positions_rad=positions.tolist(), joint_names=tuple(joint_names),
                     velocities_rad_s=velocities, accelerations_rad_s2=accelerations,
+                    terminal_state=phase_terminal_state(result, sdk_name, joint_names, index),
                     interpolation_dt_s=interpolation_dt_s, planning_time_s=planning_time,
                     position_error_m=0., rotation_error_rad=0.)
                 item["phases"][phase_name] = asdict(phase)

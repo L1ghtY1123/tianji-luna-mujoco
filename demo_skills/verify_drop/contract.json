@@ -1,6 +1,6 @@
 {
   "id": "verify_drop",
-  "description": "实际attachment运输、开爪后，单次Decisions联合CURRENT三RGB、BEFORE三RGB及同盒局部放大图，判断current_item_added（本次右盒新增黑件）和observation_sufficient。须两项yes；新增主体或轮廓可以证明增加，不要求随机堆叠后逐个数清N+1，不重认盒内个体ID，旧件移动或历史数量不证明增加。证据不足时，先发布明确标为动作推导、尚未视觉确认的盒内保守包络，再回固定观测位姿采新三图核验一次；不重建全局地图。仍不足不计完成。确认后才完成产物及工序，保留released_in_bin_and_visible_addition语义，并更新确认后的动作包络供回位。",
+  "description": "实际attachment运输、开爪后，单次Decisions联合CURRENT三RGB、BEFORE三RGB及同盒局部放大图，判断current_item_added（本次右盒新增黑件）和observation_sufficient。须两项yes；新增主体或轮廓可以证明增加，不要求随机堆叠后逐个数清N+1，不重认盒内个体ID，旧件移动或历史数量不证明增加。证据不足时，先发布明确标为动作推导、尚未视觉确认的盒内保守包络，再回固定观测位姿采新三图核验一次；不重建全局地图。仍不足不计完成。确认后才完成产物及工序，保留released_in_bin_and_visible_addition语义，并更新确认后的动作包络供回位。 证据充分性只评估current_item_added，允许按该问题比较BEFORE/CURRENT，不额外要求跨外观身份、全相机可见或完整轮廓；充分性仍须yes。",
   "inputs": [
     "frozen_task_item_lifecycle",
     "current_robot_feedback",

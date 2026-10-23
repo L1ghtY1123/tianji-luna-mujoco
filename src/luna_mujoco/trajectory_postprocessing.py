@@ -18,6 +18,7 @@ class RawTrajectory(NativeTrajectory):
 
     velocities_rad_s: tuple[tuple[float, ...], ...]
     accelerations_rad_s2: tuple[tuple[float, ...], ...]
+    terminal_state: dict | None = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -31,7 +32,7 @@ class RawTrajectory(NativeTrajectory):
 
 @dataclass(frozen=True)
 class PreReleasePlacePlan:
-    """Real attached phases; retreat is planned after measured release."""
+    """Attached phases; the separate retreat uses open, detached geometry."""
 
     approach: RawTrajectory
     place: RawTrajectory
@@ -125,6 +126,24 @@ def add_place_derivatives(native, raw_result):
     return replace(native, **phases)
 
 
+def phase_terminal_state(raw_result, name, joint_names, index=0):
+    """Keep the public optimized JointState that official plan_grasp passes to Lift."""
+    state = getattr(raw_result, name + '_trajectory', None)
+    if state is None or state.dt is None:
+        raise ValueError('missing native terminal JointState dt')
+    order = [state.joint_names.index(joint) for joint in joint_names]
+    result = {}
+    for field_name in ('position', 'velocity', 'acceleration'):
+        values = np.asarray(getattr(state, field_name).detach().cpu().numpy(), dtype=float)
+        result[field_name] = values[index, 0, -1, order].tolist()
+        if not np.isfinite(result[field_name]).all():
+            raise ValueError('invalid native terminal JointState')
+    result['dt'] = float(np.asarray(state.dt.detach().cpu().numpy()).reshape(-1)[index])
+    if not np.isfinite(result['dt']) or result['dt'] <= 0:
+        raise ValueError('invalid native terminal JointState dt')
+    return result
+
+
 def pre_release_place_from_result(raw_result, joint_names, interpolation_dt_s):
     """Copy only the public approach/grasp samples, respecting valid lengths."""
     planning_time = float(getattr(raw_result, "planning_time", 0.) or 0.)
@@ -146,6 +165,7 @@ def pre_release_place_from_result(raw_result, joint_names, interpolation_dt_s):
         positions, velocities, accelerations = [values[0, 0, :count][:, order].copy() for values in (q, v, a)]
         phases[project_name] = RawTrajectory(positions_rad=positions.tolist(), joint_names=tuple(joint_names),
             velocities_rad_s=velocities, accelerations_rad_s2=accelerations,
+            terminal_state=phase_terminal_state(raw_result, sdk_name, joint_names),
             interpolation_dt_s=interpolation_dt_s, planning_time_s=planning_time,
             position_error_m=0., rotation_error_rad=0.)
     return PreReleasePlacePlan(**phases)

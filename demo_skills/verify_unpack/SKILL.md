@@ -5,3 +5,5 @@ mock VLA后，当前三RGB合并一次Decisions，判断unpack_result（主桌�
 前提：unpack_pending=true、vla_pose_ready=true。
 
 输出：unpack_verified、grasp_view_ready、observation_pose_ready。
+
+observation_sufficient只针对同次请求明确列出的结果条件，不自我判断、不额外要求跨外观身份匹配或每个相机都看清；允许按结果问题比较BEFORE与CURRENT。概率阈值、补充观测上限和三相机一次请求保持原规则。

@@ -1169,6 +1169,16 @@ class Runner:
             context["scene"], phase, command, binding,
             planning_settings=context["planning_settings"], **kwargs)
 
+    async def validate_during_dwell(self, context, phase, command, binding=None, *, duration_s, **kwargs):
+        """Count validation inside the wall-clock hold, never append another full hold."""
+        started = time.monotonic()
+        check = await self.validate_motion(context, phase, command, binding, **kwargs)
+        validation_s = time.monotonic() - started
+        await self.motor(self.simulation.dwell, max(0., duration_s - validation_s))
+        return {**check, 'requested_duration_s': duration_s,
+                'validation_s': validation_s, 'duration_s': time.monotonic() - started,
+                'overrun_s': max(0., validation_s - duration_s)}
+
     def prepare_command(self, command):
         positions = np.asarray(command["positions_rad"], dtype=float)
         feedback = self.simulation.robot_snapshot()
@@ -1347,12 +1357,16 @@ class Runner:
         results = {}
         for phase in ("approach", "place"):
             command = self.prepare_command(plan["phases"][phase])
-            await self.validate_motion(context, phase, command, binding,
-                                       previous_check=plan.get('command_checks', {}).get(phase))
+            if phase == 'place':
+                results['dwell_place_approach_s'] = await self.execution_stage(
+                    context, 'dwell_place_approach_s', self.validate_during_dwell,
+                    context, phase, command, binding, duration_s=settings['dwell_place_approach_s'],
+                    previous_check=plan.get('command_checks', {}).get(phase))
+            else:
+                await self.validate_motion(context, phase, command, binding,
+                                           previous_check=plan.get('command_checks', {}).get(phase))
             results[phase] = await self.execution_stage(context, phase, self.motor,
                 self.simulation.execute_trajectory, arm, command["positions_rad"], command["dt"])
-            key = "dwell_place_approach_s" if phase == "approach" else "dwell_place_s"
-            await self.execution_stage(context, key, self.motor, self.simulation.dwell, settings[key])
         release_feedback = self.measured_state(context)
         context["release_tcp"] = release_feedback["arms"][arm]["tcp"]
         from .placement import release_endpoint_evidence
@@ -1362,9 +1376,9 @@ class Runner:
         if not endpoint['at_release_goal']:
             raise ValueError('release_endpoint_not_reached')
         results['release_collision_check'] = await self.execution_stage(
-            context, 'release_collision_check', self.validate_motion, context, 'place',
+            context, 'release_collision_check', self.validate_during_dwell, context, 'place',
             {'positions_rad': [release_feedback['arms'][arm]['joints_rad']]}, binding,
-            measured_observation=release_feedback)
+            measured_observation=release_feedback, duration_s=settings['dwell_place_s'])
         context['pending_transfer'] = {'target_id': self.state['target_id'], 'destination_id': self.state['destination_id'],
             'destination_kind': observed_object(context['observation'], self.state['destination_id'])['kind'],
             'scene_token': context['scene']['scene_token'], 'tcp_before_lift': copy.deepcopy(
@@ -1379,11 +1393,11 @@ class Runner:
         if not gripper_open_confirmed(feedback):
             raise ValueError("release_not_confirmed_by_gripper")
         self.state["facts"].update(released=True, grasp_held=False, attached=False)
-        await self.execution_stage(context, "dwell_release", self.motor,
-                                   self.simulation.dwell, settings["dwell_release_s"])
         command = self.prepare_command(plan["phases"]["retreat"])
-        await self.validate_motion(context, "retreat", command,
-                                   previous_check=plan.get('command_checks', {}).get('retreat'))
+        results['dwell_release'] = await self.execution_stage(context, 'dwell_release',
+            self.validate_during_dwell, context, 'retreat', command,
+            duration_s=settings['dwell_release_s'],
+            previous_check=plan.get('command_checks', {}).get('retreat'))
         results["retreat"] = await self.execution_stage(context, "retreat", self.motor,
             self.simulation.execute_trajectory, arm, command["positions_rad"], command["dt"])
         await self.execution_stage(context, "dwell_retreat", self.motor,
