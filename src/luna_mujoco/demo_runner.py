@@ -731,8 +731,17 @@ class DemoRunner(UnpackWorkflow, Runner):
     async def finish_unpack_at_initial_pose(self, context):
         if completed_input_ids(self.demo_task) != set(self.demo_task['transport_ids']):
             raise ValueError('program_finished_with_pending_targets')
-        if not self.state['facts'].get('observation_pose_ready'):
+        try:
+            self.require_observation_pose(context)
+        except ValueError as error:
+            if str(error) != 'mapping_requires_observation_pose':
+                raise
+            self.state['facts']['observation_pose_ready'] = False
+            context['use_retained_scene_for_return'] = True
             await self._step('move_to_observe', context)
+            self.state['facts']['observation_pose_ready'] = False
+            self.require_observation_pose(context)
+        self.state['facts']['observation_pose_ready'] = True
 
     async def _run(self, run_id, initial):
         context = {"initial": initial, "planning_settings": copy.deepcopy(self.state["planning_settings"]),
