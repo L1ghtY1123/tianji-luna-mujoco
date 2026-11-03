@@ -26,9 +26,19 @@
 | `src/luna_mujoco/robot_skills/` | 注册技能实现 |
 | `skill_catalog/` | 技能说明、参数及前提/效果契约 |
 | `src/luna_mujoco/backend_builder.py`、`geometry_service.py` | 官方 cuRobo 适配和服务 |
+| `src/tianji_foundationpose/` | 主程序使用的 FoundationPose HTTP 客户端和数据契约，不含推理后端 |
+| `services/luna_foundationpose/` | FoundationPose 容器侧的项目适配：模型缓存、请求服务及固定版本 SDK 接线 |
+| `vendor/` | 固定版本的 cuRobo/GraspGen 依赖适配包副本；来源见 `ASSET_PROVENANCE.md`，不作为项目算法的新增位置 |
+| `resources/` | CAD、相机标定、工作空间、碰撞配置与来源清单；只放静态资源，不放 Python 算法代码 |
+| `assets/` | MuJoCo 与规划使用的机器人 URDF 和网格 |
+| `scripts/` | 可复用的离线构建、资源准备和审计工具 |
 | `web/` | 工作台和实验回放 |
 | `tests/` | 当前行为回归及测试数据 |
 | `data/` | 实验、性能证据和清理前的不可执行快照 |
+
+正式任务实现位于 `src/`，容器专属服务适配位于 `services/`。二者分开是为了隔离运行环境：FoundationPose 服务使用镜像内完整的 `tianji_foundationpose` 包，主程序使用 `src/tianji_foundationpose/` 中的客户端子集；不能直接把整个 `src/` 加入该服务的 Python 搜索路径，以免同名包遮蔽服务后端。
+
+`vendor/` 是有来源记录的依赖副本，`resources/` 和 `assets/` 是算法输入，`data/` 中保留的脚本是历史实验复现材料。正式启动、导入和部署不能依赖 `data/` 中的脚本。临时部署包、已合入的候选源码与废弃构建输出在交付后清理；可复用工具应进入 `scripts/` 并接受版本管理。
 
 独立 CAD 库位于 `/home/guangyu/projects/CAD`。生产通过 `LUNA_CAD_ROOT=/opt/cad` 的只读挂载使用它；`resources/cad/` 是同步维护的项目副本。蓝盒 1000 面、黑色工件 999 面，配准和碰撞使用同一表面，左右臂离线抓姿数值保持不变。
 
@@ -46,7 +56,7 @@
 | `data/render_meshes/` | 网页渲染网格缓存，可由当前模型生成；历史回放可能引用旧缓存。 |
 | `data/foundationpose-registry/` | FoundationPose 当前部署挂载的模型注册库，运行需要，不能随历史实验一起清空。 |
 
-2026-11-03 检查时，`data/` 约 140 GiB，其中实验回收区约 96 GiB；这些是本机占用，不计入 Git 提交。本文中的 `data/` 证据链接指向本地归档，GitHub 克隆不会包含这些记录。
+2026-11-03 按用户保留要求清理后，`data/` 从约 139.96 GiB 降至 43.79 GiB：清空 293 条已删除实验的回收记录，移除 157 个过期源码/部署传输包、5 个无调用的源码暂存目录和网页构建输出。现有实验、失败证据、FoundationPose 注册库与回放网格缓存保留；这些是本机占用，不计入 Git 提交。删除清单和保留文件核对记录位于本机 `data/cleanup-20261103/repository-cleanup-*.json*`。本文中的 `data/` 证据链接指向本地归档，GitHub 克隆不会包含这些记录。
 
 在新机器部署时，还需单独准备 `.env`、OpenAI 配置、Compose 指定的本地镜像、独立 CAD 库及 FoundationPose 注册库。注册库可备份迁移，或使用 `scripts/provision_foundationpose_registry.py`，结合匹配固定版本的服务包、CAD 库和已有 seed registry 准备；仅克隆本仓库不等于已具备完整运行环境。
 
