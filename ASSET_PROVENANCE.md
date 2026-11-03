@@ -1,5 +1,7 @@
 # Robot assets and MuJoCo adaptation
 
+2026-11-03：本文中的旧测试、夹具和离线审计路径属于历史来源记录；测试目录和未使用的离线材料已按用户要求删除。当前验证入口见 README，历史文件可从 Git 查询。
+
 ## User CAD pink replacement (2026-10-21)
 
 The active `pink_wrapped` asset now comes from the supplied

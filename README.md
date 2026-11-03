@@ -33,32 +33,35 @@
 | `assets/` | MuJoCo 与规划使用的机器人 URDF 和网格 |
 | `scripts/` | 可复用的离线构建、资源准备和审计工具 |
 | `web/` | 工作台和实验回放 |
-| `tests/` | 当前行为回归及测试数据 |
-| `data/` | 实验、性能证据和清理前的不可执行快照 |
+| `data/` | 实验与运行日志、注册库、回放网格、规划参数 |
 
-正式任务实现位于 `src/`，容器专属服务适配位于 `services/`。二者分开是为了隔离运行环境：FoundationPose 服务使用镜像内完整的 `tianji_foundationpose` 包，主程序使用 `src/tianji_foundationpose/` 中的客户端子集；不能直接把整个 `src/` 加入该服务的 Python 搜索路径，以免同名包遮蔽服务后端。
+算法官方源码、权重和通用服务的维护仓库为 `/home/guangyu/projects/tianji-algorithms`。Luna 当前承担应用编排、MuJoCo 仿真、场景/碰撞/持物逻辑、专用 `geometry_service` 以及 FoundationPose 缓存适配，并非所有路径都只是 HTTP 转发。算法仓库的通用 cuRobo 服务不替代 Luna 专用接口。
 
-`vendor/` 是有来源记录的依赖副本，`resources/` 和 `assets/` 是算法输入，`data/` 中保留的脚本是历史实验复现材料。正式启动、导入和部署不能依赖 `data/` 中的脚本。临时部署包、已合入的候选源码与废弃构建输出在交付后清理；可复用工具应进入 `scripts/` 并接受版本管理。
+`vendor/tianji_curobo/` 的 26 个 Python 文件和 `vendor/tianji_graspgen/` 的 7 个文件在 2026-11-03 与算法仓库逐字节一致，是仍被当前导入与镜像构建引用的依赖副本；它们不是另一份官方 SDK。`services/` 是 Luna 的容器专属适配，使用镜像内完整 FoundationPose 服务包；`src/tianji_foundationpose/` 是应用客户端子集，不能直接覆盖服务包的 Python 搜索路径。`resources/` 和 `assets/` 只提供配置、标定和模型输入。
+
+正式入口不得加载 `data/` 中的脚本。可复用维护工具放在 `scripts/`；临时调试代码、候选实现和部署传输包在使用后删除。
 
 独立 CAD 库位于 `/home/guangyu/projects/CAD`。生产通过 `LUNA_CAD_ROOT=/opt/cad` 的只读挂载使用它；`resources/cad/` 是同步维护的项目副本。蓝盒 1000 面、黑色工件 999 面，配准和碰撞使用同一表面，左右臂离线抓姿数值保持不变。
 
 ## Git 上传与本地数据
 
-源码、技能契约、部署配置、`assets/`、`resources/` 和 `tests/fixtures/` 随 Git 保存；`.env`、`data/`、渲染缓存、依赖目录及构建输出由 `.gitignore` 排除。仅提交不含密钥的 `.env.example`，不要用 `git add -f` 上传运行数据或凭据。
+源码、技能契约、部署配置、`assets/` 和 `resources/` 随 Git 保存。`.env`、`data/`、依赖目录及构建输出由 `.gitignore` 排除，仅提交不含密钥的 `.env.example`。
 
-`data/` 有用，但不属于源码分发包：
+`data/` 当前只保留以下五项，均有明确消费者：
 
-| 路径 | 用途与保留建议 |
+| 路径 | 用途 |
 | --- | --- |
-| `data/experiments/` | 实验回放、相机图像、模型调用、轨迹和诊断证据。需要复现的记录应单独备份。 |
-| `data/experiments/.trash/` | 工作台删除实验后的可恢复回收区；删除操作会移入此处，仍占磁盘。确认不再需要恢复后才可清理。 |
-| `data/runs/` 及各审计目录 | 历史运行、性能分析和排错材料；按实验价值保留，不上传 Git。 |
-| `data/render_meshes/` | 网页渲染网格缓存，可由当前模型生成；历史回放可能引用旧缓存。 |
-| `data/foundationpose-registry/` | FoundationPose 当前部署挂载的模型注册库，运行需要，不能随历史实验一起清空。 |
+| `experiments/` | 完整实验、相机图像、模型调用、轨迹与回放记录；`.trash/` 是可恢复删除区。 |
+| `runs/` | 任务运行日志。 |
+| `foundationpose-registry/` | FoundationPose 服务正在挂载的模型注册库。 |
+| `render_meshes/` | 网页与历史实验回放引用的网格缓存。 |
+| `planning-settings.json` | 网页保存的规划参数，应用和 cuRobo 服务启动时读取。 |
 
-2026-11-03 按用户保留要求清理后，`data/` 从约 139.96 GiB 降至 43.79 GiB：清空 293 条已删除实验的回收记录，移除 157 个过期源码/部署传输包、5 个无调用的源码暂存目录和网页构建输出。现有实验、失败证据、FoundationPose 注册库与回放网格缓存保留；这些是本机占用，不计入 Git 提交。删除清单和保留文件核对记录位于本机 `data/cleanup-20261103/repository-cleanup-*.json*`。本文中的 `data/` 证据链接指向本地归档，GitHub 克隆不会包含这些记录。
+2026-11-03 按用户要求删除未被当前运行依赖的旧离线抓姿生成目录、性能排查材料、临时补丁、调试代码及测试目录。`data/` 从最初约 139.96 GiB 经两轮清理降至约 41.58 GiB；现有实验、运行日志和上述运行依赖保留。`tests/`、`web/tests/` 及测试专属配置不再保留，历史版本仍可从 Git 查询。
 
-在新机器部署时，还需单独准备 `.env`、OpenAI 配置、Compose 指定的本地镜像、独立 CAD 库及 FoundationPose 注册库。注册库可备份迁移，或使用 `scripts/provision_foundationpose_registry.py`，结合匹配固定版本的服务包、CAD 库和已有 seed registry 准备；仅克隆本仓库不等于已具备完整运行环境。
+带日期的历史文档记录当时的验证结果；其中旧测试、夹具和离线审计路径可能已经移除，不代表当前可用文件。实验回放记录仍以 `data/experiments/` 为准，GitHub 克隆不会包含本地运行数据。
+
+在新机器部署时，还需单独准备 `.env`、OpenAI 配置、Compose 指定的本地镜像、独立 CAD 库及 FoundationPose 注册库。注册库可迁移，或通过 `scripts/provision_foundationpose_registry.py` 配合匹配版本的服务包、CAD 库和 seed registry 准备。
 
 ## 启动
 
@@ -86,7 +89,7 @@ ssh -N -L 8350:127.0.0.1:8350 guangyu@192.168.3.4
 
 ## 开发与验证
 
-安装项目及开发依赖后运行 `python -m pytest -q` 和 `python -m ruff check src tests --select F`。普通任务可通过 `scripts/validate_demo_run.py --instruction "自然语言任务" --output data/acceptance.json` 验收。
+安装项目及开发依赖后运行 `python -m ruff check src services --select F`；前端在 `web/` 中执行 `pnpm build`。测试目录已按用户要求删除，语法/构建检查、只读接口检查与完整仿真必须分别报告。普通任务可通过 `scripts/validate_demo_run.py --instruction "自然语言任务" --output data/acceptance.json` 验收。
 
 新增技能需要契约、参数 schema 和 handler；不得在 controller 中添加固定任务流程。执行前检查观测/场景版本、身份、机器人反馈、工作空间与碰撞，不能用模型判断替代数值检查。未通过的判断沿 graph 失败或恢复分支处理，不伪造成功。
 

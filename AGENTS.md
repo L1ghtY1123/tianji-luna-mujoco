@@ -5,10 +5,10 @@
 ## 工作边界
 
 - 只在 `C:/project/tianji-luna-mujoco` 和 `/home/guangyu/projects/tianji-luna-mujoco` 工作；独立 CAD 库 `/home/guangyu/projects/CAD` 已获同步授权。不要创建平行项目或工作树，不使用 sub-agent，不修改其他用户服务。
-- 目录边界：`src/` 放主程序及客户端，`services/` 放容器专属服务适配，`vendor/` 保留有来源记录的只读依赖副本，`resources/` 和 `assets/` 放静态资源，`scripts/` 放可复用维护工具。`data/` 只存运行数据和实验复现材料，正式入口不得加载其中脚本；交付后清理临时部署包、已合入的候选源码和废弃构建输出，实验记录按用户要求保留。
+- 目录边界：`src/` 放主程序及客户端，`services/` 放容器专属服务适配，`vendor/` 保留有来源记录的只读依赖副本，`resources/` 和 `assets/` 放静态资源，`scripts/` 放可复用维护工具。`data/` 只保留实验与运行日志、FoundationPose 注册库、回放网格缓存和规划参数，正式入口不得加载其中脚本；交付后清理临时部署包、已合入的候选源码和废弃构建输出，实验记录按用户要求保留。
 - 官方 SDK、安装包与参考工程只读；算法只通过匹配固定版本的公开接口调用。cuRobo 源码基线见 `resources/curobo/sdk-source-manifest.json`。不能修改 SDK 或省略碰撞检查来提速。
 - 五容器合计最多 4 逻辑核：web 1.5、cuRobo 1、SAM3/GraspGen/FoundationPose 各 0.5。OMP/MKL/OpenBLAS 单线程，web 软件渲染最多 2 线程。本地重检查串行。可增加本项目 RAM/VRAM，以实测收益与不 OOM 为准。
-- 替换功能时同步删除旧入口、实现、专属配置、无效依赖和专属测试；保留当前行为的有效测试。检查动态注册、前端、部署副本，远端同步包括删除。历史实验留在 data，不能靠历史兼容分支延长旧框架寿命。
+- 替换功能时同步删除旧入口、实现、专属配置、无效依赖和专属测试；当前仓库按用户要求不保留 `tests/`、`web/tests/` 和测试专属依赖；用静态检查、构建、实际入口及按需完整仿真验证。检查动态注册、前端、部署副本，远端同步包括删除。历史实验留在 data，不能靠历史兼容分支延长旧框架寿命。
 
 ## 模型与 graph
 
@@ -43,4 +43,4 @@
 
 ## 验证与文档
 
-影响技能用途、前提、算法、结果、恢复或状态时，同步 contract/SKILL.md、docs/luna-skills-guide.md 与 README。报告真实实测，区分单元测试、健康检查和完整仿真；保留失败证据，不把一次成功说成稳定成功率。性能目标：扣除初始 Responses 后 120–240 秒，按实际阶段耗时定位。
+影响技能用途、前提、算法、结果、恢复或状态时，同步 contract/SKILL.md、docs/luna-skills-guide.md 与 README。报告真实实测，区分静态/构建检查、健康检查和完整仿真；保留失败证据，不把一次成功说成稳定成功率。性能目标：扣除初始 Responses 后 120–240 秒，按实际阶段耗时定位。

@@ -28,14 +28,13 @@ The default scene includes an open blue bin as well as the three small objects. 
 
 Current deployment uses `deploy/demo.compose.yaml` and `deploy/run-demo.sh`; follow the root README for service configuration and source synchronization between `C:/project/tianji-luna-mujoco` and `/home/guangyu/projects/tianji-luna-mujoco`. The frontend uses `LUNA_DEV_BACKEND_URL`.
 
-For local frontend tests and bundle verification:
+For local frontend bundle verification (the test directory was removed at the user's request):
 
 Node.js 20.19+ or 22.12+ is required by Vite. Dependencies are pinned: Three.js 0.180.0 and Vite 7.1.9. `pnpm-lock.yaml` records the complete dependency graph.
 
 ```sh
 cd web
 pnpm install --frozen-lockfile
-pnpm test
 pnpm build
 ```
 
@@ -76,8 +75,6 @@ Three.js integrations follow the pinned package's public `WebGLRenderer`, geomet
 
 场景跟随使用轻量只读 `GET /api/workspace-scene`，仅返回仿真快照和服务实例标识，不重复传输任务事件历史。
 
-`workspace-layer.test.js` 检查实际单位、面朝向、独立控制与释放资源；`workspace-page.test.js` 检查只读请求、静态图缓存、串行刷新及场景版本变化。后端 `test_offline_workspace.py` 验证内部共享面剔除、空洞保留和查询数据不变。
-
 ## 原始碰撞球查看器
 
 主视图的「碰撞球查看 ↗」在新标签页打开 `/collision-spheres.html`。页面复用 `scene-view.js` 的相机、MuJoCo 网格、渲染调度和视角控制；`collision-sphere-layer.js` 将碰撞球按半径分成最多三个共享几何的 Three.js `InstancedMesh`，逐球使用 API 提供的中心和半径，不再次增加 buffer。半径不超过 17 / 44 / 175 mm 时分别使用 detail 4 / 7 / 15；更大的球提高大球组的共享细分精度，球面三角片的最大内缩不超过 0.2 mm。显示细分不改变规划球或真实几何缺口。
@@ -85,10 +82,6 @@ Three.js integrations follow the pinned package's public `WebGLRenderer`, geomet
 只读 `GET /api/collision-spheres` 返回 `source`、`gripper_state: open`、`radius_policy: original_yaml_plus_link_buffer`、`sphere_count`、`link_count`、`spheres: [{id, link, center_m, radius_m}]` 和 `simulation`。后端必须在同一个只读快照中生成球与 `simulation.geometry_poses`：双臂跟随当前姿态，夹爪固定张开。原 YAML 和主仿真姿态均不修改。页面拒绝闭爪/包络元数据、无效球和不完整计数，避免把别的几何当成原始规划球。
 
 `collision-sphere-page.js` 在每次读取完成后等待 500ms 再请求，可暂停跟随或手动刷新；仅使用 GET，不连接任务/场景修改接口。`simulation.manifest_revision` 变化时重新读取 `/api/manifest`，版本不一致则重试，避免新场景网格配旧快照。可单独隐藏球或场景网格、调整球的不透明度。此页核对开夹爪规划几何覆盖，不进行碰撞判定。
-
-`tests/collision-sphere-layer.test.js` 使用真实 Three.js 验证原球半径、坐标、全量绘制、资源释放和错误数据拒绝；`tests/collision-sphere-page.test.js` 验证球/网格同快照、只读请求、串行刷新、暂停和场景重建竞态。浏览器视觉与真实机器人几何核查仍需实际后端验收。
-
-`tests/model.test.js` checks scene validation, quaternion-to-yaw mapping, run control gating, trace provenance, incremental events, and per-field confidence. `tests/object-drag.test.js` checks drag projection, local draft updates, cancellation, and draft position precedence over live snapshots. `tests/scene-preview.test.js` uses real Three.js meshes to check preview rotation, full-size scaling for each primitive, table edits, and restoration of live transforms. `tests/main-flow.test.js` executes the page entry point with DOM/network boundaries replaced, checking millimeter input conversion, linked dimensions, shared drag/form edits, explicit Apply, failure preservation, Reset, and stale request ordering. `tests/task-clock.test.js` checks Start/Reset transitions, stale snapshots, terminal duration, and server-time calibration. Browser and real-backend acceptance is separate from these checks; build/unit checks alone do not establish visual interaction or physical grasp success.
 
 ## cuRobo 参数与 batch 进度
 
@@ -98,7 +91,7 @@ Three.js integrations follow the pinned package's public `WebGLRenderer`, geomet
 
 `run-evidence.js` 从 `run.holding`、`run.collision_model`、`run.verification` 提取显示摘要。主状态栏持续显示持物/释放待确认、碰撞模型、视觉验证与几何准备耗时；运行事实保留测量摘要和表面球数量/分辨率，排除原始点数组。`current_step.stage` 及 `stage_started_at` 显示内部阶段及耗时，不新增模型调用。Reset 后旧持物摘要清空。
 
-草稿需应用才能 Start；POST 携带 expected_revision，Start 携带 settings_revision，跨页面冲突需重新读取。Start、运行中或算法 pending 会重新锁定高级参数，运行中与 pending 时所有参数禁改且不能解锁；结束后高级参数仍需手动解锁。Reset 保留参数，单轮 run.planning_settings 展示实际快照。`tests/planning-settings.test.js` 和 `tests/main-flow.test.js` 覆盖默认锁定、手动解锁、重新锁定保留草稿、执行时间可编辑、运行/pending 禁解锁。
+草稿需应用才能 Start；POST 携带 expected_revision，Start 携带 settings_revision，跨页面冲突需重新读取。Start、运行中或算法 pending 会重新锁定高级参数，运行中与 pending 时所有参数禁改且不能解锁；结束后高级参数仍需手动解锁。Reset 保留参数，单轮 run.planning_settings 展示实际快照。
 
 `planning_batch_start/complete` 和 `ik_batch_start/complete` 记录 batch_index、batch_count、candidate_indices、arm、duration_s、success_count。plan_grasp skill 内部仅 batch；完成全部 IK 可行候选批次后，选择从当前姿态开始、沿接近/抓取/抬升实际指令的七关节累计绝对路程最小的完整可行轨迹。GraspGen score 只决定调度顺序和路程相等时的优先级。旧记录的 stopped_early 提示保留其历史含义；当前规划不提前停止。参数含义与边界见 `../docs/planning-parameters.md`。
 
