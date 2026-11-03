@@ -3,7 +3,7 @@ from .app import create_app as create_workbench
 
 
 def create_app():
-    return create_workbench(demo_mode=True)
+    return create_workbench()
 
 
 def main():

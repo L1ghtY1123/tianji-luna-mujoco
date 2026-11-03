@@ -10,12 +10,14 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 import numpy as np
+from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -37,19 +39,31 @@ def write_json(path, value):
 def archive_value(directory, name, value):
     """JSON structure plus non-pickle arrays. References are relative to the experiment."""
     arrays = {}
+    array_fingerprints = {}
     array_path = name + ".npz"
 
     def convert(item):
+        if isinstance(item, BaseModel):
+            return convert(item.model_dump(mode='json'))
         if isinstance(item, np.ndarray):
             if item.dtype.hasobject:
                 return convert(item.tolist())
-            key = f"array_{len(arrays)}"
-            arrays[key] = item
+            fingerprint = (str(item.dtype), item.shape,
+                           hashlib.sha256(np.ascontiguousarray(item)).hexdigest())
+            key = array_fingerprints.get(fingerprint)
+            if key is None:
+                key = f"array_{len(arrays)}"
+                arrays[key] = item
+                array_fingerprints[fingerprint] = key
             return {"type": "ndarray", "path": array_path, "key": key,
                     "dtype": str(item.dtype), "shape": list(item.shape)}
         if isinstance(item, np.generic):
             return convert(item.item())
         if isinstance(item, dict):
+            if 'mesh_assets' in item and 'mesh_layers' in item:
+                from .collision_archive import archive_collision_assets
+
+                item = archive_collision_assets(directory, item)
             return {str(key): convert(child) for key, child in item.items()}
         if isinstance(item, (tuple, list)):
             return [convert(child) for child in item]
@@ -63,9 +77,38 @@ def archive_value(directory, name, value):
     path = directory / (name + ".json")
     path.parent.mkdir(parents=True, exist_ok=True)
     if arrays:
-        np.savez_compressed(directory / array_path, **arrays)
+        # Keep ordinary NPZ/NPY compatibility while reducing background CPU
+        # competition with perception. Repeated snapshots share exact bytes.
+        with ZipFile(directory / array_path, 'w', compression=ZIP_DEFLATED, compresslevel=1) as archive:
+            for key, item in arrays.items():
+                with archive.open(key + '.npy', 'w', force_zip64=True) as stream:
+                    np.lib.format.write_array(stream, item, allow_pickle=False)
     write_json(path, converted)
     return name + ".json"
+
+
+def decode_visual_archive_image(value):
+    """Validate the declared image format while preserving exact transmitted bytes."""
+    formats = {'data:image/jpeg;base64': ('JPEG', 'image/jpeg', '.jpg'),
+               'data:image/png;base64': ('PNG', 'image/png', '.png')}
+    if not isinstance(value, str) or ',' not in value:
+        raise ValueError('unsupported_visual_archive_image')
+    prefix, data = value.split(',', 1)
+    if prefix not in formats:
+        raise ValueError('unsupported_visual_archive_image')
+    format, media_type, extension = formats[prefix]
+    try:
+        raw = base64.b64decode(data, validate=True)
+        with Image.open(BytesIO(raw)) as image:
+            if image.format != format:
+                raise ValueError('visual_archive_image_format_mismatch')
+            image.verify()
+        # verify checks the container; load also rejects truncated pixel data.
+        with Image.open(BytesIO(raw)) as image:
+            image.load()
+    except (OSError, ValueError) as error:
+        raise ValueError('invalid_visual_archive_image') from error
+    return raw, media_type, extension
 
 
 class ExperimentSession:
@@ -79,7 +122,9 @@ class ExperimentSession:
         self.generation = None
         self.video = None
         self.error = None
-        self._queue = queue.Queue(maxsize=128)
+        # A bounded policy can emit several records per node, even without a
+        # motor wait. Reserve room for those bursts while the disk writer runs.
+        self._queue = queue.Queue(maxsize=512)
         self._stop = threading.Event()
         self._finished = threading.Event()
         self._finish_lock = threading.Lock()
@@ -142,12 +187,23 @@ class ExperimentSession:
         self._submit('observation_images', (name, views, labels))
         return {camera: f'{name}-camera-{camera}.svg' for camera in views}
 
+    def collision_scene(self, name, snapshot):
+        self._submit('collision_scene', (name, snapshot))
+        return name + '.json'
+
     def visual_decision(self, evidence):
         """Archive actual network calls; reconstruct images without inline base64 in JSON."""
         key = evidence['request_hash']
         if not re.fullmatch(r'[a-f0-9]{64}', key):
             raise ValueError('invalid_visual_request_hash')
         name = 'decisions/' + key
+        call_id = evidence.get('call_id')
+        if call_id is not None:
+            if not re.fullmatch(r'[a-f0-9]{32}', call_id):
+                raise ValueError('invalid_visual_call_id')
+            # Keep Windows archive/image paths short while retaining request_hash
+            # inside the record. Repeated identical requests remain independent.
+            name = 'decisions/call-' + call_id
         self._submit('visual_decision', (name, evidence))
         return name + '.json'
 
@@ -171,6 +227,10 @@ class ExperimentSession:
                         stream.write(json.dumps(event, ensure_ascii=False) + "\n")
                 elif kind == "artifact":
                     archive_value(self.directory, *payload)
+                elif kind == 'collision_scene':
+                    from .collision_archive import archive_collision_snapshot
+
+                    archive_collision_snapshot(self.directory, *payload)
                 elif kind == 'observation_images':
                     from .observation_labels import annotated_rgb_svg
                     name, views, labels = payload
@@ -181,20 +241,20 @@ class ExperimentSession:
                 elif kind == 'visual_decision':
                     name, evidence = payload
                     count = 0
-                    for message in evidence['request']['input']:
-                        for part in message['content']:
+                    contents = [message['content'] for message in evidence['request']['input']]
+                    contents.extend(question['instructions'] for question in evidence['request'].get('questions', [])
+                                    if isinstance(question.get('instructions'), list))
+                    for content in contents:
+                        for part in content:
                             if part['type'] != 'input_image':
                                 continue
-                            prefix, data = part['image_url'].split(',', 1)
-                            if prefix != 'data:image/jpeg;base64':
-                                raise ValueError('unsupported_visual_archive_image')
-                            image = base64.b64decode(data, validate=True)
-                            path = f'{name}-image-{count:03d}.jpg'
+                            image, media_type, extension = decode_visual_archive_image(part['image_url'])
+                            path = f'{name}-image-{count:03d}{extension}'
                             target = self.directory / path
                             target.parent.mkdir(parents=True, exist_ok=True)
                             target.write_bytes(image)
                             part['image_url'] = {'path': path, 'sha256': hashlib.sha256(image).hexdigest(),
-                                                 'media_type': 'image/jpeg'}
+                                                 'media_type': media_type}
                             count += 1
                     write_json(self.directory / (name + '.json'), evidence)
                     summary = {key: evidence.get(key) for key in
@@ -336,8 +396,8 @@ class ExperimentStore:
         try:
             (directory / "events.jsonl").touch()
             source_root = Path(__file__).resolve().parents[2]
-            source_paths = list((source_root / "src/luna_mujoco").glob("*.py"))
-            source_paths.extend((source_root / "skills").glob("*/*"))
+            source_paths = list((source_root / "src/luna_mujoco").rglob("*.py"))
+            source_paths.extend((source_root / "skill_catalog").glob("*/*"))
             source_paths.extend((source_root / "resources").rglob("*.json"))
             config = {**config, "source_sha256": {path.relative_to(source_root).as_posix():
                       hashlib.sha256(path.read_bytes()).hexdigest() for path in source_paths if path.is_file()}}

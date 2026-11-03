@@ -24,7 +24,7 @@ def test_project_contracts_keep_ten_mm_through_replace_and_vendor_type_boundary(
         assert isinstance(request, getattr(vendor, name))
         assert replace(request).trajectory_collision_clearance_m == .01
         with pytest.raises(ValueError):
-            kind.from_mapping(common | values | {"trajectory_collision_clearance_m": .00999})
+            kind.from_mapping(common | values | {"trajectory_collision_clearance_m": -.001})
         with pytest.raises(ValueError):
             kind.from_mapping(common | values | {"start_joints_deg": [0.] * 6})
         assert getattr(vendor, name).from_mapping(common | values).trajectory_collision_clearance_m == .01

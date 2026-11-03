@@ -28,7 +28,7 @@ class VisibleAlgorithms(FakeAlgorithms):
     def plan_carried_lift(self, *args, **kwargs):
         raise AssertionError("grasp must execute its original lift without attachment")
 
-    def prepare_carrying(self, observation, arm, scene, holding, *, planning_settings=None):
+    def prepare_carrying(self, observation, arm, scene, holding, *, planning_settings=None, placement_request=None):
         assert observation["arms"][arm]["tcp"][2][3] == .1
         self.prepared.append(copy.deepcopy(holding))
         return {"attached": True, "scene_token": scene["scene_token"]}
@@ -38,12 +38,15 @@ class VisibleAlgorithms(FakeAlgorithms):
 
 
 
-def test_grasp_cloud_uses_measured_points_without_object_pose():
+def test_grasp_obb_uses_measured_cloud_frame_without_object_pose():
     from luna_mujoco.cameras import deproject_view
 
     class Graspgen:
         def generate(self, request):
-            np.testing.assert_allclose(request["object_points_camera_m"].mean(axis=0), 0., atol=1e-6)
+            assert request['object_points_camera_m'].shape == (4096, 3)
+            # Sampled surface points need not have zero mean. The service
+            # centers its model input and restores that offset in each pose.
+            np.testing.assert_allclose(request["scene_points_camera_m"].mean(axis=0), 0., atol=1e-6)
             return {"model": "test", "candidates": [{"index": 0, "score": 1., "T_camera_grasp": np.eye(4)}]}
 
     view = {"depth_m": np.ones((5, 5)), "valid_depth": np.ones((5, 5), bool),
@@ -86,7 +89,7 @@ def test_prepare_carrying_validates_union_point_provenance():
              "scene_token": "surface-scene", "target_id": target}
     points = np.asarray(observation["objects"][0]["points_world_m"])
     held_points = np.vstack((points, points + [0., 0., .001])).tolist()
-    holding = {"instance_id": target, "owner_id": "owner", "points_tool_m": held_points,
+    holding = {"frame": "gripper_front", "instance_id": target, "owner_id": "owner", "points_tool_m": held_points,
                "voxel_size_m": .007, "margin_m": .002, "sphere_budget": 12,
                "measurement_provenance": {"source": "registered_rgbd_visible_surface", "point_count": len(held_points),
                                           "observation_ids": ["pre-grasp", observation["observation_id"]]}}

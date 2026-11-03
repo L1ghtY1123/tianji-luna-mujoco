@@ -158,3 +158,37 @@ def test_container_pixels_do_not_include_confirmed_contents_and_prompt_is_preser
     assert not np.any(box['mask'] & part['mask'])
     assert box['mask'].sum() + part['mask'].sum() == detection['mask'].sum()
     assert box['prompt'] == 'cube' and len(box['pixels_rc']) == box['mask'].sum()
+
+
+@pytest.mark.parametrize('demo', [False, True])
+@pytest.mark.parametrize('record', [{'status': 'observed'}, {'destination_id': None},
+                                   {'destination_id': ''}, {'destination_id': '   '}])
+def test_unbound_destination_is_not_a_progress_question_or_a_success(demo, record):
+    from legacy_identity import ArchivedTwoStageInventory as DemoVisualInventory
+
+    capture, detection = fixture()
+    calls = []
+    inventory = (DemoVisualInventory if demo else VisualInventory)(api_key='test', client=client_with_answers(
+        {'identity_0': 'red', 'progress_red': 'at_destination', 'scene_inventory_closure': 'none'}, calls))
+    result = inventory.resolve(capture, [detection], instruction='move red', entities=fixed_entities(),
+        purpose='associate_inventory', progress={'red': record})
+    assert all(question['name'] != 'progress_red' for question in calls[0]['questions'])
+    assert result['progress']['red']['status'] == 'unknown'
+    assert result['progress']['red']['source'] == 'unbound_destination'
+    assert result['progress']['red']['reason'] == 'progress_destination_unbound'
+    assert result['groups'][0][0]['entity_id'] == 'red'
+
+
+@pytest.mark.parametrize('demo', [False, True])
+def test_bound_destination_keeps_current_progress_judgment(demo):
+    from legacy_identity import ArchivedTwoStageInventory as DemoVisualInventory
+
+    capture, detection = fixture()
+    calls = []
+    inventory = (DemoVisualInventory if demo else VisualInventory)(api_key='test', client=client_with_answers(
+        {'identity_0': 'red', 'progress_red': 'at_destination', 'scene_inventory_closure': 'none'}, calls))
+    result = inventory.resolve(capture, [detection], instruction='move red', entities=fixed_entities(),
+        purpose='associate_inventory', progress={'red': {'destination_id': 'configured-area'}})
+    assert any(question['name'] == 'progress_red' for question in calls[0]['questions'])
+    assert result['progress']['red']['status'] == 'at_destination'
+    assert result['progress']['red']['source'] == 'openai_decisions'

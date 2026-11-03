@@ -1,0 +1,54 @@
+{
+  "id": "resolve_placement",
+  "description": "Resolve a held-object pose within the established placement zone. Configured XY is fixed. Otherwise propose centers of 4, then 8, then 16 subdivisions as needed: Decisions chooses an XY candidate ID before numerical Z search. Stop at the first feasible candidate. Keep the grasp orientation unless the task explicitly requires another supported orientation. Start Z at the hard clearance plus the recorded tracking reserve and raise only if necessary. Check held-object/gripper geometry, current collision world, offline workspace and fixed-orientation IK. Decisions chooses semantics and candidate IDs; it does not certify numerical safety. Whole-region choices are operation proposals, not high-confidence physical facts. Extra spatial clauses use current annotated candidate footprints. plan_place separately checks the three-phase trajectory. Unknown never silently selects an alternate configured XY. Geometry and region binding must precede grasping. Explicit capture_mode=fresh while holding only supplies current candidate images against valid geometry; it does not establish observed=true or repair a stale scene.",
+  "capability": "Resolve a held-object pose within the established placement zone",
+  "inputs": [
+    "placement_zone",
+    "verified_holding",
+    "current_scene",
+    "planning_settings",
+    "placement_request",
+    "preference",
+    "current_calibrated_rgb_when_candidate_selection_needed"
+  ],
+  "requires": {
+    "target_selected": true,
+    "destination_selected": true,
+    "arm_selected": true,
+    "placement_zone_ready": true,
+    "grasp_held": true,
+    "scene_ready": true,
+    "released": false,
+    "recovery_needed": false
+  },
+  "provides": [
+    "placement_resolved"
+  ],
+  "outputs": [
+    "placement_resolved",
+    "resolution_id",
+    "candidates",
+    "selection_evidence",
+    "semantic_selection",
+    "candidate_failures"
+  ],
+  "planning_effects": {
+    "place_plan_ready": false
+  },
+  "errors": [
+    "placement_no_candidate",
+    "placement_no_semantic_candidate",
+    "placement_candidates_not_visible",
+    "placement_candidate_capture_stale",
+    "placement_support_geometry_stale",
+    "placement_destination_changed",
+    "planning_stale_scene",
+    "place_goal_workspace_rejected",
+    "placement_release_above_container",
+    "placement_release_too_high",
+    "release_height_no_valid_goal",
+    "release_height_no_held_ik_goal"
+  ],
+  "invalidates_observation": false,
+  "recovery_retry_safe": true
+}

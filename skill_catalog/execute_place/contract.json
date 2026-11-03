@@ -1,0 +1,44 @@
+{
+  "id": "execute_place",
+  "description": "Execute the current placement plan with the bound held object, open the gripper, detach and execute the verified open-hand retreat. Preserve actual feedback and partial-effect evidence on error. It neither chooses a new landing point nor marks the target delivered. verify_place separately checks the outcome.",
+  "requires": {
+    "needs_place": true,
+    "grasp_held": true,
+    "place_plan_ready": true,
+    "released": false,
+    "recovery_needed": false
+  },
+  "provides": [
+    "place_execution_completed"
+  ],
+  "inputs": [
+    "bound_place_plan",
+    "verified_holding",
+    "current_robot_feedback",
+    "collision_scene",
+    "placement_zone"
+  ],
+  "capability": "Execute the current placement plan with the bound held object, open the gripper, detach and execute the verified open-hand retreat",
+  "outputs": [
+    "place_execution_completed",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure"
+  ],
+  "invalidates_observation": true,
+  "planning_effects": {
+    "released": true,
+    "grasp_held": false,
+    "attached": false,
+    "scene_available": false,
+    "scene_ready": false,
+    "observation_map_ready": false,
+    "observed": false,
+    "at_initial_pose": false
+  }
+}

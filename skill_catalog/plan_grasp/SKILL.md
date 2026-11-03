@@ -1,0 +1,9 @@
+# plan_grasp
+
+Check candidates with the official GPU batched IK and BatchMotionPlanner.plan_grasp APIs. Plan approach, grasp and lift, with current robot/world geometry and public grasp-contact handling. Validate endpoints and commands before execution. A finite destination preflight may reject a candidate whose sampled transport endpoints fail, but does not prove the whole destination infeasible. The actual holding attachment is not installed before lift. This skill plans only; a successful plan is neither a grasp nor a holding proof.
+
+Inputs, typed arguments, prerequisites, effects and recoverable results are defined in `contract.json` and the registered parameter schema. Responses selects the initial graph; Decisions selects runtime recovery. This skill executes only its selected operation. Current policy: `docs/cad-runtime-policy-20261102.md`.
+
+The task adapter submits ranked candidates in fixed batches of two, warmed before task requests. If a batch has no candidate passing the complete endpoint and command checks, continue through the original remaining candidate pool. Stop after the first accepted batch, selecting its valid candidate by joint travel. Larger explicit API requests retain their full candidate count and supported fixed capacities. This changes search granularity, not seeds, IK tolerance, collision clearance or safety checks.
+
+CAD pregrasp lift bounds reuse the immutable canonical partition and sphere centres for identical model vertices, sphere budget and partition size. Each candidate still transforms every cell vertex and recomputes its enclosing radius with current padding. This is a geometric preview, not an installed attachment or a holding proof. Open-stop feedback noise within 1e-9 radians is normalized only in the planning model, with 1e-8 metres of conservative hand-sphere reserve; raw feedback and all larger closures are preserved.

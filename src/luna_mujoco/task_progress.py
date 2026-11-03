@@ -10,6 +10,35 @@ from .inventory_order import head_image_order, head_rgb_box_order
 SOURCE_BIN_MIN_XY_FRACTION = .5
 
 
+def current_table_measurements(observation):
+    """Summarize same-capture measured planes, without asserting visual identity."""
+    tables = observation.get('demo_tables', {})
+    capture_id = observation.get('observation_id')
+    if not capture_id or tables.get('source_observation_id') != capture_id:
+        return {}
+    result = {}
+    for identifier, measured in tables.get('tables', {}).items():
+        entity = observation.get('scene_entities', {}).get(identifier, {})
+        height, count = measured.get('surface_height_m'), measured.get('inlier_count')
+        if (entity.get('kind') != 'table' or measured.get('source') != 'initial_inventory_ransac_table'
+                or type(height) not in (int, float) or not np.isfinite(height)
+                or type(count) is not int or count <= 0):
+            continue
+        cameras = {entity.get('reference_camera_id')}
+        fusion = measured.get('fit', {}).get('multicamera_fusion') or {}
+        cameras.update(camera for camera, points in fusion.get('accepted_point_count_by_camera', {}).items()
+                       if type(points) is int and points > 0)
+        result[identifier] = {
+            'id': identifier, 'kind': 'table',
+            **{key: deepcopy(entity[key]) for key in ('description', 'color') if key in entity},
+            'observation_id': capture_id, 'measurement_source': measured['source'],
+            'measurement_scope': 'measured_horizontal_surface_not_visual_confirmation',
+            'surface_height_m': float(height), 'inlier_count': count,
+            'camera_ids': sorted(camera for camera in cameras if camera in observation.get('views', {})),
+        }
+    return result
+
+
 def measured_position(obj):
     value = obj.get('visible_centroid_world', obj.get('position'))
     if value is None:
@@ -18,9 +47,25 @@ def measured_position(obj):
     return position if position.shape == (3,) and np.isfinite(position).all() else None
 
 
+def confirmed_task_source(record):
+    """Task membership is a bound visual judgment, never a free-space certificate."""
+    initial = record.get('initial_source', {})
+    evidence = initial.get('task_source_evidence', {})
+    if (evidence.get('source') == 'openai_decisions' and evidence.get('status') == 'yes'
+            and evidence.get('target_id') == record.get('id')
+            and evidence.get('source_id') and evidence.get('source_kind')
+            and evidence.get('request_hash') and evidence.get('observation_id')
+            and evidence['observation_id'] == initial.get('measurement_observation_id')):
+        return evidence
+    return None
+
+
 def original_source_bin(record):
     """A tiny floor-hull overlap is not a source-box identity."""
     initial = record.get('initial_source', {})
+    if 'task_source_evidence' in initial:
+        confirmed = confirmed_task_source(record)
+        return confirmed['source_id'] if confirmed and confirmed['source_kind'] == 'bin' else None
     if initial.get('identity_source') == 'openai_responses' and initial.get('initial_parent_kind') == 'bin':
         return initial.get('initial_parent_id')
     candidates = {item['object_id'] for item in record.get('initial_source', {}).get('measured_relationships', [])
@@ -29,17 +74,12 @@ def original_source_bin(record):
     return next(iter(candidates)) if len(candidates) == 1 else None
 
 
-def source_region_confirmed(route, record):
-    """Validate the declared route's source, without deciding task membership.
-
-    Reuse the same measured overlap test as source-box identity. Missing or
-    ambiguous geometry is unconfirmed, never proof that an object is outside.
-    Preserve the original source when a two-leg transfer reaches the table.
-    """
-    if route not in {'box_table', 'box_table_box'}:
-        return True
+def source_region_confirmed(record):
+    """Validate a declared source judgment without imposing a source-container type."""
     reference = record if 'initial_source' in record else {'initial_source': record}
-    return original_source_bin(reference) is not None
+    if 'task_source_evidence' in reference['initial_source']:
+        return confirmed_task_source(reference) is not None
+    return True
 
 
 def source_region_geometry(record, objects):
@@ -64,7 +104,7 @@ def source_region_geometry(record, objects):
 
 
 class TaskProgress:
-    def __init__(self, instruction, scope="single", requested_arm=None, *, route='direct',
+    def __init__(self, instruction, scope="single", requested_arm=None, *,
                  requested_count=None, selection_order='explicit', quantity_groups=None):
         if requested_count is not None and (type(requested_count) is not int or requested_count < 1):
             raise ValueError('invalid_requested_count')
@@ -75,10 +115,6 @@ class TaskProgress:
         self.instruction = instruction
         self.scope = scope
         self.requested_arm = requested_arm
-        if route not in {'direct', 'box_table', 'table_box', 'box_table_box'}:
-            raise ValueError('unsupported_transfer_route')
-        self.route = route
-        self.stage_arms = {}
         self.records = {}
         self.completed_ids = []
         self.attempts = {}
@@ -101,12 +137,11 @@ class TaskProgress:
         self.group_membership = {}
         self.initial_head_reference = None
         self.placement_support_walls = {}
-        self.route_destinations = {}
 
-    def placement_request(self, destination_id, *, stage_index=None):
+    def placement_request(self, destination_id, *, transfer_index=None):
         """Keep global inventory capacity and bind the current number to its slot."""
-        stage = self.stage_index() if stage_index is None else stage_index
-        key = (stage, destination_id)
+        index = self.transfer_index() if transfer_index is None else transfer_index
+        key = (index, destination_id)
         if key not in self.placement_requests:
             identifiers = []
             for identifier in self.records:
@@ -117,9 +152,9 @@ class TaskProgress:
             # scene's transport numbering. Slot 3 still needs that layout size.
             frozen_capacity = max((entity.get('display_id', 0) for entity in self.scene_entities.values()
                                    if 'transport' in entity.get('roles', ())), default=0)
-            target_count = max(1, len(identifiers), frozen_capacity)
+            target_count = max(1, len(identifiers), frozen_capacity if not identifiers else 0)
             self.placement_requests[key] = {'target_count': target_count,
-                'target_ids': sorted(identifiers), 'stage_index': stage, 'destination_id': destination_id,
+                'target_ids': sorted(identifiers), 'transfer_index': index, 'destination_id': destination_id,
                 'region_id': 'region:' + destination_id, 'inventory_revision': self.inventory_revision,
                 'source': 'confirmed_task_inventory' if identifiers else 'single_held_object'}
         request = deepcopy(self.placement_requests[key])
@@ -134,20 +169,23 @@ class TaskProgress:
         """Every sequential item uses the full same region, never an inventory partition."""
         reference = destination['placement_reference']
         polygon = np.asarray(reference['region_polygon_world_xy_m'], float)
-        if polygon.shape != (4, 2) or not np.isfinite(polygon).all():
-            raise ValueError('shared_work_area_requires_square')
+        if (polygon.ndim != 2 or polygon.shape[1:] != (2,) or len(polygon) < 3
+                or not np.isfinite(polygon).all()):
+            raise ValueError('shared_work_area_requires_polygon')
         center = polygon.mean(axis=0).tolist()
-        first, second = polygon[1] - polygon[0], polygon[3] - polygon[0]
-        area = float(abs(first[0] * second[1] - first[1] * second[0]))
+        area = float(abs(np.dot(polygon[:, 0], np.roll(polygon[:, 1], 1))
+                         - np.dot(polygon[:, 1], np.roll(polygon[:, 0], 1))) / 2)
+        if area <= 0:
+            raise ValueError('shared_work_area_requires_polygon')
         layout = {'method': 'shared_work_area', 'target_count': 1, 'section_count': 1,
             'area_m2': area, 'center_world_xy_m': center, 'region_polygon_world_xy_m': polygon.tolist(),
             'floor_z_m': reference['floor_z_m'], 'region_id': 'region:' + destination['id'],
-            'support_entity_id': reference.get('support_entity_id', 'table'),
+            'support_entity_id': reference.get('support_entity_id', destination['id']),
             'observation_id': observation['observation_id'],
             'cells': [{'index': 0, 'slot_id': 1, 'area_m2': area, 'center_world_xy_m': center,
                        'polygon_world_xy_m': polygon.tolist()}]}
-        key = (self.stage_index(), destination['id'])
-        self.placement_requests[key] = {'target_count': 1, 'target_ids': [], 'stage_index': key[0],
+        key = (self.transfer_index(), destination['id'])
+        self.placement_requests[key] = {'target_count': 1, 'target_ids': [], 'transfer_index': key[0],
             'destination_id': destination['id'], 'region_id': layout['region_id'],
             'inventory_revision': self.inventory_revision, 'source': 'configured_shared_work_area',
             'layout': layout, 'layout_revision': hashlib.sha256(json.dumps(layout, sort_keys=True).encode()).hexdigest()[:24]}
@@ -160,11 +198,12 @@ class TaskProgress:
             if self.membership.get(identifier) != 'required':
                 continue
             item = {key: deepcopy(record[key]) for key in
-                    ('status', 'destination_id', 'stage_index', 'release_feedback_id',
+                    ('status', 'destination_id', 'transfer_index', 'release_feedback_id',
                      'completed_identity_track') if key in record}
             destination = record.get('destination_id')
-            region = self.placement_requests.get((self.stage_index(identifier), destination), {})
-            if destination:
+            region = self.placement_requests.get((self.transfer_index(identifier), destination), {})
+            unconstrained_container = self.scene_entities.get(destination, {}).get('kind') == 'bin' and not region
+            if destination and not unconstrained_container:
                 item.update(region_id=region.get('region_id', 'region:' + destination),
                             slot_id=1 if region.get('layout', {}).get('method') == 'shared_work_area'
                             else record.get('execution_rank', record.get('display_id')))
@@ -177,7 +216,7 @@ class TaskProgress:
             result[identifier] = item
         return result
 
-    def bind_placement_region(self, destination, observation, *, stage_index=None):
+    def bind_placement_region(self, destination, observation, *, transfer_index=None):
         from .placement_layout import (
             measured_region_translation,
             measured_support_walls,
@@ -185,9 +224,9 @@ class TaskProgress:
         )
 
         identifier = destination['id']
-        stage = self.stage_index() if stage_index is None else stage_index
-        request = self.placement_request(identifier, stage_index=stage)
-        key = (stage, identifier)
+        index = self.transfer_index() if transfer_index is None else transfer_index
+        request = self.placement_request(identifier, transfer_index=index)
+        key = (index, identifier)
         reference = destination.get('placement_reference', {})
         walls = measured_support_walls(destination)
         if 'layout' in request:
@@ -207,7 +246,7 @@ class TaskProgress:
             revision = hashlib.sha256(json.dumps(layout, sort_keys=True, allow_nan=False).encode()).hexdigest()[:24]
             self.placement_requests[key].update(layout=layout, layout_revision=revision)
             self.placement_support_walls[key] = walls.copy()
-            return self.placement_request(identifier, stage_index=stage)
+            return self.placement_request(identifier, transfer_index=index)
         polygon = reference.get('region_polygon_world_xy_m')
         if polygon is None or 'floor_z_m' not in reference:
             raise ValueError('placement_requires_measured_region_polygon')
@@ -221,63 +260,29 @@ class TaskProgress:
         revision = hashlib.sha256(json.dumps(layout, sort_keys=True, allow_nan=False).encode()).hexdigest()[:24]
         self.placement_requests[key].update(layout=layout, layout_revision=revision)
         self.placement_support_walls[key] = walls.copy()
-        return self.placement_request(identifier, stage_index=stage)
+        return self.placement_request(identifier, transfer_index=index)
 
-    def confirm_route_destinations(self, selections, observation):
-        """Validate all JEV-selected route regions before permitting first motion."""
-        if not self.inventory_finalized:
-            raise ValueError('route_requires_frozen_inventory')
-        members = {key for key, value in self.membership.items() if value == 'required'}
-        stages = {'0', '1'} if self.route == 'box_table_box' else {'0'}
-        if set(selections) != members or any(set(value) != stages for value in selections.values()):
-            raise ValueError('complete_route_destinations_required')
-        visible = {obj['id']: obj for obj in observation['objects']}
-        regions = {}
-        for identifier, selected in selections.items():
-            for stage, destination_id in selected.items():
-                destination = visible.get(destination_id, {})
-                to_table = self.route == 'box_table' or self.route == 'box_table_box' and stage == '0'
-                if destination.get('kind') != ('marker' if to_table else 'bin'):
-                    raise ValueError('route_destination_missing_or_wrong_kind')
-                if (self.route == 'box_table_box' and stage == '1'
-                        and destination_id == original_source_bin(self.records[identifier])):
-                    raise ValueError('final_destination_must_differ_from_source_bin')
-                reference = destination.get('placement_reference', {})
-                if 'region_polygon_world_xy_m' not in reference or 'floor_z_m' not in reference:
-                    raise ValueError('route_destination_region_unmeasured')
-                regions[int(stage), destination_id] = destination
-        for (stage, _), destination in regions.items():
-            self.placement_request(destination['id'], stage_index=stage)
-        self.route_destinations = deepcopy(selections)
-        self.ledger_revision += 1
-
-    def pending_route_id(self):
-        return next((key for key, item in self.records.items()
-                     if item.get('stage_index') == 1 and item['status'] not in
-                     {'completed', 'deferred'}), None)
-
-    def stage_index(self, identifier=None):
-        identifier = identifier or self.current_id or self.pending_route_id()
-        return self.records.get(identifier, {}).get('stage_index', 0)
+    def transfer_index(self, identifier=None):
+        """The selected transfer keeps its geometry index after confirmation."""
+        return self.records.get(identifier or self.current_id, {}).get('transfer_index', 0)
 
     def bound_arm(self):
-        return self.requested_arm or self.stage_arms.get(str(self.stage_index()))
+        return self.requested_arm or self.records.get(self.current_id, {}).get('execution_arm')
 
     def bind_arm(self, arm):
-        if arm not in {'A', 'B'}:
+        if arm not in {'A', 'B'} or self.current_id not in self.records:
             raise ValueError('invalid_execution_arm')
         if self.requested_arm and self.requested_arm != arm:
             raise ValueError('requested_arm_cannot_switch')
-        stage = str(self.stage_index())
-        if self.stage_arms.get(stage) not in (None, arm):
-            raise ValueError('stage_arm_is_fixed')
-        self.stage_arms[stage] = arm
+        self.records[self.current_id]['execution_arm'] = arm
 
     def observe(self, objects, observation_id):
         before = deepcopy(self.records)
         self.observation_id = observation_id
         self.visible_ids = {obj['id'] for obj in objects}
         for entity in self.scene_entities.values():
+            if self.records.get(entity['id'], {}).get('status') == 'consumed':
+                continue
             if entity.get('kind') != 'table':
                 entity['visibility'] = 'visible' if entity['id'] in self.visible_ids else 'unseen'
                 entity['geometry_status'] = 'measured' if entity['id'] in self.visible_ids else 'missing'
@@ -316,15 +321,24 @@ class TaskProgress:
             for key in ('kind', 'color', 'position', 'visual_semantics', 'measured_relationships'):
                 if key in obj:
                     record[key] = deepcopy(obj[key])
+            if (not self.inventory_finalized and not record.get('transfers')
+                    and not self.attempts.get(obj['id'])):
+                # Discovery creates a proposal before RGBD association. Add the
+                # actual source evidence before freezing; never overwrite the
+                # original source after selection, movement or finalization.
+                initial = record.setdefault('initial_source', {})
+                initial.update({key: deepcopy(obj[key]) for key in
+                    ('position', 'visual_semantics', 'measured_relationships') if key in obj})
+                initial['measurement_observation_id'] = observation_id
         if self.records != before:
             self.ledger_revision += 1
-        if self.records and (self.route != 'direct'
-                or self.scope == 'single' and self.selection_order == 'inventory'):
+        if self.records and self.scope == 'single' and self.selection_order == 'inventory':
             self.inventory_initialized = True
 
     def initialize_scene_inventory(self, observation):
         """Fix all initial entities; later captures only update their measurements."""
         if self.scene_inventory_observation_id:
+            self._update_table_measurements(observation)
             return
         semantic = observation.get('scene_entities')
         if semantic:
@@ -369,6 +383,17 @@ class TaskProgress:
                 **{key: deepcopy(observation['table'][key]) for key in
                    ('position', 'size', 'surface_height_m') if key in observation['table']}}
         self.scene_inventory_observation_id = observation['observation_id']
+        self._update_table_measurements(observation)
+
+    def _update_table_measurements(self, observation):
+        for entity in self.scene_entities.values():
+            if (entity.get('kind') == 'table' and entity.get('geometry_status') == 'measured'
+                    and entity.get('measurement_source') == 'initial_inventory_ransac_table'
+                    and entity.get('observation_id') != observation['observation_id']):
+                entity['geometry_status'] = 'cached'
+        for identifier, measured in current_table_measurements(observation).items():
+            if identifier in self.scene_entities:
+                self.scene_entities[identifier].update(measured, geometry_status='measured')
 
     def scene_queries(self):
         queries = {}
@@ -393,7 +418,7 @@ class TaskProgress:
         visible = {**observation.get('scene_entities', {}), **{obj['id']: obj for obj in observation['objects']}}
         if any(key not in visible for key in identifiers):
             raise ValueError('inventory_required_object_unseen')
-        if any(not source_region_confirmed(self.route, self.records[key]) for key in identifiers):
+        if any(not source_region_confirmed(self.records[key]) for key in identifiers):
             raise ValueError('task_source_region_unconfirmed')
         assigned = set()
         for group in self.quantity_groups:
@@ -411,11 +436,23 @@ class TaskProgress:
             ordered = head_rgb_box_order([semantic[key] for key in identifiers])
         else:
             ordered = head_image_order([visible[key] for key in identifiers], observation.get('views', {}).get('3', {}))
-        for number, identifier in enumerate(ordered, 1):
+        assigned_numbers = [entity['display_id'] for entity in self.scene_entities.values()
+                            if type(entity.get('display_id')) is int and entity['display_id'] > 0]
+        if len(assigned_numbers) != len(set(assigned_numbers)):
+            raise ValueError('duplicate_inventory_display_id')
+        used_numbers = set(assigned_numbers)
+        next_number = 1
+        for identifier in ordered:
+            number = self.scene_entities.get(identifier, {}).get('display_id')
+            if number is None:
+                while next_number in used_numbers:
+                    next_number += 1
+                number = next_number
+                used_numbers.add(number)
             self.records[identifier]['display_id'] = number
             self.records[identifier].setdefault('initial_source', {key: deepcopy(visible[identifier][key])
                 for key in ('position', 'visual_semantics', 'measured_relationships') if key in visible[identifier]})
-        self.next_display_id = len(ordered) + 1
+        self.next_display_id = max(used_numbers, default=0) + 1
         self.inventory_finalized = True
         self.inventory_initialized = True
         self.inventory_revision += 1
@@ -427,7 +464,7 @@ class TaskProgress:
         for identifier in identifiers:
             self.scene_entities[identifier]['roles'] = ['transport', 'collision']
         for identifier, entity in self.scene_entities.items():
-            number = self.records.get(identifier, {}).get('display_id')
+            number = self.records.get(identifier, {}).get('display_id', entity.get('display_id'))
             if number is None:
                 number = self.next_display_id
                 self.next_display_id += 1
@@ -463,7 +500,7 @@ class TaskProgress:
             identifier = obj['id']
             record = self.records.get(identifier, {})
             membership = self.membership.get(identifier, 'unknown')
-            direct_single_candidate = (self.route == 'direct' and self.scope == 'single'
+            direct_single_candidate = (self.scope == 'single'
                                        and self.selection_order == 'explicit' and membership == 'unknown')
             if membership != 'required' and not direct_single_candidate:
                 continue
@@ -488,8 +525,6 @@ class TaskProgress:
             raise ValueError('target_not_in_initial_inventory')
         if identifier in self.records and self.membership.get(identifier, 'unknown') != 'required':
             raise ValueError('target_not_in_task_inventory')
-        if self.pending_route_id() not in (None, identifier):
-            raise ValueError('pending_route_requires_same_object')
         record = self.records.get(identifier, {})
         if record.get('status') in {'completed'}:
             raise ValueError('target_already_completed')
@@ -498,12 +533,12 @@ class TaskProgress:
         pending = [item for key, item in self.records.items()
                    if self.membership.get(key) == 'required'
                    and item['status'] not in {'completed', 'deferred'}]
-        if self.selection_order == 'inventory' and pending and self.pending_route_id() is None:
+        if self.selection_order == 'inventory' and pending:
             first = min(pending, key=lambda item: (item.get('execution_rank', item.get('display_id', 10**9)),
                                                   item['id']))
             if first['id'] != identifier:
                 raise ValueError('target_violates_inventory_order')
-        if not source_region_confirmed(self.route, {**source, **record}):
+        if not source_region_confirmed({**source, **record}):
             raise ValueError('task_source_region_unconfirmed')
         self.membership[identifier] = 'required'
         self.records[identifier] = {**record, **{key: deepcopy(source[key]) for key in
@@ -513,7 +548,8 @@ class TaskProgress:
         number = self.scene_entities.get(identifier, {}).get('display_id', source.get('display_id'))
         if number is not None:
             self.records[identifier].setdefault('display_id', number)
-        self.records[identifier].setdefault('stage_index', 0)
+        self.records[identifier]['transfer_index'] = len(record.get('transfers', []))
+        self.records[identifier].pop('execution_arm', None)
         self.records[identifier].setdefault('initial_source', {key: deepcopy(source[key]) for key in
             ('position', 'visual_semantics', 'measured_relationships') if key in source})
         self.current_id = identifier
@@ -540,7 +576,7 @@ class TaskProgress:
         if record.get('visual_release', {}).get('action_id') != action_id:
             visual = self.visual_progress().get(identifier, {})
             record.update(release_feedback_id=feedback_id, transport_status='released', visual_release={
-                'action_id': action_id, 'stage_index': self.stage_index(identifier),
+                'action_id': action_id, 'transfer_index': self.transfer_index(identifier),
                 'destination_id': record.get('destination_id'), 'confirmed_observation_id': None,
                 **{key: visual[key] for key in ('region_id', 'slot_id') if visual.get(key) is not None}})
             self.ledger_revision += 1
@@ -558,7 +594,7 @@ class TaskProgress:
                     and evidence.get('status') == 'at_destination')
         record['destination_visual_evidence'] = deepcopy(evidence)
         confirmed = (slot_matches and bool(record.get('release_feedback_id'))
-                     and release.get('stage_index') == self.stage_index(identifier)
+                     and release.get('transfer_index') == self.transfer_index(identifier)
                      and release.get('destination_id') == record.get('destination_id')
                      and evidence.get('source') == 'openai_decisions'
                      and evidence.get('status') == 'at_destination'
@@ -572,27 +608,33 @@ class TaskProgress:
             record['transport_status'] = 'awaiting_visual_confirmation'
         return confirmed
 
+    def record_visual_progress(self, identifier, evidence):
+        """Keep verified release evidence and later observations separately."""
+        record = self.records[identifier]
+        release = record.get('visual_release', {})
+        confirmed = (release.get('confirmed_observation_id')
+                     and release.get('destination_id') == record.get('destination_id')
+                     and release.get('transfer_index') == self.transfer_index(identifier))
+        field = ('destination_tracking_evidence' if confirmed or record.get('completed_identity_track')
+                 else 'destination_visual_evidence')
+        record[field] = deepcopy(evidence)
+
     def complete(self, identifier, *, observation_id=None, feedback_id=None):
         record = self.records[identifier]
-        stages = record.setdefault('completed_stages', [])
+        transfers = record.setdefault('transfers', [])
         evidence = {'feedback_id': feedback_id} if feedback_id else {'observation_id': observation_id}
         if not next(iter(evidence.values())):
             raise ValueError('completion_requires_release_evidence')
         key, identifier_value = next(iter(evidence.items()))
-        if record.get('status') == 'completed' or any(step.get(key) == identifier_value for step in stages):
+        if record.get('status') == 'completed' or any(step.get(key) == identifier_value for step in transfers):
             return
-        stages.append({'stage_index': self.stage_index(identifier), 'destination_id': record.get('destination_id'),
-                       'arm': self.bound_arm(), **evidence})
-        if self.route == 'box_table_box' and self.stage_index(identifier) == 0:
-            record.update(status='pending', stage_index=1, current_region=record.get('destination_id'))
-            self.current_id = None
-            self.failure = None
-            self.ledger_revision += 1
-            return
+        transfers.append({'transfer_index': self.transfer_index(identifier), 'destination_id': record.get('destination_id'),
+                          'arm': record.get('execution_arm', self.requested_arm), **evidence})
         if identifier not in self.completed_ids:
             self.completed_ids.append(identifier)
             self.ledger_revision += 1
-        record.update(status='completed', **{'confirmed_' + key: identifier_value})
+        record.update(status='completed', current_region=record.get('destination_id'),
+                      **{'confirmed_' + key: identifier_value})
         self.current_id = None
         self.failure = None
 
@@ -609,6 +651,9 @@ class TaskProgress:
             raise ValueError('invalid_unseen_relevance_judgment')
         self.relevance.update(judgments)
 
+    def assess_observed_membership(self, judgments):
+        self.assess_membership(judgments)
+
     def assess_membership(self, judgments):
         for identifier, value in judgments.items():
             record = self.records.get(identifier)
@@ -620,7 +665,7 @@ class TaskProgress:
                     or record['status'] in {'selected', 'completed', 'deferred'}
                     and value != self.membership.get(identifier, 'required')):
                 raise ValueError('invalid_task_membership')
-            if value == 'required' and not source_region_confirmed(self.route, record):
+            if value == 'required' and not source_region_confirmed(record):
                 raise ValueError('task_source_region_unconfirmed')
         if self.requested_count is not None and self.selection_order == 'explicit':
             membership = self.membership | judgments
@@ -653,8 +698,7 @@ class TaskProgress:
                   if key not in self.visible_ids and item['status'] not in {'completed', 'deferred'}]
         return {'instruction': self.instruction, 'scope': self.scope, 'requested_arm': self.requested_arm,
                 'requested_count': self.requested_count, 'selection_order': self.selection_order,
-                'route': self.route, 'stage_index': self.stage_index(), 'stage_arms': dict(self.stage_arms),
-                'pending_route_id': self.pending_route_id(),
+                'transfer_index': self.transfer_index(),
                 'ledger_revision': self.ledger_revision,
                 'inventory_initialized': self.inventory_initialized,
                 'inventory_finalized': self.inventory_finalized,
@@ -663,7 +707,6 @@ class TaskProgress:
                 'scene_entities': deepcopy(self.scene_entities),
                 'scene_inventory_observation_id': self.scene_inventory_observation_id,
                 'placement_regions': deepcopy(list(self.placement_requests.values())),
-                'route_destinations': deepcopy(self.route_destinations),
                 'quantity_groups': [{**group, 'member_ids': [key for key, value in
                     self.group_membership.get(group['group_id'], {}).items() if value == 'required']}
                     for group in self.quantity_groups],
@@ -685,8 +728,6 @@ class TaskProgress:
                 and len(self.completed_ids) != self.requested_count):
             return 'needs_attention'
         if state['unresolved_membership']:
-            return 'needs_attention'
-        if judgment == 'complete' and self.pending_route_id() is not None:
             return 'needs_attention'
         if judgment == 'complete' and any(item['status'] not in {'completed', 'deferred'}
                                           for item in state['objects']):

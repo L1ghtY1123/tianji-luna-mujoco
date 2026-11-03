@@ -10,36 +10,48 @@ import numpy as np
 from .geometry import front_tcp_offset, rigid_matrix
 from .kinematics import robot_model
 from .placement import observed_object
+from .placement_candidates import support_xy_candidates
+from .planning_settings import PlanningSettings
 
 MEASUREMENT_RESERVE_M = .005
 GEOMETRY_PADDING_M = .000001
-MAX_GRASP_TILT_DEG = 45.
 
 
 def prepare_grasp_candidates(candidates, *, robot_base_world_m, target_reference_world_m,
-                             reference_tcp=None):
-    """Filter directions and choose jaw symmetry without translating GraspGen poses."""
+                             reference_tcp=None, planning_settings=None):
+    """Insert once along local +Z, then filter directions and choose jaw symmetry."""
+    settings = PlanningSettings.model_validate(planning_settings or {})
     away = (np.asarray(target_reference_world_m, dtype=float)
             - np.asarray(robot_base_world_m, dtype=float))[:2]
     length = np.linalg.norm(away)
-    if not np.isfinite(away).all() or length <= 1e-9:
+    if not np.isfinite(away).all() or (length <= 1e-9 and settings.grasp_require_away_from_robot):
         raise ValueError("grasp_requires_horizontal_robot_target_direction")
-    away /= length
-    minimum_down = float(np.cos(np.deg2rad(MAX_GRASP_TILT_DEG)))
+    away = away / length if length > 1e-9 else np.zeros(2)
+    minimum_down = float(np.cos(np.deg2rad(settings.grasp_maximum_tilt_deg)))
     reference = rigid_matrix(reference_tcp)[:3, :3] if reference_tcp is not None else None
     shifted, accepted, evidence = [], [], []
     for candidate in candidates:
         prepared = deepcopy(candidate)
-        pose = rigid_matrix(candidate["T_world_tcp"]).copy()
+        # Reprocessing always starts from the saved original, never an already
+        # inserted pose. This user-requested depth precedes reach/IK/collision.
+        pose = rigid_matrix(candidate.get("T_world_tcp_before_insertion",
+                                          candidate["T_world_tcp"])).copy()
+        prepared["T_world_tcp_before_insertion"] = pose.tolist()
+        offline = candidate.get('source') == 'cad_offline_library'
+        insertion_m = 0. if offline else settings.grasp_insertion_m
+        insertion = insertion_m * pose[:3, 2]
+        pose[:3, 3] += insertion
+        prepared.update(insertion_applied=not offline, insertion_m=insertion_m,
+                        insertion_offset_world_m=insertion.tolist(), T_world_tcp=pose.tolist())
         downward = float(-pose[2, 2])
         away_dot = float(pose[:2, 2] @ away)
         tilt_ok = downward >= minimum_down - 1e-9
-        direction_ok = away_dot >= -1e-9
+        direction_ok = not settings.grasp_require_away_from_robot or away_dot >= -1e-9
         if tilt_ok and direction_ok:
             # Parallel jaws have a half-turn equivalent about their approach Z.
             # Choose in the EXECUTING arm's frame, before IK/collision planning.
             # Never flip a solved trajectory or alter the approach direction.
-            if reference is not None:
+            if reference is not None and not offline:
                 alternative = pose[:3, :3] @ np.diag([-1., -1., 1.])
                 flip = np.trace(reference.T @ alternative) > np.trace(reference.T @ pose[:3, :3]) + 1e-9
                 prepared['T_world_tcp_before_symmetry'] = pose.tolist()
@@ -53,10 +65,11 @@ def prepare_grasp_candidates(candidates, *, robot_base_world_m, target_reference
                          "horizontal_away_from_robot_dot": away_dot,
                          "tilt_passed": tilt_ok, "away_from_robot_passed": direction_ok})
     return shifted, accepted, {
-        "axis": "actual_tool_positive_z_in_world", "maximum_tilt_deg": MAX_GRASP_TILT_DEG,
+        "axis": "actual_tool_positive_z_in_world", "maximum_tilt_deg": settings.grasp_maximum_tilt_deg,
+        "require_away_from_robot": settings.grasp_require_away_from_robot,
         "minimum_downward_dot": minimum_down, "robot_base_world_m": list(robot_base_world_m),
-        "horizontal_robot_to_target_unit_vector": away.tolist(), "insertion_m": 0.,
-        "operation_order": ["direction_filter", "arm_jaw_symmetry", "batched_ik"],
+        "horizontal_robot_to_target_unit_vector": away.tolist(), "insertion_m": settings.grasp_insertion_m,
+        "operation_order": ["local_z_insertion", "direction_filter", "arm_jaw_symmetry", "batched_ik"],
         "input_count": len(candidates), "accepted_count": len(accepted),
         "rejected_count": len(candidates) - len(accepted),
         "rejected_tilt_count": sum(not row["tilt_passed"] for row in evidence),
@@ -98,7 +111,7 @@ def arm_wrist_reach(arm):
     upper_maximum = float(np.hypot(axial, transverse))
     shoulder_offset = float(np.linalg.norm(data.xpos[upper_start] - data.xpos[shoulder]))
     maximum = shoulder_offset + upper_maximum + forearm + GEOMETRY_PADDING_M
-    wrist_offset = data.xmat[tool].reshape(3, 3).T @ (data.xpos[wrist] - data.xpos[tool])
+    wrist_offset = data.xmat[tool].reshape(3, 3).T @ (data.xpos[wrist] - data.xpos[tool]) - front_tcp_offset(arm)
     return {"robot_base_world_m": data.xpos[model.body("Link_Base").id].tolist(),
             "shoulder_world_m": data.xpos[shoulder].tolist(),
             "tcp_to_wrist_tool_m": wrist_offset.tolist(),
@@ -119,6 +132,10 @@ def transport_tcp_height(rotation, lowest_held_z, occupied_top_z, arm):
 
 def filter_transport_reach(candidates, object_points, arm, request):
     """Screen the retained grasp attitude at the eventual above-bin TCP goal."""
+    if request.get('orientation_mode') == 'free':
+        return candidates, {'applied': False, 'orientation_mode': 'free',
+            'destination_feasibility': 'deferred_to_attached_pose_planning',
+            'input_count': len(candidates), 'accepted_count': len(candidates), 'rejected_count': 0}
     geometry = arm_wrist_reach(arm)
     region = request['transport_region']
     center = np.asarray(region['center_world_xy_m'], float)
@@ -133,11 +150,26 @@ def filter_transport_reach(candidates, object_points, arm, request):
     for candidate in candidates:
         pose = rigid_matrix(candidate['T_world_tcp'])
         height = transport_tcp_height(pose[:3, :3], points[:, 2].min() - pose[2, 3], top, arm)
-        mount = np.r_[center - (pose[:3, :3] @ front_tcp_offset(arm))[:2], height]
-        wrist = mount + pose[:3, :3] @ geometry['tcp_to_wrist_tool_m']
-        distance = float(np.linalg.norm(wrist - shoulder))
+        front_offset = np.zeros(2)
+        centers = np.asarray([center])
+        if request.get('free_placement') or region.get('free_placement'):
+            centers = support_xy_candidates(region['polygon_world_xy_m'],
+                offsets_world_xy_m=points[:, :2] - pose[:2, 3] - front_offset,
+                clearance_m=.015)
+        if not len(centers):
+            evidence.append({'candidate_index': candidate['index'], 'reach_screening_passed': False,
+                             'reason': 'carried_footprint_outside_measured_region', 'placement_candidate_count': 0})
+            continue
+        mounts = np.column_stack((centers - front_offset, np.full(len(centers), height)))
+        wrists = mounts + pose[:3, :3] @ geometry['tcp_to_wrist_tool_m']
+        distances = np.linalg.norm(wrists - shoulder, axis=1)
+        selected = int(np.argmin(distances))
+        mount, wrist = mounts[selected], wrists[selected]
+        distance = float(distances[selected])
         passed = distance <= limit
-        evidence.append({'candidate_index': candidate['index'], 'nominal_mount_world_m': mount.tolist(),
+        evidence.append({'candidate_index': candidate['index'], 'nominal_tcp_world_m': mount.tolist(),
+            'target_reference_world_xy_m': centers[selected].tolist(),
+            'placement_candidate_count': len(centers),
             'nominal_transport_wrist_distance_m': distance,
             'horizontal_wrist_distance_m': float(np.linalg.norm((wrist - shoulder)[:2])),
             'reach_screening_passed': passed})
@@ -164,18 +196,30 @@ def fixed_slot_reach_context(snapshot, target_id, arm, placement_request, settin
         raise ValueError("grasp_requires_finite_bound_floor") from None
     if isinstance(raw_floor, bool) or not np.isfinite(floor):
         raise ValueError("grasp_requires_finite_bound_floor")
-    center = np.asarray(cells[0]["center_world_xy_m"], dtype=float)
+    precise = request.get('precise_xy') is True or request.get('fixed_xy') is True
+    center = np.asarray(request.get('selected_reference_world_xy_m') if precise else
+                        cells[0]["center_world_xy_m"], dtype=float)
     points = np.asarray(observed_object(snapshot, target_id)["points_world_m"], dtype=float)
     if (center.shape != (2,) or not np.isfinite(center).all() or points.ndim != 2
             or points.shape[1] != 3 or len(points) == 0 or not np.isfinite(points).all()):
         raise ValueError("grasp_requires_finite_measured_reference")
-    return {**arm_wrist_reach(arm), "arm": arm, "object_id": target_id,
+    region_candidates = {}
+    if request.get('free_placement') and not precise:
+        polygon = cells[0]['polygon_world_xy_m']
+        positions = support_xy_candidates(polygon)
+        if not len(positions):
+            raise ValueError('placement_no_support_candidate')
+        region_candidates = {'candidate_world_xy_m': positions.tolist(),
+                             'region_polygon_world_xy_m': polygon}
+    return {**region_candidates, **arm_wrist_reach(arm), "arm": arm, "object_id": target_id,
+            "precise_xy": precise,
             "slot_id": request["slot_id"], "layout_revision": request.get("layout_revision"),
             "target_reference_world_xy_m": center.tolist(),
             "measured_reference_world_m": points.mean(axis=0).tolist(),
             "measured_cloud_min_world_z_m": float(points[:, 2].min()),
             "bound_floor_z_m": floor,
             "required_clearance_m": settings.trajectory_collision_clearance_m,
+            "release_height_m": settings.place_release_height_m,
             "endpoint_allowance_m": 0.,
             "approach_axis": settings.place_approach_axis,
             "approach_offset_m": settings.place_approach_offset_m,
@@ -187,7 +231,7 @@ def fixed_slot_reach_context(snapshot, target_id, arm, placement_request, settin
 
 def filter_fixed_slot_reach(candidates, context):
     accepted, evidence = [], []
-    center = np.asarray(context["target_reference_world_xy_m"])
+    centers = np.asarray(context.get("candidate_world_xy_m", [context["target_reference_world_xy_m"]]))
     shoulder = np.asarray(context["shoulder_world_m"])
     wrist_offset = np.asarray(context["tcp_to_wrist_tool_m"])
     # Reserve measurement uncertainty inside the bound. This intentionally
@@ -195,29 +239,39 @@ def filter_fixed_slot_reach(candidates, context):
     limit = context["maximum_shoulder_wrist_distance_m"] - context["measurement_reserve_m"]
     for candidate in candidates:
         grasp = rigid_matrix(candidate["T_world_tcp"])
-        mount_xy = center - (grasp[:3, :3] @ front_tcp_offset(context['arm']))[:2]
+        reference_offset = (np.asarray(context['measured_reference_world_m']) - grasp[:3, 3]
+                            if context.get('precise_xy') else np.zeros(3))
+        mount_xy = centers - reference_offset[:2]
         # Use the validated full geometry's bottom when available. A top-only
         # measurement would underestimate nominal release Z by object height.
         # This screens quality only; actual attachment/map checks still set Z.
         object_min_z = context.get("nominal_object_min_world_z_m", context["measured_cloud_min_world_z_m"])
         mount_z = (grasp[2, 3] - object_min_z
-                   + context["bound_floor_z_m"] + context["required_clearance_m"]
+                   + context["bound_floor_z_m"]
+                   + max(context["required_clearance_m"], context["release_height_m"])
                    + context["endpoint_allowance_m"])
-        mount = np.r_[mount_xy, mount_z]
-        wrist = mount + grasp[:3, :3] @ wrist_offset
+        mounts = np.column_stack((mount_xy, np.full(len(mount_xy), mount_z)))
+        wrists = mounts + grasp[:3, :3] @ wrist_offset
         approach_offset = np.zeros(3)
         approach_offset["xyz".index(context["approach_axis"])] = context["approach_offset_m"]
         if context["approach_in_tool_frame"]:
             approach_offset = grasp[:3, :3] @ approach_offset
-        approach_wrist = wrist + approach_offset
+        approach_wrists = wrists + approach_offset
+        scores = np.maximum(np.linalg.norm(wrists - shoulder, axis=1),
+                            np.linalg.norm(approach_wrists - shoulder, axis=1))
+        selected = int(np.argmin(scores))
+        mount, wrist, approach_wrist = mounts[selected], wrists[selected], approach_wrists[selected]
+        selected_xy = mount_xy[selected]
         release_distance = float(np.linalg.norm(wrist - shoulder))
         approach_distance = float(np.linalg.norm(approach_wrist - shoulder))
         passes_screen = max(release_distance, approach_distance) <= limit
         evidence.append({"candidate_index": candidate["index"],
-                         "target_mount_world_xy_m": mount_xy.tolist(),
+                         "target_mount_world_xy_m": selected_xy.tolist(),
+                         "target_reference_world_xy_m": centers[selected].tolist(),
+                         "placement_candidate_count": len(centers),
                          "target_wrist_world_xy_m": wrist[:2].tolist(),
                          "horizontal_wrist_distance_m": float(np.linalg.norm(wrist[:2] - shoulder[:2])),
-                         "nominal_mount_world_m": mount.tolist(),
+                         "nominal_tcp_world_m": mount.tolist(),
                          "nominal_release_wrist_world_m": wrist.tolist(),
                          "nominal_approach_wrist_world_m": approach_wrist.tolist(),
                          "nominal_release_wrist_distance_m": release_distance,

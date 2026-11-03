@@ -1,0 +1,19 @@
+{
+  "source": "user_declared_experiment_conditions_2026-10-26",
+  "work_area": "Robot tasks take place around the table.",
+  "surroundings": "There are no other obstacles on either side of or behind the robot.",
+  "collision_map_scope": "Only currently or previously observed, confirmed entities in the Responses inventory, including the task support surfaces.",
+  "evidence_type": "operator_supplied_environment_conditions_not_camera_measurements",
+  "completion_requirements": {
+    "robot_pose": "observation",
+    "source": "explicit_user_request_2026-11-02",
+    "description": "Complete the task with both empty arms at the configured observation posture. A required post-delivery return may already satisfy this condition; do not add another movement when actual feedback already proves it. Responses owns all graph actions; completion checks feedback and never inserts movement.",
+    "after_each_object": {
+      "source": "explicit_user_request_reconfirmed_2026-11-02",
+      "robot_pose": "observation",
+      "observe_inventory": true,
+      "description": "After each object's verified delivery, including the last, return both empty arms to the configured observation posture and observe the inventory there. Responses must author explicit nodes and edges using skill contracts, including any necessary map refresh; runtime never inserts movement. Temporary occlusion must preserve all other inventory IDs."
+    }
+  },
+  "limits": "These conditions do not specify object identities or poses, task order, execution arm, or skill choices. Partial observations within the task area remain partial. Retain valid previously observed entities and explicitly update moved geometry."
+}

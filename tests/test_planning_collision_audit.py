@@ -135,7 +135,7 @@ def test_batch_does_not_recheck_raw_paths_before_final_interpolation(monkeypatch
     monkeypatch.setattr(module, 'add_trajectory_derivatives', lambda result, raw: result)
     backend = object.__new__(module.ValidatedBatchBackend)
     backend.arm = 'A'
-    backend.motion_planner = SimpleNamespace(last_grasp_result=None)
+    backend.motion_planner = SimpleNamespace(last_grasp_result=None, grasp_contacts=lambda links: __import__("contextlib").nullcontext())
     backend.tool_fk_evidence = lambda *args: {'frame': 'world'}
 
     def repeated(_):
@@ -158,37 +158,61 @@ def test_closed_grasp_lift_requires_actual_fingers_but_no_attachment():
 
 
 @pytest.mark.parametrize('reject_lift', [False, True])
-def test_execution_checks_closed_geometry_before_original_lift(tmp_path, reject_lift):
+def test_execution_checks_closed_geometry_before_original_lift(tmp_path, reject_lift, monkeypatch):
     import asyncio
+    from copy import deepcopy
     from unittest.mock import AsyncMock
 
+    import numpy as np
     from test_runner import Sim
 
     from luna_mujoco.runner import Runner
 
     simulation = Sim()
+    original_snapshot = simulation.robot_snapshot
+    feedback_reads = 0
+
+    def drifting_feedback():
+        nonlocal feedback_reads
+        feedback_reads += 1
+        value = deepcopy(original_snapshot())
+        value['arms']['A']['joints_rad'][6] = feedback_reads * 5e-5
+        return value
+
+    simulation.robot_snapshot = drifting_feedback
     runner = Runner(simulation, None, None, tmp_path)
     runner.state.update(arm='A', generation=1, target_id='black')
     runner.verify_scene = AsyncMock()
     runner.capture_holding_reference = AsyncMock()
+    runner.measured_state = lambda context: simulation.robot_snapshot()
+    monkeypatch.setattr("luna_mujoco.runner.grasp_support_reference", lambda *args, **kwargs: {})
     stages = []
 
     async def stage(context, name, function, *args, **kwargs):
         stages.append(name)
         if name in {'open_gripper', 'close_gripper'}:
             simulation.set_gripper('A', name == 'close_gripper', 1)
+        if name == 'validate_lift':
+            return await function(*args, **kwargs)
+        if name == 'verify_holding_after_lift':
+            return {'success': True}
         return {}
 
     async def check(context, phase, command, binding=None, **kwargs):
         stages.append('check_' + phase)
         assert binding is None
+        assert kwargs.get('measured_observation') is not None
+        np.testing.assert_allclose(command['positions_rad'][0],
+            kwargs['measured_observation']['arms']['A']['joints_rad'], atol=1e-8, rtol=0)
         expected = .48 if phase == 'grasp_lift' else 0.
         assert simulation.robot_snapshot()['arms']['A']['gripper_position_rad'] == expected
         if phase == 'grasp_lift' and reject_lift:
             raise ValueError('closed lift collides')
 
     runner.execution_stage, runner.validate_motion = stage, check
-    context = {'planning_settings': PlanningSettings().model_dump(), 'plan': {
+    context = {'holding': {'owner_id': 'run', 'points_tool_m': [[0, 0, 0], [0, 0, .1]]},
+        'scene': {'scene_token': 'scene', 'observation_id': 'capture', 'generation': 1},
+        'planning_settings': PlanningSettings().model_dump(), 'plan': {
         'T_world_tcp': simulation.state['arms']['A']['tcp'],
         'phases': {name: {'positions_rad': [[0.] * 7, [0.] * 7], 'dt': .02}
                    for name in ('approach', 'grasp', 'lift')}}}

@@ -58,7 +58,7 @@ class Sim:
                 "views": {str(i): {"rgb": rgb.copy(), "depth_m": np.ones((4, 4), dtype=np.float32)}
                           for i in (1, 2, 3)}}
 
-    def execute_trajectory(self, arm, positions_rad, dt, generation):
+    def execute_trajectory(self, arm, positions_rad, dt, generation, *, execution_settings=None):
         assert generation == self.state["generation"]
         if positions_rad[-1][0] == 1:
             self.state["objects"][0]["T_world_object"][2][3] = .1
@@ -66,7 +66,7 @@ class Sim:
         self.state["arms"][arm]["joints_rad"] = list(positions_rad[-1])
         return {"completed": True}
 
-    def execute_dual_trajectory(self, paths, dt, generation):
+    def execute_dual_trajectory(self, paths, dt, generation, *, execution_settings=None):
         assert generation == self.state['generation']
         for arm in ('A', 'B'):
             self.state['arms'][arm]['joints_rad'] = list(paths[arm][-1])
@@ -76,7 +76,7 @@ class Sim:
         assert generation == self.state["generation"]
         return {"completed": True, "duration_s": duration_s}
 
-    def set_gripper(self, arm, closed, generation):
+    def set_gripper(self, arm, closed, generation, *, execution_settings=None):
         assert generation == self.state["generation"]
         self.state["arms"][arm].update(gripper_closed_fraction=.6 if closed else 0.,
                                        gripper_position_rad=.48 if closed else 0.)
@@ -135,6 +135,7 @@ def test_algorithm_event_log_failure_keeps_existing_fail_closed_behavior(tmp_pat
 
 
 class Algorithms:
+
     def clear_carrying(self):
         return {"ok": True, "attached": False}
 
@@ -192,7 +193,7 @@ class Algorithms:
     def validate_execution(self, *args, **kwargs):
         return {"collision_free": True}
 
-    def prepare_carrying(self, observation, arm, scene, holding, *, planning_settings=None):
+    def prepare_carrying(self, observation, arm, scene, holding, *, planning_settings=None, placement_request=None):
         assert holding["verified"] and not holding["attached"]
         return {"attached": True, "scene_token": scene["scene_token"]}
 
@@ -256,6 +257,6 @@ async def wait(runner):
 async def test_unconfirmed_scene_rejected(tmp_path):
     sim = Sim()
     sim.state["confirmed"] = False
-    runner = Runner(sim, Algorithms(), lambda record: Decisions(), tmp_path)
+    runner = Runner(sim, Algorithms(), None, tmp_path)
     with pytest.raises(ValueError, match="confirm_scene_first"):
         await runner.start("抓取黑色物体")

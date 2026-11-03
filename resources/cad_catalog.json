@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "asset_id": "blue_box",
+      "source_asset_id": "blue_box_410x310x145",
+      "model_id": "blue_box",
+      "mesh_key": "blue_box",
+      "display_name": "蓝色盒子",
+      "placement_support": {
+        "kind": "interior_floor",
+        "point_canonical_m": [
+          0.0,
+          0.0,
+          -0.0675
+        ],
+        "normal_canonical": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "mesh_sha256": "35f8ec94f1ae3e0806eb04f370f477e939ce41b2963d243d680fa82068547071"
+      },
+      "segmentation_aliases": [
+        "蓝色盒子",
+        "蓝色物料盒",
+        "blue box",
+        "blue bin",
+        "blue material bin",
+        "blue container",
+        "blue tray"
+      ],
+      "description": "Rigid blue rectangular open-top material bin with rounded corners, an outward rim and tapered walls. Catalog reference dimensions are 410 by 310 by 145 mm. Colour and dimensions alone do not establish identity.",
+      "source_sha256": "212b3373d70dc040983e1409cf09b8b8cb93ee0c67da8619f563e091e47ef30e",
+      "geometry": "rigid_reference",
+      "preview_path": "cad_catalog/blue_box.png",
+      "preview_sha256": "41223c5ef931bb63cdb090623c9cc3b583b2dc9a9692cdb9cd7b3dd1d99237fe"
+    },
+    {
+      "asset_id": "black_workpiece",
+      "source_asset_id": "THREADED_VISUAL_SAMPLE_MM",
+      "model_id": "black_core",
+      "mesh_key": "black_core",
+      "display_name": "黑色工件",
+      "segmentation_aliases": [
+        "黑色工件",
+        "黑色零件",
+        "black workpiece",
+        "black part",
+        "black threaded workpiece",
+        "black housing",
+        "black object",
+        "black shape"
+      ],
+      "description": "Small rigid black rectangular hollow housing with an open end, four corner holes or columns and a short threaded protrusion at the opposite end. Compare its box-like body and asymmetric external details with the model reference; black colour or processing history alone does not establish a CAD match.",
+      "source_sha256": "35597406bc1fa94cde8ece1c56f425c5da8e0eb623e4559e38314c7c4880445c",
+      "geometry": "rigid_reference",
+      "preview_path": "cad_catalog/black_core.png",
+      "preview_sha256": "48a4cdfb5cf8f689603d2c552bad3104ff285c9a58fe9c50b399e66f17d0402e"
+    }
+  ]
+}

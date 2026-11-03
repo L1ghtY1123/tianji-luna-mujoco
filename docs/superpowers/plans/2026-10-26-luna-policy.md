@@ -1,0 +1,64 @@
+# Luna policy implementation plan
+
+> Execute the user-authorized refactor in the existing project. Independent model, skill and mapping tasks use dispatching-parallel-agents; integration and final validation remain with the main agent.
+
+**Goal:** Extensible, object-grounded Responses/Decisions skill execution with conservative unknown-space handling.
+
+**Architecture:** Typed graph and immutable task schema, explicit registry-bound skills, evidence-driven runtime and isolated model adapters. Preserve the existing public algorithm SDK boundary and useful motion primitives.
+
+**Tech Stack:** Python 3.12, Pydantic 2, NumPy, MuJoCo 3.10, existing cuRobo services, OpenAI Responses and Decisions, existing workbench.
+
+**Spec:** ../specs/2026-10-26-luna-policy-design.md
+
+## Global constraints
+
+- Work in C:/project/tianji-luna-mujoco and its existing Ubuntu deployment only.
+- No JEV dependency or JEV skill requirement; user instruction supersedes historical documents.
+- SDK/vendor immutable, no hidden simulator state in perception or collision maps.
+- Model-generated effects are expectations, never verified state updates.
+- Keep remote CPU quotas and single-thread local numerical checks.
+
+## Tasks
+
+- [x] 1. Model boundary: agent/schema.py, responses.py, decisions.py, discovery adapter; registry-based validation; tests for schema/budgets/revisions.
+- [x] 2. Skill boundary: registry handler registration and argument validation, independent configured vla_unpack, deterministic simulation effect; test missing handlers/arguments/pose.
+- [x] 3. Mapping: preserve inventory filtering; partial observations incrementally retain unchanged geometry, explicitly invalidate moved entities, and use separate calibrated visibility evidence for swept-space admission. Test occlusion, missing depth, stale records and motion coverage.
+- [x] 4. Runtime: typed graph interpreter, state bindings, decisions conditions, bounded retry/replan, permanent identity obligations and semantic completion; integrate real application composition.
+- [x] 5. Generalize sensing and action adapters: remove hardcoded colors/side/destination/mandatory workflow; preserve measured geometry and current object ownership.
+- [x] 6. Reorganize functional modules and remove proven obsolete runtime code; update imports, public entry, catalogue and docs.
+- [ ] 7. Run affected/full feasible Python and web tests, static checks, real MuJoCo/service evaluation; independent review; repair important findings and report exact remaining limitations.
+
+## Review focus
+
+Partial action failure cannot replay side effects; unknown IDs cannot create duplicates; target-count/all termination cannot hide missed targets; graph patches cannot lower goal; unknown map cells cannot silently become free. Each owning task includes regression coverage.
+
+## Execution record
+
+- 2026-10-26 user-reported `visual_identity_unknown`, experiment `750b7b5e65694b69af84805793521883`: replaying the exact frozen RGB confirmed `pink package` produced zero SAM3 proposals in all three views, while `pink object` produced one in cameras 3 and 2. Added a bounded, cached appearance fallback for empty object queries, without lowering Decisions thresholds, adding motion, or invoking Responses. On deployed source, the full archived observe replay succeeded with all required geometry present, one real Decisions call, zero Responses calls and zero robot commands (`data/identity-observe-replay.json`).
+- The same experiment exposed prose in `task.processing`, silently bypassing the `vla_unpack` lifecycle. Strict output schema now enumerates registered IDs, parsing validates them, and the prompt distinguishes processing IDs from the graph. A fresh real Responses compile on the archived capture used one request, returned `["vla_unpack"]` and initialized the wrapped-source lifecycle (`data/identity-compile-replay.json`). Affected regression suite: **128 passed** (`data/identity-fix-tests.txt`); changed Python Ruff checks passed. Source deployed with a scoped backup `data/identity-before-fix.tar.gz`; only the web container restarted, no new images. This verifies identity/bootstrap corrections, not full physical unpack completion or resolution of the known swept-space coverage blocker.
+
+- Baseline 192fbaa, local and remote git status clean. Remote Luna services healthy. Python local test environment being installed under ignored data/refactor-venv. No source changes before this record.
+- Decision: use project-owned typed graph rather than importing GaP's multi-agent online generator; preserves one normal Responses call and stable existing skills.
+- Decision: deterministic geometric/contract checks remain in code; user-requested Decisions governs semantic and visual judgments, not numerical collision calculations.
+- Removed old demo_runner/demo_program/visual_discovery entry and obsolete bind/mock skill contracts. The active catalogue has 20 registered handlers, including vla_unpack. Stable perception and physical algorithms remain in place.
+- Independent review repaired stale destination plans, unknown branch fallthrough, pre-action visual evidence, revision input/product loss, and the completed-A-to-first-pending-B transition. Controller-level reproduction now completes both inputs without replaying A.
+- Local full suite: 2654 passed, 63 skipped, 42 failed in 317.82s (`data/refactor-suite-final.txt`). Of these, 41 match failures reproduced against baseline 192fbaa exactly (`data/refactor-baseline-results.txt`); the remaining obsolete simulation method-name test was corrected. Fresh targeted suite after final changes: 20 passed, including physical MuJoCo unpack pose and controller revision. Baseline failures are not waived or rewritten.
+- Frontend: 334 tests passed; production build passed (existing large-bundle warning). Ruff on all modified/new Python files and git diff --check passed.
+- Remote deployment used the existing verified web image sha256:c3752c14b69f82d7ed0b2cae76ddef1dccb54effac6c155fa0d2d7c73e306036 plus the five pinned jsonschema packages, built as tianji-luna-mujoco:0.5.0-policy-guangyu (0e3d7fa2d8d1). Normal full builds use Dockerfile.web and web.constraints.txt. Scoped source backup: data/policy-before-update.tar.gz. Existing web/cuRobo services restarted; SAM3/GraspGen unchanged. Host UID/GID 1003:1004 preserved; CPU quotas remain 2/1/0.5/0.5. cuRobo GPU warmup completed with pinned official source.
+- Six real service runs exercised natural-language direct grasp/place without unpacking. These exposed and repaired nested graph bounds, verbose SAM queries, missing candidate references, typed judgment archive serialization, inappropriate intermediate-work-area binding, and model-normalized reference IDs. Invalid output repair and execution replan share the same Responses budget.
+- The sixth run (`data/policy-live-grasp-place-6.json`, experiment `d0610b29aebc4e9daafd2e41d4d1d2a5`) used one Responses request. Inventory confirmation, real RGBD map build, GraspGen, and native cuRobo grasp planning succeeded. All five native candidate paths were refused by swept-space coverage before motor execution. Full physical grasp/place acceptance is therefore outstanding.
+- Expected algorithm/perception failures now become structured skill failures for explicit graph branches. Unexpected errors still terminate at the runtime boundary. Focused controller/runner tests: 64 passed. Latest combined model, generic perception, recorded controller integration, inventory map, coverage and evidence tests: 74 passed (`data/refactor-final-focused.txt`). Independent mapping checks: 101 passed. Frontend remains 334 passed with a successful build after VLA replay-label migration.
+- Coverage diagnostics now report first unknown sphere, its continuous-motion expansion and its gap from the measured initial robot volume. Exact bounded memoization and fail-fast rejection reduce repeated computation without admitting unknown space. `data/replay_archived_coverage.py` reuses recorded RGBD and native trajectories without any model request or robot command.
+- Archived GPU replay exposed different gripper normalization in capture FK versus command FK. Capture now uses the same normalized configuration. Replaying after this fix certifies all 533 stationary robot spheres (`data/replayed-coverage-74-normalized.json`). The moving approach still fails coverage (0.106 s check), including later chunks with nonzero unknown-space extension. No tolerance was widened and no motor was commanded.
+- Final independent review reproduced a partial-execution replay bug: retry after gripper closure and failed lift reopened the gripper. Motor/effect dispatches are now recorded; exception, unknown and cancellation preserve holding/partial execution, invalidate plans and require explicit recovery. Ordinary retry, graph revision, target reset and a new run in the same simulation generation cannot clear this latch. The current catalogue has no general recovery handler; simulation reset is the available external recovery. Pure planning failures can still follow graph branches or retry. Focused review tests: 30 passed.
+- Final full suite supersedes the earlier run: **2670 passed, 63 skipped, 42 failed, 1 warning in 305.03s**, recorded in `data/refactor-suite-acceptance.txt`. Exactly 41 failed node IDs match the baseline reproduction. The one new failure was lost top-level service error metadata after conversion to a graph result; the runtime now preserves the original code/details and stores graph context separately. Subsequent affected boundary suite: **46 passed** (`data/refactor-final-boundary-tests.txt`). The full suite was not repeated after that narrow correction; the 41 baseline failures remain unresolved.
+- Final static checks: Ruff on every modified/new Python file and git diff --check pass. Frontend remains 334 tests and build passed; no frontend code changed after that verification. Remote source comparison verified 139 deployed files and 47 removals before the final narrow error-metadata correction, which was subsequently synchronized separately. Services are idle/healthy. Full moving grasp/place acceptance remains open because the available calibrated views do not certify the candidate swept volumes; no hidden simulator free-space prior was introduced.
+
+## Lifecycle arm integration audit (2026-10-26)
+
+- Reproduced `lifecycle_arm_binding_invalid` in experiment `e8a42353d26648f5a23710f27154a468`: Responses correctly leaves both future arms `auto`, but the observation lifecycle validator required A/B before any selection. Validation now requires a concrete arm only for executed legs. Unpack verification evaluates both future delivery workspaces while retaining `auto`; explicit `choose_arm` synchronizes the selected binding to the ledger and observation reference.
+- The prior visual-identity verification had tested real observation with a legacy task and real compilation separately. It had not exercised the newly compiled unpack lifecycle through observation. The new regression chains those boundaries; archived real SAM3/Decisions replay passes with no missing geometry, zero Responses calls and zero robot commands (`data/lifecycle-arm-observe-replay.json`).
+- Real API runs also exposed lost initial source measurements, partial visible-floor overlap being used as a semantic membership veto, and inverted failure guards accepting empty handlers. Source evidence now retains measurements and bound Decisions task-membership confirmation separately from path coverage. The compiler rejects empty failure/unknown branches, the interpreter preserves unhandled failures, and node events retain their cause. No geometric or confidence threshold was lowered.
+- Affected suite: 168 passed. Full suite: **2723 passed, 63 skipped, 41 failed, 1 warning in 331.41 s** (`data/lifecycle-complete-full-suite.txt`). All 41 failed node IDs exactly match `data/refactor-baseline-results.txt`; these pre-existing failures remain unresolved. A final diagnostic-only change identifies `confirm_task_binding` separately from the completed observation step; subsequent controller/lifecycle/interpreter checks: 62 passed.
+- Latest real API run `751722429842485d9461669713132642` completed observation and then stopped before motion with `task_binding_unconfirmed:work_area_identity`. Decisions returned 0.61 against the existing 0.8 threshold. The request archive confirms that configured-region metadata and all three current RGB views were supplied; duplicate image bytes were referenced, not lost. This run used three Responses requests including two bounded plan repairs. It does **not** establish end-to-end unpack success. The source scope was also not confirmed complete.
+- Changes deployed to the user's mounted web service using the existing image. No changes to vendor SDKs, other users' services, CPU quotas or safety tolerances. Full physical task acceptance remains open.

@@ -37,14 +37,82 @@ def plan_results(runner, original, outcomes):
     runner.call_algorithm = call
 
 
-async def test_zero_ik_then_failed_plan_uses_third_pool_with_one_deadline(tmp_path, monkeypatch):
+def contact_rejection():
+    return {'candidate_index': 17, 'stage': 'command_validation',
+        'code': 'planning_bounded_contact_unreachable', 'details': {
+            'source': 'measured_points_and_own_finite_pad_planes', 'is_holding_evidence': False,
+            'opposing_contact_predicted': False, 'observed_point_count': 5569,
+            'driver_limit_rad': .182634, 'contact_probe_rad': .166634,
+            'model_fingerprint': 'own-model', 'pads': [
+                {'link': 'left', 'observed_patch_point_count': 1394, 'minimum_signed_gap_m': .01654},
+                {'link': 'right', 'observed_patch_point_count': 1421, 'minimum_signed_gap_m': .01397}]}}
+
+
+@pytest.mark.parametrize('order,accepted', [([253, 174, 199], True),
+                                          ([253, 253, 199], False), ([253, 174, 200], False)])
+def test_exhaustion_matches_candidate_ids_independently_of_joint_travel_sort(order, accepted):
+    from luna_mujoco.demo_sampling import validate_planning_exhaustion
+    evaluation = {key: 'bound' for key in ('arm', 'target_id', 'generation', 'scene_token',
+        'planning_settings', 'tool_profile_revision', 'sampling_round', 'start_joints_deg', 'other_joints_deg')}
+    evaluation['valid_candidates'] = [{'candidate_index': index} for index in (174, 199, 253)]
+    error = exhausted(evaluation)
+    failures = {row['candidate_index']: row for row in error.details['failures']}
+    error.details['failures'] = [deepcopy(failures.get(index, failures[174])) | {'candidate_index': index}
+                                for index in order]
+    assert validate_planning_exhaustion(error, evaluation) is accepted
+
+
+def test_completed_command_collision_can_spend_remaining_candidate_pool():
+    from luna_mujoco.algorithms import determinate_grasp_failure
+    proof = {'collision_free': False, 'motion_collision_checks_passed': False,
+        'failure_reason': 'collision_or_joint_bounds', 'phase': 'grasp_lift',
+        'checked_point_count': 82, 'command_point_count': 56, 'first_invalid_index': 0,
+        'scene_token': 'current', 'binding_sha256': 'a' * 64,
+        'collision_scope': 'measured_obstacles_and_both_robot_arms'}
+    failure = {'stage': 'command_validation', 'code': 'execution_collision', 'details': proof}
+    assert determinate_grasp_failure(failure)
+    for invalid in ({'failure_reason': 'observation_coverage_insufficient'}, {'checked_point_count': 0},
+                    {'first_invalid_index': None}, {'collision_free': True}, {'binding_sha256': ''}):
+        assert not determinate_grasp_failure(failure | {'details': proof | invalid})
+
+
+async def test_proven_bounded_contact_rejection_spends_remaining_frozen_pool(tmp_path, monkeypatch):
+    runner, snapshot, context, calls, _, original = sampling_case(tmp_path, monkeypatch, [True, True])
+    async def call(function, *args, **kwargs):
+        result = await original(function, *args, **kwargs)
+        if function is runner.algorithms.plan_grasp and args[3]['A']['sampling_round'] == 1:
+            error = exhausted(args[3]['A'])
+            error.details['failures'] = [contact_rejection()]
+            raise error
+        return result
+    runner.call_algorithm = call
+    result = await runner.plan_grasp(snapshot, 'source', 'A', context)
+    assert result['sampling_round'] == 2
+    assert [call[0] for call in calls] == ['evaluate_arms', 'plan_grasp', 'generate_grasps',
+                                        'evaluate_arms', 'plan_grasp']
+
+
+@pytest.mark.parametrize('fault', ['source', 'positive', 'nan', 'probe', 'points'])
+def test_contact_error_name_without_finite_rejection_proof_does_not_authorize_sampling(fault):
+    from luna_mujoco.algorithms import determinate_grasp_failure
+    failure = contact_rejection()
+    proof = failure['details']
+    if fault == 'source': proof['source'] = 'unknown'
+    elif fault == 'positive': proof['opposing_contact_predicted'] = True
+    elif fault == 'nan': proof['pads'][0]['minimum_signed_gap_m'] = float('nan')
+    elif fault == 'probe': proof['contact_probe_rad'] = .5
+    else: proof['observed_point_count'] = 0
+    assert not determinate_grasp_failure(failure)
+
+
+async def test_zero_ik_then_failed_plan_uses_third_bounded_pool_without_wrapper_deadline(tmp_path, monkeypatch):
     runner, snapshot, context, calls, _, original = sampling_case(tmp_path, monkeypatch, [False, True, True])
     plan_results(runner, original, ["exhausted", "success"])
     result = await runner.plan_grasp(snapshot, "source", "A", context)
     assert result["sampling_round"] == 3
     assert [call[0] for call in calls] == ["evaluate_arms", "generate_grasps", "evaluate_arms",
         "plan_grasp", "generate_grasps", "evaluate_arms", "plan_grasp"]
-    assert [call[2]["timeout_s"] for call in calls] == [180., 175., 170., 165., 160., 155., 150.]
+    assert all("timeout_s" not in call[2] for call in calls)
     evidence = result["sampling_evidence"]
     assert evidence["total_requested_candidate_count"] == 1768
     assert evidence["trajectory_attempt_count"] == 2
@@ -117,12 +185,13 @@ async def test_incomplete_or_nondeterminate_failure_never_resamples(tmp_path, mo
 
 @pytest.mark.parametrize("stop", ["timeout", "scene", "cancel"])
 async def test_no_next_pool_after_stop_during_planning(tmp_path, monkeypatch, stop):
-    runner, snapshot, context, calls, clock, original = sampling_case(tmp_path, monkeypatch, [True])
+    runner, snapshot, context, calls, _, original = sampling_case(tmp_path, monkeypatch, [True])
     async def call(function, *args, **kwargs):
         result = await original(function, *args, **kwargs)
         if function is runner.algorithms.plan_grasp:
             if stop == "timeout":
-                clock[0] += 180.
+                # A service timeout is unknown execution, not certified pool exhaustion.
+                raise AlgorithmError("planner request timed out", code="algorithm_request_timeout")
             elif stop == "scene":
                 context["scene"]["scene_token"] = "changed"
             else:

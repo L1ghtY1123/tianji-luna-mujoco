@@ -12,7 +12,7 @@ def test_place_defaults_are_independent_of_existing_grasp_settings():
     assert (settings.lift_axis, settings.lift_offset_m, settings.lift_in_tool_frame) == ("z", .1, False)
     assert (settings.place_approach_axis, settings.place_approach_offset_m, settings.place_approach_in_tool_frame) == ("z", .1, False)
     assert (settings.place_retreat_axis, settings.place_retreat_offset_m, settings.place_retreat_in_tool_frame) == ("z", .1, False)
-    assert settings.place_release_height_m == .01
+    assert settings.place_release_height_m == 0.
     for retired in ('plan_timeout_s', 'place_timeout_s'):
         assert retired not in settings.model_dump()
         assert retired not in settings.model_json_schema()['properties']
@@ -22,7 +22,7 @@ def test_place_defaults_are_independent_of_existing_grasp_settings():
             assert fields[f'{grasp}_{suffix}']['title'] == fields[f'{place}_{suffix}']['title']
     assert "place_max_candidates" not in settings.model_dump()
     assert "place_max_candidates" not in settings.model_json_schema()["properties"]
-    assert [settings.dwell_place_approach_s, settings.dwell_place_s, settings.dwell_release_s, settings.dwell_retreat_s] == [1, 1, 1, 1]
+    assert [settings.dwell_place_approach_s, settings.dwell_place_s, settings.dwell_release_s, settings.dwell_retreat_s] == [0, 0, 0, 0]
 
 
 @pytest.mark.parametrize("changes", [
@@ -65,7 +65,7 @@ def test_legacy_saved_release_margin_is_replaced_by_collision_threshold(tmp_path
     path.write_text(json.dumps({legacy_name: .02, "approach_axis": "x", "approach_offset_m": -.08,
                                 "lift_axis": "y", "lift_offset_m": .12, "lift_in_tool_frame": True}), encoding="utf-8")
     migrated = load_settings(path)
-    assert migrated.place_release_height_m == .01
+    assert migrated.place_release_height_m == 0.
     assert (migrated.approach_axis, migrated.approach_offset_m) == ("x", -.08)
     assert (migrated.lift_axis, migrated.lift_offset_m, migrated.lift_in_tool_frame) == ("y", .12, True)
     save_settings(path, migrated)

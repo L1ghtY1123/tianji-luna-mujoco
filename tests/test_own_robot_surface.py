@@ -81,6 +81,25 @@ def test_only_actual_first_surface_matches_not_foreground_or_hidden_robot_surfac
     assert bool(result["matched"][0]) is expected
 
 
+@pytest.mark.parametrize('depth', [.9, .894, 1., 1.3])
+def test_boolean_mask_short_circuit_preserves_ownership_and_unresolved_pixels(depth, monkeypatch):
+    model, data, view = ray_fixture()
+    view['depth_m'][:] = depth
+    ray = mujoco.mj_multiRay
+    calls = []
+    def counted(*args):
+        calls.append(args[-2])
+        return ray(*args)
+    monkeypatch.setattr(mujoco, 'mj_multiRay', counted)
+    full = first_surface_matches(model, data, view, [[1, 1]])
+    full_count = len(calls)
+    calls.clear()
+    compact = first_surface_matches(model, data, view, [[1, 1]], mask_only=True)
+    for key in ('matched', 'unresolved_near_robot'):
+        np.testing.assert_array_equal(compact[key], full[key])
+    assert len(calls) == (1 if depth == .9 else full_count)
+
+
 def test_off_axis_euclidean_range_is_not_compared_directly_to_optical_depth():
     model = mujoco.MjModel.from_xml_string('''<mujoco><worldbody>
         <geom type="box" pos=".36 0 .95" size=".03 .03 .05" group="0"/>

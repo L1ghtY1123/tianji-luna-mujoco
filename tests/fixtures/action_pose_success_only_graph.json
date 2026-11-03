@@ -1,0 +1,271 @@
+{
+  "version": 1,
+  "steps": [
+    {
+      "type": "skill",
+      "id": "target",
+      "skill": "identify_target",
+      "arguments": {
+        "target_id": "pink_package_1"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "work",
+      "skill": "identify_destination",
+      "arguments": {
+        "destination_id": "demo-destination"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "arm0",
+      "skill": "choose_arm",
+      "arguments": {
+        "arm": "auto"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "map0",
+      "skill": "build_scene",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "grasps",
+      "skill": "generate_grasps",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "grasp_plan",
+      "skill": "plan_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "grasp_exec",
+      "skill": "execute_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "grasp_check",
+      "skill": "verify_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "if",
+      "condition": "grasp_check.success",
+      "then_steps": [],
+      "else_steps": [
+        {
+          "type": "stop",
+          "reason": "未能确认已抓住当前包裹；停止以避免无证据搬运。"
+        }
+      ]
+    },
+    {
+      "type": "skill",
+      "id": "work_place_plan",
+      "skill": "plan_place",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "work_place_exec",
+      "skill": "execute_place",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "work_place_check",
+      "skill": "verify_place",
+      "arguments": {}
+    },
+    {
+      "type": "if",
+      "condition": "work_place_check.success",
+      "then_steps": [],
+      "else_steps": [
+        {
+          "type": "stop",
+          "reason": "当前包裹在处理区的放置未获确认；停止，不执行拆包或移动。"
+        }
+      ]
+    },
+    {
+      "type": "skill",
+      "id": "prepare",
+      "skill": "prepare_unpack",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "unpack",
+      "skill": "vla_unpack",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "unpack_check_action_pose",
+      "skill": "verify_unpack",
+      "arguments": {}
+    },
+    {
+      "type": "if",
+      "condition": "unpack_check_action_pose.success",
+      "then_steps": [],
+      "else_steps": [
+        {
+          "type": "stop",
+          "reason": "拆包验证未成功，或未建立安全返回所需的显式交接；停止。"
+        }
+      ]
+    },
+    {
+      "type": "skill",
+      "id": "return_for_unpack_check",
+      "skill": "move_to_observe",
+      "arguments": {}
+    },
+    {
+      "type": "if",
+      "condition": "return_for_unpack_check.success",
+      "then_steps": [],
+      "else_steps": [
+        {
+          "type": "stop",
+          "reason": "无法确认安全返回观测位；停止，不抓取未经验证的产物。"
+        }
+      ]
+    },
+    {
+      "type": "skill",
+      "id": "unpack_check_observation_pose",
+      "skill": "verify_unpack",
+      "arguments": {}
+    },
+    {
+      "type": "if",
+      "condition": "unpack_check_observation_pose.success",
+      "then_steps": [],
+      "else_steps": [
+        {
+          "type": "stop",
+          "reason": "观测位拆包结果验证未成功；停止，不把未确认产物作为目标。"
+        }
+      ]
+    },
+    {
+      "type": "skill",
+      "id": "product_destination",
+      "skill": "identify_destination",
+      "arguments": {
+        "destination_id": "right_box"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "product_arm",
+      "skill": "choose_arm",
+      "arguments": {
+        "arm": "auto"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "map_product",
+      "skill": "build_scene",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "product_grasps",
+      "skill": "generate_grasps",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "product_grasp_plan",
+      "skill": "plan_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "product_grasp_exec",
+      "skill": "execute_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "product_grasp_check",
+      "skill": "verify_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "if",
+      "condition": "product_grasp_check.success",
+      "then_steps": [],
+      "else_steps": [
+        {
+          "type": "stop",
+          "reason": "未能确认已抓住经验证的拆包产物；停止。"
+        }
+      ]
+    },
+    {
+      "type": "skill",
+      "id": "transport_plan",
+      "skill": "plan_transport",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "transport_exec",
+      "skill": "execute_transport",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "release",
+      "skill": "drop",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "delivery_check",
+      "skill": "verify_drop",
+      "arguments": {}
+    },
+    {
+      "type": "if",
+      "condition": "delivery_check.success",
+      "then_steps": [],
+      "else_steps": [
+        {
+          "type": "stop",
+          "reason": "未能视觉确认产物已进入右侧盒子；停止，不宣告完成。"
+        }
+      ]
+    },
+    {
+      "type": "skill",
+      "id": "final_return",
+      "skill": "move_to_observe",
+      "arguments": {}
+    },
+    {
+      "type": "if",
+      "condition": "final_return.success",
+      "then_steps": [],
+      "else_steps": [
+        {
+          "type": "stop",
+          "reason": "最终双臂返回观测位未获确认；停止。"
+        }
+      ]
+    }
+  ]
+}

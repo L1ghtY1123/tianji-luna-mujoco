@@ -12,6 +12,7 @@ from test_visible_surface_gpu_contract import measured_binding
 
 from luna_mujoco import carrying
 from luna_mujoco.backend_builder import ROOT
+from luna_mujoco.motion_coverage import MotionCoverage
 from luna_mujoco.perception_mapping import ObservedFreeSpaceGuard
 
 
@@ -101,7 +102,8 @@ def command_boundary(monkeypatch, phase, failure=None):
     runtime = SimpleNamespace(_robot_config_path=ROOT / "resources/curobo/marvin_gui_dual.yml",
         _urdf_path=ROOT / "assets/marvin_urdf/marvin_with_grippers.urdf", _asset_root_path=ROOT / "assets",
         _command_checkers={}, planning_settings=SimpleNamespace(trajectory_collision_clearance_m=.01),
-        observed_free_guard=guard, geometry_scene={"collision_world_source": "measured_semantic_esdf"})
+        observed_free_guard=guard, geometry_scene={"collision_world_source": "measured_semantic_esdf"},
+        motion_coverage=MotionCoverage({'3': view | {'depth_left_m': np.full((21, 21), 3.)}}, 'scene'))
     planner = SimpleNamespace(device_cfg=SimpleNamespace(as_torch_dict=dict), scene_collision_checker=object())
     payload = {"phase": phase, "arm": "A", "scene_token": "scene", "positions_rad": [[0.] * 7, [.02] * 7],
         "joint_names": names[:7], "other_joints_deg": [0.] * 7,
@@ -139,4 +141,73 @@ def test_dual_command_checks_both_moving_chains_and_measured_grippers(monkeypatc
     checker = next(iter(runtime._command_checkers.values()))
     np.testing.assert_allclose(checker.q[0, -1], [.02] * 7 + [-.04] * 7 + [.04, 0.])
     assert result['collision_free'] is (failure is None)
+    assert {kind for _, kind in calls} == {'world', 'self', 'bounds'}
+
+
+@pytest.mark.parametrize('blind_link,arm,covered', [
+    ('Link1_L', 'A', True), ('TCP_Link_L', 'A', False),
+    ('gripL_Link4_L', 'A', False), ('jev_carried_object_A', 'A', False),
+    ('TCP_Link_R', 'AB', False), ('TCP_Link_L', 'AB', False),
+])
+def test_task_coverage_diagnoses_tool_and_attachment_without_claiming_free(monkeypatch, blind_link, arm, covered):
+    phase = 'place' if blind_link.startswith('jev_carried') else 'observation'
+    runtime, planner, payload, binding, _ = command_boundary(monkeypatch, phase)
+    if arm == 'AB':
+        payload.update(arm=arm, positions_rad=[[0.] * 14, [.02] * 14],
+                       joint_names=[f'Joint{i}_{side}' for side in ('L', 'R') for i in range(1, 8)])
+        payload.pop('other_joints_deg')
+    original = carrying.command_checker
+    def checker_with_blind_link(*args):
+        checker = original(*args)
+        checker.balls[checker.indices[blind_link]] = [4., 0., 1., .02]
+        return checker
+    monkeypatch.setattr(carrying, 'command_checker', checker_with_blind_link)
+    result = carrying.check_command_path(runtime, planner, payload, binding)
+    assert result['collision_free'] is True
+    assert result['unknown_space_motion_gate'] is False
+    assert result['sensor_coverage_role'] == 'diagnostic_for_model_mapping_strategy'
+    assert result['observation_coverage_incomplete'] is (not covered)
+    assert result['coverage_scope'] == 'task_interaction_geometry'
+    assert result['whole_robot_unknown_space_certified'] is False
+    proof = result['observation_coverage'][0]
+    assert proof['excluded_sphere_count'] > 0
+    assert proof['excluded_geometry_coverage'] == 'not_evaluated'
+    assert proof['covered'] is covered
+    if not covered:
+        assert proof['first_unobserved_link'] == blind_link
+
+
+@pytest.mark.parametrize('invalid', ['missing', 'stale', 'invalidated', 'inventory'])
+def test_coverage_diagnostic_still_requires_valid_bound_map_evidence(monkeypatch, invalid):
+    runtime, planner, payload, binding, _ = command_boundary(monkeypatch, 'observation')
+    if invalid == 'missing':
+        runtime.motion_coverage = None
+    elif invalid == 'stale':
+        runtime.motion_coverage.scene_token = 'old-map'
+    elif invalid == 'invalidated':
+        runtime.motion_coverage.invalidate('capture_geometry_changed')
+    else:
+        runtime.geometry_scene['coverage'] = {'stale_entity_ids': ['moved-object']}
+    result = carrying.check_command_path(runtime, planner, payload, binding)
+    assert not result['collision_free']
+    assert result['failure_reason'] == 'observation_coverage_insufficient'
+
+
+def test_shoulder_world_collision_still_rejects_with_task_coverage(monkeypatch):
+    runtime, planner, payload, binding, calls = command_boundary(monkeypatch, 'observation')
+    original = carrying.command_checker
+    def colliding_checker(*args):
+        checker = original(*args)
+        original_cost = checker.cost
+        def cost(kind):
+            values = original_cost(kind)
+            if kind == 'world':
+                values.values[..., checker.indices['Link1_L'][0]] = .001
+            return values
+        checker.cost = cost
+        return checker
+    monkeypatch.setattr(carrying, 'command_checker', colliding_checker)
+    result = carrying.check_command_path(runtime, planner, payload, binding)
+    assert not result['collision_free']
+    assert result['failure_reason'] == 'collision_or_joint_bounds'
     assert {kind for _, kind in calls} == {'world', 'self', 'bounds'}

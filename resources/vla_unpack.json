@@ -1,0 +1,14 @@
+{
+  "preparation_joints_deg": {
+    "A": [-86, 76, 88, -90, 2, 14, -24],
+    "B": [106, 61, -113, -78, 27, 36, 37]
+  },
+  "output_region": {
+    "source": "configured_vla_output_intent",
+    "frame": "world",
+    "center_world_xy_m": [0.44, -0.30],
+    "size_xy_m": [0.04, 0.04],
+    "required_workspace_arm": "B",
+    "physical_marker": false
+  }
+}

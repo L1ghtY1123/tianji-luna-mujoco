@@ -50,7 +50,7 @@ def mapped_runtime(monkeypatch):
                                                      for key, view in decoded["views"].items()}
             candidate = SimpleNamespace(selected_instance_id="source", instance_metrics={"source": {}},
                                         camera_metrics={}, table=SimpleNamespace(model={}), timings_ms={})
-            return candidate, [SimpleNamespace(feature_tensor=np.array([self.value]),
+            return candidate, [SimpleNamespace(name="background", pose=[0, 0, 0, 1, 0, 0, 0], feature_tensor=np.array([self.value]),
                 dims=[self.size] * 3, voxel_size=.01)], {
                 "voxel": {"background": {"dims": [self.size] * 3, "voxel_size": .01}}}
 
@@ -190,7 +190,8 @@ def test_held_map_excludes_only_an_existing_source_layer(monkeypatch, background
     assert result["excluded_object_ids"] == excluded
     assert runtime.geometry_scene["disabled_obstacle_names"] == disabled
     assert runtime.logical_carrying_binding is held_binding
-    assert runtime.geometry_model is model and runtime.geometry_grids is grids
+    assert all(grid in runtime.geometry_grids for grid in grids)
+    assert all(name in runtime.geometry_model[group] for group in model for name in model[group])
     preview = runtime.pointcloud_preview["collision_scene"]
     assert preview["status"] == "available" and preview["table"]["enabled"]
     layers = {layer["name"]: layer for layer in preview["voxel_layers"]}

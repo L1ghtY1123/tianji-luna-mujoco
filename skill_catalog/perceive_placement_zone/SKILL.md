@@ -1,0 +1,5 @@
+# perceive_placement_zone
+
+Obtain the current destination support region and interpret only this transfer location clause. Use an accepted CAD interior-floor/surface definition or a measured support plane; do not demand visible depth for a registered CAD floor. Reuse an already confirmed destination relation when its binding is valid. Decide whether the language authorizes the entire region or adds a relative position/subregion/orientation constraint. Selecting a container on the left/right does not itself constrain a point within that container. CAD selection, grasp method, later processing, return posture and task completion are outside these questions. Unknown geometry or language returns an explicit reason; the graph chooses any legal recovery movement, observation and retry.
+
+Inputs, typed arguments, prerequisites, effects and recoverable results are defined in `contract.json` and the registered parameter schema. Responses selects the initial graph; Decisions selects runtime recovery. This skill executes only its selected operation. Current policy: `docs/cad-runtime-policy-20261102.md`.

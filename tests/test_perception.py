@@ -58,6 +58,70 @@ class FrozenSegmenter:
         return []
 
 
+def test_identity_bound_colour_is_not_replaced_by_unknown_hsv_diagnostic():
+    from geometry_perception_fixture import ScriptedDiscovery, ScriptedVisualInventory
+
+    capture, masks = capture_fixture()
+    for view in capture['views'].values():
+        view['rgb'][np.logical_or.reduce(masks)] = [220, 20, 170]
+    discovery = ScriptedDiscovery().discover(capture, instruction='fixture')
+    for entity in discovery['entities'].values():
+        entity['color'] = 'pink'
+    engine = perception_module().Perception(FrozenSegmenter(masks),
+        visual_inventory=ScriptedVisualInventory(['first', 'second']),
+        robot_surface_classifier=lambda *args: {'status': 'measured', 'masks': {}})
+    observed = engine.observe(capture, source_hint={
+        'scene_entities': discovery['entities'], 'visual_reference': discovery['reference'],
+        'visual_decision': {'source': engine.visual_plan_source, 'purpose': 'associate_inventory'}})
+    assert len(observed['objects']) == 2
+    for obj in observed['objects']:
+        assert obj['color'] == 'pink'
+        assert obj['color_evidence']['heuristic_label'] == 'unknown'
+        assert obj['color_evidence']['semantic_source'] == 'identity_bound_reference'
+
+
+def test_small_visible_surface_uses_bounded_shape_prompt_then_identity_and_depth():
+    capture, masks = capture_fixture()
+    calls = []
+
+    class Segmenter:
+        def segment(self, rgb, text, timestamp_us):
+            calls.append(text)
+            return [{'mask': mask, 'score': .75} for mask in masks] if text == 'red shape' else []
+
+    perception = GeometryPerception(Segmenter(), prompts={'first': 'red object', 'second': 'red object'})
+    result = perception.observe(capture, source_hint={'kind': 'cube', 'color': 'red'})
+    assert len(result['objects']) == 2
+    assert calls == ['red object', 'red shape'] * 3
+    assert all(obj['identity_source'] == 'openai_decisions' for obj in result['objects'])
+    assert all(query['fallback_for'] == 'red object' for query in result['sam3_queries']
+               if query['prompt'] == 'red shape')
+
+
+def test_failed_cad_estimation_propagates_without_obb_fallback():
+    from geometry_perception_fixture import ScriptedDiscovery, ScriptedVisualInventory
+
+    capture, masks = capture_fixture()
+    discovery = ScriptedDiscovery().discover(capture, instruction='fixture')
+
+    class Resolver:
+        def identity_constraints(self, generation):
+            return {}
+
+        def resolve(self, capture, group, instance, **kwargs):
+            if instance['id'] == 'first':
+                raise ValueError('cad_pose_estimation_failed:service_unavailable')
+            return instance
+
+    engine = perception_module().Perception(FrozenSegmenter(masks),
+        visual_inventory=ScriptedVisualInventory(['first', 'second']), cad_resolver=Resolver(),
+        robot_surface_classifier=lambda *args: {'status': 'measured', 'masks': {}})
+    with pytest.raises(perception_module().PerceptionError, match='cad_pose_estimation_failed:service_unavailable'):
+        engine.observe(capture, source_hint={
+            'scene_entities': discovery['entities'], 'visual_reference': discovery['reference'],
+            'visual_decision': {'source': engine.visual_plan_source, 'purpose': 'associate_inventory'}})
+
+
 def test_rgb_inventory_prompt_is_used_literally_and_cached():
     capture, masks = capture_fixture()
     calls = []
@@ -93,6 +157,92 @@ def test_two_rgb_descriptions_bind_overlapping_sam_proposals_without_duplicate_i
     assert all(len(view['instance_masks']) == 2 for view in result['views'].values())
     perception.observe(capture, source_hint={'kind': 'cube', 'color': 'any'})
     assert len(calls) == 6
+
+
+def test_empty_shape_prompt_uses_one_cached_appearance_query_before_identity_resolution():
+    capture, masks = capture_fixture()
+    calls = []
+
+    class Segmenter:
+        def segment(self, rgb, text, timestamp_us):
+            calls.append(text)
+            return [{'mask': mask, 'score': .9} for mask in masks] if text == 'red object' else []
+
+    perception = GeometryPerception(Segmenter(), prompts={'first': 'red package', 'second': 'red parcel'})
+    hint = {'kind': 'cube', 'color': 'red'}
+    result = perception.observe(capture, source_hint=hint)
+    assert calls == ['red package', 'red parcel', 'red object'] * 3
+    assert {obj['id'] for obj in result['objects']} == {'first', 'second'}
+    assert all(obj['identity_source'] == 'openai_decisions' for obj in result['objects'])
+    fallbacks = [query for query in result['sam3_queries'] if 'fallback_for' in query]
+    assert len(fallbacks) == 3
+    assert all(query['fallback_for'] == 'red package' and query['fallback_reason'] == 'no_sam3_match'
+               for query in fallbacks)
+    again = perception.observe(capture, source_hint=hint)
+    assert len(calls) == 9
+    assert all(query['cache_hit'] for query in again['sam3_queries'])
+
+
+def test_appearance_fallback_cannot_bypass_unknown_decisions_identity():
+    capture, masks = capture_fixture()
+    calls = []
+
+    class Segmenter:
+        def segment(self, rgb, text, timestamp_us):
+            calls.append(text)
+            return [{'mask': mask, 'score': .9} for mask in masks] if text == 'red object' else []
+
+    class UnknownInventory:
+        identities = ('first', 'second')
+
+        def __init__(self):
+            self.kinds = {}
+
+        def resolve(self, capture, detections, **kwargs):
+            assert len(detections) == 6
+            raise perception_module().VisualInventoryError('visual_identity_unknown')
+
+    perception = GeometryPerception(Segmenter(), prompts={'first': 'red package', 'second': 'red package'})
+    perception.visual_inventory = UnknownInventory()
+    with pytest.raises(perception_module().PerceptionError, match='visual_identity_unknown'):
+        perception.observe(capture, source_hint={'kind': 'cube', 'color': 'red'})
+    assert calls == ['red package', 'red object'] * 3
+
+
+@pytest.mark.parametrize('kind,color,prompt,expected', [
+    ('cube', 'red', 'red package', ['red package', 'red object', 'red shape']),
+    ('cube', 'red', 'red object', ['red object', 'red shape']),
+    ('cube', 'unknown', 'package', ['package']),
+    ('bin', 'blue', 'blue container', ['blue container', 'blue box']),
+    ('bin', 'blue', '蓝色盒子', ['蓝色盒子', 'blue box', 'blue container']),
+])
+def test_empty_appearance_fallback_is_bounded_for_objects_and_containers(kind, color, prompt, expected):
+    capture, _ = capture_fixture()
+    calls = []
+
+    class Segmenter:
+        def segment(self, rgb, text, timestamp_us):
+            calls.append(text)
+            return []
+
+    perception = GeometryPerception(Segmenter(), identities=('first',), prompts={'first': prompt})
+    perception.observe(capture, source_hint={'kind': kind, 'color': color})
+    assert calls == expected * 3
+
+
+def test_sam3_service_failure_does_not_trigger_appearance_fallback():
+    capture, _ = capture_fixture()
+    calls = []
+
+    class Segmenter:
+        def segment(self, rgb, text, timestamp_us):
+            calls.append(text)
+            raise perception_module().PerceptionError('sam3_service_unavailable')
+
+    perception = GeometryPerception(Segmenter(), identities=('first',), prompts={'first': 'red package'})
+    with pytest.raises(perception_module().PerceptionError, match='sam3_service_unavailable'):
+        perception.observe(capture, source_hint={'kind': 'cube', 'color': 'red'})
+    assert calls == ['red package']
 
 
 def test_observe_fuses_only_masked_measured_points_under_decisions_ids():
@@ -153,12 +303,13 @@ def test_default_perception_uses_visual_inventory_and_requires_its_selected_purp
     capture, masks = capture_fixture()
     inventory = ScriptedVisualInventory(('decisions-first', 'decisions-second'))
     monkeypatch.setattr(module.VisualInventory, 'from_environment', lambda: inventory)
-    monkeypatch.setattr(module.VisualDiscovery, 'from_environment', lambda: ScriptedDiscovery(('decisions-first', 'decisions-second')))
+    manifest = ScriptedDiscovery(('decisions-first', 'decisions-second')).discover(capture, instruction='fixture')
     engine = module.Perception(FrozenSegmenter(masks))
     with pytest.raises(module.PerceptionError, match='visual_decisions_selection_required'):
         engine.observe(capture)
     result = engine.observe(capture, source_hint={
-        'kind': 'cube', 'visual_decision': {'source': 'jev', 'purpose': 'initialize_inventory'}})
+        'kind': 'cube', 'scene_entities': manifest['entities'], 'visual_reference': manifest['reference'],
+        'visual_decision': {'source': 'responses_program', 'purpose': 'initialize_inventory'}})
     assert {obj['id'] for obj in result['objects']} == {'decisions-first', 'decisions-second'}
     assert all(obj['identity_source'] == 'openai_decisions' for obj in result['objects'])
 
@@ -173,12 +324,15 @@ def test_visual_identity_failure_never_falls_back_to_unambiguous_measured_geomet
             raise module.VisualInventoryError('visual_identity_unknown', evidence={'status': 'unknown'})
 
     from geometry_perception_fixture import ScriptedDiscovery
-    engine = module.Perception(FrozenSegmenter(masks), visual_inventory=UnknownInventory(),
-                               visual_discovery=ScriptedDiscovery(('first', 'second')))
+    manifest = ScriptedDiscovery(('first', 'second')).discover(capture, instruction='fixture')
+    engine = module.Perception(FrozenSegmenter(masks), visual_inventory=UnknownInventory())
     with pytest.raises(module.PerceptionError, match='visual_identity_unknown') as raised:
         engine.observe(capture, source_hint={
-            'kind': 'cube', 'visual_decision': {'source': 'jev', 'purpose': 'initialize_inventory'}})
-    assert raised.value.details == {'status': 'unknown'}
+            'kind': 'cube', 'scene_entities': manifest['entities'], 'visual_reference': manifest['reference'],
+            'visual_decision': {'source': 'responses_program', 'purpose': 'initialize_inventory'}})
+    assert raised.value.details['status'] == 'unknown'
+    assert raised.value.details['observation_id'] == capture['observation_id']
+    assert raised.value.details['sam3_queries']
 
 
 @pytest.mark.parametrize("kind", ["box", "cylinder"])

@@ -233,7 +233,7 @@ def test_backend_releases_public_result_after_success_or_failure(monkeypatch, fa
         raw.approach_interpolated_trajectory.velocity = None
     backend = object.__new__(ValidatedBatchBackend)
     backend.arm = 'A'
-    backend.motion_planner = SimpleNamespace(last_grasp_result="stale")
+    backend.motion_planner = SimpleNamespace(grasp_contacts=lambda links: __import__("contextlib").nullcontext(), last_grasp_result="stale")
 
     def native_call(self, request):
         assert self.motion_planner.last_grasp_result is None

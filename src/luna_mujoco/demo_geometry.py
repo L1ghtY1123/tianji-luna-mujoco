@@ -1,9 +1,8 @@
-"""Measured inventory geometry and explicitly labelled user-prior completion."""
+"""Measured inventory geometry without hidden-surface completion."""
 import numpy as np
 from scipy.ndimage import binary_propagation
-from scipy.spatial import ConvexHull, QhullError, cKDTree
+from scipy.spatial import cKDTree
 
-from .cad_assets import cad_asset
 from .cameras import deproject_view
 from .perception import PerceptionError
 
@@ -20,6 +19,24 @@ def supported_surface_points(points):
     return keep
 
 
+def _locally_supported_plane(points, *, normal, offset):
+    """Check neighbourhoods before selecting a thin band of plane inliers."""
+    points = np.asarray(points)
+    local = points[np.abs(points @ normal + offset) <= .03]
+    if len(local) < 16:
+        return np.empty((0, 3))
+    distance, indices = cKDTree(local).query(local, k=16)
+    neighbours = local[indices]
+    centred = neighbours - neighbours.mean(axis=1, keepdims=True)
+    covariance = np.einsum('nki,nkj->nij', centred, centred) / 16
+    values, vectors = np.linalg.eigh(covariance)
+    supported = ((distance[:, -1] <= .02) & (values[:, 1] > 1e-6)
+                 & (values[:, 0] <= .1 * values[:, 1])
+                 & (np.abs(vectors[:, :, 0] @ normal) >= np.cos(np.deg2rad(5)))
+                 & (np.abs(local @ normal + offset) <= .006))
+    return local[supported]
+
+
 def fuse_table_plane(seed, point_groups, *, normal, offset):
     """Fuse locally horizontal, connected measured returns within one 2cm edge band."""
     low, high = seed[:, :2].min(axis=0), seed[:, :2].max(axis=0)
@@ -27,21 +44,8 @@ def fuse_table_plane(seed, point_groups, *, normal, offset):
     groups = {}
     for camera, points in point_groups.items():
         points = np.asarray(points)
-        local = points[np.all((points[:, :2] >= lower) & (points[:, :2] <= upper), axis=1)
-                       & (np.abs(points @ normal + offset) <= .03)]
-        if len(local) < 16:
-            groups[camera] = np.empty((0, 3))
-            continue
-        distance, indices = cKDTree(local).query(local, k=16)
-        neighbours = local[indices]
-        centred = neighbours - neighbours.mean(axis=1, keepdims=True)
-        covariance = np.einsum('nki,nkj->nij', centred, centred) / 16
-        values, vectors = np.linalg.eigh(covariance)
-        supported = ((distance[:, -1] <= .02) & (values[:, 1] > 1e-6)
-                     & (values[:, 0] <= .1 * values[:, 1])
-                     & (np.abs(vectors[:, :, 0] @ normal) >= np.cos(np.deg2rad(5)))
-                     & (np.abs(local @ normal + offset) <= .006))
-        groups[camera] = local[supported]
+        local = points[np.all((points[:, :2] >= lower) & (points[:, :2] <= upper), axis=1)]
+        groups[camera] = _locally_supported_plane(local, normal=normal, offset=offset)
     shape = np.ceil((upper - lower) / .02).astype(int) + 1
     occupied, starts = np.zeros(shape, bool), np.zeros(shape, bool)
     seed_cells = np.floor((seed[:, :2] - lower) / .02).astype(int)
@@ -90,10 +94,18 @@ def fit_inventory_table(view, bbox, excluded, *, supplemental_points=None):
     if best is None:
         raise PerceptionError('demo_inventory_table_unobservable')
     normal, offset = best
-    surface = points[np.abs(points @ normal + offset) <= .006]
+    # Near-height returns can be a vertical container wall. The main camera
+    # needs the same measured local surface support as supplemental cameras.
+    surface = _locally_supported_plane(points, normal=normal, offset=offset)
     if len(surface) < 100:
         raise PerceptionError('demo_inventory_table_unobservable')
+    seed_support = {'source': 'measured_local_plane_neighbourhood',
+        'input_point_count': len(points), 'accepted_point_count': len(surface),
+        'local_support_radius_m': .02, 'local_support_neighbours': 16,
+        'normal_tolerance_deg': 5., 'distance_threshold_m': .006}
     fusion = None
+    if callable(supplemental_points):
+        supplemental_points = supplemental_points(surface, normal, offset)
     if supplemental_points:
         surface, fusion = fuse_table_plane(surface, supplemental_points, normal=normal, offset=offset)
     low, high = surface.min(axis=0), surface.max(axis=0)
@@ -106,57 +118,6 @@ def fit_inventory_table(view, bbox, excluded, *, supplemental_points=None):
             'surface_height_m': z, 'normal': normal.tolist(), 'inlier_count': len(surface),
             'source': 'initial_inventory_ransac_table',
             'fit': {'iterations': 256, 'distance_threshold_m': .006, 'maximum_tilt_deg': 5.,
-                    'input_point_count': len(points), 'sample_limit': 6000, 'multicamera_fusion': fusion},
+                    'input_point_count': len(points), 'sample_limit': 6000,
+                    'seed_surface_support': seed_support, 'multicamera_fusion': fusion},
             'downward_extent_m': .30, 'downward_extent_source': 'bounded_cuboid_completion'}
-
-
-def complete_source_height(instance, *, support_z_m, support_source, observation_id, height_prior_m=None):
-    """Keep original samples; add a bounded collision envelope, never sensor depth."""
-    points = np.asarray(instance['points_world_m'], dtype=float)
-    if points.ndim != 2 or points.shape[1] != 3 or not len(points) or not np.isfinite(points).all():
-        raise PerceptionError('demo_height_measured_points_required')
-    priors = {cad_asset(asset)['size_m'][2]: asset for asset in ('pink_wrapped', 'black_core')}
-    priors[cad_asset('black_core')['size_m'][0]] = 'black_core:flat_local_x_vertical'
-    support = float(support_z_m)
-    height = float(cad_asset('pink_wrapped')['size_m'][2] if height_prior_m is None else height_prior_m)
-    tolerance = .015
-    # Old explicit dimensions remain readable for archived callers. Active demo
-    # perception always supplies the catalog height and records the asset ID.
-    if height not in priors and height not in (.06, .10):
-        raise PerceptionError('demo_height_prior_unauthorized')
-    prior_source = 'user_cad_asset:' + priors[height] if height in priors else f'user_specified_{round(height * 1000)}mm'
-    if (not np.isfinite(support) or points[:, 2].min() < support - tolerance
-            or points[:, 2].max() > support + height + tolerance
-            or points[:, 2].max() < support + height - tolerance):
-        raise PerceptionError('demo_height_prior_inconsistent')
-    low, high = points.min(axis=0), points.max(axis=0)
-    if high[2] - low[2] >= height - tolerance and low[2] <= support + tolerance:
-        instance.pop('completed_geometry_points_world_m', None)
-        instance['geometry_completion'] = {
-            'status': 'measured_height_covered', 'source': 'measured_surface_with_user_height_consistency',
-            'height_prior_m': height, 'height_prior_source': prior_source,
-            'support_z_m': support, 'support_source': support_source, 'observation_id': observation_id,
-            'measurement_tolerance_m': tolerance, 'measured_point_count': len(points),
-            'measured_bounds_world_m': [low.tolist(), high.tolist()],
-            'synthetic_point_count': 0, 'synthetic_points_are_measured': False}
-        return
-    bottom, top = min(support, low[2]), max(support + height, high[2])
-    try:
-        hull = ConvexHull(points[:, :2])
-    except QhullError as error:
-        raise PerceptionError('demo_height_measured_footprint_required') from error
-    boundary = points[hull.vertices, :2]
-    # At most seven measured-hull rings, all at 2 cm or smaller spacing. This
-    # is a separately labelled attachment envelope, not added observed voxels.
-    heights = np.linspace(bottom, top, int(np.ceil((top - bottom) / .02)) + 1)
-    envelope = np.array([[x, y, z] for z in heights for x, y in boundary], dtype=np.float32)
-    instance['completed_geometry_points_world_m'] = np.vstack((points, envelope)).astype(np.float32)
-    instance['geometry_completion'] = {
-        'source': 'measured_surface_and_user_height_prior', 'height_prior_m': height,
-        'height_prior_source': prior_source, 'support_z_m': support,
-        'support_source': support_source, 'observation_id': observation_id,
-        'measurement_tolerance_m': tolerance, 'measured_point_count': len(points),
-        'measured_bounds_world_m': [low.tolist(), high.tolist()],
-        'completed_bounds_world_m': [[*low[:2].tolist(), bottom], [*high[:2].tolist(), top]],
-        'synthetic_point_count': len(envelope), 'synthetic_points_are_measured': False,
-        'xy_policy': 'measured_convex_hull_extrusion', 'map_voxel_size_m': .02}

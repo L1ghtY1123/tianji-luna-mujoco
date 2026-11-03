@@ -10,16 +10,16 @@ from luna_mujoco.skills import Registry, SkillSelectionError
 from luna_mujoco.task_progress import TaskProgress
 
 
-def test_build_scene_contract_rejects_completed_grasp_and_retains_empty_hand_entry():
+def test_build_scene_contract_rejects_held_grasp_and_allows_verified_empty_hands():
     registry = Registry()
-    facts = {'observed': True, 'target_selected': True, 'arm_selected': True,
-             'inventory_finalized': True, 'destination_ready': True,
-             'scene_ready': False, 'recovery_needed': False, 'grasp_completed': True}
+    facts = {'observed': True, 'inventory_finalized': True,
+             'recovery_needed': False, 'grasp_completed': True, 'grasp_held': True}
     with pytest.raises(SkillSelectionError) as caught:
         registry.validate_selection('build_scene', facts)
     assert caught.value.details['unmet_requirements'] == {
-        'grasp_completed': {'expected': False, 'actual': True}}
-    facts['grasp_completed'] = False
+        'grasp_held': {'expected': False, 'actual': True}}
+    # A historical completed grasp does not mean that an object is still held.
+    facts['grasp_held'] = False
     registry.validate_selection('build_scene', facts)
 
 
@@ -36,7 +36,7 @@ async def test_held_build_scene_is_rejected_before_mapping_or_motion(tmp_path, e
     runner.algorithms.build_scene = build_scene
     runner.build_scene = Runner.build_scene.__get__(runner)
     scene = deepcopy(context['scene'])
-    with pytest.raises(ValueError, match='grasp_scene_requires_empty_hands'):
+    with pytest.raises(ValueError, match='unknown_skill:build_scene' if entry == 'skill' else 'grasp_scene_requires_empty_hands'):
         if entry == 'skill':
             await runner.execute('build_scene', context)
         else:
@@ -61,24 +61,22 @@ async def test_place_retry_rejects_unusable_saved_scene_without_requesting_rebui
         runner.state['facts']['scene_ready'] = False
     facts = deepcopy(runner.state['facts'])
     failure = deepcopy(runner.task_progress.failure)
-    with pytest.raises(SkillSelectionError, match='retry_place_requires_saved_grasp_scene'):
-        await runner.recover_task(context, 'retry_place')
+    with pytest.raises(ValueError, match='unknown_skill:recover_task'):
+        await runner.execute('recover_task', context, {'action': 'retry_place'})
     assert runner.state['facts'] == facts
     assert runner.task_progress.failure == failure
     assert prepared == [] and captures == [] and maps == []
 
 
-async def test_place_retry_reuses_current_grasp_scene_without_new_capture_or_map(tmp_path):
+async def test_removed_place_retry_preserves_failure_and_current_scene(tmp_path):
     runner, context, _, prepared, captures, maps = fixture(tmp_path)
     await runner.verify_grasp(context)
     runner.task_progress = TaskProgress('place the held object')
     runner.task_progress.fail('source', 'plan_place', 'place_no_valid_candidate', {})
-    runner.state['facts'].update(observed=True, scene_ready=True, recovery_needed=True)
     scene = deepcopy(context['scene'])
-    result = await runner.recover_task(context, 'retry_place')
-    assert result['scene_reused'] is True
-    assert result['required_evidence'] == []
-    assert runner.task_progress.failure is None
-    assert runner.state['facts']['scene_ready']
+    failure = deepcopy(runner.task_progress.failure)
+    with pytest.raises(ValueError, match='unknown_skill:recover_task'):
+        await runner.execute('recover_task', context, {'action': 'retry_place'})
+    assert runner.task_progress.failure == failure
     assert context['scene'] == scene
     assert prepared == [] and captures == [] and maps == []

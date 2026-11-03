@@ -5,6 +5,33 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 
+def safe_closure_prefix(angles, valid):
+    """Only the contiguous collision-free prefix can authorize a close command."""
+    failed = np.flatnonzero(~np.asarray(valid, dtype=bool))
+    end = int(failed[0]) - 1 if len(failed) else len(angles) - 1
+    return None if end <= 0 else float(angles[end])
+
+
+def grasp_closure_samples(robot_config, arm, urdf_path, maximum_driver_rad=None):
+    """Possible stopping positions before object contact, from authored limits."""
+    if arm not in {'A', 'B'}:
+        raise ValueError('closure preflight requires one arm')
+    driver = 'gripL_finger_joint' if arm == 'A' else 'gripR_finger_joint'
+    joint = next(joint for joint in ET.parse(urdf_path).getroot().findall('joint') if joint.get('name') == driver)
+    limit = joint.find('limit')
+    lower, upper = float(limit.get('lower')), float(limit.get('upper'))
+    if not np.isfinite([lower, upper]).all() or lower >= upper:
+        raise ValueError('closure preflight requires finite authored limits')
+    if maximum_driver_rad is not None:
+        if (type(maximum_driver_rad) not in (int, float) or not np.isfinite(maximum_driver_rad)
+                or not lower < maximum_driver_rad <= upper):
+            raise ValueError('closure limit must be inside authored limits')
+        upper = float(maximum_driver_rad)
+    angles = np.linspace(lower, upper, int(np.ceil((upper - lower) / .02)) + 1)
+    padding = gripper_sweep_padding(robot_config, arm, urdf_path, float(np.diff(angles).max()))
+    return angles, padding
+
+
 def gripper_sweep_padding(robot_config, arm, urdf_path, max_step_rad):
     """Return per-sphere world-only padding covering the actual sample gaps.
 

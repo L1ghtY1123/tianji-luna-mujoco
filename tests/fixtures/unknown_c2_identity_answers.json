@@ -1,0 +1,755 @@
+{
+  "source_run_id": "f5a8f196d17b4f7cb341650f299b8477",
+  "source_request_hashes": [
+    "e615d3e02ddb427b5f4706caad3be7bfa1e9cc451df47d004168a8481d8be298",
+    "31f15d2e51ddc650608603ea627342a03caa88b7948fff30f2badf309f820f55"
+  ],
+  "observation_id": "rgbd-2-3cff5fda081248fb97865a0d7e683b47",
+  "generation": 2,
+  "entities": {
+    "instance-2a32049c6f994e98": {
+      "id": "instance-2a32049c6f994e98",
+      "kind": "table",
+      "color": "white",
+      "description": "白色桌面，作为最终放置支撑面。",
+      "appearance_keywords": [
+        "white",
+        "flat",
+        "rectangular"
+      ],
+      "initial_parent_id": null,
+      "roles": [
+        "table",
+        "collision"
+      ]
+    },
+    "instance-28634d7f920541b2": {
+      "id": "instance-28634d7f920541b2",
+      "kind": "bin",
+      "color": "blue",
+      "description": "装有粉色物体和绿色物体的左侧蓝色盒子，是指定取物来源。",
+      "appearance_keywords": [
+        "blue",
+        "rectangular",
+        "rigid"
+      ],
+      "initial_parent_id": null,
+      "roles": [
+        "container",
+        "collision"
+      ]
+    },
+    "instance-902f587da023483e": {
+      "id": "instance-902f587da023483e",
+      "kind": "object",
+      "color": "pink",
+      "description": "左侧蓝色盒子里的粉色物体，是唯一要取出的物体。",
+      "appearance_keywords": [
+        "pink",
+        "rectangular",
+        "solid-colored"
+      ],
+      "initial_parent_id": "instance-28634d7f920541b2",
+      "roles": [
+        "collision"
+      ],
+      "display_id": 1
+    },
+    "instance-a9125ad56aa64665": {
+      "id": "instance-a9125ad56aa64665",
+      "kind": "object",
+      "color": "green",
+      "description": "左侧蓝色盒子里的绿色物体；用户只要求取出粉色物体，因此不操作此物体。",
+      "appearance_keywords": [
+        "green",
+        "rectangular",
+        "solid-colored"
+      ],
+      "initial_parent_id": "instance-28634d7f920541b2",
+      "roles": [
+        "collision"
+      ]
+    }
+  },
+  "task_spec": {
+    "instruction": "只将左侧蓝色盒子里的粉色物体取出，放到桌面上不被其他物体占用的区域。不要拆包。每完成一个物体后双臂回观测位姿并观测；任务结束回开始时的双臂位姿。",
+    "supported": true,
+    "reason": "任务是对一个明确指定物体进行直接取放，不包含拆包或其他物体变换。最终目的地绑定到桌面；在测得的桌面区域中选择不被其他物体占用且通过语义与数值检查的位置。只选择左侧蓝色盒子里的粉色物体，绿色物体不属于操作目标。每次交付核验后，按要求回观测位姿并观测库存；最后回到任务开始时测得的双臂位姿并核验完成。",
+    "scope": "ids",
+    "target_selector": "左侧蓝色盒子里的粉色物体",
+    "target_refs": [
+      "instance-902f587da023483e"
+    ],
+    "quantity": 1,
+    "source_ref": "instance-28634d7f920541b2",
+    "destination_ref": "instance-2a32049c6f994e98",
+    "work_area_ref": null,
+    "selection_order": "explicit",
+    "processing": [],
+    "completion_conditions": [
+      "仅将左侧蓝色盒子里的粉色物体放到桌面上不被其他物体占用的区域",
+      "不拆包",
+      "粉色物体交付核验后双臂回观测位姿并观测库存",
+      "任务结束时双臂回到任务开始时测得的位姿并经核验"
+    ],
+    "completion_pose": "initial",
+    "constraints": [
+      "只操作粉色目标物体，不操作同一盒子里的绿色物体",
+      "保持物体完整，不拆包",
+      "放置在桌面上实际不被其他物体占用的区域",
+      "每个物体完成交付核验后，双臂回观测位姿并观测库存"
+    ],
+    "source_inventory_complete": "unknown"
+  },
+  "categorical_answers": [
+    {
+      "type": "choice",
+      "name": "identity_0",
+      "choice": "instance-28634d7f920541b2",
+      "probabilities": [
+        {
+          "value": "instance-28634d7f920541b2",
+          "probability": 0.77
+        },
+        {
+          "value": "instance-902f587da023483e",
+          "probability": 0.04
+        },
+        {
+          "value": "instance-a9125ad56aa64665",
+          "probability": 0.03
+        },
+        {
+          "value": "reject",
+          "probability": 0.07
+        },
+        {
+          "value": "unknown",
+          "probability": 0.09
+        }
+      ],
+      "confidence": 0.71
+    },
+    {
+      "type": "choice",
+      "name": "identity_1",
+      "choice": "instance-28634d7f920541b2",
+      "probabilities": [
+        {
+          "value": "instance-28634d7f920541b2",
+          "probability": 0.59
+        },
+        {
+          "value": "instance-902f587da023483e",
+          "probability": 0.13
+        },
+        {
+          "value": "instance-a9125ad56aa64665",
+          "probability": 0.08
+        },
+        {
+          "value": "reject",
+          "probability": 0.09
+        },
+        {
+          "value": "unknown",
+          "probability": 0.11
+        }
+      ],
+      "confidence": 0.49
+    },
+    {
+      "type": "choice",
+      "name": "identity_2",
+      "choice": "instance-902f587da023483e",
+      "probabilities": [
+        {
+          "value": "instance-28634d7f920541b2",
+          "probability": 0.04
+        },
+        {
+          "value": "instance-902f587da023483e",
+          "probability": 0.74
+        },
+        {
+          "value": "instance-a9125ad56aa64665",
+          "probability": 0.12
+        },
+        {
+          "value": "reject",
+          "probability": 0.04
+        },
+        {
+          "value": "unknown",
+          "probability": 0.06
+        }
+      ],
+      "confidence": 0.68
+    },
+    {
+      "type": "choice",
+      "name": "identity_3",
+      "choice": "instance-a9125ad56aa64665",
+      "probabilities": [
+        {
+          "value": "instance-28634d7f920541b2",
+          "probability": 0.08
+        },
+        {
+          "value": "instance-902f587da023483e",
+          "probability": 0.1
+        },
+        {
+          "value": "instance-a9125ad56aa64665",
+          "probability": 0.61
+        },
+        {
+          "value": "reject",
+          "probability": 0.11
+        },
+        {
+          "value": "unknown",
+          "probability": 0.1
+        }
+      ],
+      "confidence": 0.51
+    },
+    {
+      "type": "choice",
+      "name": "identity_4",
+      "choice": "instance-28634d7f920541b2",
+      "probabilities": [
+        {
+          "value": "instance-28634d7f920541b2",
+          "probability": 0.89
+        },
+        {
+          "value": "instance-902f587da023483e",
+          "probability": 0.03
+        },
+        {
+          "value": "instance-a9125ad56aa64665",
+          "probability": 0.02
+        },
+        {
+          "value": "reject",
+          "probability": 0.02
+        },
+        {
+          "value": "unknown",
+          "probability": 0.04
+        }
+      ],
+      "confidence": 0.86
+    },
+    {
+      "type": "choice",
+      "name": "identity_5",
+      "choice": "instance-902f587da023483e",
+      "probabilities": [
+        {
+          "value": "instance-28634d7f920541b2",
+          "probability": 0.03
+        },
+        {
+          "value": "instance-902f587da023483e",
+          "probability": 0.93
+        },
+        {
+          "value": "instance-a9125ad56aa64665",
+          "probability": 0.02
+        },
+        {
+          "value": "reject",
+          "probability": 0.01
+        },
+        {
+          "value": "unknown",
+          "probability": 0.01
+        }
+      ],
+      "confidence": 0.91
+    },
+    {
+      "type": "choice",
+      "name": "identity_6",
+      "choice": "instance-28634d7f920541b2",
+      "probabilities": [
+        {
+          "value": "instance-28634d7f920541b2",
+          "probability": 0.59
+        },
+        {
+          "value": "instance-902f587da023483e",
+          "probability": 0.08
+        },
+        {
+          "value": "instance-a9125ad56aa64665",
+          "probability": 0.1
+        },
+        {
+          "value": "reject",
+          "probability": 0.13
+        },
+        {
+          "value": "unknown",
+          "probability": 0.1
+        }
+      ],
+      "confidence": 0.49
+    },
+    {
+      "type": "choice",
+      "name": "identity_7",
+      "choice": "instance-28634d7f920541b2",
+      "probabilities": [
+        {
+          "value": "instance-28634d7f920541b2",
+          "probability": 0.75
+        },
+        {
+          "value": "instance-902f587da023483e",
+          "probability": 0.07
+        },
+        {
+          "value": "instance-a9125ad56aa64665",
+          "probability": 0.05
+        },
+        {
+          "value": "reject",
+          "probability": 0.05
+        },
+        {
+          "value": "unknown",
+          "probability": 0.08
+        }
+      ],
+      "confidence": 0.69
+    },
+    {
+      "type": "choice",
+      "name": "visibility_instance-28634d7f920541b2",
+      "choice": "visible",
+      "probabilities": [
+        {
+          "value": "visible",
+          "probability": 0.99
+        },
+        {
+          "value": "unseen",
+          "probability": 0.01
+        },
+        {
+          "value": "unknown",
+          "probability": 0.0
+        }
+      ],
+      "confidence": 0.99
+    },
+    {
+      "type": "choice",
+      "name": "visibility_instance-902f587da023483e",
+      "choice": "visible",
+      "probabilities": [
+        {
+          "value": "visible",
+          "probability": 1.0
+        },
+        {
+          "value": "unseen",
+          "probability": 0.0
+        },
+        {
+          "value": "unknown",
+          "probability": 0.0
+        }
+      ],
+      "confidence": 1.0
+    },
+    {
+      "type": "choice",
+      "name": "visibility_instance-a9125ad56aa64665",
+      "choice": "visible",
+      "probabilities": [
+        {
+          "value": "visible",
+          "probability": 0.98
+        },
+        {
+          "value": "unseen",
+          "probability": 0.01
+        },
+        {
+          "value": "unknown",
+          "probability": 0.01
+        }
+      ],
+      "confidence": 0.97
+    },
+    {
+      "type": "choice",
+      "name": "scene_inventory_closure",
+      "choice": "none",
+      "probabilities": [
+        {
+          "value": "none",
+          "probability": 0.96
+        },
+        {
+          "value": "unlisted",
+          "probability": 0.01
+        },
+        {
+          "value": "unknown",
+          "probability": 0.03
+        }
+      ],
+      "confidence": 0.94
+    }
+  ],
+  "pairwise_answers": [
+    {
+      "type": "predicate",
+      "name": "match_0_0",
+      "probability": 0.26
+    },
+    {
+      "type": "predicate",
+      "name": "match_0_1",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_0_2",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_1_0",
+      "probability": 0.35
+    },
+    {
+      "type": "predicate",
+      "name": "match_1_1",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_1_2",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_2_0",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_2_1",
+      "probability": 0.72
+    },
+    {
+      "type": "predicate",
+      "name": "match_2_2",
+      "probability": 0.02
+    },
+    {
+      "type": "predicate",
+      "name": "match_3_0",
+      "probability": 0.01
+    },
+    {
+      "type": "predicate",
+      "name": "match_3_1",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_3_2",
+      "probability": 0.25
+    },
+    {
+      "type": "predicate",
+      "name": "match_6_0",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_6_1",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_6_2",
+      "probability": 0.99
+    },
+    {
+      "type": "predicate",
+      "name": "match_7_0",
+      "probability": 0.9
+    },
+    {
+      "type": "predicate",
+      "name": "match_7_1",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_7_2",
+      "probability": 0.0
+    },
+    {
+      "type": "choice",
+      "name": "visibility_instance-28634d7f920541b2",
+      "choice": "visible",
+      "probabilities": [
+        {
+          "value": "visible",
+          "probability": 0.99
+        },
+        {
+          "value": "unseen",
+          "probability": 0.01
+        },
+        {
+          "value": "unknown",
+          "probability": 0.0
+        }
+      ],
+      "confidence": 0.99
+    },
+    {
+      "type": "choice",
+      "name": "visibility_instance-902f587da023483e",
+      "choice": "visible",
+      "probabilities": [
+        {
+          "value": "visible",
+          "probability": 1.0
+        },
+        {
+          "value": "unseen",
+          "probability": 0.0
+        },
+        {
+          "value": "unknown",
+          "probability": 0.0
+        }
+      ],
+      "confidence": 1.0
+    },
+    {
+      "type": "choice",
+      "name": "visibility_instance-a9125ad56aa64665",
+      "choice": "visible",
+      "probabilities": [
+        {
+          "value": "visible",
+          "probability": 0.98
+        },
+        {
+          "value": "unseen",
+          "probability": 0.01
+        },
+        {
+          "value": "unknown",
+          "probability": 0.01
+        }
+      ],
+      "confidence": 0.97
+    },
+    {
+      "type": "choice",
+      "name": "scene_inventory_closure",
+      "choice": "none",
+      "probabilities": [
+        {
+          "value": "none",
+          "probability": 0.96
+        },
+        {
+          "value": "unlisted",
+          "probability": 0.01
+        },
+        {
+          "value": "unknown",
+          "probability": 0.03
+        }
+      ],
+      "confidence": 0.94
+    }
+  ],
+  "actual_anchor_comparison_answers": [
+    {
+      "type": "predicate",
+      "name": "match_0_0",
+      "probability": 0.02
+    },
+    {
+      "type": "predicate",
+      "name": "match_0_1",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_0_2",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_1_0",
+      "probability": 0.66
+    },
+    {
+      "type": "predicate",
+      "name": "match_1_1",
+      "probability": 0.04
+    },
+    {
+      "type": "predicate",
+      "name": "match_1_2",
+      "probability": 0.11
+    },
+    {
+      "type": "predicate",
+      "name": "match_2_0",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_2_1",
+      "probability": 0.79
+    },
+    {
+      "type": "predicate",
+      "name": "match_2_2",
+      "probability": 0.01
+    },
+    {
+      "type": "predicate",
+      "name": "match_3_0",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_3_1",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_3_2",
+      "probability": 0.73
+    },
+    {
+      "type": "predicate",
+      "name": "match_6_0",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_6_1",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_6_2",
+      "probability": 0.98
+    },
+    {
+      "type": "predicate",
+      "name": "match_7_0",
+      "probability": 0.64
+    },
+    {
+      "type": "predicate",
+      "name": "match_7_1",
+      "probability": 0.0
+    },
+    {
+      "type": "predicate",
+      "name": "match_7_2",
+      "probability": 0.0
+    },
+    {
+      "type": "choice",
+      "name": "visibility_instance-28634d7f920541b2",
+      "choice": "visible",
+      "probabilities": [
+        {
+          "value": "visible",
+          "probability": 1.0
+        },
+        {
+          "value": "unseen",
+          "probability": 0.0
+        },
+        {
+          "value": "unknown",
+          "probability": 0.0
+        }
+      ],
+      "confidence": 1.0
+    },
+    {
+      "type": "choice",
+      "name": "visibility_instance-902f587da023483e",
+      "choice": "visible",
+      "probabilities": [
+        {
+          "value": "visible",
+          "probability": 1.0
+        },
+        {
+          "value": "unseen",
+          "probability": 0.0
+        },
+        {
+          "value": "unknown",
+          "probability": 0.0
+        }
+      ],
+      "confidence": 1.0
+    },
+    {
+      "type": "choice",
+      "name": "visibility_instance-a9125ad56aa64665",
+      "choice": "visible",
+      "probabilities": [
+        {
+          "value": "visible",
+          "probability": 1.0
+        },
+        {
+          "value": "unseen",
+          "probability": 0.0
+        },
+        {
+          "value": "unknown",
+          "probability": 0.0
+        }
+      ],
+      "confidence": 1.0
+    },
+    {
+      "type": "choice",
+      "name": "scene_inventory_closure",
+      "choice": "none",
+      "probabilities": [
+        {
+          "value": "none",
+          "probability": 0.94
+        },
+        {
+          "value": "unlisted",
+          "probability": 0.03
+        },
+        {
+          "value": "unknown",
+          "probability": 0.03
+        }
+      ],
+      "confidence": 0.91
+    }
+  ],
+  "actual_anchor_comparison_request_hash": "ccff5b470a71e6bc1fecc1a2e32b68c7198aa3639769dccee16f9537683f91ac"
+}

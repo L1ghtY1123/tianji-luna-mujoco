@@ -1,10 +1,11 @@
-"""Track only unmanipulated containers using explicit initial RGBD evidence."""
+"""Track containers using explicit, first-confirmed RGBD identity evidence."""
 import hashlib
 import json
 from copy import deepcopy
 
 import numpy as np
 
+from .inventory_reference import current_inventory_entities
 from .visual_inventory import VisualInventory
 
 SOURCE = 'measured_container_correspondence'
@@ -23,38 +24,49 @@ def _array_digest(value):
                           + np.ascontiguousarray(array).tobytes()).hexdigest()
 
 
-def _scope(reference, generation, request_hash):
-    return {'reference_observation_id': reference['observation_id'], 'generation': generation,
-            'initial_request_hash': request_hash, 'entities_sha256': _digest(reference['entities'])}
+def _scope(reference, generation, request_hash, anchor_observation_id=None):
+    # Live inventory adds positions, work regions and processing outputs. These
+    # do not change a container's reference identity. Its own identity fields do.
+    containers = {identifier: {key: entity[key] for key in ('id', 'kind', 'color', 'description') if key in entity}
+                  for identifier, entity in reference['entities'].items() if entity.get('kind') == 'bin'}
+    scope = {'reference_observation_id': reference['observation_id'], 'generation': generation,
+            'initial_request_hash': request_hash, 'container_identities_sha256': _digest(containers)}
+    if anchor_observation_id is not None:
+        scope['anchor_observation_id'] = anchor_observation_id
+    return scope
 
 
 def _anchors_digest(containers):
     return _digest({identifier: {'kind': record['kind'], 'initial_identity_answers': record['initial_identity_answers'],
+        'placement_reference': record.get('placement_reference'),
         'views': {camera: {key: view[key] for key in ('array_sha256', 'calibration_sha256')}
                   for camera, view in record['views'].items()}} for identifier, record in containers.items()})
 
 
 def reference_with_container_tracks(observation, capture, minimum_confidence=.8):
-    """Add an archiveable sidecar only after the initial current-geometry result."""
+    """Freeze the first complete, current Decisions-confirmed identity result.
+
+    Its capture may follow the initial Responses images. Keep those two capture
+    identities separate; an incomplete first observation must not disable tracking
+    for the rest of a run. Existing anchors are never overwritten here.
+    """
     reference = observation.get('visual_reference', {})
     visual = observation.get('visual_inventory', {})
     evidence, coverage = visual.get('evidence', {}), visual.get('identity_coverage', {})
-    check = observation.get('demo_inventory_check', {})
-    if (reference.get('observation_id') != capture.get('observation_id')
+    # A known container's identity is independent of whether the task source
+    # inventory is exhaustive. Preserve that separate completeness verdict.
+    if (not reference.get('observation_id') or not capture.get('observation_id')
             or observation.get('observation_id') != capture.get('observation_id')
             or observation.get('generation') != capture.get('generation')
             or 'container_identity_tracks' in reference
-            or coverage.get('purpose') != 'initialize_inventory'
+            or coverage.get('purpose') not in {'initialize_inventory', 'associate_inventory'}
             or evidence.get('source') != 'openai_decisions'
             or evidence.get('observation_id') != capture.get('observation_id')
             or not evidence.get('request_hash') or visual.get('missing_geometry_ids')
-            or check.get('status') != 'none' or check.get('confidence', 0) < minimum_confidence
             or not set(coverage.get('required_entity_ids', [])) <= set(coverage.get('accepted_entity_ids', []))):
         return reference
-    task = reference.get('demo_task', {})
     containers = {}
-    for identifier in (task.get('source_bin_id'), task.get('right_bin_id')):
-        entity = reference.get('entities', {}).get(identifier, {})
+    for identifier, entity in current_inventory_entities(reference).items():
         answers = [deepcopy(a) for a in evidence.get('answers', []) if a.get('name', '').startswith('identity_')
                    and a.get('type') == 'choice' and a.get('choice') == identifier
                    and type(a.get('confidence')) in (int, float) and minimum_confidence <= a['confidence'] <= 1.]
@@ -82,15 +94,81 @@ def reference_with_container_tracks(observation, capture, minimum_confidence=.8)
             views[camera] = frozen
         if views:
             containers[identifier] = {'kind': 'bin', 'initial_identity_answers': answers, 'views': views}
+            obj = next((obj for obj in observation.get('objects', []) if obj['id'] == identifier), {})
+            region = obj.get('placement_reference', {})
+            if (region.get('source') == 'sam3_bin_mask_and_measured_horizontal_floor_patch'
+                    and region.get('observation_id') == capture['observation_id']):
+                containers[identifier]['placement_reference'] = {key: deepcopy(region[key]) for key in (
+                    'position_world_m', 'floor_z_m', 'region_polygon_world_xy_m', 'source',
+                    'observation_id', 'region_measurement', 'observed_floor_hull_world_xy_m') if key in region}
     if not containers:
         return reference
-    scope = _scope(reference, capture['generation'], evidence['request_hash'])
+    scope = _scope(reference, capture['generation'], evidence['request_hash'], capture['observation_id'])
     track = {**scope, 'scope_id': _digest(scope), 'initial_capture_time': capture['time'],
-             'source': 'initial_decisions_registered_rgbd', 'containers': containers,
+             'source': 'first_verified_decisions_registered_rgbd', 'containers': containers,
              'anchors_sha256': _anchors_digest(containers)}
     if reference.get('owner_id'):
         track['owner_id'] = reference['owner_id']
     return {**reference, 'container_identity_tracks': track}
+
+
+def retain_container_placement_regions(observation):
+    """Keep previously measured floor extent after current stationary correspondence.
+
+    A narrowed visible patch is not a smaller container. This changes semantic
+    placement references only; no collision surface or hidden box wall is added.
+    """
+    reference = observation.get('visual_reference', {})
+    tracks = reference.get('container_identity_tracks', {})
+    proof = observation.get('visual_inventory', {}).get('container_correspondence', {})
+    if not tracks or proof.get('status') != 'matched':
+        return
+    try:
+        scope = _scope(reference, observation['generation'], tracks['initial_request_hash'],
+                       tracks.get('anchor_observation_id'))
+        if (tracks['scope_id'] != _digest(scope) or proof.get('scope_id') != tracks['scope_id']
+                or any(tracks.get(key) != value for key, value in scope.items())
+                or tracks['anchors_sha256'] != _anchors_digest(tracks['containers'])
+                or tracks.get('owner_id') and tracks['owner_id'] != reference.get('owner_id')
+                or proof.get('source') != SOURCE
+                or proof.get('initial_request_hash') != tracks['initial_request_hash']
+                or proof.get('observation_id') != observation['observation_id']
+                or proof.get('generation') != observation['generation']
+                or proof.get('binding_hash') != _digest({k: v for k, v in proof.items() if k != 'binding_hash'})):
+            return
+        for obj in observation.get('objects', []):
+            identifier = obj['id']
+            anchor = tracks['containers'].get(identifier, {}).get('placement_reference', {})
+            witnesses = [row for key, row in proof['matches'].items()
+                if row.get('entity_id') == identifier and proof['candidate_mapping'].get(key) == identifier
+                and row['mask_iou'] >= THRESHOLDS['mask_iou'] and row['depth_residual_p95_m'] <= .005
+                and row.get('stationary_depth', {}).get('valid_pixels', 0) >= THRESHOLDS['minimum_pixels']
+                and row.get('stationary_depth', {}).get('within_5mm_fraction', 0) >= .95]
+            if obj.get('kind') != 'bin' or not anchor or not witnesses:
+                continue
+            if not any(row.get('source') == SOURCE and row.get('binding_hash') == proof['binding_hash']
+                       for row in obj.get('identity_evidence', [])):
+                continue
+            current = obj.get('placement_reference', {})
+            old = np.asarray(anchor['region_polygon_world_xy_m'], float)
+            new = np.asarray(current.get('region_polygon_world_xy_m', []), float)
+            if old.ndim != 2 or old.shape[1] != 2 or len(old) < 3 or not np.isfinite(old).all():
+                continue
+            if current and abs(current['floor_z_m'] - anchor['floor_z_m']) > .005:
+                continue
+            def area(polygon):
+                return abs(float(np.sum(polygon[:, 0] * np.roll(polygon[:, 1], -1)
+                                        - polygon[:, 1] * np.roll(polygon[:, 0], -1)))) / 2
+            if new.ndim == 2 and new.shape[1] == 2 and len(new) >= 3 and area(new) >= area(old):
+                continue
+            obj['placement_reference'] = deepcopy(anchor) | {
+                'source': 'retained_measured_floor_patch', 'source_observation_id': anchor['observation_id'],
+                'observation_id': observation['observation_id'],
+                'correspondence_binding_hash': proof['binding_hash'],
+                'current_visible_reference': deepcopy(current), 'full_container_extent_claimed': False}
+    except (KeyError, TypeError, ValueError):
+        # Unavailable or malformed historical evidence never expands a region.
+        return
 
 
 def _compatible_view(current, anchor):
@@ -125,18 +203,22 @@ def container_correspondence(capture, detections, reference, entities):
     if not tracks:
         return result
     try:
-        scope = _scope(reference, capture['generation'], tracks['initial_request_hash'])
-        if (tracks.get('source') != 'initial_decisions_registered_rgbd'
+        scope = _scope(reference, capture['generation'], tracks['initial_request_hash'],
+                       tracks.get('anchor_observation_id'))
+        if (tracks.get('source') not in {'initial_decisions_registered_rgbd', 'first_verified_decisions_registered_rgbd'}
+                or tracks.get('source') == 'first_verified_decisions_registered_rgbd' and not tracks.get('anchor_observation_id')
                 or tracks['scope_id'] != _digest(scope)
                 or any(tracks.get(key) != value for key, value in scope.items())
                 or tracks.get('anchors_sha256') != _anchors_digest(tracks['containers'])
-                or capture['observation_id'] == reference['observation_id']
+                or capture['observation_id'] == tracks.get('anchor_observation_id', reference['observation_id'])
                 or not np.isfinite(capture['time']) or not np.isfinite(tracks['initial_capture_time'])
                 or capture['time'] <= tracks['initial_capture_time']
                 or tracks.get('owner_id') and tracks['owner_id'] != reference.get('owner_id')):
             return result
         result.update(scope_id=tracks['scope_id'], initial_request_hash=tracks['initial_request_hash'])
-        allowed = {reference.get('demo_task', {}).get(key) for key in ('source_bin_id', 'right_bin_id')}
+        if 'anchor_observation_id' in tracks:
+            result['anchor_observation_id'] = tracks['anchor_observation_id']
+        allowed = set(current_inventory_entities(reference, entities))
         for index, detection in enumerate(detections):
             if detection.get('kind') != 'bin':
                 continue
@@ -158,8 +240,21 @@ def container_correspondence(capture, detections, reference, entities):
                 actual_mask = np.asarray(detection['mask'], bool)
                 if any(array.shape != prior.shape for array in (silhouette, depth, valid, actual_mask)):
                     continue
-                overlap = prior & silhouette
-                union = prior | silhouette
+                raw_union = prior | silhouette
+                paired_depth = (valid & anchor['valid_depth'] & np.isfinite(depth)
+                    & np.isfinite(anchor['depth_m']) & (depth > 0) & (anchor['depth_m'] > 0))
+                tolerance = THRESHOLDS['depth_residual_p95_m']
+                # Compare the surfaces both captures could see. A nearer current
+                # depth occludes the old surface; an old foreground depth can
+                # explain newly revealed pixels outside the old instance mask.
+                # Invalid/missing depth never supplies either explanation. Old
+                # container pixels that moved farther away are NOT excluded.
+                occluded = prior & paired_depth & (depth < anchor['depth_m'] - tolerance)
+                revealed = silhouette & ~prior & paired_depth & (anchor['depth_m'] < depth - tolerance)
+                visible_prior = prior & ~occluded
+                visible_current = silhouette & ~occluded & ~revealed
+                overlap = visible_prior & visible_current
+                union = visible_prior | visible_current
                 if not union.any():
                     continue
                 iou = float(overlap.sum() / union.sum())
@@ -173,7 +268,20 @@ def container_correspondence(capture, detections, reference, entities):
                 residual = float(np.quantile(np.abs(depth[common] - anchor['depth_m'][common]), .95))
                 if residual > THRESHOLDS['depth_residual_p95_m']:
                     continue
+                # Stationarity is a depth measurement, independent of a later
+                # SAM boundary. Include old visible pixels omitted by SAM;
+                # invalid depth counts against agreement, never as free space.
+                checked = visible_prior & paired_depth
+                consistent = checked & (np.abs(depth - anchor['depth_m']) <= .005)
+                stationary_depth = {'visible_anchor_pixels': int(visible_prior.sum()),
+                    'valid_pixels': int(checked.sum()),
+                    'within_5mm_fraction': float(consistent.sum() / max(int(visible_prior.sum()), 1)),
+                    'source': 'all_unoccluded_registered_anchor_depth', 'tolerance_m': .005}
                 matches.append({'entity_id': identifier, 'camera_id': camera, 'mask_iou': iou,
+                    'stationary_depth': stationary_depth,
+                    'raw_mask_iou': float((prior & silhouette).sum() / max(int(raw_union.sum()), 1)),
+                    'mask_comparison': 'registered_depth_mutually_visible_surfaces',
+                    'current_occluded_pixels': int(occluded.sum()), 'newly_revealed_pixels': int(revealed.sum()),
                     'common_valid_pixels': count, 'valid_overlap_fraction': fraction, 'depth_residual_p95_m': residual,
                     'initial_mask_sha256': anchor['array_sha256']['mask'],
                     'current_mask_sha256': _array_digest(silhouette), 'current_depth_sha256': _array_digest(depth)})

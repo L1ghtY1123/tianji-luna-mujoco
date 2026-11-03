@@ -178,7 +178,7 @@ def test_physics_step_refreshes_cartesian_poses_only_when_read(monkeypatch):
         body = instance._tcp_ids['A']
         for result in (robot, snapshot):
             np.testing.assert_allclose(np.asarray(result['arms']['A']['tcp'])[:3, 3],
-                                       expected.xpos[body], atol=1e-12)
+                                       expected.xpos[body] + expected.xmat[body].reshape(3, 3) @ [0, 0, .185], atol=1e-12)
             np.testing.assert_allclose(np.asarray(result['arms']['A']['tcp'])[:3, :3],
                                        expected.xmat[body].reshape(3, 3), atol=1e-12)
     finally:

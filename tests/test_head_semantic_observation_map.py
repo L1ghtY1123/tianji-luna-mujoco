@@ -73,13 +73,52 @@ def test_head_to_three_camera_rebuilds_entities_but_fits_table_only_once():
     assert len(fits) == 1
 
 
-def test_selected_scene_cannot_fit_initial_table_from_wrists():
+@pytest.mark.parametrize('state,policy', [('selected', 'selected_instances'), ('observation', 'all_instances')])
+def test_first_three_camera_scene_initializes_table_from_same_capture_head_only(state, policy):
+    from test_semantic_builder import builder, request
+
+    value, segmenter, mapper, fits = builder()
+    capture = request(state) | {'scene_policy': policy}
+    if state == 'observation':
+        capture['confirmed_instance_id'] = ''
+    result = value.build(capture)
+    assert [item.camera_id for item in segmenter.requests] == ['1', '2', '3']
+    assert [item.camera_id for item in mapper.integrated] == ['1', '2', '3']
+    assert set(result.instance_metrics) == {'source', 'other'}
+    assert len(fits) == 1
+    groups, spheres = fits[0]
+    assert len(groups) == 1 and len(groups[0]) == 8
+    assert groups[0][:, 0].min() == 3  # Head transform, no wrist background.
+    assert spheres.shape == (6, 4)
+    assert value.table_cache.diagnostics['source_observation_id'] == capture['observation_set_id']
+    assert value.table_cache.diagnostics['cache_hit'] is False
+
+
+def test_three_camera_update_keeps_calibration_change_guard():
     from test_semantic_builder import builder, request
 
     value, _, _, fits = builder()
+    capture = request('observation') | {'scene_policy': 'all_instances', 'confirmed_instance_id': ''}
+    value.build(capture)
+    changed = deepcopy(capture)
+    changed['views']['3']['T_base_left_camera'][0][3] += .1
     with pytest.raises(ValueError, match='initial_head_table_required'):
-        value.build(request('selected') | {'scene_policy': 'selected_instances'})
-    assert not fits
+        value.build(changed)
+    assert len(fits) == 1
+
+
+def test_first_three_camera_scene_does_not_substitute_wrists_for_missing_head_support():
+    from test_semantic_builder import builder, request
+    from tianji_curobo.mixed_esdf_scene import build_table_completion
+
+    value, _, mapper, _ = builder()
+    value.table_cache.table_builder = build_table_completion
+    capture = request('observation') | {'scene_policy': 'all_instances', 'confirmed_instance_id': ''}
+    capture['views']['3']['valid_left_mask'][:] = 0
+    with pytest.raises(ValueError, match='tabletop_not_found: too few finite background points'):
+        value.build(capture)
+    assert value.table_cache.table is None
+    assert mapper.integrated is None
 
 
 def test_targetless_three_camera_update_keeps_every_instance_and_existing_table():

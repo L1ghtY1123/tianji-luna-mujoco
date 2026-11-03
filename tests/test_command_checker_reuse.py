@@ -30,3 +30,8 @@ def test_feedback_updates_reuse_checker_but_keep_exact_kinematics(monkeypatch):
     robot['robot_cfg']['kinematics']['collision_spheres']['carried'] = [2]
     assert carrying.command_checker(runtime, planner, robot, 'scene') is not first
     assert carrying.command_checker(runtime, planner, robot, 'new-scene') is not second
+    physical = carrying.command_checker(runtime, planner, robot, 'scene', clearance_m=0.)
+    clearance = carrying.command_checker(runtime, planner, robot, 'scene')
+    assert physical is not clearance
+    assert carrying.command_checker(runtime, planner, robot, 'scene', clearance_m=0.) is physical
+    assert {cfg['collision_activation_distance'] for cfg in created} == {0., .01}

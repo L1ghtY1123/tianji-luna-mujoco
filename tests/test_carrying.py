@@ -7,7 +7,7 @@ import pytest
 def binding(**updates):
     return {"arm": "A", "owner_id": "hold-1", "observation_id": "rgbd-2",
             "generation": 2, "scene_token": "scene-2", "instance_id": "sam-source",
-            "frame": "tool", "state": "held", "points_tool_m": [[-.03, -.02, -.04], [.03, .02, .04]],
+            "frame": "gripper_front", "state": "held", "points_tool_m": [[-.03, -.02, -.04], [.03, .02, .04]],
             "uncertainty_m": .004, "coverage": .6} | updates
 
 
@@ -105,7 +105,7 @@ def test_derived_gripper_config_mirrors_only_mesh_verified_opposing_pad_and_link
     for link, spheres in configured['robot_cfg']['kinematics']['collision_spheres'].items():
         for actual, source in zip(spheres, before['robot_cfg']['kinematics']['collision_spheres'][link], strict=True):
             assert actual['center'] == source['center']
-            padding = 1e-9 if link.startswith(('gripL_', 'gripR_')) else 0.
+            padding = 1e-8 if link.startswith(('gripL_', 'gripR_')) else 0.
             assert actual['radius'] == source['radius'] + padding
     assert original == before
 
@@ -192,3 +192,17 @@ def test_world_z_lift_uses_tilted_support_frame_without_requiring_goal_collinear
     with pytest.raises(ValueError, match="projection"):
         validate_support_goal_projection(tcp[:3, 3], tcp[:3, 3] + [.1, 0, 0], normal, .04)
 
+def test_large_negative_driver_feedback_reports_numeric_limits():
+    import yaml
+
+    from luna_mujoco.backend_builder import ROOT
+    from luna_mujoco.carrying import configure_gripper_feedback
+    config = yaml.safe_load((ROOT / 'resources/curobo/marvin_gui_dual.yml').read_bytes())
+    with pytest.raises(ValueError) as error:
+        configure_gripper_feedback(config, {'A': -.1051233035735, 'B': 0.},
+                                   ROOT / 'assets/marvin_urdf/marvin_with_grippers.urdf')
+    message = str(error.value)
+    assert 'arm=A, joint=gripL_finger_joint' in message
+    assert 'actual_rad=-0.105123303573' in message
+    assert 'minimum_rad=0, maximum_rad=0.8000000093' in message
+    assert 'limit_noise_tolerance_rad=0.0001' in message

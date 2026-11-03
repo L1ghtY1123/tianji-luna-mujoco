@@ -3,7 +3,7 @@ import copy
 import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
-from test_rgbd_workflow import Choices, SensorRobot, VisionAlgorithms
+from rgbd_workflow_fixture import SensorRobot, VisionAlgorithms
 from test_runner import Algorithms, Decisions, Sim
 
 from luna_mujoco.runner import Runner
@@ -36,7 +36,7 @@ class VisualAlgorithms(Algorithms):
 async def prepare_runner(tmp_path):
     simulation = Sim()
     algorithms = VisualAlgorithms()
-    runner = Runner(simulation, algorithms, lambda record: Decisions(), tmp_path)
+    runner = Runner(simulation, algorithms, None, tmp_path)
     from luna_mujoco.task_progress import TaskProgress
     runner.task_progress = TaskProgress('grasp the selected object', requested_arm='A')
     runner.task_progress.bind_arm('A')
@@ -62,20 +62,12 @@ def move_object(algorithms, object_index, change):
     algorithms.visual_poses[object_index] = matrix
 
 
-
-
-
-
-
-
-
-
 class RecordingSensorRobot(SensorRobot):
     def __init__(self):
         super().__init__()
         self.motor_calls = []
 
-    def execute_trajectory(self, arm, positions_rad, dt, generation):
+    def execute_trajectory(self, arm, positions_rad, dt, generation, *, execution_settings=None):
         self.motor_calls.append(int(positions_rad[-1][0]))
         return super().execute_trajectory(arm, positions_rad, dt, generation)
 
@@ -120,7 +112,7 @@ async def verified_visual_holding(tmp_path, *, surface_half_width_m=None):
     robot = RecordingSensorRobot()
     algorithms = PlaceVisualAlgorithms()
     algorithms.source_surface_half_width_m = surface_half_width_m
-    runner = Runner(robot, algorithms, lambda record: Choices("grasp"), tmp_path)
+    runner = Runner(robot, algorithms, None, tmp_path)
     await runner.start("抓取红色方块")
     await wait(runner)
     assert runner.state["status"] == "succeeded", runner.state["error"]
@@ -133,18 +125,6 @@ async def verified_visual_holding(tmp_path, *, surface_half_width_m=None):
                "scene_observation": copy.deepcopy(runner.holding_state["scene_observation"]),
                "holding": copy.deepcopy(runner.holding_state)}
     return runner, algorithms, context
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 @pytest.mark.parametrize("status", ["IK_FAIL", "TRAJOPT_FAIL", "COLLISION", "LINEAR_CONSTRAINT_FAIL"])
@@ -180,8 +160,6 @@ def test_native_service_internal_or_transport_failure_remains_fatal(code):
     with pytest.raises(AlgorithmError, match="unexpected SDK failure"):
         algorithms.plan_grasp(observation, "red", "A", evaluations, scene)
     assert calls == ["/tools/plan_grasp_batch"]
-
-
 
 
 def test_collision_proof_cannot_omit_the_live_active_joint_feedback():

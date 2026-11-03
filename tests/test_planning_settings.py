@@ -11,29 +11,27 @@ from luna_mujoco.planning_settings import PlanningSettings, load_settings
 
 
 @pytest.mark.parametrize("old_clearance", [.005, .0075, .00999])
-def test_only_saved_legacy_clearance_migrates_explicitly_to_ten_mm(tmp_path, old_clearance):
+def test_saved_configurable_clearance_is_preserved(tmp_path, old_clearance):
     path = tmp_path / "planning-settings.json"
     saved = {"trajectory_collision_clearance_m": old_clearance,
              "place_release_height_m": old_clearance, "time_scale": 4.,
              "ik_position_threshold_m": .005, "attachment": {"sphere_budget": 24}}
     path.write_text(json.dumps(saved), encoding="utf-8")
-    with pytest.warns(UserWarning, match="clearance.*migrated.*0.01"):
-        settings = load_settings(path)
-    assert settings.trajectory_collision_clearance_m == .01
-    assert settings.place_release_height_m == .01
+    settings = load_settings(path)
+    assert settings.trajectory_collision_clearance_m == old_clearance
+    assert settings.place_release_height_m == old_clearance
     assert settings.time_scale == 4.
     assert settings.ik_position_threshold_m == .005
     assert settings.attachment.sphere_budget == 24
     assert json.loads(path.read_text()) == saved
-    with pytest.raises(ValidationError):
-        PlanningSettings.model_validate(saved)
+    assert PlanningSettings.model_validate(saved) == settings
 
 
 def test_saved_clearance_above_policy_is_preserved_and_invalid_old_value_rejected(tmp_path):
     path = tmp_path / "planning-settings.json"
     path.write_text(json.dumps({"trajectory_collision_clearance_m": .015}), encoding="utf-8")
-    assert load_settings(path).place_release_height_m == .015
-    path.write_text(json.dumps({"trajectory_collision_clearance_m": .0049}), encoding="utf-8")
+    assert load_settings(path).place_release_height_m == 0.
+    path.write_text(json.dumps({"trajectory_collision_clearance_m": -.001}), encoding="utf-8")
     with pytest.raises(ValidationError):
         load_settings(path)
 
@@ -52,7 +50,7 @@ def test_invalid_or_inconsistent_settings_rejected(changes):
 
 
 def test_settings_apply_persist_and_reset_preserves_algorithm_configuration(tmp_path):
-    app = create_app(Simulation(), Algorithms(), lambda record: None, tmp_path / "runs")
+    app = create_app(Simulation(), Algorithms(), None, tmp_path / "runs")
     with TestClient(app) as client:
         original = client.get("/api/planning-settings").json()
         values = {**original["settings"], "time_scale": 4, "ik_num_seeds": 24}
@@ -72,7 +70,7 @@ def test_settings_apply_persist_and_reset_preserves_algorithm_configuration(tmp_
             "instruction": "抓取黑色方块", "settings_revision": original["revision"]})
         assert stale_start.status_code == 409
         assert stale_start.json()["detail"] == "planning_settings_changed"
-    restarted = create_app(Simulation(), Algorithms(), lambda record: None, tmp_path / "runs")
+    restarted = create_app(Simulation(), Algorithms(), None, tmp_path / "runs")
     with TestClient(restarted) as client:
         assert client.get("/api/planning-settings").json()["settings"] == values
 
@@ -80,7 +78,7 @@ def test_settings_apply_persist_and_reset_preserves_algorithm_configuration(tmp_
 
 
 def test_failed_settings_save_does_not_change_running_configuration(tmp_path, monkeypatch):
-    app = create_app(Simulation(), Algorithms(), lambda record: None, tmp_path / "runs")
+    app = create_app(Simulation(), Algorithms(), None, tmp_path / "runs")
     with TestClient(app) as client:
         original = client.get("/api/planning-settings").json()
         def fail_save(*args):

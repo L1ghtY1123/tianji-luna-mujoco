@@ -1,5 +1,6 @@
 """Runtime invariants and reproducible historical geometry checks, without CUDA."""
 
+import hashlib
 import importlib.util
 import json
 import shutil
@@ -68,14 +69,41 @@ def test_previous_static_model_reproduces_its_reviewed_axis_bounds():
         assert overhang <= 0.015001, f"{link}: raw sphere bounds protrude by {overhang * 1000:.3f} mm"
 
 
-def test_geometry_refit_preserves_buffers_collision_pairs_and_open_gripper_locks():
+def test_historical_geometry_refit_preserves_buffers_collision_pairs_and_open_gripper_locks():
     project = CONFIG_PATH.parents[2]
     source = project / "data/collision-sphere-source-2026-09-30.yml"
     before = yaml.safe_load(source.read_text(encoding="utf-8"))
-    after = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    reviewed = project / "data/collision-correction-2026-09-30/reviewed-model.yml"
+    after = yaml.safe_load(reviewed.read_text(encoding="utf-8"))
     before["robot_cfg"]["kinematics"].pop("collision_spheres")
     after["robot_cfg"]["kinematics"].pop("collision_spheres")
     assert after == before
+
+
+def test_current_gripper_buffers_replay_certified_tightening_without_changing_hard_clearance(monkeypatch):
+    from luna_mujoco.planning_settings import PlanningSettings
+
+    project = CONFIG_PATH.parents[2]
+    monkeypatch.syspath_prepend(str(project / "scripts"))
+    from tighten_gripper_envelope import tighten
+
+    certificate = json.loads((project / "resources/curobo/gripper-tight-cover-20261023.json").read_bytes())
+    source_path = project / "data/observation-contact-20261023/previous_collision.yml"
+    assert hashlib.sha256(source_path.read_bytes()).hexdigest() == certificate["previous_config_sha256"]
+    assert hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest() == certificate["config_sha256"]
+    source = yaml.safe_load(source_path.read_bytes())
+    current = yaml.safe_load(CONFIG_PATH.read_bytes())
+    replayed, proof = tighten(source, project / "assets/marvin_urdf/marvin_with_grippers.urdf")
+    assert replayed == current  # Includes every unrelated pair, joint lock and setting.
+    assert proof["previous_world_buffers"] == certificate["previous_world_buffers"]
+    assert proof["previous_self_buffers"] == certificate["previous_self_buffers"]
+    before, after = source["robot_cfg"]["kinematics"], current["robot_cfg"]["kinematics"]
+    for link in before["collision_sphere_buffer"]:
+        if link.startswith(("gripL_", "gripR_")):
+            assert after["collision_sphere_buffer"][link] == 0.
+            assert after["self_collision_buffer"][link] == pytest.approx(
+                before["collision_sphere_buffer"][link] + before["self_collision_buffer"][link])
+    assert PlanningSettings().trajectory_collision_clearance_m == .005
 
 
 def load_correction_replay():

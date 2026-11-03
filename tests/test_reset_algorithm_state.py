@@ -30,7 +30,7 @@ async def test_latest_successful_reset_is_not_poisoned_by_superseded_cleanup_fai
 
     simulation = Simulation()
     algorithms = SupersededFailure()
-    runner = Runner(simulation, algorithms, lambda record: None, tmp_path)
+    runner = Runner(simulation, algorithms, None, tmp_path)
     runner.clear_algorithm_state()
     try:
         assert await asyncio.to_thread(algorithms.entered.wait, 2)
@@ -60,7 +60,7 @@ async def test_reset_cleanup_waits_for_old_request_then_clears_its_late_attachme
     simulation = Simulation()
     simulation.confirm()
     algorithms = LateAttachment()
-    runner = Runner(simulation, algorithms, lambda record: None, tmp_path)
+    runner = Runner(simulation, algorithms, None, tmp_path)
     release = asyncio.Event()
 
     async def old_request():
@@ -91,7 +91,7 @@ async def test_only_latest_generation_cleans_when_two_resets_precede_pending_req
 
     simulation = Simulation()
     algorithms = CountingAlgorithms()
-    runner = Runner(simulation, algorithms, lambda record: None, tmp_path)
+    runner = Runner(simulation, algorithms, None, tmp_path)
     release = asyncio.Event()
     runner.planning_worker = asyncio.create_task(release.wait())
     runner.clear_algorithm_state()
@@ -111,7 +111,7 @@ def test_same_generation_scene_action_does_not_forget_a_nonempty_hand(tmp_path, 
             return {**self.snapshot(), "settled": True}
 
     simulation = SettledSimulation()
-    app = create_app(simulation, Algorithms(), lambda record: None, tmp_path)
+    app = create_app(simulation, Algorithms(), None, tmp_path)
     holding = {"state": holding_state, "generation": 1, "arm": "A", "instance_id": "visible-source",
                "verified": holding_state == "held", "attached": holding_state == "held"}
     with TestClient(app) as client:
@@ -133,7 +133,7 @@ async def test_failed_cleanup_blocks_start_until_a_later_confirmed_cleanup(tmp_p
     simulation = Simulation()
     simulation.confirm()
     algorithms = UnconfirmedCleanup()
-    runner = Runner(simulation, algorithms, lambda record: None, tmp_path)
+    runner = Runner(simulation, algorithms, None, tmp_path)
     runner.clear_algorithm_state()
     await asyncio.wait_for(runner.algorithm_cleanup_worker, 3)
     assert not runner.algorithm_pending
@@ -146,7 +146,7 @@ async def test_failed_cleanup_blocks_start_until_a_later_confirmed_cleanup(tmp_p
 
 
 def test_public_release_pending_keeps_unknown_detach_state_and_bounds_nested_evidence(tmp_path):
-    app = create_app(Simulation(), Algorithms(), lambda record: None, tmp_path)
+    app = create_app(Simulation(), Algorithms(), None, tmp_path)
     with TestClient(app) as client:
         app.state.runner.holding_state = {
             "state": "release_pending", "arm": "A", "verified": False, "attached": True,

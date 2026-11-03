@@ -88,6 +88,7 @@ def backend(cost):
     value._device, value._dtype = "cpu", "float32"
     value.carrying_link = "jev_carried_object_A"
     value.carrying_scene_token = "scene-current"
+    value.carrying_geometry_coverage = 'measured_surface_voxels_with_uncertainty'
     value.carrying_spheres_tool = np.array([[0., 0., -.05, .013]], dtype=np.float32)
     value._motion_clearance_checker = SimpleNamespace(get_collision_distance=lambda spheres: Tensor(cost))
     value.motion_planner = SimpleNamespace(last_grasp_result="old", last_pose_result="old")
@@ -152,7 +153,7 @@ def test_attachment_cache_retains_exact_uploaded_sphere_values_without_aliasing(
     uploads = []
     value.motion_planner.attachment_manager = SimpleNamespace(update=lambda spheres, *args, **kwargs: uploads.append(spheres))
     monkeypatch.setattr(backend_builder, "carrying_spheres", lambda binding: [[.0123456789123, 0., 0., .013456789123]])
-    value.attach_measured_carrying(SimpleNamespace(arm="A", scene_token="fresh"), [0.] * 7)
+    value.attach_measured_carrying(SimpleNamespace(arm="A", scene_token="fresh", cad_tool=None, obb_tool=None), [0.] * 7)
     np.testing.assert_array_equal(value.carrying_spheres_tool, uploads[0].values)
     uploads[0].values[:] = 99
     assert value.carrying_spheres_tool.max() < 1

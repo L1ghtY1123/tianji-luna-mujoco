@@ -36,7 +36,7 @@ async def test_motion_returns_capture_without_sam3_or_rebuild(tmp_path):
     assert result['semantic_processing'] is False
     assert 'fine_capture' in state
     assert not runner.state['facts']['scene_ready']
-    evidence = runner.snapshot_for_decision(state)['perception_state']['source_views']
+    evidence = state['view_evidence']
     assert not evidence['views_ready'] and evidence['geometry_analysis_pending']
     assert evidence['observation_id'] == state['fine_capture']['observation_id']
 
@@ -142,7 +142,7 @@ async def test_first_scene_capture_does_not_require_a_previous_capture(tmp_path)
         seen.append(kwargs['capture'])
         return context['observation']
     runner.observe = observe
-    await runner.execute('observe_scene', state)
+    await runner.observe(state, capture=None)
     assert seen == [None]
 
 
@@ -155,7 +155,7 @@ async def test_scene_analysis_after_motion_uses_new_pose_frame(tmp_path):
         seen.append(kwargs['capture']['observation_id'])
         return context['observation']
     runner.observe = observe
-    await runner.execute('observe_scene', state)
+    await runner.observe(state, capture=state['latest_capture'])
     assert seen == ['new']
 
 

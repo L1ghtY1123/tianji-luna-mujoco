@@ -1,7 +1,8 @@
 import { createEventTitleResolver } from './model.js';
+import { inventoryEntities, inventoryTransformations } from './task-inventory.js';
 
 const SKILL_EVENTS = new Set(['skill_start', 'skill_complete', 'skill_error']);
-const CATEGORY_NAMES = { jev: '历史模型记录', skill: '技能程序', algorithm: '算法调用', system: '系统记录', subgraph: '阶段子图' };
+const CATEGORY_NAMES = { jev: '历史模型记录', skill: '技能程序', algorithm: '算法调用', system: '系统记录', subgraph: '技能阶段' };
 const STATUS_NAMES = { failed: '失败', complete: '完成', warning: '需关注', recorded: '已记录', incomplete: '未记录结束', cancelled: '已取消' };
 const COLORS = { jev: '#7ec3ff', skill: '#8ed2a2', algorithm: '#7ec3ff', system: '#b7c6d5', subgraph: '#c3a6f0' };
 const STATUS_COLORS = { failed: '#f07e73', complete: '#80d59b', warning: '#edc778', recorded: '#9aaebe', incomplete: '#edc778', cancelled: '#b7c6d5' };
@@ -12,9 +13,8 @@ const PHASES = {
   container: ['目的容器', 'identify_destination'],
   grasp: ['抓取', 'generate_grasps', 'evaluate_arms', 'choose_arm', 'plan_grasp', 'plan_grasp_and_place', 'execute_approach', 'execute_grasp', 'close_gripper', 'execute_lift', 'verify_grasp'],
   transport: ['运输 / 放置', 'plan_place', 'execute_place', 'verify_place'],
-  unpack: ['VLA 拆包', 'prepare_unpack', 'mock_unpack', 'verify_unpack'],
-  drop: ['黑件运输 / 右盒投放', 'plan_transport', 'execute_transport', 'drop', 'verify_drop'],
-  recovery: ['恢复 / 重试', 'recover_task', 'inspect_visual_result'],
+  unpack: ['VLA 拆包', 'prepare_unpack', 'vla_unpack', 'verify_unpack'],
+  drop: ['运输 / 目的地投放', 'plan_transport', 'execute_transport', 'drop', 'verify_drop'],
   system: ['任务 / 决策'],
 };
 
@@ -129,51 +129,36 @@ const OBJECT_PHASES = {
   grasp: ['抓取 / 持物', 'execute_approach', 'execute_grasp', 'close_gripper', 'execute_lift', 'verify_grasp'],
   place: ['放置 / 松爪', 'plan_place', 'execute_place'],
   verify: ['放置核验', 'verify_place', 'observe_result'],
-  unpack: ['VLA 拆包 / 核验', 'prepare_unpack', 'mock_unpack', 'verify_unpack'],
-  transport: ['黑件持物运输', 'plan_transport', 'execute_transport'],
-  drop: ['右盒投放 / 完成核验', 'drop', 'verify_drop'],
+  unpack: ['VLA 拆包 / 核验', 'prepare_unpack', 'vla_unpack', 'verify_unpack'],
+  transport: ['持物运输', 'plan_transport', 'execute_transport'],
+  drop: ['目的地投放 / 完成核验', 'drop', 'verify_drop'],
   system: ['程序 / 记录'],
 };
 
 export function buildObjectTimeline(graph) {
   const groups = new Map();
-  const processRecords = { ...(graph.events?.findLast(event => event.data?.task_progress?.process_records)
-    ?.data.task_progress.process_records ?? {}) };
-  for (const event of graph.events ?? []) {
-    if (event.kind !== 'product_created' || !event.data?.process_id) continue;
-    const data = event.data;
-    processRecords[data.process_id] = { ...data, ...processRecords[data.process_id] };
-  }
-  const entityProcesses = new Map();
-  for (const [id, record] of Object.entries(processRecords)) {
-    for (const entity of [record.input_entity_id, record.output_entity_id].filter(Boolean)) entityProcesses.set(entity, id);
-  }
-  const inventory = graph.events?.findLast(event => Array.isArray(event.data?.task_progress?.objects))
-    ?.data.task_progress.objects ?? [];
+  const progress = graph.events?.findLast(event => event.data?.task_progress)?.data.task_progress;
+  const transformations = inventoryTransformations(progress);
+  const inventory = inventoryEntities(progress);
   const displayIds = new Map(inventory.filter(object => Number.isInteger(object.display_id) && object.display_id > 0)
     .map(object => [object.id, object.display_id]));
   for (const node of graph.nodes) {
     const targets = [...new Set(node.events.map(event => event.target_id ?? event.data?.target_id
       ?? event.data?.result?.target_id).filter(value => typeof value === 'string' && value))];
     const targetId = targets.length === 1 ? targets[0] : null;
-    const processIds = [...new Set([...node.events.map(event => event.process_id ?? event.data?.process_id),
-      ...targets.map(id => entityProcesses.get(id))].filter(Boolean))];
-    const processId = processIds.length === 1 ? processIds[0] : null;
-    const process = processRecords[processId] ?? {};
-    const key = processId ?? targetId ?? '__shared__';
-    if (!groups.has(key)) groups.set(key, { targetId, processId,
-      inputEntityId: process.input_entity_id ?? null, outputEntityId: process.output_entity_id ?? null,
-      displayId: process.display_id ?? displayIds.get(targetId) ?? null, stages: [] });
+    const key = targetId ?? '__shared__';
+    if (!groups.has(key)) groups.set(key, { targetId,
+      displayId: displayIds.get(targetId) ?? null,
+      transformations: transformations.filter(item => [item.input_entity_id, item.output_entity_id].includes(targetId)), stages: [] });
     const source = node.events.find(event => SKILL_EVENTS.has(event.kind)) ?? node.events[0];
     const skill = source.data?.skill ?? source.title;
     let phase = Object.entries(OBJECT_PHASES).find(([, names]) => names.slice(1).includes(skill))?.[0];
-    if (!phase && node.events.some(event => event.kind === 'product_created')) phase = 'unpack';
     if (!phase && node.events.some(event => event.kind === 'visual_decisions_call' || event.kind?.startsWith('observation_'))) phase = 'observe';
-    phase ??= 'system';
+    phase ??= SKILL_EVENTS.has(source.kind) ? `skill:${skill}` : 'system';
     const group = groups.get(key);
     let stage = group.stages.at(-1);
     if (!stage || stage.phase !== phase) {
-      stage = { id: `timeline:${node.id}`, phase, title: OBJECT_PHASES[phase][0], nodes: [], events: [] };
+      stage = { id: `timeline:${node.id}`, phase, title: OBJECT_PHASES[phase]?.[0] ?? skill, nodes: [], events: [] };
       group.stages.push(stage);
     }
     stage.nodes.push(node);
@@ -204,11 +189,12 @@ export function renderObjectTimeline(container, graph, onSelect) {
   container.replaceChildren();
   for (const group of buildObjectTimeline(graph)) {
     const section = element('section', '', 'object-route');
-    section.append(element('h3', group.processId ? `工序 #${group.displayId ?? '—'}` : group.targetId
+    section.append(element('h3', group.targetId
       ? group.displayId ? `物体 #${group.displayId}` : `物体 ${group.targetId}`
       : '共享观测 / 未记录目标 ID'));
-    if (group.processId) section.append(element('p', `输入 ID：${group.inputEntityId ?? '未记录'} → 产物 ID：${group.outputEntityId ?? '等待拆包确认'}`, 'muted'));
-    else if (group.displayId) section.append(element('p', `永久 ID：${group.targetId}`, 'muted'));
+    if (group.displayId) section.append(element('p', `永久 ID：${group.targetId}`, 'muted'));
+    for (const transformation of group.transformations) section.append(element('p',
+      `${transformation.input_entity_id} → ${transformation.output_entity_id} · ${transformation.skill}`, 'muted'));
     const route = element('div', '', 'object-route-stages');
     for (const [stageIndex, stage] of group.stages.entries()) {
       const card = element('div', '', `object-stage status-${stage.status}`);
@@ -350,7 +336,7 @@ function drawing(graph, options = {}) {
   const title = options.title ?? '实验执行图';
   const content = [label(28, 38, wrapText(title, 72)[0], { 'font-size': 26 }),
     label(28, 72, '从左到右，换行继续 · 实际调用开始顺序 · 分组含完整决策证据'),
-    label(28, 107, '蓝：模型 / 算法调用   绿：技能程序   紫：阶段子图'),
+    label(28, 107, '蓝：模型 / 算法调用   绿：技能程序   紫：技能阶段'),
     label(28, 136, '路线颜色表示前一调用结果：绿 = 完成，红 = 失败，灰 = 其他', { fill: '#b3c6d5' })];
   for (const group of layout.groups) {
     content.push(shape('rect', { x: group.x, y: group.y, width: group.width, height: group.height, rx: 14, fill: '#121f2d', stroke: '#716587', 'stroke-width': 2 }));

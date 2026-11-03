@@ -1,6 +1,7 @@
 """API locks are exercised with the current program runner actually in flight."""
 from fastapi.testclient import TestClient
 from test_demo_async_safety import RecordedRobot, WaitingVision
+from test_demo_runner import TestPolicyController
 
 from luna_mujoco.app import create_app
 
@@ -28,6 +29,7 @@ class ApiRobot(RecordedRobot):
 
 
 def make_app(tmp_path, monkeypatch):
+    monkeypatch.setattr('luna_mujoco.runtime.controller.PolicyController', TestPolicyController)
     monkeypatch.setattr("luna_mujoco.demo_scene.demo_observation_poses",
                         lambda: {"A": [0.] * 7, "B": [0.] * 7})
     robot, algorithms = ApiRobot(), WaitingVision("plan")

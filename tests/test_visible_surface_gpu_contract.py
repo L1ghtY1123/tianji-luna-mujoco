@@ -11,7 +11,7 @@ from luna_mujoco.geometry_service import GeometryRuntime
 def measured_binding():
     return CarryingBinding.from_mapping({
         "arm": "A", "owner_id": "hold", "observation_id": "obs", "generation": 1,
-        "scene_token": "scene", "instance_id": "object", "frame": "tool", "state": "held",
+        "scene_token": "scene", "instance_id": "object", "frame": "gripper_front", "state": "held",
         "points_tool_m": [[-.03, -.03, .04], [.03, .03, .04]],
         "uncertainty_m": .004, "coverage": .5,
     }, scene={"scene_token": "scene", "observation_id": "obs", "generation": 1, "target_id": "object"}, arm="A")

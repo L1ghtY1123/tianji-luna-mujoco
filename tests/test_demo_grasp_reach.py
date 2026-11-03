@@ -7,6 +7,7 @@ from scipy.spatial.transform import Rotation
 
 from luna_mujoco.algorithms import AlgorithmError, Algorithms
 from luna_mujoco.demo_algorithms import DemoAlgorithms
+from luna_mujoco.object_obb import observed_object_obb
 
 
 @pytest.fixture(autouse=True)
@@ -15,6 +16,12 @@ def isolate_reach_screen_from_direction_and_insertion_policy(monkeypatch):
     # cone/insertion policy is independently tested in test_luna_grasp_policy.
     monkeypatch.setattr("luna_mujoco.demo_algorithms.prepare_grasp_candidates",
         lambda candidates, **kwargs: (deepcopy(candidates), deepcopy(candidates), {}))
+
+
+def grasp_result(snapshot, candidates):
+    return {'candidates': deepcopy(candidates), 'batches': [{'candidate_count': len(candidates)}],
+            'object_obb': observed_object_obb(snapshot['objects'][0]),
+            'graspgen_input_source': 'observed_obb_mesh_surface_samples'}
 
 
 def inputs(arm="A"):
@@ -53,13 +60,25 @@ def inputs(arm="A"):
     return snapshot, candidates, request
 
 
+def test_generic_bin_grasp_uses_transport_region_without_unpack_stage(monkeypatch):
+    snapshot, candidates, _ = inputs()
+    snapshot['observation_id'] = 'measured'
+    snapshot['objects'][0].update(kind='cube', color='red')
+    request = {'object_id': 'target', 'transport_region': {
+        'observation_id': 'measured', 'center_world_xy_m': [.45, .1], 'occupied_top_z_m': .6}}
+    monkeypatch.setattr(Algorithms, 'generate_grasps', lambda *args, **kwargs: grasp_result(snapshot, candidates))
+    result = DemoAlgorithms().generate_grasps(snapshot, 'target', arm='A', placement_request=request)
+    assert result['fixed_slot_reach_filter']['candidate_evidence']
+    assert all('nominal_transport_wrist_distance_m' in row
+               for row in result['fixed_slot_reach_filter']['candidate_evidence'])
+
+
 @pytest.mark.parametrize("arm", ["A", "B"])
 def test_known_impossible_grasp_rejected_before_ik_without_reordering(monkeypatch, arm):
     snapshot, candidates, request = inputs(arm)
     original = deepcopy(candidates)
     monkeypatch.setattr(Algorithms, "generate_grasps",
-                        lambda *args, **kwargs: {"candidates": deepcopy(candidates),
-                                                "batches": [{"candidate_count": len(candidates)}]})
+                        lambda *args, **kwargs: grasp_result(snapshot, candidates))
     result = DemoAlgorithms().generate_grasps(snapshot, "target", arm=arm, placement_request=request)
     assert result["candidates"] == [original[1]]
     evidence = result["fixed_slot_reach_filter"]
@@ -83,7 +102,7 @@ def test_five_mm_inward_reserve_rejects_near_boundary_candidate(monkeypatch, arm
     snapshot = {"objects": [{"id": "target", "points_world_m": [[0., 0., 0.]]}]}
     candidate = {"index": 91, "score": .7, "T_world_tcp": transform.tolist()}
     monkeypatch.setattr(Algorithms, "generate_grasps",
-                        lambda *args, **kwargs: {"candidates": [candidate], "batches": [{"candidate_count": 1}]})
+                        lambda *args, **kwargs: grasp_result(snapshot, [candidate]))
     shoulder = np.asarray(geometry["shoulder_world_m"])
     offset = rotation @ np.asarray(geometry["tcp_to_wrist_tool_m"])
     for extra, accepted in ((-.0051, True), (-.0049, False)):
@@ -93,11 +112,13 @@ def test_five_mm_inward_reserve_rejects_near_boundary_candidate(monkeypatch, arm
                    "layout": {"floor_z_m": shoulder[2] - .05 - offset[2] - .01,
                               "cells": [{"slot_id": 1, "center_world_xy_m": target.tolist()}]}}
         if accepted:
-            result = DemoAlgorithms().generate_grasps(snapshot, "target", arm=arm, placement_request=request)
+            result = DemoAlgorithms().generate_grasps(snapshot, "target", arm=arm, placement_request=request,
+                planning_settings={"place_release_height_m": .01})
             assert result["candidates"] == [candidate]
         else:
             with pytest.raises(AlgorithmError) as caught:
-                DemoAlgorithms().generate_grasps(snapshot, "target", arm=arm, placement_request=request)
+                DemoAlgorithms().generate_grasps(snapshot, "target", arm=arm, placement_request=request,
+                planning_settings={"place_release_height_m": .01})
             assert caught.value.code == "grasp_no_fixed_slot_reachable_candidate"
             assert caught.value.details["fixed_slot_reach_filter"]["rejected_count"] == 1
 
@@ -111,7 +132,7 @@ def test_eighth_run_horizontal_distance_is_outside_inward_reserve(monkeypatch, a
     transform[:3, :3] = np.diag([1., -1., -1.])
     candidate = {"index": 91, "score": .7, "T_world_tcp": transform.tolist()}
     monkeypatch.setattr(Algorithms, "generate_grasps",
-                        lambda *args, **kwargs: {"candidates": [candidate], "batches": [{"candidate_count": 1}]})
+                        lambda *args, **kwargs: grasp_result(snapshot, [candidate]))
     snapshot = {"objects": [{"id": "target", "points_world_m": [[0., 0., 0.]]}]}
     wrist_offset = transform[:3, :3] @ geometry["tcp_to_wrist_tool_m"]
     target = np.asarray(geometry["shoulder_world_m"])[:2] + [.601385, 0.] - wrist_offset[:2]
@@ -141,8 +162,7 @@ def test_reach_filter_keeps_original_order_and_scores_without_vertical_ranking(m
     second.update(index=199, score=.999, source_index=17)
     candidates = [candidates[1], second]
     monkeypatch.setattr(Algorithms, "generate_grasps",
-                        lambda *args, **kwargs: {"candidates": deepcopy(candidates),
-                                                "batches": [{"candidate_count": len(candidates)}]})
+                        lambda *args, **kwargs: grasp_result(snapshot, candidates))
     result = DemoAlgorithms().generate_grasps(snapshot, "target", arm="A", placement_request=request)
     assert result["candidates"] == candidates
 
@@ -169,16 +189,19 @@ def test_ninth_measured_nominal_release_rejected_despite_passing_horizontal_scre
     snapshot["objects"][0]["points_world_m"] = points.tolist()
     request["layout"]["floor_z_m"] = .5999999642372131
     request["layout"]["cells"][0]["center_world_xy_m"] = center
+    from luna_mujoco.geometry import front_tcp_pose
+    pose = front_tcp_pose(pose, arm)
     candidate = {"index": 163, "score": .6663368940353394, "T_world_tcp": pose.tolist()}
     monkeypatch.setattr(Algorithms, "generate_grasps",
-                        lambda *args, **kwargs: {"candidates": [candidate], "batches": [{"candidate_count": 1}]})
+                        lambda *args, **kwargs: grasp_result(snapshot, [candidate]))
     with pytest.raises(AlgorithmError) as caught:
-        DemoAlgorithms().generate_grasps(snapshot, "target", arm=arm, placement_request=request)
+        DemoAlgorithms().generate_grasps(snapshot, "target", arm=arm, placement_request=request,
+                planning_settings={"place_release_height_m": .01})
     evidence = caught.value.details["fixed_slot_reach_filter"]
     item = evidence["candidate_evidence"][0]
     assert item["horizontal_wrist_distance_m"] < evidence["reach_screening_limit_m"]
     assert item["nominal_release_wrist_distance_m"] > evidence["reach_screening_limit_m"]
-    assert item["nominal_mount_world_m"][2] == pytest.approx(
+    assert item["nominal_tcp_world_m"][2] == pytest.approx(
         pose[2, 3] - minimum + .5999999642372131 + .01)
 
 
@@ -194,17 +217,22 @@ def test_missing_or_invalid_frozen_floor_fails_before_graspgen(monkeypatch, floo
         DemoAlgorithms().generate_grasps(snapshot, "target", arm="A", placement_request=request)
 
 
-def test_nominal_z_and_tool_frame_approach_use_validated_current_settings(monkeypatch):
+@pytest.mark.parametrize('clearance,release_height', [(.02, .01), (.005, .03)])
+def test_nominal_z_and_tool_frame_approach_use_validated_current_settings(monkeypatch, clearance, release_height):
     snapshot, candidates, request = inputs()
     monkeypatch.setattr(Algorithms, "generate_grasps",
-                        lambda *args, **kwargs: {"candidates": [candidates[1]], "batches": [{"candidate_count": 1}]})
-    settings = {"trajectory_collision_clearance_m": .02, "place_approach_axis": "x",
+                        lambda *args, **kwargs: grasp_result(snapshot, [candidates[1]]))
+    settings = {"trajectory_collision_clearance_m": clearance, "place_release_height_m": release_height,
+                "place_approach_axis": "x",
                 "place_approach_offset_m": .04, "place_approach_in_tool_frame": True}
     result = DemoAlgorithms().generate_grasps(
         snapshot, "target", arm="A", placement_request=request, planning_settings=settings)
     evidence = result["fixed_slot_reach_filter"]
-    assert evidence["required_clearance_m"] == .02
+    assert evidence["required_clearance_m"] == clearance
     item = evidence["candidate_evidence"][0]
+    minimum = np.asarray(snapshot['objects'][0]['points_world_m'])[:, 2].min()
+    expected_z = candidates[1]['T_world_tcp'][2][3] - minimum + .6 + max(clearance, release_height)
+    assert item['nominal_tcp_world_m'][2] == pytest.approx(expected_z)
     rotation = np.array(candidates[1]["T_world_tcp"])[:3, :3]
     np.testing.assert_allclose(np.array(item["nominal_approach_wrist_world_m"])
                                - item["nominal_release_wrist_world_m"], rotation @ [.04, 0., 0.])

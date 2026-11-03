@@ -19,7 +19,7 @@ COPY --from=frontend /usr/local/bin/node /usr/local/bin/node
 RUN node --version
 COPY assets/ ./assets/
 COPY resources/ ./resources/
-COPY demo_skills/ ./demo_skills/
+COPY skill_catalog/ ./skill_catalog/
 COPY vendor/tianji_graspgen/__init__.py vendor/tianji_graspgen/client.py vendor/tianji_graspgen/wire.py ./vendor/tianji_graspgen/
 COPY vendor/tianji_curobo/__init__.py vendor/tianji_curobo/contracts.py vendor/tianji_curobo/trajectory_interpolation.py vendor/tianji_curobo/semantic_esdf_transport.py ./vendor/tianji_curobo/
 COPY --from=frontend /build/web/dist ./web/dist

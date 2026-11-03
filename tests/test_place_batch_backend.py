@@ -51,6 +51,7 @@ def backend(raw):
     value._goal_tool_pose_type = SimpleNamespace(from_poses=lambda poses, **kwargs: poses)
     value._tool_pose_criteria_type = lambda: "default"
     value.carrying_link, value.carrying_scene_token = "jev_carried_object_A", "scene"
+    value.carrying_geometry_coverage = 'measured_surface_voxels_with_uncertainty'
     value.carrying_spheres_tool = np.array([[.01, 0., 0., .01]], dtype=np.float32)
     queries, calls, checked, restored = [], [], [], []
     def cost(spheres):
@@ -61,80 +62,26 @@ def backend(raw):
         calls.append((goal, state, kwargs))
         return raw
     value.motion_planner = SimpleNamespace(plan_grasp=plan, update_tool_pose_criteria=restored.append,
-        trajopt_solver=SimpleNamespace(config=SimpleNamespace(interpolation_dt=.02)), last_grasp_result=None)
+        trajopt_solver=SimpleNamespace(config=SimpleNamespace(interpolation_dt=.02,
+            position_tolerance=.005, orientation_tolerance=.05)), last_grasp_result=None)
+    from scipy.spatial.transform import Rotation
+
+    goal = request()
+    poses = []
+    for matrix in np.asarray(goal.goal_matrices_world):
+        quaternion = Rotation.from_matrix(matrix[:3, :3]).as_quat()[[3, 0, 1, 2]]
+        offset = np.zeros(3)
+        offset["xyz".index(goal.approach_axis)] = goal.approach_offset_m
+        if goal.approach_in_tool_frame:
+            offset = matrix[:3, :3] @ offset
+        poses.extend([(matrix[:3, 3] + offset, quaternion), (matrix[:3, 3], quaternion)])
+    def compute(state):
+        position, quaternion = poses.pop(0)
+        pose = SimpleNamespace(position=Tensor([position]), quaternion=Tensor([quaternion]))
+        return SimpleNamespace(tool_poses=SimpleNamespace(get_link_pose=lambda frame: pose))
+    value.motion_planner.compute_kinematics = compute
     value.validate_trajectory_native = checked.append
     return value, calls, checked, restored
-
-
-def test_release_conflict_rejects_only_one_candidate_and_two_phase_batch_copies_derivatives():
-    raw = raw_result()
-    value, calls, checked, restored = backend(raw)
-    # Match the public tensor repeat operation while keeping this test CPU-only.
-    class Position:
-        def repeat(self, count, axis):
-            return np.zeros((count, 7))
-    value._state = lambda joints: SimpleNamespace(position=Position())
-    result = value.plan_place_batch_native(request())
-    assert len(calls) == 1 and calls[0][1].shape == (16, 7)
-    assert calls[0][2]["plan_grasp_to_lift"] is False
-    assert calls[0][2]["plan_approach_to_grasp"] is True
-    assert calls[0][2]["disable_collision_links"] == []
-    assert restored == [{"tcp": "default"}]
-    assert result["batch_size"] == result["batch_capacity"] == 16
-    assert [item["index"] for item in result["items"]] == list(range(16))
-    failed, passed = result["items"][:2]
-    assert failed["success"] is False and failed["status"] == "release_clearance_conflict"
-    assert failed["release_clearance"]["conflicting_sphere_indices"] == [0]
-    assert passed["success"] is True and set(passed["phases"]) == {"approach", "place"}
-    assert checked == []  # Only final interpolated commands get the extra hard check.
-    raw.grasp_interpolated_trajectory.velocity.values[:] = 99.
-    assert len(passed["phases"]["place"]["positions_rad"]) == 3
-    assert passed["phases"]["place"]["velocities_rad_s"][0] == (1.,) * 7
-    assert passed["phases"]["place"]["interpolation_dt_s"] == .02
-    assert value.motion_planner.last_grasp_result is None
-
-
-def test_runtime_reuses_capacity_sixteen_backend_and_preserves_logical_hold_after_rejections(monkeypatch):
-    runtime = geometry_service.GeometryRuntime()
-    runtime.geometry_scene = {"scene_token": "scene", "target_id": "sam-source",
-        "observation_id": "rgbd-2", "generation": 2, "exclusion_state": "held"}
-    runtime.geometry_solver_profile = runtime.planning_settings.solver_payload()
-    created = []
-    def create(arm, batch_size, **kwargs):
-        created.append(batch_size)
-        runtime.effective_config = {"A": {"plan": {"optimizer_attachment": True}}}
-        return SimpleNamespace(update_voxel_scene=lambda *args, **kwargs: None,
-            update_peer_collision_model=lambda *args: None, attach_measured_carrying=lambda *args: None,
-            plan_place_batch_native=lambda request: {"items": [{"index": i, "success": False,
-                "approach_success": False, "place_success": False, "phases": {}, "status": "unreachable"}
-                for i in range(16)], "batch_size": 16, "batch_capacity": 16})
-    monkeypatch.setattr(runtime, "_create_real_backend_unlocked", create)
-    monkeypatch.setattr(runtime, "_prepare_scene_cache_unlocked", lambda: runtime.geometry_scene.copy())
-    runtime.geometry_grids, runtime.geometry_model = [], {"cuboid": {}}
-    held = object()
-    runtime.logical_carrying_binding = held
-    for _ in range(2):
-        result = geometry_service.run_operation(runtime, "/tools/plan_place_batch", payload())
-        assert result["ok"] is True and result["batch_capacity"] == 16
-        assert result["collision_evidence"]["internal_batched_ik"] is True
-        assert runtime.logical_carrying_binding is held
-        assert runtime.carrying_binding is None
-    assert created == [16]
-
-
-@pytest.mark.parametrize("changes,match", [
-    ({"goal_position_m": [0., 0., 0.]}, "singular"),
-    ({"goal_matrices_world": [np.eye(4).tolist()]}, "exactly 16"),
-    ({"gripper_joint_positions_rad": None}, "feedback"),
-    ({"carrying_binding": None}, "carrying"),
-])
-def test_batch_endpoint_rejects_ambiguous_or_incomplete_input(changes, match):
-    runtime = geometry_service.GeometryRuntime()
-    runtime.geometry_scene = {"scene_token": "scene", "target_id": "sam-source",
-        "observation_id": "rgbd-2", "generation": 2}
-    runtime.geometry_solver_profile = runtime.planning_settings.solver_payload()
-    with pytest.raises(ValueError, match=match):
-        geometry_service.run_operation(runtime, "/tools/plan_place_batch", payload() | changes)
 
 
 def test_place_ik_uses_closed_gripper_and_held_attachment_scope(monkeypatch):
@@ -226,25 +173,6 @@ def test_prepare_and_failed_place_ik_reuse_one_backend_and_preserve_hold(monkeyp
         assert runtime.logical_carrying_binding == held
     assert created == [(100, True)]
     assert not runtime._batch_backends
-
-
-def test_all_failed_batch_needs_no_phase_samples():
-    from luna_mujoco.place_batch import place_batch_items_from_result
-
-    raw = SimpleNamespace(approach_success=Tensor([0] * 16), grasp_success=Tensor([0] * 16),
-        status="No grasp in goal set was reachable.")
-    items = place_batch_items_from_result(raw, [f"Joint{i}_L" for i in range(1, 8)], .02)
-    assert len(items) == 16 and all(not item["success"] and item["phases"] == {} for item in items)
-
-
-@pytest.mark.parametrize("length", [1, 1.5, 5, float("nan")])
-def test_invalid_successful_candidate_length_is_a_service_failure(length):
-    from luna_mujoco.place_batch import place_batch_items_from_result
-
-    raw = raw_result()
-    raw.grasp_interpolated_last_tstep.values[2] = length
-    with pytest.raises(ValueError, match="length"):
-        place_batch_items_from_result(raw, [f"Joint{i}_L" for i in range(1, 8)], .02)
 
 
 @pytest.mark.parametrize("ik_only", [True, False])
@@ -340,24 +268,3 @@ def test_held_backend_construction_reserves_shared_geometry_before_measured_upda
         assert len(reserved) == 31 and all(row['radius'] < 0 for row in reserved)
 
 
-def test_batch_leaves_final_command_check_to_caller_and_sdk_exception_is_fatal():
-    class Position:
-        def repeat(self, count, axis):
-            return np.zeros((count, 7))
-    value, _, _, _ = backend(raw_result())
-    value._state = lambda joints: SimpleNamespace(position=Position())
-    checked = []
-    def check(phase):
-        checked.append(phase)
-        raise AssertionError('raw path checked before execution interpolation')
-    value.validate_trajectory_native = check
-    result = value.plan_place_batch_native(request())
-    assert result["items"][1]["success"] is True
-    assert checked == []
-    assert result["items"][2]["success"] is True
-    def crash(*args, **kwargs):
-        raise RuntimeError("SDK broken")
-    value.motion_planner.plan_grasp = crash
-    with pytest.raises(RuntimeError, match="SDK broken"):
-        value.plan_place_batch_native(request())
-    assert value.motion_planner.last_grasp_result is None

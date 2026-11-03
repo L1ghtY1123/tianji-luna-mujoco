@@ -1,4 +1,4 @@
-"""Independent physical QA must not confuse process count with entity count."""
+"""Independent physical QA counts completed inputs and verifies their output lineage."""
 import importlib.util
 from copy import deepcopy
 from pathlib import Path
@@ -17,17 +17,18 @@ def sample():
     box_pose[:3, 3] = [.2, -.6, .4725]
     product_pose = box_pose.copy()
     product_pose[2, 3] += -.0675 + .0745 / 2
+    creation = {'observation_id': 'unpack', 'request_hash': 'verified', 'action_id': 'unpack-action'}
     records = [
-        {'id': 'pink-1', 'status': 'consumed', 'completed_stages': [
-            {'stage_index': 0, 'observation_id': 'place'}]},
-        {'id': 'product-1', 'status': 'completed', 'completed_stages': [
-            {'stage_index': 1, 'observation_id': 'drop'}]}]
-    progress = {'objects': records, 'completed_process_ids': ['process-1'],
-        'process_records': {'process-1': {'id': 'process-1', 'input_entity_id': 'pink-1',
-            'output_entity_id': 'product-1', 'status': 'completed', 'phase': 'completed',
-            'creation_evidence': {'observation_id': 'unpack', 'request_hash': 'verified'}}}}
+        {'id': 'pink-1', 'status': 'consumed', 'output_entity_id': 'product-1', 'transfers': [
+            {'transfer_index': 0, 'destination_id': 'work-area', 'arm': 'A', 'observation_id': 'place'}]},
+        {'id': 'product-1', 'status': 'completed', 'input_entity_id': 'pink-1', 'processing_skill': 'vla_unpack',
+            'creation_evidence': creation, 'current_region': 'right-bin', 'transfers': [
+                {'transfer_index': 0, 'destination_id': 'right-bin', 'arm': 'B', 'observation_id': 'drop'}]}]
+    progress = {'objects': records, 'selected_input_ids': ['pink-1'], 'completed_input_ids': ['pink-1'],
+        'transformations': {'process-1': {'id': 'process-1', 'skill': 'vla_unpack', 'input_entity_id': 'pink-1',
+            'output_entity_id': 'product-1', 'evidence': deepcopy(creation)}}}
     state = {'run': {'run_id': 'test', 'status': 'succeeded', 'holding': None,
-        'task_progress': progress, 'metrics': {'responses_call_count': 1}},
+        'task_progress': progress, 'task_inventory': {'destination_id': 'right-bin'}, 'metrics': {'responses_call_count': 1}},
         'simulation': {'objects': [
             {'id': 'right-bin', 'asset_id': 'blue_box', 'size': [.410, .310, .145],
              'color': '#123456', 'T_world_object': box_pose.tolist()},
@@ -50,9 +51,9 @@ def test_process_status_without_each_observation_is_not_acceptance(missing):
     state, config = sample()
     progress = state['run']['task_progress']
     if missing == 'unpack':
-        progress['process_records']['process-1']['creation_evidence'] = {}
+        progress['objects'][1]['creation_evidence'] = {}
     else:
-        progress['objects'][0 if missing == 'place' else 1]['completed_stages'] = []
+        progress['objects'][0 if missing == 'place' else 1]['transfers'] = []
     assert not module.audit(state, 1, config)['passed']
 
 
@@ -73,12 +74,63 @@ def test_actual_bin_pose_not_configured_pose_is_used():
     assert module.audit(state, 1, config)['passed']
 
 
-def test_duplicate_process_output_cannot_count_twice():
+def test_duplicate_transformation_output_cannot_count_twice():
     state, config = sample()
     progress = state['run']['task_progress']
-    progress['process_records']['process-2'] = deepcopy(progress['process_records']['process-1'])
-    progress['completed_process_ids'].append('process-2')
-    assert not module.audit(state, 2, config)['passed']
+    progress['transformations']['process-2'] = deepcopy(progress['transformations']['process-1'])
+    progress['transformations']['process-2'].update(id='process-2', input_entity_id='other-input')
+    assert not module.audit(state, 1, config)['passed']
+
+
+def test_acceptance_does_not_require_a_fixed_number_of_mapping_calls_or_transfers():
+    state, config = sample()
+    state['events'] *= 3
+    source = state['run']['task_progress']['objects'][0]
+    source['transfers'].insert(0, {'transfer_index': 0, 'destination_id': 'buffer',
+        'arm': 'B', 'observation_id': 'buffer-placement'})
+    source['transfers'][1]['transfer_index'] = 1
+    result = module.audit(state, 1, config)
+    assert result['passed']
+    assert result['verified_entity_lineage']
+    assert result['build_scene_calls'] == 6
+
+
+@pytest.mark.parametrize('fault', ['creation_mismatch', 'cycle', 'unselected', 'wrong_destination',
+    'unobserved_transfer', 'output_mismatch', 'skill_mismatch', 'duplicate_object'])
+def test_inconsistent_generic_completion_evidence_is_rejected(fault):
+    state, config = sample()
+    progress = state['run']['task_progress']
+    if fault == 'creation_mismatch':
+        progress['transformations']['process-1']['evidence']['action_id'] = 'different-action'
+    elif fault == 'cycle':
+        progress['transformations']['process-1']['output_entity_id'] = 'pink-1'
+    elif fault == 'unselected':
+        progress['selected_input_ids'] = []
+    elif fault == 'wrong_destination':
+        progress['objects'][1]['current_region'] = 'elsewhere'
+    elif fault == 'output_mismatch':
+        progress['objects'][0]['output_entity_id'] = 'different-product'
+    elif fault == 'skill_mismatch':
+        progress['objects'][1]['processing_skill'] = 'different-skill'
+    elif fault == 'duplicate_object':
+        progress['objects'].append(deepcopy(progress['objects'][1]))
+    else:
+        progress['objects'][1]['transfers'][0].pop('observation_id')
+    assert not module.audit(state, 1, config)['passed']
+
+
+def test_additional_verified_transformation_can_precede_unpack():
+    state, config = sample()
+    progress = state['run']['task_progress']
+    creation = {'observation_id': 'inspect', 'request_hash': 'inspected', 'action_id': 'inspection-action'}
+    progress['objects'][0]['output_entity_id'] = 'inspected-1'
+    progress['objects'].append({'id': 'inspected-1', 'status': 'consumed', 'input_entity_id': 'pink-1',
+        'output_entity_id': 'product-1', 'processing_skill': 'inspect_part', 'creation_evidence': creation})
+    progress['objects'][1]['input_entity_id'] = 'inspected-1'
+    progress['transformations']['process-1']['input_entity_id'] = 'inspected-1'
+    progress['transformations']['inspection'] = {'id': 'inspection', 'skill': 'inspect_part',
+        'input_entity_id': 'pink-1', 'output_entity_id': 'inspected-1', 'evidence': deepcopy(creation)}
+    assert module.audit(state, 1, config)['passed']
 
 
 def test_polygon_containment_does_not_fill_cut_corners():

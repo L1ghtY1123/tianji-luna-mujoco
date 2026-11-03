@@ -36,14 +36,15 @@ def test_scene_inventory_fixes_entities_roles_queries_and_table_before_motion():
     assert progress.scene_entities['table'] == initial['table']
 
 
-def test_fixed_queries_do_not_discover_shapes_or_apply_cube_synonym_fallback():
+def test_fixed_queries_only_add_bounded_empty_container_aliases():
     capture, masks = capture_fixture()
     detector = PromptSegmenter({'red sphere': masks, 'cube': masks})
     queries = [{'kind': 'sphere', 'color': 'red', 'prompt': 'red sphere', 'entity_ids': ['ball-1', 'ball-2']},
                {'kind': 'bin', 'color': 'blue', 'prompt': 'blue open box', 'entity_ids': ['box']}]
     result = GeometryPerception(detector, identities=('ball-1', 'ball-2')).observe(capture, checkpoint='fine', source_hint={
         'kind': 'any', 'include_containers': True, 'scene_queries': queries})
-    assert detector.calls == ['red sphere', 'blue open box'] * 3
+    assert detector.calls == ['red sphere', 'blue open box', 'blue box', 'blue container'] * 3
+    assert 'cube' not in detector.calls
     assert len(result['objects']) == 2
     assert {obj['id'] for obj in result['objects']} == {'ball-1', 'ball-2'}
     assert all('candidate_entity_ids' not in obj for obj in result['objects'])

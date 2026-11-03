@@ -1,0 +1,41 @@
+{
+  "id": "prepare_unpack",
+  "description": "Plan and execute both arms to the configured vla_unpack starting joints using the current measured collision scene. Both arm goals belong to that capability configuration. This does not process the object, verify a product, choose an arm for other transfers or force an observation return afterward.",
+  "inputs": [
+    "verified_table_release",
+    "current_robot_feedback",
+    "latest_collision_scene",
+    "planning_settings"
+  ],
+  "requires": {
+    "table_release_verified": true,
+    "grasp_held": false,
+    "scene_available": true
+  },
+  "provides": [
+    "vla_pose_ready"
+  ],
+  "capability": "Plan and execute both arms to the configured vla_unpack starting joints using the current measured collision scene",
+  "outputs": [
+    "vla_pose_ready",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "processing_requires_post_delivery_observation",
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure"
+  ],
+  "invalidates_observation": true,
+  "planning_effects": {
+    "observation_pose_ready": false,
+    "grasp_view_ready": false,
+    "observation_map_ready": false,
+    "observed": false,
+    "views_ready": false,
+    "scene_ready": false,
+    "at_initial_pose": false
+  }
+}

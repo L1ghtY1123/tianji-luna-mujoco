@@ -27,25 +27,13 @@ OBJECTS = [{"id": "cube-1", "kind": "cube", "color": "red", "position": [9, 8, 7
            {"id": "bin-1", "kind": "bin", "color": "blue"}]
 
 
-async def test_runner_rejects_repeat_visual_input_but_accepts_new_masks(tmp_path):
-    from test_rgbd_workflow import SensorRobot, VisionAlgorithms
+async def test_retired_scene_inspection_dispatch_is_unavailable(tmp_path):
+    from rgbd_workflow_fixture import SensorRobot, VisionAlgorithms
 
     from luna_mujoco.runner import Runner
-    from luna_mujoco.skills import SkillSelectionError
-
-    runner = Runner(SensorRobot(), VisionAlgorithms(), lambda record: None, tmp_path)
-    calls = []
-    async def inspect(context):
-        calls.append(context['observation']['observation_id'])
-        return {'status': 'unknown', 'observation_id': calls[-1]}
-    runner.inspect_scene = inspect
-    context = {'observation': capture(), 'initial': {}}
-    await runner.execute('inspect_scene', context)
-    with pytest.raises(SkillSelectionError, match='visual_input_already_analyzed'):
-        await runner.execute('inspect_scene', context)
-    context['observation']['views']['3']['instance_masks']['cube-1'][0, 0] = True
-    await runner.execute('inspect_scene', context)
-    assert len(calls) == 2
+    runner = Runner(SensorRobot(), VisionAlgorithms(), None, tmp_path)
+    with pytest.raises(ValueError, match='unknown_skill:inspect_scene'):
+        await runner.execute('inspect_scene', {'observation': capture()})
 
 
 def scene_reply():

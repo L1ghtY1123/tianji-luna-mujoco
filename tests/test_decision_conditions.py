@@ -3,7 +3,7 @@ import math
 
 import pytest
 
-from luna_mujoco.decision_conditions import condition, parse_answers
+from luna_mujoco.decision_conditions import condition, parse_answers, result_answers
 from luna_mujoco.visual_api import VisualInventoryError
 from luna_mujoco.visual_inventory import choice
 
@@ -40,13 +40,19 @@ def test_choice_response_cannot_impersonate_a_current_predicate():
                       [condition('placed', '')], .8)
 
 
+@pytest.mark.parametrize('name', ['unpack_result', 'current_item_added'])
+def test_result_helper_rejects_historical_choice_even_with_high_confidence(name):
+    body = {'answers': [{'name': name, 'type': 'choice', 'choice': 'yes', 'confidence': 1.}]}
+    with pytest.raises(VisualInventoryError, match='invalid_response'):
+        result_answers(body, name, .8)
+
+
 @pytest.mark.parametrize('mutation', ['missing', 'outside', 'false_footprint', 'changed_tcp'])
 def test_numeric_release_evidence_cannot_be_replaced_with_command_success(mutation):
     from test_demo_release_result import release_inputs
 
     from luna_mujoco.demo_transfer_verification import release_result_payload
     capture, binding, reference = release_inputs()
-    reference['demo_task']['workflow'] = 'unpack_transfer'
     endpoint = binding['evidence']['release_endpoint']
     if mutation == 'missing':
         binding['evidence'].pop('release_endpoint')
@@ -71,7 +77,6 @@ def test_table_presence_and_gripper_occupancy_are_independent_observations(visib
     from luna_mujoco.demo_transfer_verification import verify_release_result
 
     capture, binding, reference = release_inputs()
-    reference['demo_task']['workflow'] = 'unpack_transfer'
     rows = [{'type': 'predicate', 'name': name, 'probability': probability}
             for name, probability in [('place_result', visible), ('workpiece_still_held', held)]]
     client = DemoVisualInventory(api_key='offline', client=httpx.Client(transport=httpx.MockTransport(

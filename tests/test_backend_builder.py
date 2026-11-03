@@ -236,7 +236,7 @@ def test_optimizer_and_hard_checker_receive_original_open_gripper_spheres(monkey
                 continue
             for sphere, source in zip(spheres, original["collision_spheres"][link], strict=True):
                 assert sphere['center'] == source['center']
-                padding = 1e-9 if link.startswith(('gripL_', 'gripR_')) else 0.
+                padding = 1e-8 if link.startswith(('gripL_', 'gripR_')) else 0.
                 assert sphere['radius'] == source['radius'] + padding
         assert {k: v for k, v in actual["collision_sphere_buffer"].items()
                 if not k.startswith('jev_carried_object_')} == original["collision_sphere_buffer"]
@@ -287,6 +287,19 @@ def test_support_departure_passes_public_linear_scale_without_hidden_multiplier(
     assert actual.terminal_pose_axes_weight_factor == [1.] * 6
     assert actual.non_terminal_pose_axes_weight_factor == [2., 2., 0., 2., 2., 2.]
     assert actual.project_distance_to_goal is False
+
+
+def test_compound_runtime_selects_public_batch_planner(monkeypatch):
+    from luna_mujoco import geometry_service
+    captured = {}
+    def build(runtime, arm, **kwargs):
+        captured.update(kwargs)
+        return object()
+    monkeypatch.setattr(geometry_service, 'build_geometry_backend', build)
+    runtime = object.__new__(geometry_service.GeometryRuntime)
+    runtime.warmup_status = {'ready': False}
+    runtime._create_real_backend_unlocked('A', compound_planner=True)
+    assert captured['compound_planner'] is True
 
 
 def test_support_frame_config_is_temporary_fixed_tcp_child_with_no_collision_changes():

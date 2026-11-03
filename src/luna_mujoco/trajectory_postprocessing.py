@@ -48,6 +48,14 @@ class PreReleasePlacePlan:
         object.__setattr__(self, "scene_token", self.approach.scene_token)
 
 
+class EndpointPoseMismatch(ValueError):
+    """A returned phase misses its immutable requested pose despite SDK success."""
+
+    def __init__(self, evidence):
+        super().__init__(f"{evidence['compound_phase']} endpoint FK exceeds requested pose tolerance")
+        self.evidence = evidence
+
+
 def _phase_samples(raw_result, name, batch_size):
     trajectory = getattr(raw_result, f"{name}_interpolated_trajectory", None)
     if trajectory is None:
@@ -144,7 +152,7 @@ def phase_terminal_state(raw_result, name, joint_names, index=0):
     return result
 
 
-def pre_release_place_from_result(raw_result, joint_names, interpolation_dt_s):
+def pre_release_place_from_result(raw_result, joint_names, interpolation_dt_s, *, endpoint_errors):
     """Copy only the public approach/grasp samples, respecting valid lengths."""
     planning_time = float(getattr(raw_result, "planning_time", 0.) or 0.)
     if not np.isfinite(planning_time) or planning_time < 0:
@@ -163,11 +171,12 @@ def pre_release_place_from_result(raw_result, joint_names, interpolation_dt_s):
             raise ValueError(f"invalid {project_name} interpolation length") from error
         order = [names.index(joint) for joint in joint_names]
         positions, velocities, accelerations = [values[0, 0, :count][:, order].copy() for values in (q, v, a)]
+        position_error, rotation_error = endpoint_errors(project_name, positions[-1])
         phases[project_name] = RawTrajectory(positions_rad=positions.tolist(), joint_names=tuple(joint_names),
             velocities_rad_s=velocities, accelerations_rad_s2=accelerations,
             terminal_state=phase_terminal_state(raw_result, sdk_name, joint_names),
             interpolation_dt_s=interpolation_dt_s, planning_time_s=planning_time,
-            position_error_m=0., rotation_error_rad=0.)
+            position_error_m=position_error, rotation_error_rad=rotation_error)
     return PreReleasePlacePlan(**phases)
 
 

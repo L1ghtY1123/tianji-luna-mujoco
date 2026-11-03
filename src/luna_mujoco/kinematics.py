@@ -5,6 +5,7 @@ from functools import lru_cache
 import mujoco
 import numpy as np
 
+from .geometry import front_tcp_pose
 from .model_builder import ARM_JOINTS, TCP_BODIES, ModelBuilder, normalize_scene
 
 
@@ -31,6 +32,6 @@ def robot_tcp(arms, arm):
     transform = np.eye(4)
     transform[:3, :3] = data.xmat[index].reshape(3, 3)
     transform[:3, 3] = data.xpos[index]
-    return transform
+    return front_tcp_pose(transform, arm)
 
 

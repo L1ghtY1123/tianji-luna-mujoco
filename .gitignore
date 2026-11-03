@@ -3,15 +3,18 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+# Local credentials; only the template belongs in Git.
 .env
 .env.*
 !.env.example
+# Runtime data, experiment evidence, caches and recoverable trash stay local.
 data/
 reports/
 videos/
 assets/render_meshes/
 *.log
 web/node_modules/
+.web-node_modules/
 web/dist/
 deploy-bundle.tar.gz
 *.bundle

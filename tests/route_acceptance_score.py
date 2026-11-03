@@ -13,7 +13,7 @@ def inside_polygon(xy, polygon, tolerance=.002):
     return bool(np.all(equations[:, :2] @ xy + equations[:, 2] <= tolerance))
 
 
-def score(oracle, progress, expected_count, route):
+def score(oracle, progress, expected_count, required_transfer_count=1):
     failures, checks = [], []
     records = progress.get('objects', [])
     initial = [obj for obj in oracle['before']['objects'] if obj['id'].startswith('source-')]
@@ -30,21 +30,32 @@ def score(oracle, progress, expected_count, route):
         if len(initial) > 1 and np.sort(cost[row])[1] - cost[row, column] < .01:
             failures.append('initial_identity_ambiguous:' + records[row]['id'])
         matched[records[row]['id']] = initial[column]['id']
-    layouts = {(r['stage_index'], r['destination_id']): r['layout']
+    layouts = {(r['transfer_index'], r['destination_id']): r['layout']
                for r in progress.get('placement_regions', []) if 'layout' in r}
-    expected_stages = 2 if route == 'box_table_box' else 1
     for record in records:
-        stages = record.get('completed_stages', [])
-        if record['status'] != 'completed' or len(stages) != expected_stages:
-            failures.append('incomplete_route:' + record['id'])
+        transfers = record.get('transfers', [])
+        observations = [transfer.get('observation_id') for transfer in transfers]
+        verified = required_transfer_count > 0 and len(transfers) == required_transfer_count
+        verified = verified and len(set(observations)) == len(observations) and all(
+            transfer.get('transfer_index') == index and transfer.get('observation_id')
+            and transfer.get('destination_id') and transfer.get('arm') in {'A', 'B'}
+            for index, transfer in enumerate(transfers))
+        if record['status'] != 'completed' or not verified:
+            failures.append('incomplete_verified_transfers:' + record['id'])
             continue
-        last = stages[-1]
-        layout = layouts.get((last['stage_index'], last['destination_id']))
+        last = transfers[-1]
+        layout = layouts.get((last['transfer_index'], last['destination_id']))
         if layout is None:
             failures.append('missing_frozen_layout:' + record['id'])
             continue
-        cell = next(cell for cell in layout['cells'] if cell['slot_id'] == record['display_id'])
-        actual = final[matched[record['id']]]
+        cell = next((cell for cell in layout['cells'] if cell['slot_id'] == record['display_id']), None)
+        if cell is None:
+            failures.append('missing_frozen_slot:' + record['id'])
+            continue
+        actual = final.get(matched[record['id']])
+        if actual is None:
+            failures.append('missing_physical_object:' + record['id'])
+            continue
         transform = np.asarray(actual['T_world_object'])
         half = np.asarray(actual['size']) / 2
         corners = np.array([[x, y, z] for x in (-half[0], half[0]) for y in (-half[1], half[1])
@@ -54,23 +65,24 @@ def score(oracle, progress, expected_count, route):
         gap = float(corners[:, 2].min() - layout['floor_z_m'])
         settled = -.003 <= gap <= .005
         checks.append({'instance_id': record['id'], 'physical_id': actual['id'], 'slot_id': record['display_id'],
-            'stage_arms': [stage['arm'] for stage in stages], 'center_in_assigned_slot': in_slot,
+            'transfer_arms': [transfer['arm'] for transfer in transfers], 'center_in_assigned_slot': in_slot,
             'footprint_in_region': in_region, 'physical_bottom_gap_m': gap, 'settled_on_floor': settled})
         if not settled:
             failures.append('physical_object_not_settled_on_floor:' + record['id'])
     return {'passed': not failures, 'failures': failures, 'checks': checks,
             'xy_checks_are_diagnostic_only': True,
-            'scope': 'independent route completion and final settling; TCP slot is checked by release endpoint audit'}
+            'scope': 'independent verified transfers and final settling; TCP slot is checked by release endpoint audit'}
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('directory', type=Path)
     parser.add_argument('--count', required=True, type=int)
-    parser.add_argument('--route', required=True)
+    parser.add_argument('--required-transfer-count', default=1, type=int)
     args = parser.parse_args()
     result = score(json.loads((args.directory / 'independent-oracle.json').read_text()),
-                   json.loads((args.directory / 'task-progress.json').read_text()), args.count, args.route)
+                   json.loads((args.directory / 'task-progress.json').read_text()), args.count,
+                   args.required_transfer_count)
     (args.directory / 'physical-score.json').write_text(json.dumps(result, indent=2))
     print(json.dumps(result))
     raise SystemExit(int(not result['passed']))

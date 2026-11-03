@@ -158,7 +158,7 @@ def test_closed_gripper_retains_link4_world_spheres_and_exact_owner_touch_pairs(
     scene = {"scene_token": "scene", "observation_id": "rgbd", "generation": 1, "target_id": "source"}
     binding = CarryingBinding.from_mapping(
         {"arm": "A", "owner_id": "held", "scene_token": "scene", "observation_id": "rgbd",
-         "generation": 1, "instance_id": "source", "frame": "tool",
+         "generation": 1, "instance_id": "source", "frame": "gripper_front",
          "state": "held", "points_tool_m": [[0., 0., .15], [.01, .01, .17]],
          "uncertainty_m": .005, "coverage": .6}, scene=scene, arm="A")
     carried, attached_link = create_carrying_robot_config(locked, binding)
@@ -172,7 +172,7 @@ def test_closed_gripper_retains_link4_world_spheres_and_exact_owner_touch_pairs(
             # Feedback locking already adds 1 nm on both hands to bound
             # open-stop normalization. Attachment must preserve that geometry.
             expected_spheres = array(config["robot_cfg"]["kinematics"]["collision_spheres"][link])
-            expected_spheres[:, 3] += 1e-9
+            expected_spheres[:, 3] += 1e-8
             np.testing.assert_array_equal(array(kin["collision_spheres"][link]), expected_spheres)
             assert len(kin["collision_spheres"][link]) == 14
             assert link in kin["collision_link_names"]

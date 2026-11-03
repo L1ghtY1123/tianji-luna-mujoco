@@ -1,0 +1,57 @@
+{
+  "id": "verify_unpack",
+  "description": "Compare the bound pre-processing appearance with current three-camera RGB and registered depth. Check the configured processing result and disappearance of the input wrapper; do not require a future delivery or return posture. A successful result creates a distinct permanent product ID with input/output lineage and dated current support evidence, then retires the consumed input. Keep that verified support evidence instead of immediately asking the same table relation again. Workspace checks are reported separately from visual processing success. No movement or collision-map publication occurs; observe_scene may reuse the resulting capture.",
+  "inputs": [
+    "confirmed_work_area_release_rgb_reference",
+    "processing_action",
+    "current_rgbd",
+    "current_target_id"
+  ],
+  "requires": {
+    "unpack_pending": true
+  },
+  "provides": [
+    "unpack_verified"
+  ],
+  "capability": "Compare the bound pre-processing appearance with current three-camera RGB and registered depth",
+  "outputs": [
+    "unpack_verified",
+    "product_id",
+    "output_entity_id",
+    "workspace_evidence",
+    "execution_or_evidence_record"
+  ],
+  "result_bindings": {
+    "$product": "product_id"
+  },
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure"
+  ],
+  "invalidates_observation": false,
+  "planning_effects": {
+    "observed": false,
+    "target_selected": false,
+    "destination_selected": false,
+    "destination_ready": false,
+    "scene_ready": false,
+    "views_ready": false,
+    "grasps_ready": false,
+    "plan_ready": false,
+    "place_plan_ready": false,
+    "grasp_completed": false,
+    "grasp_held": false,
+    "lifted": false,
+    "verified": false,
+    "released": false,
+    "transport_plan_ready": false,
+    "transport_execution_completed": false,
+    "drop_completed": false,
+    "scene_available": false,
+    "task_assessed": true,
+    "needs_place": true
+  }
+}

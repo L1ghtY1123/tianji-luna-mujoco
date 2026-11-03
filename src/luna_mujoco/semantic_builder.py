@@ -98,45 +98,6 @@ def _color_preview(views, geometries, integration):
     return colored, replace(integration, pointcloud_data=data[:4 + count * 12] + colorizer.colors(centers).tobytes())
 
 
-def _authorized_demo_height(completion, identifier, observation_id):
-    """Authorize catalog/legacy height from current identity, never mock geometry."""
-    from .cad_assets import cad_asset
-
-    height = completion.get('height_prior_m')
-    context = completion.get('instance_context')
-    # Preserve the original 100 mm contract for captures without lifecycle data.
-    if context is None:
-        return height == .10
-    if (not isinstance(context, Mapping) or context.get('instance_id') != identifier
-            or context.get('observation_id') != observation_id
-            or completion.get('observation_id') != observation_id
-            or type(context.get('appearance_revision')) is not int):
-        return False
-    source = completion.get('height_prior_source')
-    if source == 'user_cad_asset:pink_wrapped':
-        return (height == cad_asset('pink_wrapped')['size_m'][2]
-                and context.get('color') == 'pink' and context.get('current_appearance') == 'wrapped'
-                and context['appearance_revision'] == 0)
-    black_axes = {'user_cad_asset:black_core': 2,
-                  'user_cad_asset:black_core:flat_local_x_vertical': 0}
-    if source in black_axes:
-        return (height == cad_asset('black_core')['size_m'][black_axes[source]]
-                and context.get('color') == 'black' and context.get('current_appearance') == 'unpacked'
-                and context['appearance_revision'] > 0
-                and context.get('lifecycle_phase') == 'unpacked_confirmed'
-                and completion.get('support_source') == 'cached_measured_table_plane')
-    if height == .10:
-        return (context.get('color') == 'pink' and context.get('current_appearance') == 'wrapped'
-                and context['appearance_revision'] == 0
-                and completion.get('height_prior_source') == 'user_specified_100mm')
-    return (height == .06 and context.get('color') == 'black'
-            and context.get('current_appearance') == 'unpacked'
-            and context['appearance_revision'] > 0
-            and context.get('lifecycle_phase') == 'unpacked_confirmed'
-            and completion.get('height_prior_source') == 'user_specified_60mm'
-            and completion.get('support_source') == 'cached_measured_table_plane')
-
-
 class ProjectSemanticBuilder:
     def __init__(self, *, robot_segmenter_boundary, mapper_boundary, scene_type, robot_spheres,
                  open3d_runtime=None, table_builder=build_table_completion, instance_mapper=None):
@@ -154,6 +115,8 @@ class ProjectSemanticBuilder:
         self.scene_voxel_grids = []
 
     def build(self, payload):
+        if any(field in payload for field in ('demo_bin_priors', 'demo_completions')):
+            raise ValueError('synthetic_scene_geometry_unsupported:rebuild_from_registered_rgbd')
         started = time.perf_counter()
         self.diagnostics = {}
         self.scene_voxel_grids = []
@@ -161,8 +124,6 @@ class ProjectSemanticBuilder:
         demo_mapping = payload.get('demo_mapping', False)
         if type(demo_mapping) is not bool or (demo_mapping and tuple(payload['views']) != ('1', '2', '3')):
             raise ValueError('demo_mapping requires an explicit boolean and all three registered views')
-        if payload.get('scene_policy') in {'all_instances', 'selected_instances'} and self.table_cache.table is None:
-            raise ValueError('initial_head_table_required')
         policy = payload.get("mapping_collision_policy", {})
         hard_clearance = float(policy.get("trajectory_collision_clearance_m", .01))
         distances = [hard_clearance, float(policy.get("optimizer_collision_activation_distance_m", .03))]
@@ -203,7 +164,15 @@ class ProjectSemanticBuilder:
             table, demo_table_models = self.table_cache.build_demo(
                 payload.get('demo_tables'), spheres, hard_clearance_m=hard_clearance)
         else:
-            table = self.table_cache.build(background_groups, spheres, payload,
+            table_payload, table_groups = payload, background_groups
+            if (self.table_cache.table is None
+                    and payload.get('scene_policy') in {'all_instances', 'selected_instances'}):
+                # Fit support from this capture's head measurement, then use all
+                # requested cameras for instances in the same scene build.
+                head = next(view for view in prepared if view.camera_id == '3')
+                table_groups = [head.background_points_base_m]
+                table_payload = payload | {'scene_policy': 'head_all_instances', 'views': {'3': payload['views']['3']}}
+            table = self.table_cache.build(table_groups, spheres, table_payload,
                                           hard_clearance_m=hard_clearance, open3d_runtime=self.open3d_runtime)
         crop_model = None if demo_mapping else table_surface_crop_model(table)
         timings["table"] = (time.perf_counter() - stage) * 1000
@@ -233,17 +202,6 @@ class ProjectSemanticBuilder:
             for name, points in view.instance_points_base_m.items():
                 instance_points.setdefault(name, {})[view.camera_id] = points
         timings["isolated_surfaces"] = (time.perf_counter() - stage) * 1000
-        bin_shells = {}
-        if demo_mapping:
-            from .demo_bin_geometry import fit_bin_shell, validate_bin_priors
-            priors = payload.get('demo_bin_priors', {})
-            validate_bin_priors(priors, instance_points, payload['observation_set_id'],
-                                payload['selection_generation'])
-            for identifier in priors:
-                clean_points = np.concatenate(list(instance_points[identifier].values()))
-                bin_shells[identifier] = fit_bin_shell(clean_points, instance_id=identifier,
-                    observation_id=payload['observation_set_id'], generation=payload['selection_generation'],
-                    prior=priors[identifier])
         selected = payload["confirmed_instance_id"]
         if payload.get('scene_policy') in {'head_all_instances', 'all_instances', 'selected_instances', 'demo_inventory'}:
             requested_instances = set().union(*(set(view['instance_masks']) for view in payload['views'].values()))
@@ -334,7 +292,6 @@ class ProjectSemanticBuilder:
             'background_drop_policy': 'discard_all_unlisted_and_tabletop_returns' if demo_mapping else
                                       'all_nonsemantic_including_support' if omit_background else 'separate_measured_support',
             'demo_mapping': demo_mapping, 'unobserved_space': 'unknown',
-            'bin_shell_completions': bin_shells,
             'workspace_bounds_m': {'minimum': list(bounds.minimum_m), 'maximum': list(bounds.maximum_m)},
             "empty_background_cache_hit": empty_cache_hit,
             "table_cache": dict(self.table_cache.diagnostics), "instance_padding_m": padding_m,
@@ -351,21 +308,6 @@ class ProjectSemanticBuilder:
         if demo_mapping:
             scene_model['cuboid'] = {f'semantic_table::{identifier}': model
                                      for identifier, model in demo_table_models.items()}
-            for identifier, completion in bin_shells.items():
-                for kind, field in (('cuboid', 'cuboids'), ('mesh', 'meshes')):
-                    for part, model in completion.get(field, {}).items():
-                        scene_model[kind][f'semantic_instance::{identifier}::bin_shell::{part}'] = model
-            for identifier, completion in payload.get('demo_completions', {}).items():
-                completion_bounds = np.asarray(completion.get('completed_bounds_world_m'), dtype=float)
-                if (completion_bounds.shape != (2, 3) or not np.isfinite(completion_bounds).all()
-                        or np.any(completion_bounds[1] <= completion_bounds[0])
-                        or completion.get('source') != 'measured_surface_and_user_height_prior'
-                        or not _authorized_demo_height(completion, identifier, payload['observation_set_id'])
-                        or completion.get('synthetic_points_are_measured') is not False):
-                    raise ValueError('demo_height_completion_invalid')
-                scene_model['cuboid'][f'semantic_instance::{identifier}::height_completion'] = {
-                    'pose': [*((completion_bounds[0] + completion_bounds[1]) / 2).tolist(), 1., 0., 0., 0.],
-                    'dims': (completion_bounds[1] - completion_bounds[0]).tolist()}
         for geometry in geometries:
             scene_model[geometry.kind][geometry.name] = dict(geometry.model)
         if self.instance_mapper is None:

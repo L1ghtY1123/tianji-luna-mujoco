@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from test_demo_partial_identity import inputs
 
-from luna_mujoco.demo_perception import DemoVisualInventory
+from legacy_identity import ArchivedTwoStageInventory as DemoVisualInventory
 from luna_mujoco.visual_api import VisualInventoryError
 
 
@@ -19,14 +19,14 @@ def tracking_inputs():
         view.update(T_world_camera=np.eye(4),
                     intrinsics={"fx": 10., "fy": 10., "cx": 16., "cy": 12.})
     entities["remaining"] = deepcopy(entities["pink"]) | {"id": "remaining"}
-    reference.update(owner_id="run", demo_task={"source_object_ids": ["pink", "remaining"]})
+    reference.update(owner_id="run", task_spec={"target_refs": ["pink", "remaining"]})
     slot = {"slot_id": 1, "center_world_xy_m": [.4, 0.],
             "polygon_world_xy_m": [[.3, -.1], [.5, -.1], [.5, .1], [.3, .1]],
-            "floor_z_m": .56, "layout_revision": "layout"}
+            "floor_z_m": .56, "layout_revision": "layout", "height_prior_m": .10}
     binding = {"owner_id": "run", "generation": 1, "target_id": "pink", "instance_id": "pink",
                "arm": "A", "scene_token": "old-place-scene", "observation_id": "original",
                "destination_id": "demo-destination", "region_id": "region:demo-destination",
-               "slot_id": 1, "layout_revision": "layout", "assigned_slot": slot, "stage_index": 0,
+               "slot_id": 1, "layout_revision": "layout", "assigned_slot": slot, "transfer_index": 0,
                "release_feedback_id": "feedback-1-1.0", "release_feedback_time": 1.,
                "source": "validated_held_attachment_place_release", "identity_source": "execution_chain"}
     binding["binding_id"] = hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest()
@@ -36,7 +36,7 @@ def tracking_inputs():
               **{key: binding[key] for key in ("binding_id", "target_id", "destination_id", "region_id",
                                               "slot_id", "layout_revision", "release_feedback_id")}}
     progress = {"pink": {"status": "completed", "destination_id": "demo-destination",
-                         "stage_index": 0, "release_feedback_id": binding["release_feedback_id"],
+                         "transfer_index": 0, "release_feedback_id": binding["release_feedback_id"],
                          "region_id": binding["region_id"], "slot_id": 1, "assigned_slot": deepcopy(slot),
                          "completed_identity_track": {"binding": binding, "visual_evidence": visual,
                              "capture": {"generation": 1, "observation_id": "post-place", "time": 2.}}},
@@ -59,8 +59,16 @@ def resolve(values=None, *, mutate=None):
         answers = []
         for question in payload["questions"]:
             name = question["name"]
+            if question['type'] == 'predicate':
+                identity_name = 'identity_' + name.split('_')[1] if name.startswith('match_') else name
+                value, confidence = values.get(identity_name, ('unknown', .5))
+                probability = (.5 if value == 'unknown' else confidence
+                    if question['instructions'].partition(' Reference subject: ')[0].endswith('permanent reference ID ' + value + '.')
+                    else 1. - confidence)
+                answers.append({'name': name, 'type': 'predicate', 'probability': probability})
+                continue
             fallback = ("yes" if name.startswith("tracked_") else
-                        "none" if name == "demo_unlisted_pink" else
+                        "none" if name == "scene_inventory_closure" else
                         "elsewhere" if name.startswith("progress_") else "visible")
             value, confidence = values.get(name, (fallback, .99))
             answers.append({"name": name, "type": "choice", "choice": value, "confidence": confidence})
@@ -72,8 +80,13 @@ def resolve(values=None, *, mutate=None):
     return result, calls, (capture, detections, entities, reference, progress)
 
 
-def test_scoped_completed_candidate_keeps_required_identity_and_current_geometry():
-    result, calls, (_, detections, _, _, _) = resolve()
+@pytest.mark.parametrize('remaining_destination_bound', [False, True])
+def test_scoped_completed_candidate_keeps_required_identity_and_current_geometry(remaining_destination_bound):
+    def bind_remaining_destination(capture, detections, entities, reference, progress):
+        if remaining_destination_bound:
+            progress['remaining']['destination_id'] = 'demo-destination'
+
+    result, calls, (_, detections, _, _, _) = resolve(mutate=bind_remaining_destination)
     assert len(calls) == 2
     tracked = calls[0]["questions"]
     assert [q["name"] for q in tracked] == ["tracked_0"]
@@ -84,7 +97,13 @@ def test_scoped_completed_candidate_keeps_required_identity_and_current_geometry
         "remaining", "reject", "unknown"]
     assert "visibility_pink" not in questions
     assert "progress_pink" not in questions
-    assert "progress_remaining" in questions
+    assert ("progress_remaining" in questions) is remaining_destination_bound
+    if remaining_destination_bound:
+        assert result['progress']['remaining']['status'] == 'elsewhere'
+        assert result['progress']['remaining']['source'] == 'openai_decisions'
+    else:
+        assert result['progress']['remaining']['status'] == 'unknown'
+        assert result['progress']['remaining']['reason'] == 'progress_destination_unbound'
     assert result["identity_coverage"]["required_entity_ids"] == ["pink", "remaining"]
     assert result["identity_coverage"]["remaining_source_ids"] == ["remaining"]
     assert result["missing_geometry_ids"] == []
@@ -104,6 +123,19 @@ def test_geometry_scope_never_promotes_unknown(value, confidence):
         resolve({"tracked_0": (value, confidence), "identity_1": ("remaining", .95)})
 
 
+def test_unconfirmed_scoped_view_keeps_id_available_to_other_camera():
+    def mutate(capture, detections, entities, reference, progress):
+        detections.append(deepcopy(detections[1]) | {'camera_id': '1'})
+    result, calls, _ = resolve({'tracked_0': ('unknown', .99), 'identity_1': ('pink', .96),
+                               'identity_2': ('remaining', .95)}, mutate=mutate)
+    question = next(q for q in calls[1]['questions'] if q['name'] == 'identity_1')
+    assert 'pink' in {option['value'] for option in question['choices']}
+    assert result['completed_tracking']['candidate_mapping'] == {}
+    assert result['missing_geometry_ids'] == []
+    pink = next(group for group in result['groups'] if group[0]['entity_id'] == 'pink')
+    assert [entry['camera_id'] for entry in pink] == ['2']
+
+
 def test_scoped_answer_cannot_choose_a_different_owner():
     with pytest.raises(VisualInventoryError, match="visual_decisions_invalid_response"):
         resolve({"tracked_0": ("remaining", .99), "identity_1": ("remaining", .95)})
@@ -111,7 +143,7 @@ def test_scoped_answer_cannot_choose_a_different_owner():
 
 @pytest.mark.parametrize("field,value", [
     ("generation", 2), ("owner_id", "other-run"), ("slot_id", 2),
-    ("release_feedback_id", "other-release"), ("target_id", "remaining"),
+    ("release_feedback_id", "other-release"), ("target_id", "remaining"), ("transfer_index", 1),
 ])
 def test_changed_completed_binding_fails_before_decisions(field, value):
     def mutate(capture, detections, entities, reference, progress):
@@ -164,7 +196,7 @@ def test_one_point_outside_slot_or_height_prevents_locating_scope(point):
     assert completed_candidate_scopes(capture, detections, tracks) == {}
 
 
-def test_overlapping_completed_slots_are_rejected_instead_of_picking_first_owner():
+def test_overlapping_completed_regions_use_full_visual_identity_not_first_owner():
     def mutate(capture, detections, entities, reference, progress):
         other = deepcopy(progress["pink"])
         binding = other["completed_identity_track"]["binding"]
@@ -176,8 +208,10 @@ def test_overlapping_completed_slots_are_rejected_instead_of_picking_first_owner
         other["completed_identity_track"]["visual_evidence"].update(
             target_id="remaining", slot_id=2, binding_id=binding["binding_id"])
         progress["remaining"] = other
-    with pytest.raises(VisualInventoryError, match="completed_slots_overlap"):
-        resolve(mutate=mutate)
+    result, calls, _ = resolve({'identity_0': ('pink', .99), 'identity_1': ('remaining', .99)}, mutate=mutate)
+    assert len(calls) == 1
+    assert {group[0]['entity_id'] for group in result['groups']} == {'pink', 'remaining'}
+    assert 'completed_tracking' not in result
 
 
 def test_negative_completed_correspondence_cannot_drop_the_known_collision_entity():
@@ -209,17 +243,17 @@ def test_current_only_request_and_remaining_payload_have_distinct_bound_evidence
     assert not any("identity_" in question["name"] for question in first["questions"])
     context = json.loads(second["input"][0]["content"][0]["text"])
     assert "pink" not in context["fixed_entities"]
-    assert context["fixed_reference_labels"]["remaining"] == "R2"  # Preserve the original full-inventory label.
+    assert context["fixed_reference_labels"]["remaining"] == "Reference 2"  # Preserve the original full-inventory label.
     current = context["completed_source_correspondences"]
     assert current[0]["entity_id"] == "pink"
     assert current[0]["status"] == "confirmed"
-    assert current[0]["current_candidates"] == [{"candidate": "C0", "camera": "3",
+    assert current[0]["current_candidates"] == [{"candidate": "Candidate 0", "camera": "3",
         "box": [0.09375, 1/6, 0.4375, 2/3]}]
     assert current[0]["request_hash"] == result["completed_tracking"]["request_hash"]
-    question = next(question for question in second["questions"] if question["name"] == "demo_unlisted_pink")
+    question = next(question for question in second["questions"] if question["name"] == "scene_inventory_closure")
     guide = json.loads(question["instructions"].split("Visible-source reference guide: ")[1])
     assert guide["references"][0]["reference_kind"] == "same_capture_completed_correspondence"
-    assert guide["references"][0]["current_candidates"][0]["candidate"] == "C0"
+    assert guide["references"][0]["current_candidates"][0]["candidate"] == "Candidate 0"
     assert "reference_boxes" not in guide["references"][0]
 
 
@@ -235,17 +269,30 @@ def test_two_request_join_rejects_changed_capture_or_hash(field, value):
         merge_completed_correspondence(DemoVisualInventory(), capture, detections, entities, tracking, result)
 
 
-def test_unknown_unlisted_check_never_completes_dual_request_merge():
-    with pytest.raises(VisualInventoryError, match="source_inventory_unknown"):
-        resolve({"tracked_0": ("yes", .99), "identity_1": ("remaining", .95),
-                 "demo_unlisted_pink": ("none", .79)})
+def test_unknown_enumeration_preserves_confirmed_identities_without_claiming_completion():
+    result, _, _ = resolve({"tracked_0": ("yes", .99), "identity_1": ("remaining", .95),
+                           "scene_inventory_closure": ("none", .79)})
+    assert result['demo_inventory_check']['status'] == 'unknown'
+    assert set(result['identity_coverage']['accepted_entity_ids']) == {'pink', 'remaining'}
 
 
-def test_missing_current_completed_geometry_stops_before_any_model_call():
+def test_unseen_completed_entity_does_not_block_partial_observation_or_invent_geometry():
+    def mutate(capture, detections, entities, reference, progress):
+        del detections[0]
+    result, calls, _ = resolve({'identity_0': ('remaining', .99),
+                               'visibility_pink': ('unknown', .99)}, mutate=mutate)
+    assert len(calls) == 1
+    assert result['missing_geometry_ids'] == ['pink']
+    assert result['identity_coverage']['accepted_entity_ids'] == ['remaining']
+    assert {group[0]['entity_id'] for group in result['groups']} == {'remaining'}
+
+
+def test_outside_prior_region_is_reidentified_visually_instead_of_assuming_missing():
     def mutate(capture, detections, entities, reference, progress):
         detections[0]["points"][:, 2] = .8
-    with pytest.raises(VisualInventoryError, match="completed_tracking_current_geometry_missing"):
-        resolve(mutate=mutate)
+    result, calls, _ = resolve({'identity_0': ('pink', .99), 'identity_1': ('remaining', .99)}, mutate=mutate)
+    assert len(calls) == 1
+    assert set(result['identity_coverage']['accepted_entity_ids']) == {'pink', 'remaining'}
 
 
 def test_invalid_binary_response_keeps_scope_evidence_and_does_not_call_remaining_request():
@@ -267,17 +314,23 @@ def test_invalid_binary_response_keeps_scope_evidence_and_does_not_call_remainin
 
 
 def test_invalid_extra_or_uncertain_noncompleted_id_still_stops():
-    with pytest.raises(VisualInventoryError, match="demo_unlisted_pink_object"):
+    with pytest.raises(VisualInventoryError, match="scene_unlisted_object"):
         resolve({"tracked_0": ("yes", .99), "identity_1": ("remaining", .95),
-                 "demo_unlisted_pink": ("extra", .9)})
-    with pytest.raises(VisualInventoryError, match="visual_identity_unknown"):
+                 "scene_inventory_closure": ("unlisted", .9)})
+    with pytest.raises(VisualInventoryError, match="visual_identity_unknown") as caught:
         resolve({"tracked_0": ("yes", .99), "identity_1": ("remaining", .79)})
+    current = caught.value.evidence
+    assert current['missing_geometry_ids'] == ['remaining']
+    assert current['original_decisions_answers'][0] == {
+        'name': 'match_1_0', 'type': 'predicate', 'probability': .79}
+    initial = current['initial_identity_failure']['evidence']
+    assert initial['answers'][0]['choice'] == 'remaining'
+    assert initial['answers'][0]['confidence'] == .79
+    assert current['request_hash'] != initial['request_hash']
 
 
 async def test_runtime_preserves_per_object_chain_across_transfer_reset(tmp_path):
-    from test_demo_runner import TEST_SETTINGS, DemoRobot, DemoVision
-
-    from luna_mujoco.demo_runner import DemoRunner
+    from test_demo_runner import TEST_SETTINGS, DemoRobot, DemoVision, TestPolicyController
 
     class InspectTracking(DemoVision):
         def observe(self, capture, **kwargs):
@@ -291,7 +344,7 @@ async def test_runtime_preserves_per_object_chain_across_transfer_reset(tmp_path
                 assert track["visual_evidence"]["binding_id"] == track["binding"]["binding_id"]
             return super().observe(capture, **kwargs)
 
-    runner = DemoRunner(DemoRobot(), InspectTracking(2), None, tmp_path, planning_settings=TEST_SETTINGS)
+    runner = TestPolicyController(DemoRobot(), InspectTracking(2), None, tmp_path, planning_settings=TEST_SETTINGS)
     await runner.start("move all pink objects")
     await runner.worker
     assert runner.state["status"] == "succeeded", runner.state.get("error")
@@ -305,3 +358,29 @@ async def test_unconfirmed_release_creates_no_completed_track(tmp_path):
     runner, _, _ = await run_demo(tmp_path, count=1, progress="unknown")
     assert runner.state["status"] == "needs_attention"
     assert "completed_identity_track" not in runner.task_progress.records["pink-1"]
+
+
+def test_confirmed_intermediate_transfer_can_track_without_claiming_task_completion():
+    def intermediate(capture, detections, entities, reference, progress):
+        progress['pink']['status'] = 'observed'
+    result, _, values = resolve(mutate=intermediate)
+    assert result['completed_tracking']['candidate_mapping'] == {'0': 'pink'}
+    assert values[-1]['pink']['status'] == 'observed'
+
+
+def test_transfer_correspondence_does_not_ask_rgb_to_remeasure_invisible_slot():
+    from luna_mujoco.demo_completed_tracking import (
+        completed_candidate_scopes,
+        completed_correspondence_payload,
+        completed_identity_tracks,
+    )
+    capture, detections, entities, reference, progress = tracking_inputs()
+    tracks = completed_identity_tracks(capture, reference, progress, entities)
+    scopes = completed_candidate_scopes(capture, detections, tracks)
+    payload = completed_correspondence_payload(capture, detections, tracks, scopes)
+    assert 'outlined' not in payload['questions'][0]['instructions']
+    assert 'separate movable object' in payload['questions'][0]['instructions']
+    for part in payload['input'][0]['content']:
+        if part['type'] == 'input_text':
+            assert '"slots"' not in part['text']
+    assert scopes[0]['location_is_identity_proof'] is False

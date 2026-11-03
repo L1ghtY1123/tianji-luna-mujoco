@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, model_validator
 
 from .observation_motion import observation_joint_limits, observation_poses
+from .vla_configuration import default_vla_input_size
 
 RELEASE_ENDPOINT_POSITION_TOLERANCE_M = .002
 
@@ -76,6 +77,23 @@ class ObservationSettings(BaseModel):
         return self
 
 
+def vla_input_field(axis):
+    from .vla_configuration import default_vla_input_xy
+    return Field(default_factory=lambda: default_vla_input_xy()[axis],
+        title=f"VLA 输入位置 {'X' if axis == 0 else 'Y'}",
+        description="世界坐标，单位米。指定 VLA 桌面正方形区域的中心；区域内自主选点，保留既有姿态。",
+        json_schema_extra={'group': 'vla', 'unit': 'm', 'display_scale': 1, 'step': .001})
+
+
+class VLAUnpackSettings(BaseModel):
+    model_config = ConfigDict(extra='forbid', frozen=True, allow_inf_nan=False)
+    input_x_m: float = vla_input_field(0)
+    input_y_m: float = vla_input_field(1)
+    input_size_m: float = Field(default_factory=default_vla_input_size, ge=.02, le=.5,
+        title='VLA 输入区域边长', description='无可见标记的桌面正方形边长；与 X/Y 共同定义数值放置边界。',
+        json_schema_extra={'group': 'vla', 'unit': 'm', 'display_scale': 1, 'step': .01})
+
+
 class PlanningSettings(BaseModel):
     experimental_semantic_only_mapping: bool = setting(True, "实验场景仅保留已识别物体",
         "仅在双臂观测位姿分析完成后，保留SAM3物体/容器及桌面；删除未分类背景。初始运动地图不使用此规则。",
@@ -84,6 +102,15 @@ class PlanningSettings(BaseModel):
 
     holding_position_tolerance_fraction: float = setting(.02, "夹持位置容差", "相对空夹闭合位置的容差，占有效行程的比例。", "verification", ge=.001, le=.1, step=.005)
     holding_stable_window_s: float = setting(.2, "夹持稳定窗口", "只使用窗口内的夹爪位置判断稳定，不使用力或电流。", "verification", unit="s", ge=.05, le=1., step=.05)
+    gripper_stable_velocity_rad_s: float = setting(.015, "夹爪稳定速度上限", "驱动关节连续低于此速度并满足稳定窗口才返回；超时失败。", "verification", unit="rad/s", step=.005, gt=0, le=.2)
+    gripper_timeout_s: float = setting(3., "夹爪稳定超时", "仿真时间上限；未稳定不能作为夹持成功。", "verification", unit="s", step=.1, gt=0, le=15)
+    motion_position_tolerance_rad: float = setting(.005, "运动到位误差", "轨迹结束后关节位置误差上限；不改变沿途跟踪保护。", "execution", unit="°", scale=180 / math.pi, step=.1, gt=0, le=.02)
+    motion_stable_velocity_rad_s: float = setting(.03, "运动到位速度上限", "末端关节速度连续满足要求才返回。", "execution", unit="rad/s", step=.01, gt=0, le=.2)
+    motion_stable_window_s: float = setting(.08, "运动到位稳定窗口", "仿真时间；短暂到位后再次偏离会重新计时。", "execution", unit="s", step=.02, ge=.02, le=1)
+    motion_settle_timeout_s: float = setting(3., "运动到位超时", "轨迹结束后的最大等待时间；超时失败。", "execution", unit="s", step=.1, gt=0, le=15)
+    grasp_insertion_m: float = setting(0., "抓姿局部 Z 补偿", "在 IK 前沿原抓姿局部 +Z 应用一次；零使用标定转换，不累计偏移。", "grasp", unit="mm", scale=1000, step=1, ge=-.02, le=.03)
+    grasp_maximum_tilt_deg: float = setting(180., "抓姿最大倾角", "相对世界向下轴；180°不按倾角排除，最终由数值碰撞与 IK 判断。", "grasp", unit="°", step=5, ge=0, le=180)
+    grasp_require_away_from_robot: bool = setting(False, "只保留背离机身的抓取方向", "可选方向约束；默认关闭，不能代替碰撞检查。", "grasp")
 
     ik_num_seeds: int = setting(16, "IK 优化 seeds", "每目标 IK 优化起点数；16 为锁定 cuRobo batch planner 默认，两处 IK 显式对齐。",
                                "shared", ge=1, le=64, strict=True)
@@ -96,14 +123,14 @@ class PlanningSettings(BaseModel):
     random_seed: int = setting(123, "random seed", "两处 IK 和 TrajOpt 使用相同随机数种子；GPU 计算不保证逐位复现。",
                               "shared", ge=0, le=2147483647, strict=True)
     self_collision_check: bool = setting(True, "自碰撞检查", "启用机器人自身碰撞检查；关闭会降低规划约束。", "shared")
-    trajectory_collision_clearance_m: float = setting(.01, "碰撞间距（hard clearance）",
-        "独立 IK、内部 IK 和三段轨迹复核共用。目标物体仅从 cuRobo world 排除。",
-        "shared", unit="mm", scale=1000, ge=.01, le=.5)
+    trajectory_collision_clearance_m: float = setting(.005, "碰撞间距（hard clearance）",
+        "普通环境及非接触链接的硬净距。指腹目标接触及已测支撑接触单独处理；不是全局禁止接触距离。",
+        "shared", unit="mm", scale=1000, ge=0, le=.5)
 
     optimizer_collision_activation_distance_m: float = setting(.03, "碰撞代价激活距离（soft activation）",
         "TrajOpt 在该距离内产生避障代价，不等于 hard clearance；必须不小于 hard clearance。",
-        "planner", unit="mm", scale=1000, ge=.03, le=.5)
-    trajopt_num_seeds: int = setting(2, "TrajOpt seeds", "每目标轨迹优化起点数；2 为官方 batch 默认。项目要求 ≤ IK seeds，避免 SDK 自动上调。",
+        "planner", unit="mm", scale=1000, ge=0, le=.5)
+    trajopt_num_seeds: int = setting(4, "TrajOpt seeds", "每目标轨迹优化起点数；本项目采用4，以提高包含抓取目标时的路径求解覆盖。锁定官方batch默认2。要求 ≤ IK seeds，避免 SDK 自动上调。",
                                     "planner", ge=1, le=8, strict=True)
     plan_max_attempts: int = setting(2, "最大规划 attempts", "普通plan_pose/plan_cspace的公开尝试预算。plan_grasp内部阶段采用官方默认，公共接口未暴露此参数。",
                                      "planner", ge=1, le=10, strict=True)
@@ -131,29 +158,32 @@ class PlanningSettings(BaseModel):
     place_retreat_offset_m: float = setting(.1, "Lift 偏移", "官方grasp_lift_offset语义；默认沿 world +Z 提升100 mm，不能为零。",
                                             "place", unit="mm", scale=1000, ge=-.5, le=.5)
     place_retreat_in_tool_frame: bool = setting(False, "Lift 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
-    place_release_height_m: float = setting(.01, "持物球底最小间隙", "只读，等于hard clearance，默认10mm。固定抓取旋转，考虑attachment与夹爪最低点及实际碰撞场计算尽量低的安全Z；实际物体包络在目标区域内即可，不设置2mm位置误差上限。",
+    place_release_height_m: float = setting(0., "额外释放间隙下限", "默认0，不另加释放高度；从hard clearance允许的最低高度开始，检查夹爪、持物球和当前碰撞场。非零值仅用于显式指定更大的间隙。",
                                        "place", unit="mm", scale=1000, step=1, ge=0, le=.502)
+    place_max_release_gap_m: float = setting(.05, "选位允许的最大物体离面高度", "resolve_placement 拒绝物体几何底部高于支撑面此距离的候选，避免把障碍上方悬空位置作为放置点。",
+                                          "place", unit="mm", scale=1000, step=1, ge=0, le=.502)
 
     time_scale: float = setting(2., "时间伸长／补点倍率（三段共用）", "cuRobo 完成后用 q/v/a 做五次 Hermite 补点；默认 2 倍，执行点间隔保持 SDK dt。",
                                 "execution", unit="倍", step=.1, ge=1, le=10)
-    dwell_approach_s: float = setting(1., "Approach 后停留", "仿真保持关节目标；停留不乘时间伸长倍率。",
+    dwell_approach_s: float = setting(0., "Approach 后额外停留", "到位反馈通过后的可选停留；不乘时间伸长倍率。",
                                      "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_grasp_s: float = setting(1., "夹爪闭合后停留", "停留后以实测可见点云和 TCP 反馈记录抓取参照，再执行原有 Lift。",
+    dwell_grasp_s: float = setting(0., "夹爪闭合后额外停留", "夹爪稳定反馈通过后的可选停留，不替代夹持判定。",
                                   "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_lift_s: float = setting(1., "Lift 后停留", "停留后只采集 post_grasp RGBD；verify_grasp 计算持物结果并建立 attachment。",
+    dwell_lift_s: float = setting(0., "Lift 后额外停留", "携物抬升到位后的可选停留，不替代持物判定。",
                                  "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_place_approach_s: float = setting(1., "放置 approach 后停留", "保持关节目标后进入放置阶段。",
+    dwell_place_approach_s: float = setting(0., "放置 approach 后额外停留", "到位反馈通过后的可选停留。",
                                            "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_place_s: float = setting(1., "放置后开爪前停留", "到达放置位姿后保持关节目标，再检查开爪。",
+    dwell_place_s: float = setting(0., "放置后开爪前额外停留", "到位反馈通过后的可选停留。",
                                    "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_release_s: float = setting(1., "释放后稳定等待", "开爪并 detach 后等待，再执行预先规划的撤离；不在此观察。",
+    dwell_release_s: float = setting(0., "释放后额外稳定等待", "开爪稳定并 detach 后可选等待；物体落稳及位置由后续当前观测核验。",
                                      "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_retreat_s: float = setting(1., "撤离后停留", "撤离后等待，再观察一次以确认可见放置结果。",
+    dwell_retreat_s: float = setting(0., "撤离后额外停留", "撤离到位后的可选等待，不自动添加观测。",
                                      "execution", unit="s", step=.1, ge=0, le=30)
 
     pointcloud_filter: PointcloudFilterSettings = Field(default_factory=PointcloudFilterSettings)
     observation: ObservationSettings = Field(default_factory=ObservationSettings)
     attachment: AttachmentSettings = Field(default_factory=AttachmentSettings)
+    vla_unpack: VLAUnpackSettings = Field(default_factory=VLAUnpackSettings)
 
     @model_validator(mode="before")
     @classmethod
@@ -166,11 +196,14 @@ class PlanningSettings(BaseModel):
         migrated.pop("place_max_candidates", None)
         for legacy_name in ("release_margin_m", "place_release_margin_m", "plan_timeout_s", "place_timeout_s"):
             migrated.pop(legacy_name, None)
-        migrated['place_release_height_m'] = migrated.get('trajectory_collision_clearance_m', .01)
         return migrated
 
     @model_validator(mode="after")
     def validate_relationships(self):
+        if self.gripper_timeout_s <= self.holding_stable_window_s:
+            raise ValueError("夹爪超时必须大于稳定窗口")
+        if self.motion_settle_timeout_s <= self.motion_stable_window_s:
+            raise ValueError("运动到位超时必须大于稳定窗口")
         if self.trajopt_num_seeds > self.ik_num_seeds:
             raise ValueError("TrajOpt seeds 不能大于 IK 优化 seeds，否则 SDK 会增加内部 IK seeds")
         if self.ik_num_seeds > self.ik_seed_solver_num_seeds:
@@ -199,13 +232,6 @@ def load_settings(path: Path):
     if not path.exists():
         return PlanningSettings()
     values = json.loads(path.read_text(encoding="utf-8"))
-    clearance = values.get("trajectory_collision_clearance_m") if isinstance(values, dict) else None
-    if type(clearance) in (int, float) and .005 <= clearance < .01:
-        # Only loading an older saved policy may upgrade its clearance. Live
-        # requests below 10 mm remain invalid; existing plans/bindings are not rewritten.
-        warnings.warn(f"saved collision clearance {clearance} migrated to 0.01 m under the 10 mm policy",
-                      UserWarning, stacklevel=2)
-        values = {**values, "trajectory_collision_clearance_m": .01}
     attachment = values.get("attachment", {}) if isinstance(values, dict) else {}
     budget = attachment.get("sphere_budget") if isinstance(attachment, dict) else None
     if type(budget) is int and 32 <= budget <= 256:

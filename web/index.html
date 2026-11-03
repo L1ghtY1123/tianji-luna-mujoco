@@ -58,7 +58,7 @@
             </details>
             <details class="pointcloud-panel" id="pointcloud-panel" role="tabpanel" aria-label="点云诊断" hidden>
               <summary class="sr-only">原始 RGBD 点云与碰撞场景</summary>
-              <p class="pointcloud-note">选择原始 RGBD 点云或 TSDF / ESDF 碰撞场景，点击“显示点云”叠加最近建图快照。可隐藏仿真物体，仅保留机器人与测量叠层。</p>
+              <p class="pointcloud-note">选择原始 RGBD 点云或当前碰撞场景，点击“显示点云”叠加最近建图快照。可隐藏仿真物体，查看机器人与已发布的 CAD、OBB 和桌面几何。</p>
               <p id="pointcloud-status" class="helper-text" role="status">等待观察节点完成点云建图。</p>
               <div id="pointcloud-content"></div>
             </details>
@@ -84,10 +84,10 @@
           <div class="run-facts"><span>任务 <b id="task-value">—</b></span><span>源物体 <b id="target-value">—</b></span><span>物料盒 <b id="destination-value">—</b></span><span>机械臂 <b id="arm-value">—</b></span></div>
           <section id="run-details" class="run-details" aria-label="当前任务步骤与错误" hidden>
             <strong id="run-step"></strong><p id="run-step-timing" hidden></p><p id="run-candidate" hidden></p>
-            <p id="run-last-error" class="run-warning" hidden></p><p id="run-failure" class="run-failure" role="alert" hidden></p>
+            <p id="run-last-error" class="run-warning" hidden></p><div id="run-failure" class="run-failure" role="alert" hidden></div>
             <p id="algorithm-pending" class="run-warning" hidden>后台算法调用尚未返回。结果不会触发后续动作；返回前不能开始新任务，仍可 Reset 或编辑场景。</p>
           </section>
-          <section id="task-object-list" class="object-list" aria-label="物体与拆包工序清单" hidden></section>
+          <section id="task-object-list" class="object-list" aria-label="任务实体与处理关联清单" hidden></section>
           <details class="log-guide"><summary>记录说明与性能</summary><p class="panel-description">Responses 建立初始清单并编排 skills，程序校验与执行；Decisions 判断身份及放置结果。</p><div id="performance-summary" class="performance-summary" aria-label="视觉模型性能摘要" hidden><div><span>Responses / Decisions 调用</span><strong id="metric-count">—</strong></div><div><span>已记录平均耗时</span><strong id="metric-mean">—</strong></div><div><span>已记录累计耗时</span><strong id="metric-total">—</strong></div><div><span>整轮耗时</span><strong id="metric-run">—</strong></div></div></details>
           <div id="trace-list" class="trace-list"><div class="trace-empty"><strong>等待第一条指令</strong><p>运行事件按时间记录于此。</p></div></div>
           <details id="facts-section" class="facts-section" hidden><summary>运行事实 / 验证 / 性能</summary><pre id="facts-content"></pre></details>

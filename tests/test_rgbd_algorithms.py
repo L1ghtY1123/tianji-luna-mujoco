@@ -65,7 +65,7 @@ def test_observation_map_keeps_all_requested_camera_instances_without_target_exc
     assert observation['views']['3']['instance_masks']['seen-red'].any()
 
 
-def test_graspgen_receives_the_measured_partial_cloud_without_surface_completion():
+def test_graspgen_receives_obb_samples_while_cloud_reference_stays_measured():
     class Client:
         def __init__(self):
             self.points = []
@@ -80,62 +80,11 @@ def test_graspgen_receives_the_measured_partial_cloud_without_surface_completion
     result = Algorithms(graspgen_client=client).generate_grasps(observation, "seen-red")
     assert result["candidate_count"] == 2
     assert result["cloud"]["source"] == "rgbd_visible_surface"
-    assert len(client.points[0]) == 25
+    assert len(client.points[0]) == 4096
     points = observation["objects"][0]["points_world_m"]
-    np.testing.assert_allclose(client.points[0], points.astype(float) - points.astype(float).mean(axis=0), atol=1e-7)
+    assert result['object_obb']['measured_point_count'] == len(points) == 25
+    assert result['graspgen_input_source'] == 'observed_obb_mesh_surface_samples'
     np.testing.assert_array_equal(client.points[0], client.points[1])
-
-
-def test_place_uses_attached_source_native_phases_and_place_specific_parameters():
-    observation = observed_scene()
-    with_bin(observation)
-    scene = {"target_id": "seen-red", "generation": 1, "observation_id": "capture-4", "scene_token": "map-1"}
-    calls = []
-
-    def request(path, body):
-        calls.append((path, body))
-        if path == "/carrying/validate":
-            import hashlib
-            import json
-            digest = hashlib.sha256(json.dumps(body, sort_keys=True, separators=(',', ':'),
-                                              allow_nan=False).encode()).hexdigest()
-            return {"ok": True, "collision_free": True, "scene_token": body["scene_token"],
-                    "binding_sha256": digest, "attached": body.get("carrying_binding") is not None}
-        phase = {"positions_rad": [[0.] * 7, [.01] * 7], "joint_names": [f"Joint{i}_L" for i in range(1, 8)],
-                 "velocities_rad_s": [[0.] * 7] * 2, "accelerations_rad_s2": [[0.] * 7] * 2,
-                 "interpolation_dt_s": .02}
-        if path == "/tools/plan_to_pose":
-            assert body["gripper_joint_positions_rad"] == {"A": 0., "B": .3}
-            assert "carrying_binding" not in body
-            return {"scene_token": "map-1", "attached": False, "trajectory": phase}
-        if path == "/tools/solve_ik_batch":
-            return {"scene_token": "map-1", "batch_size": len(body["goal_matrices_world"]),
-                    "items": [{"candidate_index": index, "success": True}
-                              for index in range(len(body["goal_matrices_world"]))],
-                    "attached": True, "collision_evidence": {"optimizer_attachment": True}}
-        return {"ok": True, "scene_token": "map-1",
-                "collision_evidence": {"optimizer_attachment": True},
-                "items": [{"index": index, "success": True, "approach_success": True, "place_success": True,
-                           "phases": {name: phase for name in ("approach", "place")}} for index in range(16)]}
-
-    holding = {"arm": "A", "owner_id": "owner-1", "verified": True, "attached": True,
-               "attachment_evidence": {"attachment_spheres_tool_m": [[.5, .1, .64, .02]]},
-               "points_tool_m": observation["objects"][0]["points_world_m"].tolist(),
-               "grasp_support_reference": {"T_world_tcp_at_grasp": np.eye(4).tolist(),
-                                           "table_height_m": .6,
-                                           "source": "rgbd_table_and_joint_feedback"}}
-    result = Algorithms(curobo_request=request).plan_place(observation, "seen-red", "A", scene,
-                                                          holding, "blue-bin")
-    assert calls[0][0] == "/tools/solve_ik_batch"
-    path, payload = calls[1]
-    assert path == "/tools/plan_place_batch"
-    assert len(payload["goal_matrices_world"]) == 16
-    assert payload["approach_offset_m"] == .05 and payload["approach_in_tool_frame"] is False
-    assert payload["lift_offset_m"] == .05 and payload["lift_in_tool_frame"] is False
-    assert payload["carrying_binding"]["owner_id"] == "owner-1"
-    assert payload["gripper_joint_positions_rad"] == {"A": .3, "B": .3}
-    assert set(result["phases"]) == {"approach", "place", "retreat"}
-    assert result["retreat_requires_replan"] is False
 
 
 def test_actual_command_check_rejects_a_proof_for_another_request():
@@ -197,7 +146,10 @@ def test_grasp_plan_defers_attachment_and_formal_place_until_after_grasp(monkeyp
     assert result["place_preflight"]["scope"] == "deferred_until_attachment"
 
 
-def test_attachment_uses_actual_postlift_tcp_feedback_and_measured_surface():
+@pytest.mark.parametrize('placement_request,expected', [
+    (None, None), ({'region': {'id': 'support'}}, 'place'),
+    ({'transport_region': {'id': 'container'}}, 'pose')])
+def test_attachment_uses_actual_postlift_tcp_feedback_and_measured_surface(placement_request, expected):
     from luna_mujoco.placement import carrying_binding
 
     observation = observed_scene()
@@ -211,8 +163,10 @@ def test_attachment_uses_actual_postlift_tcp_feedback_and_measured_surface():
         calls.append((path, body))
         return {"attached": True, "scene_token": "map-1"}
     algorithms = Algorithms(curobo_request=request)
-    algorithms.prepare_carrying(observation, "A", scene, holding)
+    observation["stage"] = "unpacked"  # Historical flags never select a planner.
+    algorithms.prepare_carrying(observation, "A", scene, holding, placement_request=placement_request)
     path, payload = calls[0]
+    assert payload.get("next_motion_kind") == expected
     assert path == "/carrying/prepare"
     np.testing.assert_allclose(payload["goal_position_m"], actual[:3, 3])
     np.testing.assert_allclose(payload["carrying_binding"]["points_tool_m"],

@@ -22,7 +22,7 @@ def head_observation():
 
 
 def progress_for(observation, count=4, **kwargs):
-    progress = TaskProgress('搬运指定物体', route='table_box', requested_count=count, **kwargs)
+    progress = TaskProgress('搬运指定物体', requested_count=count, **kwargs)
     progress.observe(observation['objects'], observation['observation_id'])
     progress.assess_membership({'br': 'required', 'tl': 'required', 'bl': 'required',
                                 'tr': 'required', 'obstacle': 'excluded'})
@@ -101,10 +101,13 @@ def test_group_quota_rejects_three_red_members_instead_of_two_red_and_one_green(
     assert progress.freeze_inventory(observation)['inventory_finalized'] is True
 
 
-def test_build_scene_contract_rejects_unfinalized_inventory_and_missing_region():
+def test_build_scene_contract_requires_inventory_without_arm_or_destination():
     from luna_mujoco.skills import Registry, SkillSelectionError
     registry = Registry()
-    facts = {'observed': True, 'target_selected': True, 'arm_selected': True}
+    facts = {'observed': True, 'inventory_finalized': False, 'grasp_held': False, 'recovery_needed': False}
     with pytest.raises(SkillSelectionError) as failure:
         registry.validate_selection('build_scene', facts)
-    assert set(failure.value.details['unmet_requirements']) == {'inventory_finalized', 'destination_ready'}
+    assert failure.value.details['unmet_requirements'] == {
+        'inventory_finalized': {'expected': True, 'actual': False}}
+    facts['inventory_finalized'] = True
+    registry.validate_selection('build_scene', facts)

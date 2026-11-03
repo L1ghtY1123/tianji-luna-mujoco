@@ -4,9 +4,30 @@ import pytest
 from luna_mujoco.task_progress import TaskProgress
 
 
-@pytest.mark.parametrize('route', ['direct', 'box_table'])
-def test_jev_membership_separates_requested_objects_and_unknowns_from_obstacles(route):
-    progress = TaskProgress('把盒子中物体放到桌面黄色区域', 'collection', route=route)
+def test_container_delivery_without_layout_has_no_fabricated_slot_constraint():
+    progress = TaskProgress('put item in bin')
+    progress.scene_entities['bin'] = {'id': 'bin', 'kind': 'bin'}
+    progress.select({'id': 'item', 'display_id': 1}, 'bin')
+    current = progress.visual_progress()['item']
+    assert current['destination_id'] == 'bin'
+    assert 'slot_id' not in current
+    assert 'region_id' not in current
+    assert 'assigned_slot' not in current
+
+
+@pytest.mark.parametrize('kind', ['table', 'support_region', None])
+def test_absent_layout_does_not_remove_required_surface_slot_evidence(kind):
+    progress = TaskProgress('place item on surface')
+    progress.scene_entities['surface'] = {'id': 'surface', 'kind': kind}
+    progress.select({'id': 'item', 'display_id': 1}, 'surface')
+    current = progress.visual_progress()['item']
+    assert current['region_id'] == 'region:surface'
+    assert current['slot_id'] == 1
+    assert 'assigned_slot' not in current
+
+
+def test_membership_separates_requested_objects_and_unknowns_from_obstacles():
+    progress = TaskProgress('把盒子中物体放到桌面黄色区域', 'collection')
     objects = [{'id': key, 'kind': 'cube', 'position': [.4, i * .1, .6]}
                for i, key in enumerate(('source', 'table-object', 'unclear'))]
     objects[0]['measured_relationships'] = [
@@ -37,7 +58,7 @@ def test_jev_membership_separates_requested_objects_and_unknowns_from_obstacles(
 
 
 def test_membership_rejects_unknown_ids_and_changes_to_selected_history():
-    progress = TaskProgress('only source', 'collection', route='box_table')
+    progress = TaskProgress('only source', 'collection')
     source = {'id': 'source', 'kind': 'cube', 'measured_relationships': [
         {'relation': 'above_observed_bin_floor', 'object_id': 'box', 'visible_xy_fraction': 1.}]}
     progress.observe([source], 'head')
@@ -51,7 +72,7 @@ def test_membership_rejects_unknown_ids_and_changes_to_selected_history():
 
 
 def test_explicit_selection_keeps_membership_when_observed_after_completion():
-    progress = TaskProgress('move source', route='table_box')
+    progress = TaskProgress('move source')
     source = {'id': 'source', 'kind': 'cube'}
     progress.select(source, 'bin')
     progress.complete('source', observation_id='released')

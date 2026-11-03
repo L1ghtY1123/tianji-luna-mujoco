@@ -1,10 +1,11 @@
-"""Explicit user CAD priors and generated assets, never observed scene poses."""
+"""CAD assets for MuJoCo scene construction, not perception or planning."""
 import json
 from copy import deepcopy
 from functools import lru_cache
-from pathlib import Path
 
-CAD_ROOT = Path(__file__).resolve().parents[2] / "resources/cad"
+from .cad_paths import cad_resource_root
+
+CAD_ROOT = cad_resource_root() / "cad"
 
 
 @lru_cache(maxsize=1)
@@ -28,11 +29,6 @@ def cad_catalog():
     return {"assets": [{key: record[key] for key in
                         ("id", "label", "size_m", "default_color", "demo_mass_kg")}
                        for record in (cad_asset(key) for key in _manifest()['assets'])]}
-
-
-def workpiece_height_prior(asset_id):
-    """Declared demo posture: pink upright; unpacked black long axis horizontal."""
-    return cad_asset(asset_id)['size_m'][0 if asset_id == 'black_core' else 2]
 
 
 def _mesh_path(relative_path):

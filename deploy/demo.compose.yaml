@@ -55,6 +55,7 @@ services:
     ports: ["8352:8310"]
     volumes:
       - ../:/opt/jev:ro
+      - ../../CAD:/opt/cad:ro
       - demo-curobo-cache:/var/cache/jodell-curobo
     environment:
       OMP_NUM_THREADS: "1"
@@ -62,6 +63,7 @@ services:
       OPENBLAS_NUM_THREADS: "1"
       PYTHONPATH: /opt/jev/src:/opt/jev/vendor
       LUNA_CUROBO_PORT: "8310"
+      LUNA_CAD_ROOT: /opt/cad
       LUNA_ROBOT_URDF: /opt/jev/assets/marvin_urdf/marvin_with_grippers.urdf
       LUNA_MARVIN_MESHES: /opt/jev/assets/marvin_urdf/meshes
       LUNA_RAG_MESHES: /opt/jev/assets/marvin_urdf/rag100_050/meshes
@@ -71,9 +73,32 @@ services:
       interval: 10s
       timeout: 10s
       start_period: 180s
+  foundationpose:
+    cpus: 0.5
+    image: jodell-foundationpose:0.2.2-guangyu
+    pull_policy: never
+    container_name: tianji-luna-foundationpose-guangyu
+    gpus: all
+    init: true
+    shm_size: 2gb
+    restart: unless-stopped
+    ports: ["127.0.0.1:8365:8025"]
+    volumes:
+      - ../data/foundationpose-registry:/data/registry:ro
+      - ../services:/opt/luna-services:ro
+      - ../../CAD/runtime/registration_meshes:/opt/registration-meshes:ro
+    environment:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      FOUNDATIONPOSE_SEARCH_PROFILE: default
+      LUNA_REGISTRATION_MESH_DIRECTORY: /opt/registration-meshes
+      XDG_CACHE_HOME: /tmp/foundationpose-home/cache
+      WARP_CACHE_PATH: /tmp/foundationpose-home/warp
+    command: [/opt/luna-services/run_foundationpose.py, --host, 0.0.0.0]
   web:
-    cpus: 2
-    image: tianji-jev-mujoco:0.4.0-experiments-guangyu
+    cpus: 1.5
+    image: tianji-luna-mujoco:0.7.0-cad-distance-guangyu
     pull_policy: never
     container_name: tianji-luna-web-guangyu
     init: true
@@ -91,6 +116,9 @@ services:
       LUNA_CUROBO_URL: http://127.0.0.1:8352
       LUNA_GRASPGEN_URL: http://127.0.0.1:8363
       LUNA_SAM3_URL: http://127.0.0.1:8362
+      LUNA_FOUNDATIONPOSE_URL: http://127.0.0.1:8365
+      LUNA_GEOMETRY_MODE: cad_obb
+      LUNA_CAD_ROOT: /opt/cad
     tmpfs:
       - /opt/jev/web/node_modules:rw,exec,size=512m,uid=${LUNA_UID:-1000},gid=${LUNA_GID:-1000},mode=0755
     volumes:
@@ -99,13 +127,14 @@ services:
       - ../data:/opt/jev/data
       - ../data/render_meshes:/opt/jev/assets/render_meshes
       - ../src:/opt/jev/src:ro
-      - ../demo_skills:/opt/jev/demo_skills:ro
+      - ../skill_catalog:/opt/jev/skill_catalog:ro
       - ../resources:/opt/jev/resources:ro
+      - ../../CAD:/opt/cad:ro
       - ../web:/opt/jev/web:ro
       - ./run-demo.sh:/opt/jev/deploy/run-demo.sh:ro
     command: [bash, /opt/jev/deploy/run-demo.sh]
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8350/',timeout=5); urllib.request.urlopen('http://127.0.0.1:8351/api/state',timeout=5)"]
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8350/',timeout=5); urllib.request.urlopen('http://127.0.0.1:8351/api/run-progress',timeout=5)"]
       interval: 5s
       timeout: 10s
       start_period: 30s

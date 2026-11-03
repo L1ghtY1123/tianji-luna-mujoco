@@ -1,0 +1,28 @@
+{
+  "id": "confirm_inventory",
+  "description": "Confirm the initial task membership and source/destination/work-area bindings against the original instruction and the observed permanent instances. Initial Responses inventory is a proposal. For processing tasks, select current input objects; future products need not exist yet. An operator-configured region is an external setting, not a visible marker. Confirm the requested region binding, not its imaginary painted boundary. For all/count tasks, independently check visible source completeness; do not infer hidden contents from a candidate count. Return confirmed bindings and ledger evidence, or unknown with the specific unmet question. No motion or capture is inserted. Source means the original support/container/region of selected inputs, not the input material itself. An object cannot be its own source; source origin, target membership and final destination are distinct judgments.",
+  "requires": {
+    "observed": true,
+    "grasp_held": false
+  },
+  "provides": [
+    "inventory_finalized",
+    "task_assessed"
+  ],
+  "inputs": [
+    "task_spec",
+    "current_observation",
+    "proposed_inventory"
+  ],
+  "outputs": [
+    "confirmed_inventory"
+  ],
+  "errors": [
+    "task_binding_unconfirmed",
+    "task_target_geometry_unknown",
+    "source_inventory_unknown"
+  ],
+  "invalidates_observation": false,
+  "recovery_retry_safe": true,
+  "capability": "Confirm the initial task membership and source/destination/work-area bindings against the original instruction and the observed permanent instances"
+}

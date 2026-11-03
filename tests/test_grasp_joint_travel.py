@@ -141,7 +141,7 @@ def test_rank_returned_paths_before_interpolating_or_validating_candidates(monke
     assert result["candidate_index"] == 115
     assert result["joint_travel_rad"] == pytest.approx(.1)
     assert len(prepared) == 1
-    assert len(checked) == 2
+    assert len(checked) == 3
 
 
 def test_unneeded_later_batch_is_never_requested():
@@ -259,7 +259,8 @@ def test_command_checks_bind_measured_connector_and_predicted_phase_start_withou
 
     algorithms.request = request
     result = algorithms.plan_grasp(state, "red", "A", evaluations, scene)
-    assert [check["phase"] for check in checks] == ["approach_grasp", "grasp"]
+    assert [check["phase"] for check in checks] == ["approach_grasp", "grasp", "grasp_closure"]
+    assert checks[2]['positions_rad'] == [checks[1]['positions_rad'][-1]]
     assert all(check["gripper_geometry_mode"] == "fixed_open" for check in checks)
     assert checks[0]["current_joints_rad"] == [.005] * 7
     assert checks[0]["positions_rad"][:2] == [[.005] * 7, [0.] * 7]
@@ -268,3 +269,59 @@ def test_command_checks_bind_measured_connector_and_predicted_phase_start_withou
     assert result["selection"]["command_validated_candidate_count"] == 1
     assert result["selection"]["lift_command_collision_checked"] is False
     assert state["arms"] == original["arms"]
+
+
+def test_native_solution_with_unsafe_closure_is_rejected_before_execution():
+    algorithms, state, scene, evaluations, _ = evaluated(2, scores=[.9, .1])
+
+    def request(path, body):
+        result = batch_response(body)
+        set_path(result['items'][0], [[0., .01], [.01, .02], [.02, .03]])
+        set_path(result['items'][1], [[0., .1], [.1, .2], [.2, .3]])
+        return result
+
+    checks = []
+    def validate(observation, arm, scene, phase, command, **kwargs):
+        checks.append(phase)
+        if phase == 'grasp_closure' and command['positions_rad'][0][0] < .1:
+            raise AlgorithmError('closed pad violates table clearance', code='execution_collision')
+        return {'collision_free': True}
+
+    algorithms.request = request
+    algorithms.validate_execution = validate
+    result = algorithms.plan_grasp(state, 'red', 'A', evaluations, scene)
+    assert result['candidate_index'] == 101
+    assert len(result['prior_failures']) == 1
+    assert result['prior_failures'][0]['code'] == 'execution_collision'
+    assert checks.count('grasp_closure') == 2
+
+
+@pytest.mark.parametrize('contact_possible', [True, False])
+def test_bounded_closure_requires_fresh_proof_of_exact_command_limit(monkeypatch, contact_possible):
+    algorithms, state, scene, evaluations, _ = evaluated(1)
+    algorithms.request = lambda path, body: batch_response(body)
+    limits = []
+
+    def validate(observation, arm, scene, phase, command, **kwargs):
+        if phase == 'grasp_closure':
+            limit = kwargs.get('closure_driver_limit_rad')
+            limits.append(limit)
+            if limit is None:
+                raise AlgorithmError('full empty closure blocked', code='execution_collision', details={
+                    'grasp_closure_preflight': {'safe_driver_limit_rad': .6, 'driver_samples_rad': [0., .8]}})
+            return {'collision_free': True, 'grasp_closure_preflight': {'safe_driver_limit_rad': limit}}
+        return {'collision_free': True}
+
+    algorithms.validate_execution = validate
+    monkeypatch.setattr('luna_mujoco.grasp_contact_prediction.bounded_contact_prediction',
+        lambda *args: {'opposing_contact_predicted': contact_possible})
+    if not contact_possible:
+        with pytest.raises(AlgorithmError) as caught:
+            algorithms.plan_grasp(state, 'red', 'A', evaluations, scene)
+        assert 'planning_bounded_contact_unreachable' in str(caught.value.details)
+        return
+    result = algorithms.plan_grasp(state, 'red', 'A', evaluations, scene)
+    assert limits == [None, pytest.approx(.568)]
+    proof = result['command_checks']['closure']
+    assert proof['collision_free']
+    assert proof['full_range_rejection']['safe_driver_limit_rad'] == .6

@@ -18,6 +18,7 @@ def test_algorithm_requests_reuse_connection_and_close_it(monkeypatch):
             encoded = json.dumps({'ok': True, 'value': body['value']}).encode()
             self.send_response(200)
             self.send_header('Content-Length', str(len(encoded)))
+            self.send_header('Server-Timing', 'encode;dur=0.125')
             self.end_headers()
             self.wfile.write(encoded)
         def log_message(self, *args):
@@ -28,13 +29,24 @@ def test_algorithm_requests_reuse_connection_and_close_it(monkeypatch):
     algorithms = Algorithms()
     algorithms.curobo_url = f'http://127.0.0.1:{server.server_port}'
     try:
-        assert algorithms.request('/one', {'value': 17}) == {'ok': True, 'value': 17}
-        assert algorithms.request('/two', {'value': 29}) == {'ok': True, 'value': 29}
+        for path, value in (('/one', 17), ('/two', 29)):
+            result = algorithms.request(path, {'value': value})
+            timings = result.pop('transport_timings')
+            assert result == {'ok': True, 'value': value}
+            assert set(timings) == {'request_encode_http_roundtrip_s', 'response_decode_s',
+                                    'response_bytes', 'server_timing'}
+            assert timings['request_encode_http_roundtrip_s'] >= 0
+            assert timings['response_decode_s'] >= 0
+            assert timings['response_bytes'] == len(json.dumps(result).encode())
+            assert timings['server_timing'] == 'encode;dur=0.125'
         assert [row[1:] for row in received] == [('/one', {'value': 17}), ('/two', {'value': 29})]
         assert received[0][0] == received[1][0], 'connection was recreated for each algorithm call'
     finally:
-        if hasattr(algorithms, 'close'):
-            algorithms.close()
+        client = algorithms._client
+        algorithms.close()
+        assert algorithms._client is None
+        if client is not None:
+            assert client.is_closed
         server.shutdown()
         server.server_close()
         worker.join()

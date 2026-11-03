@@ -1,0 +1,6 @@
+FROM tianji-luna-mujoco:0.5.0-policy-guangyu
+USER root
+# FoundationPose's independent mesh/depth validation uses Trimesh's public
+# nearest-surface query. The existing web image does not contain its Rtree index.
+RUN python -m pip install --no-cache-dir --no-deps rtree==1.4.1
+USER 1000:1000

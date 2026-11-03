@@ -1,0 +1,77 @@
+{
+  "id": "build_scene",
+  "description": "Publish the selected global/local inventory collision layers: accepted current CAD meshes, measured unknown-object OBBs and table cuboids. Reuse compatible resident GPU planners. This does not capture images, run SAM3 or FoundationPose, or integrate TSDF/ESDF in CAD/OBB mode. Global updates all currently observed inventory entities; local updates only the selected entities and preserves valid other layers. Neither means hidden space has been observed. The graph chooses scope and exclusion_state. observation keeps all obstacles for empty-hand viewpoint motion; selected binds the current grasp target. A selected map is not an observation map. Missing or stale required geometry is reported, never repaired by republishing identical data.",
+  "inputs": [
+    "current_inventory_observation",
+    "selected_target_if_requested",
+    "mapping_settings",
+    "scope",
+    "reason",
+    "entity_ids",
+    "exclusion_state"
+  ],
+  "requires": {
+    "observed": true,
+    "inventory_finalized": true,
+    "grasp_held": false,
+    "recovery_needed": false
+  },
+  "provides": [
+    "scene_available"
+  ],
+  "capability": "Publish the selected global/local inventory collision layers: accepted current CAD meshes, measured unknown-object OBBs and table cuboids",
+  "outputs": [
+    "scene_available",
+    "mode_dependent_scene_ready_and_views_ready",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure",
+    "mapping_strategy_unknown",
+    "mapping_entity_not_in_inventory",
+    "local_mapping_requires_object_entities",
+    "local_mapping_entities_not_observed",
+    "inventory_map_incomplete"
+  ],
+  "invalidates_observation": false,
+  "planning_effects": {
+    "scene_available": true,
+    "scene_ready": null,
+    "views_ready": null,
+    "placement_resolved": false,
+    "place_plan_ready": false
+  },
+  "argument_rules": [
+    {
+      "when_arguments": {
+        "exclusion_state": "selected"
+      },
+      "requires": {
+        "target_selected": true
+      },
+      "effects": {
+        "scene_ready": true,
+        "views_ready": true,
+        "observation_motion_scene_ready": null,
+        "observation_map_ready": false
+      }
+    },
+    {
+      "when_arguments": {
+        "exclusion_state": "observation"
+      },
+      "requires": {},
+      "effects": {
+        "scene_ready": false,
+        "views_ready": false,
+        "observation_motion_scene_ready": true,
+        "observation_map_ready": true
+      }
+    }
+  ],
+  "recovery_retry_safe": true
+}

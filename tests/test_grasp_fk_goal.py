@@ -33,7 +33,7 @@ def pose(x=.5):
 def fk_evidence(matrix, arm="A", joints=None, token="map-1"):
     side = "L" if arm == "A" else "R"
     return {"source": "curobo_public_compute_kinematics", "frame": "world",
-            "arm": arm, "tool_frame": f"TCP_Link_{side}", "scene_token": token,
+            "arm": arm, "tool_frame": "gripper_front_" + arm, "scene_token": token,
             "joint_names": [f"Joint{i}_{side}" for i in range(1, 8)],
             "joints_rad": joints or [0.] * 7, "T_world_tcp": matrix.tolist()}
 
@@ -44,7 +44,7 @@ def inputs(arm="A", achieved=None):
     snapshot = observed_scene()
     scene = {"target_id": "seen-red", "generation": 1,
              "observation_id": "capture-4", "scene_token": "map-1"}
-    grasps = {"arm": arm, "tool_profile_revision": TOOL_PROFILE["revision"],
+    grasps = {"arm": arm, "tcp_frame": "gripper_front_" + arm, "tool_profile_revision": TOOL_PROFILE["revision"],
               "sampling_round": 2, "T_world_cloud": np.eye(4).tolist(),
               "candidates": [{"index": 981, "score": .8, "source_batch": 10,
                   "source_index": 81, "T_object_grasp": nominal.tolist(),
@@ -104,7 +104,7 @@ def test_achieved_pose_failure_is_explicit_candidate_rejection(fault):
     item["achieved_tool_pose"] = fk_evidence(achieved)
     algorithms = DemoAlgorithms(curobo_request=lambda *args: {
         "scene_token": "map-1", "batch_size": 1, "items": [item]})
-    result = algorithms.evaluate_arms(snapshot, "seen-red", grasps, scene, requested_arm="A")["A"]
+    result = algorithms.evaluate_arms(snapshot, "seen-red", grasps, scene, requested_arm="A", planning_settings={'grasp_insertion_m': .01, 'grasp_maximum_tilt_deg': 45., 'grasp_require_away_from_robot': True})["A"]
     assert result["valid_candidates"] == []
     evidence = result["batches"][0]["candidate_filters"][0]
     assert evidence["accepted"] is False
@@ -173,19 +173,23 @@ def test_backend_fk_uses_selected_ik_solution_and_serializes_binding(monkeypatch
     from tianji_curobo.contracts import NativeIkBatchResult, NativeIkResult
     names = tuple(f"Joint{i}_L" for i in range(1, 8))
     native = NativeIkBatchResult((NativeIkResult(True, (.2,) * 7, names, .003, .01),
-                                  NativeIkResult(False, None, names, 1., 1.)), "map-1", .1)
+                                  NativeIkResult(False, None, names, 1., 1.),
+                                  NativeIkResult(True, (.4,) * 7, names, .003, .01)), "map-1", .1)
     monkeypatch.setattr(_NativeCuroboBackend, "solve_ik_batch_native", lambda self, request: native)
     backend = object.__new__(ValidatedBatchBackend)
-    backend.arm, backend.tool_frame, backend.joint_names = "A", "TCP_Link_L", names
+    backend.arm, backend.tool_frame, backend.joint_names = "A", "gripper_front_A", names
     checked = []
     backend._state = lambda degrees: np.deg2rad(degrees)
+    backend._torch = SimpleNamespace(as_tensor=lambda value, **kwargs: np.asarray(value))
+    backend._device, backend._dtype = 'cpu', None
+    backend._joint_state_type = SimpleNamespace(from_position=lambda value, **kwargs: value)
     class Tensor:
         def detach(self):
             return self
         def cpu(self):
             return self
         def numpy(self):
-            return pose(.503)[None, None]
+            return np.asarray([pose(.503), pose(.605)])[:, None]
     def compute(state):
         checked.append(state)
         return SimpleNamespace(tool_poses=SimpleNamespace(get_link_pose=lambda name:
@@ -195,9 +199,15 @@ def test_backend_fk_uses_selected_ik_solution_and_serializes_binding(monkeypatch
     # Runtime replaces the token after its unchanged-scene check.
     payload = replace(result, scene_token="map-1").to_payload()
     assert len(checked) == 1
-    np.testing.assert_allclose(checked[0], [.2] * 7)
+    np.testing.assert_allclose(checked[0], [[.2] * 7, [.4] * 7])
     assert payload["items"][0]["achieved_tool_pose"] == fk_evidence(pose(.503), joints=[.2] * 7)
     assert payload["items"][1].get("achieved_tool_pose") is None
+    assert payload["items"][2]["achieved_tool_pose"] == fk_evidence(pose(.605), joints=[.4] * 7)
+
+
+def test_empty_ik_solution_set_does_not_dispatch_fk():
+    backend = object.__new__(ValidatedBatchBackend)
+    assert backend.tool_fk_batch_evidence([], 'scene') == ()
 
 
 def test_backend_preserves_final_fk_through_trajectory_derivatives_and_hard_check(monkeypatch):
@@ -208,9 +218,10 @@ def test_backend_preserves_final_fk_through_trajectory_derivatives_and_hard_chec
     monkeypatch.setattr(_NativeCuroboBackend, "plan_grasp_batch_native", lambda self, request: native)
     monkeypatch.setattr(backend_builder, "add_trajectory_derivatives", lambda result, raw: result)
     backend = object.__new__(ValidatedBatchBackend)
-    backend.motion_planner = SimpleNamespace(last_grasp_result=None)
+    backend.motion_planner = SimpleNamespace(last_grasp_result=None, grasp_contacts=lambda links: __import__("contextlib").nullcontext())
     backend.arm = 'A'
     backend.tool_fk_evidence = lambda joints, token: fk_evidence(pose(.504), joints=list(joints), token=token)
+    backend.tool_fk_batch_evidence = lambda rows, token: tuple(backend.tool_fk_evidence(joints, token) for joints in rows)
     backend.validate_trajectory_native = lambda request: None
     result = backend.plan_grasp_batch_native(SimpleNamespace(scene_token="scene"))
     assert result.items[0].grasp_endpoint_fk["joints_rad"] == [.1] * 7
@@ -236,9 +247,10 @@ def test_original_runtime_and_service_preserve_fk_at_both_api_boundaries(monkeyp
     monkeypatch.setattr(_NativeCuroboBackend, "plan_grasp_batch_native", plan)
     monkeypatch.setattr(backend_builder, "add_trajectory_derivatives", lambda result, raw: result)
     backend = object.__new__(ValidatedBatchBackend)
-    backend.motion_planner = SimpleNamespace(last_grasp_result=None)
+    backend.motion_planner = SimpleNamespace(last_grasp_result=None, grasp_contacts=lambda links: __import__("contextlib").nullcontext())
     backend.arm = 'A'
     backend.tool_fk_evidence = lambda joints, token: fk_evidence(pose(.504), joints=list(joints), token=token)
+    backend.tool_fk_batch_evidence = lambda rows, token: tuple(backend.tool_fk_evidence(joints, token) for joints in rows)
     backend.validate_trajectory_native = lambda request: None
     backend.update_peer_collision_model = lambda *args: None
     runtime = GeometryRuntime()
@@ -289,7 +301,8 @@ def test_demo_planning_uses_one_fk_goal_for_lift_request_contact_and_return(monk
         return result
     algorithms.request = request
     contacts = []
-    algorithms.validate_execution = lambda *args, **kwargs: contacts.append(kwargs["contact_goal_pose_world"]) or {}
+    algorithms.validate_execution = lambda *args, **kwargs: (
+        contacts.append(kwargs['contact_goal_pose_world']) if 'contact_goal_pose_world' in kwargs else None) or {}
     result = algorithms.plan_grasp(snapshot, "seen-red", "A", evaluations, scene)
     for goal in [captured["lift_goal"], captured["request"]["goal_matrices_world"][0],
                  *contacts, result["T_world_tcp"]]:

@@ -32,18 +32,14 @@ def release_case(tmp_path):
     return runner, context
 
 
-async def test_completed_place_requires_open_gripper_and_visual_destination_confirmation(tmp_path):
+async def test_release_feedback_does_not_claim_visual_destination_or_complete_task(tmp_path):
     runner, context = release_case(tmp_path)
-    result = await runner.execute('verify_place', context, {})
+    result = await runner.verify_place(context)
     assert result['success'] and result['status'] == 'confirmed'
     assert result['source'] == 'gripper_position'
-    assert result['verification_scope'] == 'release_and_visual_destination'
-    assert result['destination_pose_verified'] is False
-    assert result['destination_region_verified'] is True
-    assert context['observation']['observation_id'] == 'visual-after-place'
-    assert runner.task_progress.completed_ids == ['target']
+    assert result['verification_scope'] == 'release_only'
+    assert runner.task_progress.completed_ids == []
     assert runner.state['facts']['place_evidence_pending'] is False
-    assert (await runner.verify_place(context))['success']
 
 
 @pytest.mark.parametrize('fact', ['released', 'place_execution_completed'])
@@ -68,9 +64,3 @@ async def test_visual_confirmation_cannot_replace_missing_release_feedback(tmp_p
     assert result['reason'] == 'open_position_not_confirmed'
 
 
-def test_success_conclusion_describes_release_without_claiming_final_pose():
-    from luna_mujoco.run_conclusion import run_conclusion
-
-    result = run_conclusion({'status': 'succeeded', 'verification': {
-        'status': 'confirmed', 'verification_scope': 'release_only'}}, [])
-    assert '释放' in result['summary'] and '未核验' in result['summary']

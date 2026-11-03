@@ -8,9 +8,60 @@ import pytest
 from luna_mujoco.experiments import ExperimentOptions, ExperimentStore
 
 
+def test_array_deduplication_preserves_dtype_shape_and_exact_bits(tmp_path):
+    from luna_mujoco.experiments import archive_value
+
+    values = np.array([0., -0., np.nan, np.inf], dtype='>f8').reshape(2, 2)
+    data = {'a': values, 'copy': values.copy(), 'layout': np.asfortranarray(values),
+            'flat': values.reshape(4), 'bytes': values.view('u1'), 'changed': values + 1}
+    path = archive_value(tmp_path, 'arrays', data)
+    refs = json.loads((tmp_path / path).read_text())
+    assert refs['a']['key'] == refs['copy']['key'] == refs['layout']['key']
+    assert len({refs[key]['key'] for key in ('a', 'flat', 'bytes', 'changed')}) == 4
+    with np.load(tmp_path / 'arrays.npz', allow_pickle=False) as arrays:
+        for key, original in data.items():
+            restored = arrays[refs[key]['key']]
+            assert restored.dtype == original.dtype and restored.shape == original.shape
+            assert restored.tobytes() == original.tobytes()
+
+
 def begin(store, mode="auto", name="实验一"):
     return store.start(uuid4().hex, "抓红色到蓝盒", ExperimentOptions(
         name=name, record_video=False, save_mode=mode), {"planning_settings": {"time_scale": 3}})
+
+
+def test_policy_decision_burst_keeps_order_while_writer_is_busy(tmp_path, monkeypatch):
+    import threading
+
+    from luna_mujoco.experiments import ExperimentSession
+
+    release = threading.Event()
+    original = ExperimentSession._write
+    def delayed_writer(self):
+        assert release.wait(5)
+        original(self)
+    monkeypatch.setattr(ExperimentSession, '_write', delayed_writer)
+    store = ExperimentStore(tmp_path)
+    session = begin(store)
+    try:
+        for index in range(256):
+            session.event({'id': index, 'kind': 'policy_node', 'data': {}}, {'index': index})
+    finally:
+        release.set()
+        session.finish({'status': 'succeeded'})
+    assert store.get(session.id)['errors'] == []
+    assert [event['id'] for event in store.events(session.id)] == list(range(256))
+
+
+def test_archive_records_nested_policy_and_registered_skill_sources(tmp_path):
+    store = ExperimentStore(tmp_path)
+    session = begin(store)
+    session.finish({'status': 'succeeded'})
+    config = json.loads(store.file(session.id, 'config.json').read_text(encoding='utf-8'))
+    hashes = config['source_sha256']
+    assert 'src/luna_mujoco/agent/responses.py' in hashes
+    assert 'src/luna_mujoco/runtime/controller.py' in hashes
+    assert 'skill_catalog/build_scene/contract.json' in hashes
 
 
 def test_exact_arrays_events_and_settings_survive_archive(tmp_path):
@@ -127,17 +178,22 @@ def test_active_experiment_cannot_move_or_be_discarded(tmp_path):
 
 @pytest.mark.asyncio
 async def test_runner_failure_is_archived_with_causal_ids(tmp_path):
-    from test_runner import Sim
+    from test_demo_runner import DemoRobot, DemoVision, TestPolicyController
 
-    from luna_mujoco.demo_runner import DemoRunner
     from luna_mujoco.planning_settings import PlanningSettings
 
-    class Algorithms:
+    class Algorithms(DemoVision):
         def observe(self, *args, **kwargs):
+            if kwargs.get('checkpoint') == 'proposal':
+                return super().observe(*args, **kwargs)
             raise ValueError("recorded_perception_failure")
 
+    class ArchiveRobot(DemoRobot):
+        def snapshot(self):
+            return self.robot_snapshot() | {'objects': []}
+
     store = ExperimentStore(tmp_path / "experiments")
-    runner = DemoRunner(Sim(), Algorithms(), None, tmp_path / "runs", experiments=store,
+    runner = TestPolicyController(ArchiveRobot(), Algorithms(), None, tmp_path / "runs", experiments=store,
         planning_settings=PlanningSettings(observation={"A": [0.] * 7, "B": [0.] * 7}))
     await runner.start("抓取红色方块", experiment=ExperimentOptions(record_video=False))
     await runner.worker

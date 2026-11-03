@@ -1,0 +1,11 @@
+# verify_place
+
+Verify this transfer after completed release and retreat. Use one frozen three-camera RGB capture and one Decisions request to judge the destination support/container relationship and whether the target is still held. The operator accepts approximate visual placement; do not require exact post-release XYZ or a visible configured-region marker. Keep target appearance, destination identity and the current transfer location clause separate from CAD retrieval, prior processing, later observation/return and overall completion. No SAM3, FoundationPose, OBB fitting or post-release depth measurement is called. Actual release endpoint, gripper feedback and capture/action bindings are checked independently. After confirmation, update/invalidate the released entity map from execution feedback; this is a predicted transform, not a newly measured pose or full scene rebuild. Reuse unchanged post-release evidence; unknown never causes automatic capture, motion or retry.
+
+Use the registered contract and typed parameters. Runtime executes only graph-selected skills. A success confirms this transfer, not final task completion.
+
+The graph must explicitly select this skill to obtain visual delivery evidence. execute_place does not invoke it. Returning to an observation posture is a separate graph action, including the operator-required return after each verified delivery. Verification never moves either arm.
+
+For an entire region already authorized by Decisions, share historical identity separately from each question's current camera images. Name the target and destination explicitly; keep region proximity and gripper retention independent. Do not rejudge future processing or return requirements. Additional language constraints remain required when the region has not been authorized in full. A decisive visual rejection returns failure (`visual_placement_rejected`); uncertain evidence remains unknown. Neither result automatically causes motion or retries. All question images are archived and available in replay.
+
+Global inventory closure is never appended by this skill, including the final object. The graph selects verify_task_completion separately. If no historical reference image exists, refer to the bound appearance description; do not claim a reference crop was supplied.

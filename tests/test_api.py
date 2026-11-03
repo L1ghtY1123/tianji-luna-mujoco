@@ -50,7 +50,7 @@ class Algorithms:
 
 def test_progress_poll_does_not_snapshot_or_serialize_historical_geometry(tmp_path):
     simulation = Simulation()
-    app = create_app(simulation, Algorithms(), lambda record: None, tmp_path)
+    app = create_app(simulation, Algorithms(), None, tmp_path)
     app.state.runner.state['historical_geometry'] = object()
     app.state.runner.events.append({'large_history': object()})
     def forbidden_snapshot():
@@ -69,7 +69,7 @@ def test_workspace_view_is_read_only_and_reports_missing_atlas(tmp_path, monkeyp
     payload = {'source': 'offline_single_arm_workspace', 'arms': []}
     monkeypatch.setattr(WorkspaceAtlas, 'preview', lambda self: payload)
     simulation = Simulation()
-    with TestClient(create_app(simulation, Algorithms(), lambda record: None, tmp_path)) as client:
+    with TestClient(create_app(simulation, Algorithms(), None, tmp_path)) as client:
         assert client.get('/api/workspaces').json() == payload
         scene = client.get('/api/workspace-scene')
         assert scene.status_code == 200
@@ -88,7 +88,7 @@ def test_workspace_view_is_read_only_and_reports_missing_atlas(tmp_path, monkeyp
 
 
 def test_websocket_initial_packet_and_reset_event_mode(tmp_path):
-    app = create_app(Simulation(), Algorithms(), lambda record: None, tmp_path)
+    app = create_app(Simulation(), Algorithms(), None, tmp_path)
     with TestClient(app) as client, client.websocket_connect("/ws") as socket:
         packet = socket.receive_json()
         assert packet["events_mode"] == "replace"
@@ -104,7 +104,7 @@ def test_websocket_does_not_copy_events_already_delivered(tmp_path):
             copies.append(self['id'])
             return dict(self)
 
-    app = create_app(Simulation(), Algorithms(), lambda record: None, tmp_path)
+    app = create_app(Simulation(), Algorithms(), None, tmp_path)
     app.state.runner.events = [RecordedEvent(id=1, kind='jev', data={'output': 'observe_scene'})]
     with TestClient(app) as client, client.websocket_connect('/ws') as socket:
         assert socket.receive_json()['events'][0]['id'] == 1
@@ -127,7 +127,7 @@ def test_server_instance_identity_is_shared_by_http_and_websocket_and_changes_on
 
     instance_ids = []
     for _ in range(2):
-        app = create_app(Simulation(), Algorithms(), lambda record: None, tmp_path)
+        app = create_app(Simulation(), Algorithms(), None, tmp_path)
         with TestClient(app) as client:
             instance_id = client.get("/api/state").json()["server_instance_id"]
             assert UUID(instance_id).version == 4
@@ -141,7 +141,7 @@ def test_server_instance_identity_is_shared_by_http_and_websocket_and_changes_on
 
 def test_only_scene_apply_commits_edits_and_clears_previous_run(tmp_path):
     simulation = Simulation()
-    app = create_app(simulation, Algorithms(), lambda record: None, tmp_path)
+    app = create_app(simulation, Algorithms(), None, tmp_path)
     with TestClient(app) as client:
         app.state.runner.state["status"] = "succeeded"
         scene = {"objects": [{"id": "cube", "position": [.4, .1, .7]}]}
@@ -157,7 +157,7 @@ def test_only_scene_apply_commits_edits_and_clears_previous_run(tmp_path):
 
 
 def test_start_sent_before_reset_cannot_restart_the_reset_scene(tmp_path):
-    app = create_app(Simulation(), Algorithms(), lambda record: None, tmp_path)
+    app = create_app(Simulation(), Algorithms(), None, tmp_path)
     with TestClient(app) as client:
         client.post("/api/confirm").raise_for_status()
         old_generation = client.get("/api/state").json()["simulation"]["generation"]
@@ -188,7 +188,7 @@ def test_reset_clears_remote_attachment_without_blocking_physics_or_allowing_a_n
             return {"ok": True, "attached": False}
 
     algorithms = HeldAlgorithms()
-    app = create_app(Simulation(), algorithms, lambda record: None, tmp_path)
+    app = create_app(Simulation(), algorithms, None, tmp_path)
     with TestClient(app) as client:
         try:
             client.post("/api/confirm").raise_for_status()
@@ -206,7 +206,7 @@ def test_reset_clears_remote_attachment_without_blocking_physics_or_allowing_a_n
 
 
 def test_state_publishes_bounded_holding_evidence_without_cloud_or_capture_payloads(tmp_path):
-    app = create_app(Simulation(), Algorithms(), lambda record: None, tmp_path)
+    app = create_app(Simulation(), Algorithms(), None, tmp_path)
     with TestClient(app) as client:
         app.state.runner.holding_state = {
             "state": "held", "arm": "A", "verified": True, "attached": True,

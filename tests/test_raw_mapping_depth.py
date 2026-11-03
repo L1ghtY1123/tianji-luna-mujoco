@@ -169,3 +169,33 @@ def test_capture_stage_timings_reset_with_the_capture(monkeypatch):
         "filtered_depth_download_wall": 2., "semantic_partition_wall": 2.})
     adapter.begin_capture(None)
     assert adapter.timings_ms == {}
+
+
+def test_capture_fk_uses_same_normalized_sphere_radii_as_execution(monkeypatch):
+    import sys
+    from pathlib import Path
+
+    import yaml
+
+    from luna_mujoco import raw_robot_depth
+    from luna_mujoco.carrying import configure_gripper_feedback
+    root = Path(__file__).resolve().parents[1]
+    urdf = root / 'assets/marvin_urdf/marvin_with_grippers.urdf'
+    original = yaml.safe_load((root / 'resources/curobo/marvin_gui_dual.yml').read_bytes())
+    feedback = {'A': 3.2765808475558003e-19, 'B': 1.5551993046562916e-19}
+    execution = configure_gripper_feedback(original, feedback, urdf)
+    monkeypatch.setitem(sys.modules, 'curobo.kinematics', SimpleNamespace(
+        Kinematics=lambda config: SimpleNamespace(config=config),
+        KinematicsCfg=SimpleNamespace(from_data_dict=lambda config, **kwargs: config)))
+    monkeypatch.setitem(sys.modules, 'curobo.types', SimpleNamespace(DeviceCfg=lambda: object()))
+    monkeypatch.setattr(raw_robot_depth, 'articulated_segmentation_config', lambda config, **kwargs: config)
+    boundary = raw_robot_depth.RawRobotDepthBoundary(original, urdf_path=urdf, asset_root_path=root / 'assets',
+                                                     feedback=feedback)
+    captured = boundary.kinematics.config['robot_cfg']['kinematics']['collision_spheres']
+    for link, spheres in execution['robot_cfg']['kinematics']['collision_spheres'].items():
+        np.testing.assert_array_equal(np.asarray([row['radius'] for row in captured[link]], np.float32),
+                                      np.asarray([row['radius'] for row in spheres], np.float32))
+    initial = boundary.kinematics
+    boundary.update_feedback({'A': .2, 'B': .3})
+    assert boundary.kinematics is initial
+    assert boundary.robot_config == original

@@ -1,4 +1,4 @@
-"""The first real CAD run must use its validated mesh shell for source exit."""
+"""Archived CAD shell geometry is rejected before measured lift planning."""
 import copy
 import json
 from pathlib import Path
@@ -25,60 +25,24 @@ def derive(value):
                                  value["candidates"], value["scene"], value["settings"])
 
 
-def test_actual_cad_source_lift_uses_all_49_mesh_bounds_without_changing_scene():
+def test_archived_cad_source_bounds_require_rebuild_instead_of_influencing_lift():
     value = frozen()
-    before = copy.deepcopy(value["scene"])
-    settings, proof = derive(value)
-    prefix = "semantic_instance::" + proof["source_container_id"] + "::bin_shell::"
-    parts = [layer for layer in proof["retained_source_layers"] if layer["name"].startswith(prefix)]
-    assert len(parts) == 49
-    assert all(layer["source"] == "published_mesh_bounds" for layer in parts)
-    assert all(layer["geometry_source"] == "known_cad_measured_registration" for layer in parts)
-    assert all(layer["synthetic_geometry_is_measured"] is False for layer in parts)
-    assert proof["source_neighbor_ids"] == value["expected_neighbor_ids"]
-    assert proof["source_occupied_top_world_z_m"] == pytest.approx(max(
-        layer["maximum_world_m"][2] for layer in proof["retained_source_layers"]))
-    assert settings["lift_offset_m"] >= value["settings"]["lift_offset_m"]
-    for candidate in proof["candidates"]:
-        assert candidate["lowest_sphere_world_z_m"] + settings["lift_offset_m"] >= (
-            proof["source_occupied_top_world_z_m"] + .01 - 1e-12)
-    assert [c["candidate_index"] for c in proof["candidates"]] == [
-        c["candidate_index"] for c in value["candidates"]]
-    assert proof["required_clearance_m"] == .01
-    assert value["scene"] == before
-
-
-@pytest.mark.parametrize("damage", ["missing_part", "stale_part", "hash", "disabled", "wrong_id"])
-def test_cad_lift_does_not_bypass_complete_current_catalog_validation(damage):
-    value = frozen()
-    layers = value["scene"]["collision_layer_bounds"]["layers"]
-    source = value["snapshot"]["scene_entities"][value["target_id"]]["initial_parent_id"]
-    name = f"semantic_instance::{source}::bin_shell::cad_part_00"
-    if damage == "missing_part":
-        layers.pop(name)
-    elif damage == "stale_part":
-        layers[name]["observation_id"] = "old"
-    elif damage == "hash":
-        layers[name]["part_sha256"] = "unverified"
-    elif damage == "disabled":
-        value["scene"]["disabled_obstacle_names"].append(name)
-    else:
-        layers[name]["instance_id"] = "another-bin"
-    with pytest.raises(ValueError, match="demo_bin_shell"):
+    before = copy.deepcopy(value['scene'])
+    with pytest.raises(ValueError, match='scene_geometry_policy_requires_rebuild:cad_shell'):
         derive(value)
+    assert value['scene'] == before
 
 
-@pytest.mark.parametrize("role", ["source", "neighbor", "height_completion"])
-def test_mesh_type_is_not_authorized_for_unverified_source_or_neighbor_layers(role):
+@pytest.mark.parametrize('damage', ['missing_part', 'stale_part', 'hash', 'disabled', 'wrong_id'])
+def test_cad_shell_is_rejected_regardless_of_registration_metadata(damage):
     value = frozen()
-    source = value["snapshot"]["scene_entities"][value["target_id"]]["initial_parent_id"]
-    identifier = source if role == "source" else value["expected_neighbor_ids"][0]
-    name = "semantic_instance::" + identifier
-    layers = value["scene"]["collision_layer_bounds"]["layers"]
-    if role == "height_completion":
-        layer = copy.deepcopy(layers[name])
-        name += "::height_completion"
-        layers[name] = layer | {"kind": "mesh"}
-    layers[name]["source"] = "published_mesh_bounds"
-    with pytest.raises(ValueError, match="grasp_lift_source_bounds_unavailable:" + name):
+    layers = value['scene']['collision_layer_bounds']['layers']
+    name = next(name for name in layers if '::bin_shell::' in name)
+    if damage == 'missing_part':
+        layers.pop(name)
+    elif damage == 'disabled':
+        value['scene']['disabled_obstacle_names'].append(name)
+    else:
+        layers[name][damage] = 'changed'
+    with pytest.raises(ValueError, match='scene_geometry_policy_requires_rebuild:cad_shell'):
         derive(value)

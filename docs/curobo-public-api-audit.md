@@ -1,5 +1,13 @@
 # cuRobo 调用审计（2026-10-23）
 
+2026-10-27 最新场景要求：VLA前双臂必须到达 resources/vla_unpack.json 中的固定起始关节姿态，右臂不再是可选择保留当前位置的空闲臂。仿真黑色产物仅在桌面右侧中心XY=(0.44,-0.30)m、4cm×4cm区域内随机生成，同时检查桌面支撑与B臂位置包络；具体真值不进入视觉或规划。普通障碍硬净距默认及当前界面配置均为5mm，软激活距离和释放高度仍独立配置。
+
+
+2026-10-27 当前抓放设置：用户已批准以可配置的普通障碍硬净距取代10mm下限，软激活距离独立设置且不小于硬净距。抓姿局部Z补偿默认0、可在高级设置中调整；最大倾角180°和背离机身限制关闭表示不按方向预先剔除，IK与碰撞仍须通过。执行按连续位置/速度稳定窗口及超时结束；额外阶段停留默认0。用户最新要求：闭爪稳定后，校验实际闭爪、双臂、环境、自碰撞和关节界限，直接执行原生lift；抬升完成且当前反馈仍确认持物，才建立实测表面attachment。首次lift不检查携物扫掠体积；取消提前attachment及支撑层例外。固定1cm补偿/45°/10mm下限不再是当前默认行为。Responses独立编排、Decisions视觉核验及TSDF/ESDF地图边界保持。
+
+
+2026-10-26 补充：[性能与自托管边界审计](curobo-performance-audit.md)记录真实输入的冷/热态、公开 SDK wall time、checker/coverage 与 seed 对照。新增计时只包裹项目发起的公开调用，不拦截 `plan_grasp` 内部 `plan_pose`，不改变 SDK 实现或参数。严格 peer 快照复用仅用于允许缓存的调用；pinned grasp/place 的 `cache_snapshot=False` 保持有效，因此不声称该缓存使复合抓取达到约 1 秒。
+
 ## 本轮发现与边界
 
 本轮287项回归、56组GPU几何对照、13配置启动预热及未验收边界，见[2026-10-23验证记录](verification/2026-10-23-planner-call-and-geometry.md)。后文2026-10-22的时间/实验结果保留其历史范围。
@@ -43,7 +51,6 @@
 | `plan_grasp_batch` | `BatchMotionPlanner.plan_grasp` | 官方全部阶段；挑选成功候选、保留官方导数，最终插值命令检查碰撞 |
 | `plan_grasp` | `MotionPlanner.plan_grasp` | vendor历史方法，不注册为本服务HTTP入口；当前单目标抓放求解器用于下行place调用 |
 | `plan_place` | `MotionPlanner.plan_grasp`，公开 `plan_grasp_to_lift=False` | 前两段保持attachment；松爪detach后另调公开规划撤离 |
-| `plan_place_batch` 兼容入口 | `BatchMotionPlanner.plan_grasp`，同上两阶段模式 | 当前demo不调用；保留输入/释放位置/结果检查 |
 | 普通持物或空爪位姿运动 | `MotionPlanner.plan_pose` | 公开 max_attempts；原始轨迹返回后五次插值与执行时间伸长 |
 | 双臂观测/VLA移动 | `MotionPlanner.plan_cspace` 或 `plan_pose` | 14关节/双TCP目标、官方求解、10mm验证 |
 | 轴向移动/支撑法向撤离 | `ToolPoseCriteria.linear_motion` + `plan_pose` | 当前place Lift采用官方默认scale=1。旧支撑兼容入口仍有有界参数尝试，但已删除额外100000倍放大；该入口不由当前demo调用，不冒充官方plan_grasp |
@@ -62,7 +69,9 @@
 
 ## 预热与缓存
 
-启动完成13个常驻配置后才ready：A/B各IK100、批4/16、普通单臂、单目标抓放，以及AB双臂、A/B位置可达性。实测最终启动51.33秒。用户任务期间换物、换臂、松爪和重置地图不销毁兼容规划器。重置依然清除旧场景证据，旧地图不能执行。
+2026-10-26 容量修正：公开 collision_cache 使用紧凑启动容量 mesh2/cuboid5/voxel4，按实际障碍数量扩容，不再预留128/128/8。锁定SDK碰撞kernel按 sphere×allocated-obstacle 槽并行，空槽不是纯内存成本。同实测f580输入、默认16/2 seeds，热态由13.733–14.629秒降至2.642–3.071秒，全部障碍及成功判据保留；这是隔离纯规划对照，常驻部署/物理验收另记。超容量前先重建CUDA图与solver，不截断场景；响应effective_config新增collision_cache_capacity。详见`docs/curobo-performance-audit.md`及`data/curobo-capacity-f580-*.json`。
+
+当前启动完成11个常驻配置后才ready：A/B各IK100、批4、普通单臂、单目标抓放，以及AB双臂、A/B位置可达性。batch16保留按需创建；之前13配置的51.33秒属于历史记录。2026-10-26增至4个轨迹种子后，13配置挤占首次机器人深度遮罩所需显存，因此移除未使用的两项预热，并逐profile记录allocated/reserved/free。用户任务期间换物、换臂、松爪和重置地图不销毁兼容规划器。重置依然清除旧场景证据，旧地图不能执行。
 
 测得新的夹爪开度需要重新生成锁定关节几何，再通过公开API复制到原GPU缓冲；这是几何更新，不是重新预热。只换附件的GPU实测约2–3ms，开度改变约1.4–1.8s。真实prepare还包括场景上传、对侧手臂和附件检查，不能把2–3ms写成整个attachment技能耗时。
 

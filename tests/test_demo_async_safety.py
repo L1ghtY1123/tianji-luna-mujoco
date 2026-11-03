@@ -8,9 +8,9 @@ import threading
 
 import pytest
 from test_demo_runner import TEST_SETTINGS, DemoRobot, DemoVision
+from test_demo_runner import TestPolicyController as RobotOperations
 
 from luna_mujoco.algorithms import AlgorithmError
-from luna_mujoco.demo_runner import DemoRunner
 
 
 class RecordedRobot(DemoRobot):
@@ -18,11 +18,11 @@ class RecordedRobot(DemoRobot):
         super().__init__()
         self.motor_commands = []
 
-    def execute_trajectory(self, arm, positions_rad, dt, generation):
+    def execute_trajectory(self, arm, positions_rad, dt, generation, *, execution_settings=None):
         self.motor_commands.append(("trajectory", arm))
         return super().execute_trajectory(arm, positions_rad, dt, generation)
 
-    def set_gripper(self, arm, closed, generation):
+    def set_gripper(self, arm, closed, generation, *, execution_settings=None):
         self.motor_commands.append(("gripper", closed))
         return super().set_gripper(arm, closed, generation)
 
@@ -71,7 +71,7 @@ async def finish_service(runner, algorithms):
 @pytest.mark.parametrize("phase", ["ik", "plan"])
 async def test_reset_cancels_current_demo_request_and_discards_late_result(tmp_path, phase):
     robot, algorithms = RecordedRobot(), WaitingVision(phase)
-    runner = DemoRunner(robot, algorithms, None, tmp_path, planning_settings=TEST_SETTINGS)
+    runner = RobotOperations(robot, algorithms, None, tmp_path, planning_settings=TEST_SETTINGS)
     await runner.start("把一个粉色物体放到指定区域")
     try:
         assert await asyncio.to_thread(algorithms.entered.wait, 2)
@@ -94,7 +94,7 @@ async def test_reset_cancels_current_demo_request_and_discards_late_result(tmp_p
 @pytest.mark.parametrize("phase", ["ik", "plan"])
 async def test_pending_demo_plan_has_no_extra_wall_deadline_and_can_be_cancelled(tmp_path, phase):
     robot, algorithms = RecordedRobot(), WaitingVision(phase)
-    runner = DemoRunner(robot, algorithms, None, tmp_path, planning_settings=TEST_SETTINGS)
+    runner = RobotOperations(robot, algorithms, None, tmp_path, planning_settings=TEST_SETTINGS)
     await runner.start("把一个粉色物体放到指定区域")
     try:
         assert await asyncio.to_thread(algorithms.entered.wait, 2)
@@ -113,7 +113,7 @@ async def test_pending_demo_plan_has_no_extra_wall_deadline_and_can_be_cancelled
 @pytest.mark.parametrize("phase", ["ik", "plan"])
 async def test_generation_change_rejects_service_success_before_demo_execution(tmp_path, phase):
     robot, algorithms = RecordedRobot(), WaitingVision(phase)
-    runner = DemoRunner(robot, algorithms, None, tmp_path, planning_settings=TEST_SETTINGS)
+    runner = RobotOperations(robot, algorithms, None, tmp_path, planning_settings=TEST_SETTINGS)
     await runner.start("把一个粉色物体放到指定区域")
     try:
         assert await asyncio.to_thread(algorithms.entered.wait, 2)
@@ -128,7 +128,7 @@ async def test_generation_change_rejects_service_success_before_demo_execution(t
 
 async def test_demo_planning_progress_is_visible_while_request_is_pending(tmp_path):
     robot, algorithms = RecordedRobot(), WaitingVision("plan")
-    runner = DemoRunner(robot, algorithms, None, tmp_path, planning_settings=TEST_SETTINGS)
+    runner = RobotOperations(robot, algorithms, None, tmp_path, planning_settings=TEST_SETTINGS)
     await runner.start("把一个粉色物体放到指定区域")
     try:
         assert await asyncio.to_thread(algorithms.entered.wait, 2)
@@ -151,12 +151,14 @@ async def test_demo_service_failure_preserves_error_and_never_starts_motor(tmp_p
                                  details={"arm": "A"})
 
     robot = RecordedRobot()
-    runner = DemoRunner(robot, BrokenVision(count=1), None, tmp_path, planning_settings=TEST_SETTINGS)
+    runner = RobotOperations(robot, BrokenVision(count=1), None, tmp_path, planning_settings=TEST_SETTINGS)
     await runner.start("把一个粉色物体放到指定区域")
     await runner.worker
     assert runner.state["status"] == "needs_attention"
     assert runner.state["failed_step"]["skill"] == "plan_grasp"
     assert runner.state["error_code"] == "CUROBO_BACKEND_FAILED"
+    assert runner.state['policy_failure']['code'] == 'unhandled_skill_result'
+    assert runner.state['policy_failure']['details']['result']['error_code'] == 'CUROBO_BACKEND_FAILED'
     failure = next(event for event in runner.events if event["kind"] == "skill_error")
     assert failure["data"]["details"] == {"arm": "A"}
     assert robot.motor_commands == []
@@ -183,14 +185,14 @@ class WaitingMotorRobot(RecordedRobot):
                 self.finished.set()
         return generation == self.generation
 
-    def execute_trajectory(self, arm, positions_rad, dt, generation):
+    def execute_trajectory(self, arm, positions_rad, dt, generation, *, execution_settings=None):
         stage = {0: "approach", 1: "grasp", 2: "lift"}[int(positions_rad[-1][0])]
         if not self.before_command(stage, generation):
             # Model a motor response that arrives after physics was reset.
             return {"completed": True}
         return super().execute_trajectory(arm, positions_rad, dt, generation)
 
-    def set_gripper(self, arm, closed, generation):
+    def set_gripper(self, arm, closed, generation, *, execution_settings=None):
         if not self.before_command("close_gripper" if closed else "open_gripper", generation):
             return {"completed": True, "closed_command": closed}
         return super().set_gripper(arm, closed, generation)
@@ -199,7 +201,7 @@ class WaitingMotorRobot(RecordedRobot):
 @pytest.mark.parametrize("stage", ["open_gripper", "approach", "grasp", "close_gripper", "lift"])
 async def test_reset_during_demo_motor_command_cannot_dispatch_the_next_stage(tmp_path, stage):
     robot = WaitingMotorRobot(stage)
-    runner = DemoRunner(robot, DemoVision(count=1), None, tmp_path, planning_settings=TEST_SETTINGS)
+    runner = RobotOperations(robot, DemoVision(count=1), None, tmp_path, planning_settings=TEST_SETTINGS)
     await runner.start("把一个粉色物体放到指定区域")
     try:
         assert await asyncio.to_thread(robot.entered.wait, 2)

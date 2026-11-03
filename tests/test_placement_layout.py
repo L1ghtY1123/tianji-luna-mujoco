@@ -1,11 +1,11 @@
 """Task-scoped placement partitions, including already occupied destinations."""
-from copy import deepcopy
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from test_region_placement import region_inputs
 
 from luna_mujoco import placement
+from luna_mujoco.runtime.inventory import PolicyTaskProgress
 from luna_mujoco.task_progress import TaskProgress
 
 
@@ -46,7 +46,7 @@ def test_polygonal_circle_and_rotated_rectangle_have_equal_area_cells():
 
 def test_layout_count_is_task_scoped_and_does_not_shrink_after_completion():
     from test_task_progress import inventory_observation
-    progress = TaskProgress('move selected objects', 'collection', route='table_box')
+    progress = TaskProgress('move selected objects', 'collection')
     objects = [{'id': str(i), 'kind': 'cube'} for i in range(4)]
     progress.observe(objects, 'head')
     progress.assess_membership({'0': 'required', '1': 'required', '2': 'required', '3': 'excluded'})
@@ -65,70 +65,19 @@ def test_layout_count_is_task_scoped_and_does_not_shrink_after_completion():
     assert len(progress.placement_request('box')['target_ids']) == 3
 
 
-@pytest.mark.parametrize('kind', ['marker', 'bin'])
-def test_two_targets_start_in_separate_regions_and_keep_placed_obstacle(kind):
-    target, destination, holding, spheres = region_inputs(kind)
-    request = {'target_count': 2, 'target_ids': ['source', 'next'], 'slot_id': 1}
-    options = {'spheres_tool_m': spheres, 'clearance_m': .01, 'placement_request': request}
-    events = []
-    before = deepcopy(destination)
-    first = placement.release_candidates(target, destination, holding, **options,
-        progress=lambda kind, title, data: events.append((kind, data)))
-    locations = {tuple(item['release_reference']['position_world_m'][:2]) for item in first}
-    assert len(locations) == 1
-    assert 0 < len(first) <= 18
-    chosen = np.asarray(first[0]['T_world_tcp'])
-    occupied_center = np.asarray(spheres)[0, :3] @ chosen[:3, :3].T + chosen[:3, 3]
-    occupied_center[2] = .70
-    observation = {'objects': [destination, {'id': 'placed', 'points_world_m': [occupied_center]}]}
-    second = placement.release_candidates(target, destination, holding,
-        **(options | {'placement_request': request | {'slot_id': 2}}), observation=observation)
-    assert second and len(second) <= 18
-    assert {item['release_reference']['slot_id'] for item in second} == {2}
-    for item in second:
-        tcp = np.asarray(item['T_world_tcp'])
-        center = np.asarray(spheres)[0, :3] @ tcp[:3, :3].T + tcp[:3, 3]
-        assert np.linalg.norm(center[:2] - occupied_center[:2]) > spheres[0][3] + .01
-    assert any(kind == 'placement_layout' for kind, _ in events)
-    assert sum(data['accepted_yaw_count'] for kind, data in events if kind == 'placement_position_checked') == len(first)
-    assert destination['placement_reference'] == before['placement_reference']
-
-
-def test_obstacle_projection_does_not_remove_yaws_before_three_dimensional_planning():
-    target, destination, holding, spheres = region_inputs('marker')
-    obstacle = [[x, y, .7] for x in np.linspace(.58, .82, 40) for y in np.linspace(-.32, -.08, 40)]
-    observation = {'objects': [destination, {'id': 'other', 'points_world_m': obstacle}]}
-    events = []
-    goals = placement.release_candidates(target, destination, holding, spheres_tool_m=spheres, clearance_m=.01,
-        placement_request={'target_count': 2}, observation=observation,
-        progress=lambda kind, title, data: events.append((kind, data)))
-    assert len(goals) == 18
-    checked = [data for kind, data in events if kind == 'placement_position_checked']
-    assert len(checked) == 1
-    assert checked[0]['accepted_yaw_count'] == 18
-    assert checked[0]['generated_yaw_count'] == 18
-
-
-def test_multiple_objects_require_region_geometry_instead_of_reusing_one_reference():
-    target, destination, holding, spheres = region_inputs()
-    destination['placement_reference'].pop('region_polygon_world_xy_m')
-    with pytest.raises(ValueError, match='placement_requires_measured_region_polygon'):
-        placement.release_candidates(target, destination, holding, spheres_tool_m=spheres, clearance_m=.01,
-            placement_request={'target_count': 2})
-
-
-def test_each_route_stage_keeps_global_capacity_across_multiple_destinations():
-    progress = TaskProgress('transfer objects through table', 'collection', route='box_table_box')
+def test_each_explicit_transfer_keeps_global_capacity_across_multiple_destinations():
+    progress = PolicyTaskProgress('transfer objects through several destinations', 'collection')
     objects = [{'id': str(i), 'kind': 'cube', 'measured_relationships': [{
         'relation': 'above_observed_bin_floor', 'object_id': 'source-box', 'visible_xy_fraction': 1.}]
     } for i in range(3)]
     progress.observe(objects, 'head')
     progress.assess_membership({str(i): 'required' for i in range(3)})
+    progress.configure_task(SimpleNamespace(destination_ref='box2', processing=[]), [str(i) for i in range(3)])
     progress.select(objects[0], 'table')
     progress.records['2']['destination_id'] = 'other-table'
     assert progress.placement_request('table')['target_count'] == 3
     progress.complete('0', observation_id='after')
     progress.select(objects[0], 'box2')
     second = progress.placement_request('box2')
-    assert second['stage_index'] == 1
+    assert second['transfer_index'] == 1
     assert second['target_count'] == 3

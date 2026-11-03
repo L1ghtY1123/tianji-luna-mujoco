@@ -28,10 +28,10 @@ async def test_completed_obstacle_requires_current_evidence_for_either_destinati
     assert algorithms.map_calls == []
 
 
-def test_fresh_map_does_not_keep_old_object_layers(monkeypatch):
+def test_explicit_retirement_removes_obsolete_entity_layers(monkeypatch):
     runtime, payload = mapped_runtime(monkeypatch)
     runtime.geometry_model['voxel']['semantic_instance::old-placed'] = {'position_source': 'action_prediction'}
-    result = runtime.build_perception(payload)
+    result = runtime.build_perception(payload | {'mapping_lifecycle': {'retired_entity_ids': ['old-placed']}})
     assert 'semantic_instance::old-placed' not in runtime.geometry_model['voxel']
     assert 'old-placed' not in result['collision_objects']
     assert not hasattr(runtime, 'predicted_layers')

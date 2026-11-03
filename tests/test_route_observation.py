@@ -1,11 +1,9 @@
 from copy import deepcopy
-from types import SimpleNamespace
 
 import pytest
 from test_observation_motion import ObservationAlgorithms, context
 
 from luna_mujoco.perception import PerceptionError
-from luna_mujoco.runner import SkillSelectionError
 from luna_mujoco.task_progress import TaskProgress
 
 
@@ -19,19 +17,19 @@ class RouteAlgorithms(ObservationAlgorithms):
 def route_context(tmp_path):
     algorithms = RouteAlgorithms()
     runner, state = context(tmp_path, algorithms)
-    runner.task_progress = TaskProgress('桌面到盒子', route='table_box')
-    runner.state['route'] = 'table_box'
+    runner.task_progress = TaskProgress('move selected entities', 'collection')
     return runner, state, algorithms
 
 
-async def test_formal_route_map_requires_reached_observation_pose(tmp_path):
+async def test_changed_environment_requires_new_observation_pose(tmp_path):
     runner, state, algorithms = route_context(tmp_path)
-    with pytest.raises(ValueError, match='observation_pose_required'):
+    state['requires_observation_pose'] = True
+    with pytest.raises(ValueError, match='changed_environment_requires_observation_pose'):
         await runner.build_scene(state, 'selected')
     assert algorithms.map_calls == []
 
 
-async def test_formal_route_map_rejects_motion_after_observation_capture(tmp_path):
+async def test_map_rejects_motion_after_observation_capture(tmp_path):
     runner, state, algorithms = route_context(tmp_path)
     state['observation_pose_capture_id'] = state['observation']['observation_id']
     state['observation_pose_reference'] = deepcopy(state['observation'])
@@ -56,14 +54,12 @@ async def test_verified_place_cannot_return_using_map_that_omits_released_object
     assert state['pending_transfer']['target_id'] == 'source'
 
 
-async def test_task_can_finish_without_rebuilding_map_after_last_place(tmp_path):
-    runner, state, _ = route_context(tmp_path)
-    state['pending_transfer'] = {'verified': True, 'target_id': 'source'}
-    runner.task_progress.select({'id': 'source'}, 'bin')
-    runner.task_progress.complete('source', observation_id='after')
-    result = await runner.execute('assess_task', state, {'judgment': 'complete'})
-    assert result['judgment'] == 'complete'
-    assert runner.state['status'] == 'succeeded'
+async def test_removed_runner_assess_task_cannot_select_followup(tmp_path):
+    runner, state, algorithms = route_context(tmp_path)
+    with pytest.raises(ValueError, match='unknown_skill:assess_task'):
+        await runner.execute('assess_task', state, {})
+    assert algorithms.moves == []
+    assert algorithms.map_calls == []
 
 
 async def test_geometry_after_return_can_refresh_inventory_before_selecting_target(tmp_path):
@@ -76,44 +72,28 @@ async def test_geometry_after_return_can_refresh_inventory_before_selecting_targ
     assert not runner.state['facts'].get('views_ready')
 
 
-async def test_new_visual_semantics_reopens_only_pending_membership_assessment(tmp_path):
-    runner, state, _ = route_context(tmp_path)
-    await runner.observe(state, purpose='scene')
-    runner.state['facts']['task_assessed'] = True
-    source = state['observation']['objects'][0]['id']
-    runner.visual_assistance = SimpleNamespace(enabled=True, inspect_scene=lambda observation, *args, **kwargs: {
-        'observation_id': observation['observation_id'], 'objects': [{'id': source, 'inside_id': 'bin'}]})
-    await runner.inspect_scene(state)
-    assert runner.state['facts']['task_assessed'] is False
-    assert runner.task_progress.snapshot()['unresolved_membership'][0]['visual_semantics']['inside_id'] == 'bin'
-    runner.state['facts']['task_assessed'] = True
-    await runner.inspect_scene(state)
-    assert runner.state['facts']['task_assessed'] is True  # An identical answer is not new evidence.
-
-
-async def test_jev_retry_grasp_marks_observation_pose_required_without_moving(tmp_path):
+async def test_removed_runner_inspect_scene_cannot_select_followup(tmp_path):
     runner, state, algorithms = route_context(tmp_path)
-    state['observation_pose_capture_id'] = 'old-pose'
-    runner.task_progress.failure = {'code': 'grasp_verification_failed', 'attempt_count': 1}
-    await runner.recover_task(state, 'retry_grasp')
-    assert state['requires_observation_pose']
-    assert 'observation_pose_capture_id' not in state
+    with pytest.raises(ValueError, match='unknown_skill:inspect_scene'):
+        await runner.execute('inspect_scene', state, {})
     assert algorithms.moves == []
+    assert algorithms.map_calls == []
 
 
-async def test_scene_observation_rejects_repeated_same_capture_but_accepts_new_frame(tmp_path):
-    runner, state, _ = route_context(tmp_path)
-    state['latest_capture'] = runner.simulation.capture_rgbd()
-    state['observation_pose_capture_id'] = state['latest_capture']['observation_id']
-    await runner.execute('observe_scene', state, {'visual_plan': {'initial': 'initialize_inventory'}})
-    count = state['analysis_count']
-    with pytest.raises(SkillSelectionError, match='visual_input_already_analyzed'):
-        await runner.execute('observe_scene', state)
-    assert state['analysis_count'] == count
-    state['latest_capture'] = runner.simulation.capture_rgbd()
-    state['observation_pose_capture_id'] = state['latest_capture']['observation_id']
-    await runner.execute('observe_scene', state, {'visual_plan': {'initial': 'associate_inventory'}})
-    assert state['analysis_count'] == count + 1
+async def test_removed_runner_recover_task_cannot_select_followup(tmp_path):
+    runner, state, algorithms = route_context(tmp_path)
+    with pytest.raises(ValueError, match='unknown_skill:recover_task'):
+        await runner.execute('recover_task', state, {})
+    assert algorithms.moves == []
+    assert algorithms.map_calls == []
+
+
+async def test_removed_runner_observe_scene_cannot_select_followup(tmp_path):
+    runner, state, algorithms = route_context(tmp_path)
+    with pytest.raises(ValueError, match='unknown_skill:observe_scene'):
+        await runner.execute('observe_scene', state, {})
+    assert algorithms.moves == []
+    assert algorithms.map_calls == []
 
 
 @pytest.mark.parametrize('visible', [False, True])

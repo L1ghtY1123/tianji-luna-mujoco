@@ -9,10 +9,44 @@ from io import BytesIO
 import numpy as np
 from PIL import Image
 
+from .multiview_identity import grouped_view_instruction
 from .observation_labels import raster_visual_annotations
 from .visual_inventory import image_part
 
 FRAME_COLOR = (235, 235, 235)
+
+
+def _image_label(label):
+    """Compact pixel labels retain their full names and canonical IDs in context."""
+    anchor = label.startswith('Current anchor · ')
+    label = label.removeprefix('Current anchor · ')
+    label = re.sub(r'\bReference (\d+)', r'R\1', label)
+    label = re.sub(r'\bCandidate (\d+)', r'C\1', label)
+    return label + ('*' if anchor else '')
+
+
+def ground_identity_locations(payload):
+    """Put existing calibrated measurements next to the instance question they support."""
+    result = deepcopy(payload)
+    context = json.loads(result['input'][0]['content'][0]['text'])
+    locations = {row['candidate']: row for row in context.get('candidate_geometric_location_hints', [])}
+    marker = ' Current measured candidate surface: '
+    for question in result['questions']:
+        if not question['name'].startswith('identity_'):
+            continue
+        candidate = 'candidate-' + question['name'].removeprefix('identity_')
+        if candidate not in locations:
+            continue
+        question['instructions'] = question['instructions'].split(marker, 1)[0] + marker + json.dumps(
+            locations[candidate]) + (
+                '. Coordinates are metres in one calibrated robot frame: +Y is robot LEFT, -Y is RIGHT, '
+                '+X is forward. Compare the same physical instance, not merely the same category, color '
+                'or CAD model. Check other CURRENT candidates and reference-located subjects together: '
+                'simultaneously separate objects cannot share one ID. Different cameras can see different '
+                'partial surfaces of one object, so disjoint point bounds alone are not an identity verdict. '
+                'Use RGB, reference context and these measurements jointly; reject an outside-inventory '
+                'subject and keep unknown for ambiguous correspondence.')
+    return result
 
 
 def release_verification_context(progress, purpose):
@@ -25,7 +59,7 @@ def release_verification_context(progress, purpose):
             continue
         targets.append({"entity_id": identifier, **{
             key: deepcopy(record[key]) for key in (
-                "release_feedback_id", "destination_id", "region_id", "slot_id", "stage_index", "assigned_slot")
+                "release_feedback_id", "destination_id", "region_id", "slot_id", "transfer_index", "assigned_slot")
             if key in record}})
     if not targets:
         return None
@@ -33,7 +67,7 @@ def release_verification_context(progress, purpose):
         "rule": "These are recorded controller actions for the selected permanent IDs, not proof of current "
                 "visual identity, support, release or success. The IDs were selected from the initial inventory; "
                 "their recorded release feedback and assigned destinations provide temporal context for a possible "
-                "move. A selected lifecycle status can persist while visual verification is pending. "
+                "move. A selected status can persist while visual verification is pending. "
                 "Independently match current RGB to the permanent subject, and check visible support in its assigned "
                 "region and separation from the gripper. Assigned-slot geometry is intention, not a measured object "
                 "pose. Keep unknown if identity or placement remains ambiguous; do not assign an ID or success "
@@ -49,17 +83,25 @@ def _decode_image(part):
 
 
 def _source_zoom(context, raw, annotations, labels):
+    for camera in sorted(context.get('same_capture_reference', {}).get('verified_camera_ids', [])):
+        parts = _source_camera_zoom(context, raw, annotations, labels, camera)
+        if parts:
+            return parts
+    return []
+
+
+def _source_camera_zoom(context, raw, annotations, labels, camera):
     proof = context.get("same_capture_reference", {})
-    if ("2" not in proof.get("verified_camera_ids", [])
+    if (camera not in proof.get("verified_camera_ids", [])
             or not context.get("observation_id")
             or context["observation_id"] != proof.get("initial_reference_observation_id")
             or context["observation_id"] != proof.get("current_observation_id")):
         return []
-    initial, current = raw.get(("initial", "2")), raw.get(("current", "2"))
+    initial, current = raw.get(("initial", camera)), raw.get(("current", camera))
     if initial is None or current is None or initial["image_url"] != current["image_url"]:
         return []
     source_ids = context.get("source_inventory", {}).get("source_object_ids", [])
-    references = annotations.get(("initial", "2"), {}).get("items", [])
+    references = annotations.get(("initial", camera), {}).get("items", [])
     by_id = {item["id"]: item for item in references}
     if not 1 <= len(source_ids) <= 4 or any(identifier not in by_id for identifier in source_ids):
         return []
@@ -83,7 +125,7 @@ def _source_zoom(context, raw, annotations, labels):
     enlarged = np.asarray(Image.fromarray(crop).resize(tuple(display_size), Image.Resampling.NEAREST))
     parts = []
     for role, items in (("initial", source_items),
-                        ("current", annotations.get(("current", "2"), {}).get("items", []))):
+                        ("current", annotations.get(("current", camera), {}).get("items", []))):
         local_items = []
         for item in items:
             box = np.asarray(item["box"]) * [width, height, width, height]
@@ -93,10 +135,10 @@ def _source_zoom(context, raw, annotations, labels):
                 continue
             local_box = (box - np.tile(lower, 2)) / np.tile([crop_width, crop_height], 2)
             local_items.append({**item, "box": local_box.tolist(),
-                                "display_label": labels.get(item["id"], item["id"])})
+                                "display_label": item.get("display_label", labels.get(item["id"], item["id"]))})
         metadata = {
             "image_role": "same_capture_source_group_zoom", "annotation_role": role,
-            "source_camera_id": "2", "source_object_ids": source_ids,
+            "source_camera_id": camera, "source_object_ids": source_ids,
             "observation_id": context["observation_id"],
             "source_image_sha256": image_hash, "source_rgb_size_px": [width, height],
             "crop_bounds_xyxy_px": [*lower.tolist(), *upper.tolist()],
@@ -104,20 +146,22 @@ def _source_zoom(context, raw, annotations, labels):
             "scale_xy": (display_size / [crop_width, crop_height]).tolist(),
             "resampling": "nearest; display magnification only",
             "items": local_items, "frame_color": list(FRAME_COLOR),
-            "coordinates": "item boxes normalized to crop; labels are in added right margin",
+            "coordinates": "item boxes normalized to crop; short labels are adjacent to their boxes",
+            "annotation_layout": "near_box", "derived_image": True,
             "meaning": "Same frozen RGB source group, not new evidence or established correspondence. "
                        "All source reference neighbors are retained. Broad candidate boxes are shown "
-                       "in full views, not this crop. R labels are permanent references; C labels are "
+                       "in full views, not this crop. Reference labels are permanent references; Candidate labels are "
                        "unassociated proposals. Return unknown if identity remains ambiguous.",
         }
         parts.extend([{"type": "input_text", "text": json.dumps(metadata)},
-                      image_part(raster_visual_annotations(enlarged, local_items, frame_color=FRAME_COLOR))])
+                      image_part(raster_visual_annotations(enlarged, local_items, frame_color=FRAME_COLOR,
+                                                           label_layout='near_box'))])
     return parts
 
 
-def _current_candidate_zooms(context, raw, annotations, labels, image_budget):
+def _current_candidate_zooms(context, raw, annotations, labels, images_per_camera):
     """Magnify current proposal pixels only; neither masks nor identity assignments."""
-    if context.get('purpose') != 'associate_inventory' or not context.get('item_lifecycle'):
+    if context.get('purpose') != 'associate_inventory':
         return []
     parts = []
     for (role, camera), metadata in annotations.items():
@@ -125,14 +169,17 @@ def _current_candidate_zooms(context, raw, annotations, labels, image_budget):
             continue
         rgb, image_hash = _decode_image(raw[(role, camera)])
         height, width = rgb.shape[:2]
+        camera_images = 0
         groups = []
         for item in metadata['items']:
+            if item.get('annotation_role') == 'current_confirmed_container_anchor':
+                continue  # Already located in the full current view; no new proposal/detail request.
             box = np.asarray(item['box'], float) * [width, height, width, height]
             if (box.shape != (4,) or not np.isfinite(box).all() or np.any(box[:2] < 0)
                     or np.any(box[2:] > [width, height]) or np.any(box[2:] <= box[:2])):
                 continue
-            # Large bins are already clear in the full frame. Reserve the two
-            # detail images for small workpieces, not the first SAM proposals.
+            # Large bins are already clear in the full frame. Reserve each
+            # camera's detail images for small proposals.
             if np.prod(box[2:] - box[:2]) > .08 * width * height:
                 continue
             # Near-identical rectangles share an enlarged image, not an ID or question.
@@ -149,7 +196,7 @@ def _current_candidate_zooms(context, raw, annotations, labels, image_budget):
             upper = np.minimum(upper.astype(int) + padding, [width, height])
             crop_size = upper - lower
             scale = min(4., 512. / max(crop_size))
-            if scale <= 1. or len(parts) // 2 >= image_budget:
+            if scale <= 1. or camera_images >= images_per_camera:
                 continue  # Large proposals already occupy much of the full image.
             display_size = np.rint(crop_size * scale).astype(int)
             crop = rgb[lower[1]:upper[1], lower[0]:upper[0]]
@@ -158,12 +205,15 @@ def _current_candidate_zooms(context, raw, annotations, labels, image_budget):
             local_box = (np.concatenate([boxes[:, :2].min(0), boxes[:, 2:].max(0)])
                          - np.tile(lower, 2)) / np.tile(crop_size, 2)
             display_item = {'id': group[0][0]['id'], 'box': local_box.tolist(),
-                            'display_label': ' / '.join(candidate_labels)}
+                            'display_label': ' / '.join(candidate_labels),
+                            'image_label': ' / '.join(_image_label(label) for label in candidate_labels)}
             zoom = {'image_role': 'current_candidate_detail_zoom', 'source_camera_id': camera,
                 'observation_id': context['observation_id'], 'generation': context.get('generation'),
                 'source_image_sha256': image_hash, 'source_rgb_size_px': [width, height],
                 'crop_bounds_xyxy_px': [*lower.tolist(), *upper.tolist()],
                 'display_size_px': display_size.tolist(), 'candidate_labels': candidate_labels,
+                'image_labels': [_image_label(label) for label in candidate_labels],
+                'annotation_layout': 'near_box', 'derived_image': True,
                 'original_candidates': [deepcopy(item) for item, _ in group],
                 'resampling': 'nearest; at most 4x display magnification of existing pixels',
                 'meaning': 'CURRENT RGB proposal and surrounding pixels, not a mask, new observation or '
@@ -171,14 +221,16 @@ def _current_candidate_zooms(context, raw, annotations, labels, image_budget):
                     'This crop does not prove inventory completeness; inspect all full CURRENT images '
                     'for other subjects and keep unknown when the proposal cannot be matched.'}
             parts.extend([{'type': 'input_text', 'text': json.dumps(zoom)},
-                          image_part(raster_visual_annotations(enlarged, [display_item], frame_color=FRAME_COLOR))])
+                          image_part(raster_visual_annotations(enlarged, [display_item], frame_color=FRAME_COLOR,
+                                                               label_layout='near_box'))])
+            camera_images += 1
     return parts
 
 
 def add_visible_inventory_guide(payload):
     """Locate frozen source references for the global check without matching them."""
     payload = deepcopy(payload)
-    questions = [item for item in payload["questions"] if item["name"] == "demo_unlisted_pink"]
+    questions = [item for item in payload["questions"] if item["name"] == "scene_inventory_closure"]
     if not questions:
         return payload
     content = payload["input"][0]["content"]
@@ -197,7 +249,15 @@ def add_visible_inventory_guide(payload):
                 boxes.setdefault(item["id"], []).append({"camera_id": metadata["camera"], "box": item["box"]})
     references = []
     completed = {row["entity_id"]: row for row in context.get("completed_source_correspondences", [])}
+    state = context.get('inventory_state', {})
+    retired = set(state.get('retired_entity_ids', ()))
     for identifier in context["source_inventory"]["source_object_ids"]:
+        if identifier in retired:
+            references.append({'entity_id': identifier, 'reference_kind': 'retired_input',
+                'output_entity_ids': [record['output_entity_id'] for record in state.get('transformations', {}).values()
+                                      if record.get('input_entity_id') == identifier and record.get('output_entity_id')],
+                'reference_rule': 'Historical consumed input; its independent verified outputs are not extra source candidates.'})
+            continue
         if identifier in completed:
             references.append({**completed[identifier], "reference_kind": "same_capture_completed_correspondence",
                                "reference_rule": "Use the supplied CURRENT locations; historical source-box position "
@@ -210,14 +270,14 @@ def add_visible_inventory_guide(payload):
     guide = {"scope": "initial_reference_inventory_not_a_current_count_or_matching_verdict",
              "listed_reference_count": len(references), "references": references}
     questions[0]["instructions"] = questions[0]["instructions"].split(
-        " Compare the listed R references below", 1)[0] + (
-        " Compare the listed R references below with all three full CURRENT RGB images, including outside any zoom crop. "
+        " Compare the listed references below", 1)[0] + (
+        " Compare the listed references below with all three full CURRENT RGB images, including outside any zoom crop. "
         "When a listed object has a separate same-capture completed correspondence, use its CURRENT location "
         "instead of its historical source position; unknown correspondence does not establish a match. "
         "Count each physical object once across cameras: multiple views or visibly connected faces of the same "
         "identifiable object are not additional objects. An unresolved SAM candidate in an auxiliary view "
         "does not by itself establish another physical object; inspect the full RGB and the clearest available view. "
-        "Do not merge subjects merely because they share a color or are nearby. If a possibly distinct visible pink "
+        "Do not merge subjects merely because they share a color or are nearby. If a possibly distinct visible task "
         "subject remains unresolved, answer unknown. The listed reference count does not establish the current number "
         "or prove there are no extra subjects; cropped reference views cannot establish absence outside their bounds."
         " Visible-source reference guide: " + json.dumps(guide, ensure_ascii=False))
@@ -246,9 +306,10 @@ def improve_identity_presentation(payload):
     payload["input"][0]["content"] = content
     context = json.loads(content[0]["text"])
     entities = context["fixed_entities"]
-    labels = {identifier: context.get("fixed_reference_labels", {}).get(identifier, f"R{index + 1}")
+    labels = {identifier: context.get("fixed_reference_labels", {}).get(identifier, f"Reference {index + 1}")
               for index, identifier in enumerate(sorted(entities))}
-    legend = {label: {"entity_id": identifier, "description": entities[identifier].get("description", ""),
+    legend = {label: {"entity_id": identifier, "image_label": _image_label(label),
+                      "description": entities[identifier].get("description", ""),
                       "display_id": entities[identifier].get("display_id")}
               for identifier, label in labels.items()}
     raw, annotations, records = {}, {}, []
@@ -277,19 +338,38 @@ def improve_identity_presentation(payload):
     for question in payload["questions"]:
         # Deepcopy of the whole payload preserves aliases between questions.
         # Own each option here too, including historical archived requests.
-        question["choices"] = deepcopy(question["choices"])
+        if 'choices' in question:
+            question["choices"] = deepcopy(question["choices"])
         if question["name"].startswith("identity_"):
             number = question["name"].removeprefix("identity_")
-            labels["candidate-" + number] = "C" + number
-        for option in question["choices"]:
+            labels["candidate-" + number] = "Candidate " + number
+        for option in question.get('choices', []):
             if option["value"] in entities:
-                description = re.sub(r"^(?:R\d+ · )+", "", option.get("description", ""))
+                description = re.sub(r"^(?:(?:R|Reference )\d+ · )+", "", option.get("description", ""))
                 option["description"] = labels[option["value"]] + " · " + description
     context["identity_display_legend"] = legend
+    for group in context.get('current_measured_view_groups', {}).get('groups', []):
+        for candidate in group['members']:
+            labels[candidate] = 'Candidate ' + candidate.removeprefix('candidate-')
     context["candidate_display_legend"] = {label: identifier for identifier, label in labels.items()
                                           if identifier.startswith("candidate-")}
+    context['image_label_legend'] = {_image_label(label): {
+        'display_label': label,
+        'candidate' if identifier.startswith('candidate-') else 'entity_id': identifier}
+        for identifier, label in labels.items()}
+    for anchor in context.get('current_confirmed_container_anchors', []):
+        anchor['display_label'] = 'Current anchor · ' + labels[anchor['entity_id']]
+        anchor['image_label'] = _image_label(anchor['display_label'])
+        context['image_label_legend'][anchor['image_label']] = {
+            'display_label': anchor['display_label'], 'entity_id': anchor['entity_id'],
+            'annotation_role': 'current_confirmed_container_anchor'}
     context["display_label_rule"] = (
-        "R labels locate permanent references and C labels locate unassociated candidates. "
+        "Reference labels locate permanent references and Candidate labels locate unassociated candidates. "
+        "Current anchor labels locate independently tracked containers in this CURRENT capture; "
+        "their omitted identity questions do not remove them from the scene. "
+        "Derived annotation images place short R/C labels next to their own boxes: R5 means Reference 5, "
+        "C1 means Candidate 1; image_label_legend maps each to the full ID. R5* marks a CURRENT tracked anchor. "
+        "These overlays are locating aids, not raw images; unchanged full raw RGB images are supplied separately. "
         "Neutral frame colors encode no identity. Labels never replace canonical choice values.")
     content[0]["text"] = json.dumps(context, ensure_ascii=False)
     for index, key, metadata in records:
@@ -298,27 +378,28 @@ def improve_identity_presentation(payload):
         rgb, image_hash = _decode_image(raw[key])
         items = [{**item, "display_label": labels.get(item["id"], item["id"])}
                  for item in metadata["items"]]
+        for item in items:
+            if item.get('annotation_role') == 'current_confirmed_container_anchor':
+                item['display_label'] = 'Current anchor · ' + item['display_label']
+            item['image_label'] = _image_label(item['display_label'])
         metadata.update(items=items, frame_color=list(FRAME_COLOR),
-                        source_rgb_size_px=[rgb.shape[1], rgb.shape[0]], source_image_sha256=image_hash)
+                        source_rgb_size_px=[rgb.shape[1], rgb.shape[0]], source_image_sha256=image_hash,
+                        annotation_layout='near_box', derived_image=True,
+                        coordinates='boxes normalized to full source RGB; short labels adjacent to their boxes')
         content[index]["text"] = json.dumps(metadata)
         content[index + 1] = image_part(raster_visual_annotations(
-            rgb, items, regions=metadata.get("regions", []), frame_color=FRAME_COLOR))
+            rgb, items, regions=metadata.get("regions", []), frame_color=FRAME_COLOR, label_layout='near_box'))
     content.extend(_source_zoom(context, raw, annotations, labels))
-    # Full three-view images remain primary. Do not amplify every SAM prompt
-    # into another image of the same subject.
+    # Full views remain primary. Give every camera the same bounded detail
+    # allowance so earlier cameras cannot consume a later wrist view's slots.
     content.extend(_current_candidate_zooms(context, raw, annotations, labels, 2))
-    overlaps = {item["candidate"]: item for item in context.get("same_capture_box_correspondence_proposals", [])}
+    # Overlap tables and their limitations remain in shared context. Repeating
+    # the table and the same warning in every question obscures the identity task.
     for question in payload["questions"]:
         if not question["name"].startswith("identity_"):
             continue
         candidate = "candidate-" + question["name"].removeprefix("identity_")
         question["instructions"] = question["instructions"].split(" Its display label is ", 1)[0]
         question["instructions"] += f" Its display label is {labels[candidate]}; return a canonical permanent ID."
-        if candidate in overlaps:
-            record = deepcopy(overlaps[candidate])
-            for row in record["same_camera_reference_box_overlaps"]:
-                row["reference_display_label"] = labels.get(row["reference_entity_id"])
-            question["instructions"] += (
-                " These same-camera rectangles are locating hints only, not an identity assignment; "
-                "inspect the RGB subject and its neighbors. " + json.dumps(record))
+        question['instructions'] += grouped_view_instruction(context, candidate)
     return add_visible_inventory_guide(payload)

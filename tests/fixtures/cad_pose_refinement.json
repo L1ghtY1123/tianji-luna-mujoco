@@ -1,0 +1,100 @@
+{
+  "a4": {
+    "view": {
+      "frame_id": "rgbd-2-2a159172ff2d4044acd46f916b73b103",
+      "camera_id": "3",
+      "intrinsics": {
+        "cx": 321.00567626953125,
+        "cy": 241.04464721679688,
+        "fx": 370.1304931640625,
+        "fy": 370.15179443359375,
+        "width": 640,
+        "height": 480
+      }
+    },
+    "source": {
+      "run": "8fce4338b12441e28dbb699c9f81e3b2",
+      "events": [
+        251,
+        254
+      ],
+      "point_sha256": "f185003213ecb7809508f28b6333d7eefb4e753a0aa751d5c6f1c2d0c7f897ee"
+    }
+  },
+  "a2_bad": {
+    "view": {
+      "frame_id": "rgbd-2-4072709f04544b18964255a01ecf4bc9",
+      "camera_id": "3",
+      "intrinsics": {
+        "cx": 321.00567626953125,
+        "cy": 241.04464721679688,
+        "fx": 370.1304931640625,
+        "fy": 370.15179443359375,
+        "width": 640,
+        "height": 480
+      }
+    },
+    "source": {
+      "frozen_archive": "black-a2-match-audit/overhead-exposure-probe/input.json",
+      "pose_archive": "unconfirmed-fp-diagnostic/pose.json",
+      "profile": "low_memory"
+    }
+  },
+  "a2_good": {
+    "view": {
+      "frame_id": "rgbd-2-4072709f04544b18964255a01ecf4bc9",
+      "camera_id": "3",
+      "intrinsics": {
+        "cx": 321.00567626953125,
+        "cy": 241.04464721679688,
+        "fx": 370.1304931640625,
+        "fy": 370.15179443359375,
+        "width": 640,
+        "height": 480
+      }
+    },
+    "source": {
+      "frozen_archive": "black-a2-match-audit/overhead-exposure-probe/input.json",
+      "pose_archive": "unconfirmed-fp-default5/pose.json",
+      "profile": "default"
+    }
+  },
+  "blue": {
+    "view": {
+      "frame_id": "rgbd-4-4cd169d2d47941aca20e9d4a4a668f2a",
+      "camera_id": "2",
+      "intrinsics": {
+        "cx": 320.0536193847656,
+        "cy": 237.30731201171875,
+        "fx": 393.44769287109375,
+        "fy": 392.82000732421875,
+        "width": 640,
+        "height": 480
+      }
+    },
+    "source": {
+      "run": "e1dbb057e7fe4f45b5939ab54349c42e",
+      "events": [
+        14,
+        18
+      ],
+      "scope": "ray regression only; full point mask not reconstructed",
+      "archived_surface": {
+        "sample_count": 77000,
+        "inlier_fraction": 1.0,
+        "full_point_count": 77000,
+        "full_point_sha256": "8ca0045c1417ac9b4adf1fd9e44dcf6bd1d30fb7ee8aeb0cf7ad4fc27ec2ec1f",
+        "full_max_residual_m": 0.004190732369839527,
+        "extent_inlier_fraction": 1.0,
+        "residual_p95_m": 0.0024472477420410957,
+        "tolerance_m": 0.007249999791383743,
+        "minimum_fraction": 0.9
+      }
+    }
+  },
+  "policy": {
+    "sensor_only": true,
+    "no_simulation_object_pose": true,
+    "cad_frames": "catalog_verified_canonical_meters"
+  }
+}

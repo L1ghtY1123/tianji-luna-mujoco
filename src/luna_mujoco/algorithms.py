@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import sys
 import threading
@@ -13,9 +14,9 @@ import httpx
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from .geometry import TOOL_PROFILE, grasp_targets, rigid_matrix
-from .placement import observed_object, release_candidate_groups
-from .planning_batches import TRAJECTORY_BATCH_CAPACITY, pad_trajectory_batch, trajectory_batches
+from .geometry import TCP_FRAMES, TOOL_PROFILE, grasp_targets, rigid_matrix
+from .placement import observed_object
+from .planning_batches import trajectory_batches
 from .planning_settings import PlanningSettings
 from .trajectory_postprocessing import build_execution_phases
 
@@ -32,7 +33,24 @@ class AlgorithmError(RuntimeError):
 
 
 def determinate_grasp_failure(failure):
-    """Only the pinned SDK's completed result authorizes another candidate pool."""
+    """Accept completed solver failure or a finite, proven contact shortfall."""
+    if (isinstance(failure, dict) and failure.get('stage') == 'command_validation'
+            and failure.get('code') == 'execution_collision'):
+        proof = failure.get('details') or {}
+        index, count = proof.get('first_invalid_index'), proof.get('command_point_count')
+        checked, digest = proof.get('checked_point_count'), proof.get('binding_sha256')
+        return (proof.get('collision_free') is False and proof.get('motion_collision_checks_passed') is False
+            and proof.get('failure_reason') == 'collision_or_joint_bounds'
+            and proof.get('phase') in {'approach_grasp', 'grasp', 'grasp_closure', 'grasp_lift'}
+            and proof.get('collision_scope') == 'measured_obstacles_and_both_robot_arms'
+            and type(index) is int and type(count) is int and 0 <= index < count
+            and type(checked) is int and checked > 0 and bool(proof.get('scene_token'))
+            and isinstance(digest, str) and len(digest) == 64 and all(c in '0123456789abcdef' for c in digest))
+    if (isinstance(failure, dict) and failure.get('stage') == 'command_validation'
+            and failure.get('code') == 'planning_bounded_contact_unreachable'):
+        from .grasp_contact_prediction import is_proven_contact_shortfall
+
+        return is_proven_contact_shortfall(failure.get('details'))
     if (not isinstance(failure, dict) or failure.get("stage") != "planner"
             or failure.get("error") is not None or failure.get("status") != "Grasp planning completed."):
         return False
@@ -46,7 +64,8 @@ def determinate_grasp_failure(failure):
 
 class Algorithms:
     grasp_trajectory_batch_capacity = 16
-    def __init__(self, *, curobo_request=None, graspgen_client=None, perception=None, workspace_lookup=None):
+    def __init__(self, *, curobo_request=None, graspgen_client=None, perception=None, workspace_lookup=None,
+                 cad_grasp_library=None):
         from tianji_graspgen.client import GraspGenClient
 
         from .perception import Perception
@@ -57,6 +76,7 @@ class Algorithms:
         self.request = curobo_request or self._request
         self.perception = perception if perception is not None else Perception()
         self.workspace_lookup = workspace_lookup or WorkspaceAtlas().query
+        self.cad_grasp_library = cad_grasp_library
         self._client = None
         self._client_lock = threading.Lock()
 
@@ -68,6 +88,7 @@ class Algorithms:
                 self._client = None
 
     def _request(self, path, body=None):
+        started = time.perf_counter()
         try:
             with self._client_lock:
                 if self._client is None:
@@ -75,6 +96,7 @@ class Algorithms:
                 client = self._client
             response = (client.get(self.curobo_url + path) if body is None
                         else client.post(self.curobo_url + path, json=body))
+            received = time.perf_counter()
         except httpx.TimeoutException as error:
             raise AlgorithmError(f"cuRobo {path}: request timed out ({type(error).__name__})",
                                  code="algorithm_request_timeout") from error
@@ -89,6 +111,14 @@ class Algorithms:
         if not isinstance(result, dict):
             raise AlgorithmError(f"cuRobo {path}: expected a JSON object",
                                  code="algorithm_invalid_response")
+        result['transport_timings'] = {
+            'request_encode_http_roundtrip_s': received - started,
+            'response_decode_s': time.perf_counter() - received,
+            'response_bytes': len(response.content),
+            'server_timing': response.headers.get('Server-Timing'),
+        }
+        logging.getLogger(__name__).info('cuRobo request path=%s transport=%s service=%s',
+            path, result['transport_timings'], result.get('request_timings'))
         if response.is_error or result.get("ok") is False:
             error = result.get("error")
             if isinstance(error, dict):
@@ -151,12 +181,16 @@ class Algorithms:
     def build_scene(self, snapshot, target_id, *, planning_settings=None, exclusion_state="selected",
                     head_only=False):
         from .cameras import letterbox_view
+        from .inventory_map import mapping_strategy
         from .semantic_transport import encode_project_semantic_request
 
+        if any(obj.get('completed_geometry_points_world_m') is not None
+               or obj.get('geometry_completion', {}).get('source') == 'measured_surface_and_user_height_prior'
+               for obj in snapshot.get('objects', [])):
+            raise AlgorithmError('synthetic_scene_geometry_unsupported:reobserve_required')
         if snapshot.get("source") != "rgbd":
             raise AlgorithmError("scene requires registered RGBD observation")
-        # Observation motion includes every measured instance. Only the initial
-        # scene is head-only; subsequent full-obstacle updates use all cameras.
+        # Observation maps include measured instances from the requested views.
         if exclusion_state == "observation":
             target_id = None
             head_only = head_only or tuple(snapshot['views']) == ('3',)
@@ -169,23 +203,56 @@ class Algorithms:
         no_target = exclusion_state == 'observation' and not target_id
         target = self._target(snapshot, target_id) if held_surface is None and not no_target else None
         settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
+        entities = snapshot.get('scene_entities') or snapshot['objects']
+        if isinstance(entities, dict):
+            entities = list(entities.values())
+        inventory = {entity['id']: entity for entity in entities}
+        lifecycle = dict(snapshot.get('mapping_lifecycle', {}))
+        strategy = mapping_strategy(**{key: lifecycle[key] for key in
+            ('requested_scope', 'mapping_entity_ids', 'strategy_source', 'scope_reason') if key in lifecycle})
+        retained_required = set()
         if exclusion_state in {'observation', 'selected'}:
             unresolved = snapshot.get('mapping_unresolved', [])
+            if strategy:
+                retained_rows = [row for row in unresolved
+                    if row.get('status') == 'unseen' and not row.get('candidates')
+                    and row.get('previous_id') in inventory
+                    and row['previous_id'] not in lifecycle.get('retired_entity_ids', [])]
+                retained_required = {row['previous_id'] for row in retained_rows}
+                unresolved = [row for row in unresolved if row not in retained_rows]
             if unresolved:
                 raise AlgorithmError('semantic_scene_identity_unresolved', code='semantic_scene_identity_unresolved',
                     details={'unresolved': unresolved})
             task_ids = set(snapshot.get('task_member_ids', [])) | {target_id}
             for query in snapshot.get('declared_environment', []):
-                if not any(obj['id'] not in task_ids and obj.get('kind') not in {'bin', 'marker'}
-                           and obj.get('color') == query['color'] for obj in snapshot['objects']):
+                observed = any(obj['id'] not in task_ids and obj.get('kind') not in {'bin', 'marker', 'table'}
+                               and obj.get('color') == query['color'] for obj in snapshot['objects'])
+                historical = set()
+                if strategy and query.get('status') == 'observed':
+                    for identifier in query.get('observed_ids', []):
+                        entity = inventory.get(identifier, {})
+                        position = np.asarray(entity.get('position', []), dtype=float)
+                        if (identifier not in task_ids and identifier not in lifecycle.get('retired_entity_ids', [])
+                                and entity.get('kind') not in {'bin', 'marker', 'table'}
+                                and entity.get('color') == query['color'] and entity.get('observation_id')
+                                and entity.get('position_source') != 'simulation_truth'
+                                and position.shape == (3,) and np.isfinite(position).all()):
+                            historical.add(identifier)
+                if not observed and not historical:
                     raise AlgorithmError('declared_obstacle_not_observed', code='declared_obstacle_not_observed',
                         details={'query': query, 'reason': 'no_distinct_non_task_object'})
+                retained_required.update(historical)
         views = {}
+        coverage_views = {}
         camera_capture_metadata = {}
         markers = {obj['id'] for obj in snapshot['objects'] if obj.get('kind') == 'marker'}
         for camera_id in (("3",) if head_only else ("1", "2", "3")):
             captured_view = snapshot["views"][camera_id]
             view = letterbox_view(captured_view)
+            coverage_view = deepcopy(captured_view)
+            coverage_view['depth_m'] = captured_view.get('coverage_depth_m', captured_view['depth_m'])
+            coverage_view['valid_depth'] = captured_view.get('coverage_valid_depth', captured_view['valid_depth'])
+            coverage_view = letterbox_view(coverage_view)
             captured_depth = np.asarray(captured_view["depth_m"])
             captured_valid = np.asarray(captured_view["valid_depth"], dtype=bool) & np.isfinite(captured_depth) & (captured_depth > 0)
             camera_capture_metadata[camera_id] = {
@@ -224,41 +291,41 @@ class Algorithms:
                                 "rgb_size": [k["width"], k["height"]], "left_to_rgb": np.eye(4).tolist(),
                                 "instance_masks": {key: mask for key, mask in view['instance_masks'].items()
                                                    if key not in markers}}
+            coverage_views[camera_id] = {**views[camera_id],
+                'depth_left_m': np.asarray(coverage_view['depth_m'], dtype=np.float32),
+                'valid_left_mask': np.asarray(coverage_view['valid_depth'], dtype=np.uint8)}
         semantic = {"observation_set_id": snapshot["observation_id"],
                     "sam3_generation": snapshot["generation"], "confirmed_instance_id": target_id or '',
                     "selection_generation": snapshot["generation"], "views": views}
         if held_surface is not None or demo_background:
             semantic.update(mapping_mode="background", confirmed_instance_id="", sam3_generation=0)
-            for view in views.values():
+            for view in (*views.values(), *coverage_views.values()):
                 view['instance_masks'] = {}
         payload = encode_project_semantic_request(semantic, exclusion_state=exclusion_state)
+        payload['coverage_rgbd'] = encode_project_semantic_request(
+            {**semantic, 'views': coverage_views}, exclusion_state=exclusion_state)
+        lifecycle.setdefault('required_entity_ids', [obj['id'] for obj in entities
+            if obj.get('kind') not in {'marker', 'table'} and not obj.get('retired', False)])
+        lifecycle['required_entity_ids'] = sorted(set(lifecycle['required_entity_ids']) | retained_required)
+        payload['mapping_lifecycle'] = lifecycle
+        from .pointcloud_preview import observed_obb_preview
+
+        payload['object_obb_observations'] = observed_obb_preview(snapshot)
+        if os.getenv('LUNA_GEOMETRY_MODE') == 'cad_obb':
+            from .object_obb import observed_object_obb
+
+            visible_ids = set().union(*(set(view['instance_masks']) for view in views.values()))
+            payload['geometry_objects'] = []
+            for obj in snapshot['objects']:
+                if obj.get('kind') in {'table', 'marker'} or obj['id'] not in visible_ids:
+                    continue
+                geometry = ({'cad': deepcopy(obj['cad'])} if obj.get('cad') is not None
+                            else {'obb': observed_object_obb(obj)})
+                payload['geometry_objects'].append({'id': obj['id'], 'kind': obj['kind'],
+                    'observation_id': snapshot['observation_id'], 'generation': snapshot['generation'], **geometry})
         if snapshot.get("demo_mapping") is True or demo_background:
             payload["demo_mapping"] = True
             payload["demo_tables"] = snapshot.get("demo_tables")
-            task = snapshot.get('demo_task', {})
-            bin_ids = {task.get('source_bin_id'), task.get('right_bin_id')}
-            from .cad_assets import cad_asset
-            bin_asset = cad_asset('blue_box')
-            payload['demo_bin_priors'] = {obj['id']: {
-                'kind': 'bin', 'color': 'blue', 'instance_id': obj['id'],
-                'observation_id': snapshot['observation_id'], 'generation': snapshot['generation'],
-                'outer_dimensions_m': bin_asset['size_m'], 'source': 'user_supplied_cad_shape',
-                'asset_id': 'blue_box', 'cad_sha256': bin_asset['source']['sha256']}
-                for obj in snapshot['objects'] if obj['id'] in bin_ids
-                and obj.get('kind') == 'bin' and obj.get('color') == 'blue'}
-            payload["demo_completions"] = {}
-            for obj in snapshot['objects']:
-                if obj.get('geometry_completion', {}).get('source') != 'measured_surface_and_user_height_prior':
-                    continue
-                completion = deepcopy(obj['geometry_completion'])
-                # Bind the prior to the current inventory, not a copied old completion.
-                completion.pop('instance_context', None)
-                lifecycle_keys = ('current_appearance', 'appearance_revision', 'lifecycle_phase')
-                if any(key in obj for key in lifecycle_keys):
-                    completion['instance_context'] = {
-                        'instance_id': obj['id'], 'observation_id': snapshot['observation_id'],
-                        'color': obj.get('color'), **{key: obj.get(key) for key in lifecycle_keys}}
-                payload['demo_completions'][obj['id']] = completion
         if held_surface is not None:
             payload["held_instance_id"] = target_id
         result = self.request("/perception/build", {**payload, "planning_settings": settings,
@@ -280,8 +347,12 @@ class Algorithms:
 
     @staticmethod
     def _graspgen_object_points(snapshot, target):
-        """Object geometry for inference; the cloud origin stays measurement-based."""
-        return np.asarray(target["points_world_m"])
+        """Sample the observed OBB; keep the existing measured cloud frame."""
+        from .object_obb import obb_surface_points, observed_object_obb
+        from .placement import measured_object_geometry
+
+        measured_object_geometry(target)
+        return obb_surface_points(observed_object_obb(target))
 
     def generate_grasps(self, snapshot, target_id, *, arm=None, candidate_count=200,
                         progress=None, cancelled=None):
@@ -295,6 +366,8 @@ class Algorithms:
         if snapshot.get("source") != "rgbd":
             raise AlgorithmError("GraspGen requires an observed RGBD cloud")
         target = self._target(snapshot, target_id)
+        if target.get('cad') is not None:
+            return self._generate_cad_grasps(snapshot, target, arm)
         reference = self._cloud_reference(target)
         cloud_frame = self._cloud_frame(target)
         object_points = (self._graspgen_object_points(snapshot, target) - cloud_frame[:3, 3]).astype(np.float32)
@@ -339,14 +412,45 @@ class Algorithms:
                 candidate['T_world_tcp'] = tcp.tolist()
         all_generated = deepcopy(candidates)
         candidates = candidates[:candidate_count]
+        from .object_obb import observed_object_obb
+
         return {"candidates": candidates, "all_generated_candidates": all_generated,
+                "object_obb": observed_object_obb(target),
+                "graspgen_input_source": "observed_obb_mesh_surface_samples",
                 "model": model, "frame": f"cloud:{target_id}",
                 'arm': arm, 'tool_profile_revision': TOOL_PROFILE['revision'],
+                'tcp_frame': TCP_FRAMES.get(arm),
                 "T_world_cloud": cloud_frame.tolist(),
                 "graspgen_input": request,
                 "requested_candidate_count": candidate_count, "candidate_count": len(candidates), "batches": batches,
                 "generation": snapshot["generation"], "observation_id": snapshot["observation_id"],
                 "cloud": reference}
+
+    def _generate_cad_grasps(self, snapshot, target, arm):
+        from .cad_grasps import CadGraspError, CadGraspLibrary
+
+        cad = target['cad']
+        if (cad.get('instance_id') != target['id'] or any(cad.get(key) != snapshot.get(key)
+                for key in ('observation_id', 'generation'))):
+            raise AlgorithmError('cad_pose_binding_stale')
+        if cad.get('pose_validation', {}).get('accepted') is not True:
+            raise AlgorithmError('cad_pose_not_validated')
+        library = self.cad_grasp_library or CadGraspLibrary(
+            os.getenv('LUNA_CAD_ROOT', str(Path(__file__).resolve().parents[3] / 'CAD')))
+        try:
+            source = {'source_asset_id': cad['source_asset_id']} if cad.get('source_asset_id') else {}
+            result = library.generate(asset_id=cad['asset_id'], source_sha256=cad['source_sha256'],
+                arm=arm, T_world_source=cad['T_world_source'], **source)
+        except CadGraspError as error:
+            raise AlgorithmError(str(error), code=error.code) from error
+        return {**result, 'all_generated_candidates': deepcopy(result['candidates']),
+            'requested_candidate_count': result['candidate_count'], 'model': cad['asset_id'],
+            'frame': 'original_CAD', 'arm': arm, 'tcp_frame': TCP_FRAMES[arm],
+            'tool_profile_revision': TOOL_PROFILE['revision'],
+            'generation': snapshot['generation'], 'observation_id': snapshot['observation_id'],
+            'cloud': self._cloud_reference(target), 'sampling_input_digest': result['library_sha256'],
+            'batches': [{'batch_index': 1, 'candidate_count': result['candidate_count'],
+                        'source': 'cad_offline_library'}]}
 
     @staticmethod
     def _batch_items(response, count, scene_token, operation):
@@ -374,7 +478,7 @@ class Algorithms:
         # missing historical inference input from a measured target cloud.
         fields = ("graspgen_request", "T_world_cloud", "observation_id",
                   "graspgen_input_source", "graspgen_input_sampling",
-                  "completion_provenance", "graspgen_input_cloud",
+                  "completion_provenance", "graspgen_input_cloud", "object_obb",
                   "measured_cloud_reference", "completed_geometry_points_world_m")
         return deepcopy({key: replay[key] for key in fields if key in replay})
 
@@ -417,6 +521,8 @@ class Algorithms:
                 raise AlgorithmError('grasp_candidate_arm_mismatch')
             if grasps.get('tool_profile_revision') != TOOL_PROFILE['revision']:
                 raise AlgorithmError('grasp_candidate_tool_profile_changed')
+            if grasps.get('tcp_frame') != TCP_FRAMES.get(bound_arm):
+                raise AlgorithmError('grasp_candidate_tcp_frame_mismatch')
             requested_arm = bound_arm
         self._check_cancelled(cancelled)
         self._binding(snapshot, target_id, scene)
@@ -432,7 +538,7 @@ class Algorithms:
                 or any(not np.isfinite(candidate["score"]) for candidate in candidates)):
             raise AlgorithmError("GraspGen returned invalid candidate indices or scores")
         cloud_frame = rigid_matrix(grasps.get("T_world_cloud", self._cloud_frame(target)))
-        world = cloud_frame @ np.asarray([c["T_object_grasp"] for c in candidates])
+        world = None if bound_arm is not None else cloud_frame @ np.asarray([c["T_object_grasp"] for c in candidates])
         result = {}
         for arm in ((requested_arm,) if requested_arm else ('A', 'B')):
             peer = "B" if arm == "A" else "A"
@@ -467,7 +573,7 @@ class Algorithms:
                     index = start + local_index
                     if item["success"]:
                         candidate = {**sampling, **{key: candidates[index][key]
-                                      for key in ("source_batch", "source_index") if key in candidates[index]},
+                                      for key in ("source_batch", "source_index", "source", "grasp_id", "pair_id") if key in candidates[index]},
                                       "candidate_index": candidates[index]["index"],
                                       "score": candidates[index]["score"],
                                       "T_world_tcp": poses[index].tolist(), "ik": item}
@@ -494,6 +600,9 @@ class Algorithms:
                 if progress is not None:
                     progress("ik_batch_complete", "cuRobo batched IK 完成", completed)
                 self._check_cancelled(cancelled)
+            valid, destination_screening = self._grasp_destination_candidates(
+                valid, snapshot, target_id, arm, scene, settings, destination_id)
+            self._check_cancelled(cancelled)
             result[arm] = {**sampling, **({"graspgen_replay_inputs": replay_inputs} if replay_inputs else {}),
                            "valid_candidates": valid, "tested_count": len(candidates),
                            "arm": arm, "target_id": target_id,
@@ -502,13 +611,17 @@ class Algorithms:
                            "planning_settings": deepcopy(settings), "batches": batches,
                            "orientation_deg": TOOL_PROFILE[arm]["orientation_deg"],
                            "scene_token": scene["scene_token"], "generation": snapshot["generation"],
-                           "tool_profile_revision": TOOL_PROFILE["revision"]}
+                           "tool_profile_revision": TOOL_PROFILE["revision"], "tcp_frame": TCP_FRAMES[arm]}
             if destination_id is not None:
                 observed_object(snapshot, destination_id)
-                # Actual closure and carried geometry exist only after grasp.
-                # An open-hand destination failure cannot reject grasp IK.
-                result[arm].update(destination_id=destination_id, feasibility_scope="grasp_ik_only",
+                # Fixed tool geometry can reject a bounded set of destination
+                # endpoints before closure; carried motion still needs actual feedback.
+                screened = isinstance(destination_screening, dict) and destination_screening.get('applied') is True
+                scope = 'grasp_ik_and_fixed_tool_destination_screen' if screened else 'grasp_ik_only'
+                result[arm].update(destination_id=destination_id, feasibility_scope=scope,
                                    place_planning_stage="after_grasp_attachment")
+                if destination_screening is not None:
+                    result[arm]['destination_screening'] = destination_screening
         return result
 
     @staticmethod
@@ -594,7 +707,7 @@ class Algorithms:
 
     def validate_execution(self, observation, arm, scene, phase, command, binding=None, *,
                            planning_settings=None, gripper_end_position_rad=None,
-                           contact_goal_pose_world=None, previous_check=None):
+                           contact_goal_pose_world=None, previous_check=None, closure_driver_limit_rad=None):
         self._binding(observation, scene["target_id"], scene)
         settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
         peer = "B" if arm == "A" else "A"
@@ -606,10 +719,12 @@ class Algorithms:
                    "planning_settings": settings, "gripper_joint_positions_rad": {
                        name: float(value["gripper_position_rad"]) for name, value in observation["arms"].items()}}
         payload["gripper_geometry_mode"] = (
-            "fixed_open" if binding is None and phase in {"approach_grasp", "grasp", "close", "open_grasp"}
+            "fixed_open" if binding is None and phase in {"approach_grasp", "grasp", "grasp_closure", "close", "open_grasp"}
             else "actual")
         if binding is not None:
             payload["carrying_binding"] = binding
+        if closure_driver_limit_rad is not None:
+            payload['closure_driver_limit_rad'] = closure_driver_limit_rad
         if contact_goal_pose_world is not None:
             payload["contact_goal_pose_world"] = rigid_matrix(contact_goal_pose_world).tolist()
         if phase in ("close", "open", "open_grasp"):
@@ -638,177 +753,10 @@ class Algorithms:
 
     @staticmethod
     def _held_binding(observation, target_id, arm, scene, holding):
-        binding = {"arm": arm, "owner_id": holding["owner_id"], "instance_id": target_id,
-                   "observation_id": scene["observation_id"], "generation": scene["generation"],
-                   "scene_token": scene["scene_token"], "frame": "tool", "state": "held",
-                   "points_tool_m": deepcopy(holding["points_tool_m"]),
-                   "uncertainty_m": holding.get("uncertainty_m", .005),
-                   "measurement_provenance": deepcopy(holding.get("measurement_provenance"))}
-        # Geometry belongs to the existing held session, including across standalone place tasks.
-        for name in ("minimum_partition_size_m", "voxel_size_m", "margin_m", "sphere_budget"):
-            if name in holding:
-                binding[name] = holding[name]
-        return binding
+        from .carrying import held_collision_binding
 
-    def plan_place(self, observation, target_id, arm, scene, holding, destination_id, *,
-                   planning_settings=None, placement_request=None, progress=None, cancelled=None):
-        self._check_cancelled(cancelled)
-        self._binding(observation, target_id, scene)
-        settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
-        destination = observed_object(observation, destination_id)
-        if not holding.get("verified") or not holding.get("attached"):
-            raise AlgorithmError("place requires an already attached held object", code="place_requires_attachment")
-        prepared = holding.get("attachment_evidence", {})
-        if "attachment_spheres_tool_m" not in prepared:
-            prepared = self.prepare_carrying(observation, arm, scene, holding, planning_settings=settings)
-            self._check_cancelled(cancelled)
-        groups = release_candidate_groups({}, destination, holding,
-            spheres_tool_m=prepared.get("attachment_spheres_tool_m"),
-            clearance_m=settings["trajectory_collision_clearance_m"],
-            map_resolution_m=scene.get("voxel_size_m", .02),
-            observation={**observation, 'semantic_only_active': scene.get('semantic_only_active', False)},
-            placement_request=placement_request, progress=progress)
-        binding = self._held_binding(observation, target_id, arm, scene, holding)
-        failures = []
-        goals = []
-        batches = self._place_candidate_batches(groups, goals, failures, observation, arm, scene,
-                                                binding, settings, progress=progress, cancelled=cancelled)
-        for batch_index, batch_count, selected_goals in batches:
-            payload = self._motion_request(observation, arm, scene, selected_goals[0]["T_world_tcp"], settings)
-            payload.pop("goal_position_m")
-            payload.pop("goal_quaternion_wxyz")
-            payload.update(carrying_binding=binding, approach_axis=settings["place_approach_axis"],
-                           approach_offset_m=settings["place_approach_offset_m"],
-                           approach_in_tool_frame=settings["place_approach_in_tool_frame"],
-                           lift_axis=settings["place_retreat_axis"], lift_offset_m=settings["place_retreat_offset_m"],
-                           lift_in_tool_frame=settings["place_retreat_in_tool_frame"],
-                           trajectory_collision_clearance_m=settings["trajectory_collision_clearance_m"],
-                           optimizer_collision_activation_distance_m=settings["optimizer_collision_activation_distance_m"])
-            padded = pad_trajectory_batch(selected_goals)
-            payload['goal_matrices_world'] = [goal['T_world_tcp'] for goal in padded]
-            batch = {"arm": arm, "planning_stage": "place", "batch_index": batch_index, "batch_count": batch_count,
-                     "batch_scope": "generated_positions",
-                     "candidate_indices": [goal["candidate_index"] for goal in selected_goals], "frame": "world",
-                     "release_reference": goals[0]["release_reference"]}
-            if progress is not None:
-                progress("planning_batch_start", "cuRobo 放置偏航 batch 开始", batch)
-            started = time.monotonic()
-            response = self.request("/tools/plan_place_batch", payload)
-            self._check_cancelled(cancelled)
-            if response.get("scene_token") != scene["scene_token"]:
-                raise AlgorithmError("place plan returned a stale scene token")
-            if response.get("collision_evidence", {}).get("optimizer_attachment") is not True:
-                raise AlgorithmError("place plan did not optimize the carried object", code="attachment_not_applied")
-            items = response.get("items")
-            if (not isinstance(items, list) or len(items) != TRAJECTORY_BATCH_CAPACITY
-                    or any(not isinstance(item, dict) or item.get("index") != index or type(item.get("success")) is not bool
-                           for index, item in enumerate(items))):
-                raise AlgorithmError("invalid place batch candidate correspondence", code="algorithm_invalid_response")
-            if progress is not None:
-                progress("planning_batch_complete", "cuRobo 放置偏航 batch 完成", {
-                    **batch, "duration_s": time.monotonic() - started,
-                    "service_timings_s": response.get("service_timings_s"),
-                    "pose_call_timings": response.get("pose_call_timings"),
-                    "tested_count": len(selected_goals),
-                    "success_count": sum(item["success"] for item in items[:len(selected_goals)])})
-            feasible = []
-            for goal, item in zip(selected_goals, items):
-                if not item["success"]:
-                    failures.append({"candidate_index": goal["candidate_index"],
-                        "yaw_delta_world_rad": goal["yaw_delta_world_rad"],
-                        "status": item.get("status"), "error": item.get("error"),
-                        "release_clearance": item.get("release_clearance")})
-                    continue
-                if item.get("approach_success") is not True or item.get("place_success") is not True:
-                    raise AlgorithmError("incomplete successful place candidate", code="algorithm_invalid_response")
-                raw = self._native_phases({name: item["phases"][name] for name in ("approach", "place")}, arm)
-                travel = sum(float(np.linalg.norm(np.diff(phase["positions_rad"], axis=0), axis=1).sum())
-                             for phase in raw.values())
-                yaw_change = abs((goal["yaw_delta_world_rad"] + np.pi) % (2 * np.pi) - np.pi)
-                feasible.append((yaw_change, travel, goal["candidate_index"], raw))
-            for yaw_change, travel, index, raw in sorted(feasible, key=lambda item: item[:3]):
-                self._check_cancelled(cancelled)
-                try:
-                    phases, checks = self._complete_place_candidate(
-                        observation, arm, scene, binding, raw, settings, cancelled=cancelled)
-                except AlgorithmError as error:
-                    if error.code not in {"execution_collision", "CUROBO_TRAJECTORY_COLLISION",
-                                          "CUROBO_PLANNING_FAILED", "CUROBO_NO_VALID_TRAJECTORY"}:
-                        raise
-                    failures.append({"candidate_index": index, "yaw_delta_world_rad": goals[index]["yaw_delta_world_rad"],
-                                     "code": error.code, "error": str(error), "details": error.details})
-                    continue
-                selection = {'candidate_index': index,
-                    'position_index': goals[index]['release_reference'].get('region_position_index', 0),
-                    'yaw_delta_deg': float(np.rad2deg(goals[index]['yaw_delta_world_rad'])),
-                    'absolute_yaw_change_deg': float(np.rad2deg(yaw_change)), 'joint_travel_rad': travel,
-                    'successful_candidates_in_batch': len(feasible),
-                    'rule': 'first_complete_plan_in_first_feasible_batch_ranked_by_yaw_then_joint_travel_then_index',
-                    'retreat_checked': True, 'later_batches_evaluated': False}
-                if progress is not None:
-                    progress('placement_candidate_selected', '选定完整放置及撤离方案，停止后续候选', selection)
-                return {"arm": arm, "target_id": target_id, "destination_id": destination_id,
-                    "observation_id": observation["observation_id"], "generation": observation["generation"],
-                    "scene_token": scene["scene_token"], "phases": phases, "goal": goals[index],
-                    "carrying_binding": binding, "collision_evidence": response["collision_evidence"],
-                    "holding_reference": deepcopy(holding["points_tool_m"]),
-                    "command_checks": checks, "retreat_requires_replan": False,
-                    "planning_settings": settings, "time_scale": settings["time_scale"],
-                    "candidate_count": len(goals), "candidate_failures": failures,
-                    "selection_evidence": selection, "placement_request": deepcopy(placement_request)}
-        raise AlgorithmError("no world-yaw candidate has a complete collision-free place and retreat",
-            code="place_no_valid_candidate", details={"candidate_failures": failures,
-                "planning_summary": {"generated_goal_count": len(goals),
-                    "ik_rejected_count": sum(item.get('code') == 'place_ik_unreachable' for item in failures),
-                    "trajectory_rejected_count": sum(item.get('code') != 'place_ik_unreachable' for item in failures)},
-                "release_reference": goals[0]["release_reference"]})
+        return held_collision_binding(holding, scene, arm, target_id)
 
-    def _place_candidate_batches(self, groups, generated, failures, observation, arm, scene,
-                                 binding, settings, *, progress=None, cancelled=None):
-        batch_index = 0
-        for group in groups:
-            self._check_cancelled(cancelled)
-            generated.extend(group)
-            payload = self._motion_request(observation, arm, scene, group[0]["T_world_tcp"], settings)
-            payload.pop("goal_position_m")
-            payload.pop("goal_quaternion_wxyz")
-            payload.update(carrying_binding=binding,
-                           trajectory_collision_clearance_m=settings["trajectory_collision_clearance_m"],
-                           goal_matrices_world=[goal["T_world_tcp"] for goal in group])
-            batch = {"arm": arm, "planning_stage": "place", "batch_index": batch_index + 1,
-                     "batch_scope": "one_release_position", "candidate_indices":
-                     [goal["candidate_index"] for goal in group]}
-            if progress is not None:
-                progress("ik_batch_start", "cuRobo 放置 batched IK 开始", batch)
-            started = time.monotonic()
-            response = self.request("/tools/solve_ik_batch", payload)
-            self._check_cancelled(cancelled)
-            items = self._batch_items(response, len(group), scene["scene_token"], "place IK")
-            if (response.get("attached") is not True
-                    or response.get("collision_evidence", {}).get("optimizer_attachment") is not True):
-                raise AlgorithmError("place IK did not include the carried object", code="attachment_not_applied")
-            survivors = []
-            for goal, item in zip(group, items):
-                if item["success"]:
-                    survivors.append(goal)
-                else:
-                    failures.append({"candidate_index": goal["candidate_index"],
-                                     "yaw_delta_world_rad": goal["yaw_delta_world_rad"],
-                                     "code": "place_ik_unreachable", "status": "collision_aware_ik_rejected",
-                                     "failure_scope": "collision_aware_ik_not_proof_of_kinematic_unreachability",
-                                     "position_error_m": item.get("position_error_m"),
-                                     "rotation_error_rad": item.get("rotation_error_rad")})
-            if progress is not None:
-                progress("ik_batch_complete", "cuRobo 放置 batched IK 完成", {
-                    **batch, "duration_s": time.monotonic() - started,
-                    "success_count": len(survivors), "tested_count": len(group),
-                    "items": items,
-                    "effective_config": response.get("effective_config")})
-            chunks = trajectory_batches(survivors)
-            batch_count = batch_index + len(chunks)
-            for chunk in chunks:
-                batch_index += 1
-                yield batch_index, batch_count, chunk
 
     def _complete_place_candidate(self, observation, arm, scene, binding, raw, settings, *, cancelled=None):
         phases = build_execution_phases(raw, settings["time_scale"])
@@ -856,13 +804,17 @@ class Algorithms:
     def clear_carrying(self):
         return self.request("/carrying/clear", {})
 
-    def prepare_carrying(self, observation, arm, scene, holding, *, planning_settings=None):
+    def prepare_carrying(self, observation, arm, scene, holding, *, planning_settings=None,
+                         placement_request=None):
         self._binding(observation, holding["instance_id"], scene)
         settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
         binding = self._held_binding(observation, holding["instance_id"], arm, scene, holding)
         payload = self._motion_request(observation, arm, scene, observation["arms"][arm]["tcp"], settings)
-        if observation.get('stage') in ('wrapped', 'unpacked'):
-            payload['next_motion_kind'] = 'pose' if observation['stage'] == 'unpacked' else 'place'
+        if placement_request:
+            if placement_request.get('transport_region'):
+                payload['next_motion_kind'] = 'pose'
+            elif placement_request.get('region'):
+                payload['next_motion_kind'] = 'place'
         result = self.request("/carrying/prepare", {**payload, "carrying_binding": binding})
         if result.get("attached") is not True or result.get("scene_token") != scene["scene_token"]:
             raise AlgorithmError("attachment preparation failed", code="attachment_not_applied")
@@ -902,6 +854,9 @@ class Algorithms:
     def _grasp_ik_candidate(self, candidate, snapshot, target_id, arm, scene, settings):
         return candidate, None
 
+    def _grasp_destination_candidates(self, valid, snapshot, target_id, arm, scene, settings, destination_id):
+        return valid, None
+
     def _grasp_plan_evidence(self, candidate, item, phases, snapshot, target_id, arm, scene, settings):
         return {}
 
@@ -924,7 +879,7 @@ class Algorithms:
         replay_inputs = self._graspgen_replay_inputs(evaluation.get("graspgen_replay_inputs", {}))
         expected = {"arm": arm, "target_id": target_id, "generation": snapshot["generation"],
                     "scene_token": scene["scene_token"], "planning_settings": settings,
-                    "tool_profile_revision": TOOL_PROFILE["revision"]}
+                    "tool_profile_revision": TOOL_PROFILE["revision"], "tcp_frame": TCP_FRAMES[arm]}
         for field, value in expected.items():
             if evaluation.get(field) != value:
                 raise AlgorithmError(f"IK evaluation {field} differs from the requested plan",
@@ -1052,9 +1007,42 @@ class Algorithms:
                                 command, planning_settings=settings,
                                 contact_goal_pose_world=candidate["T_world_tcp"])
                         checking["arms"][arm]["joints_rad"] = points[-1].tolist()
+                        if name == 'grasp':
+                            close_command = {'positions_rad': [points[-1].tolist()], 'dt': command['dt']}
+                            try:
+                                checks['closure'] = self.validate_execution(checking, arm, scene, 'grasp_closure',
+                                    close_command, planning_settings=settings)
+                            except AlgorithmError as error:
+                                prefix = (error.details or {}).get('grasp_closure_preflight') or {}
+                                limit = prefix.get('safe_driver_limit_rad')
+                                samples = prefix.get('driver_samples_rad', [])
+                                if error.code != 'execution_collision' or limit is None or len(samples) < 2:
+                                    raise
+                                # Keep two feedback tolerances before the last proven
+                                # position. Revalidate the exact bounded command.
+                                reserve = 2 * settings['holding_position_tolerance_fraction'] * (samples[-1] - samples[0])
+                                limit -= reserve
+                                if limit <= samples[0] + reserve:
+                                    raise
+                                checks['closure'] = self.validate_execution(checking, arm, scene, 'grasp_closure',
+                                    close_command, planning_settings=settings, closure_driver_limit_rad=limit)
+                                checks['closure']['full_range_rejection'] = {
+                                    'first_world_collision': error.details.get('first_world_collision'),
+                                    'safe_driver_limit_rad': prefix['safe_driver_limit_rad'],
+                                    'command_reserve_rad': reserve}
+                                from .grasp_contact_prediction import bounded_contact_prediction
+
+                                contact = bounded_contact_prediction(
+                                    self._target(snapshot, target_id)['points_world_m'], candidate['T_world_tcp'],
+                                    arm, limit, settings['holding_position_tolerance_fraction'])
+                                checks['closure']['bounded_contact_prediction'] = contact
+                                if not contact['opposing_contact_predicted']:
+                                    raise AlgorithmError('bounded closure cannot reach observed opposing pad contacts',
+                                        code='planning_bounded_contact_unreachable', details=contact)
                 except AlgorithmError as error:
                     check_cancelled()
                     if error.code not in {"planning_phase_start_changed", "execution_collision",
+                                          "planning_bounded_contact_unreachable",
                                           "execution_observation_coverage_insufficient"}:
                         raise
                     batch_failures.append({"candidate_index": candidate["candidate_index"],

@@ -23,8 +23,10 @@ add any number of instances; an existing user-edited scene takes precedence.
   height and a 1 mm settling gap. Other preset offsets are defined in the config.
   These scene-authoring coordinates never enter runtime visual perception.
 - Black CAD: native size [0.044,0.056,0.0745] m. The mock rotates local Y by 90
-  degrees so the part lies flat, changes yaw by 30 degrees, and outputs center
-  XY=[0.56,-0.22] m. Z is tabletop+0.023 m, leaving a 1 mm settling gap; gravity
+  degrees so the part lies flat, uses yaw 210 degrees, and samples XY inside
+  the unmarked right-side region in `resources/vla_unpack.json`: center
+  [0.44,-0.30] m, size [0.04,0.04] m. Table support and the B-arm position
+  workspace are checked. Z is tabletop+0.023 m, leaving a 1 mm settling gap; gravity
   remains enabled. Decisions and current RGBD must independently confirm it.
 - The invisible square table target is 0.32 m wide, center XY=[0.50160,0.11646] m.
   Release XY refers to the gripper front, not the held point-cloud centroid.

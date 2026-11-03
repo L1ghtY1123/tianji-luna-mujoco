@@ -37,6 +37,71 @@ function mappedPreview() {
       coverage: { full_environment_coverage: false, unknown_space_motion_gate: false }, mesh_layers: {} } });
 }
 
+function obbPreview() {
+  const data = mappedPreview();
+  const row = {instance_id: 'object-7', observation_id: 'rgbd-1', generation: 1, status: 'current',
+    obb: {frame: 'world', instance_id: 'object-7', source: 'observed_points_obb_approximation',
+      T_frame_obb: [[0, -1, 0, .5], [1, 0, 0, .2], [0, 0, 1, .7], [0, 0, 0, 1]],
+      half_extents_m: [.06, .025, .02], points_sha256: 'a'.repeat(64), measured_point_count: 100,
+      observation_provenance: {observation_id: 'rgbd-1', generation: 1}, unobserved_surfaces_are_measured: false}};
+  data.object_obbs = {observed: [row], mapped: [{...structuredClone(row), status: 'retained',
+    observation_id: 'rgbd-0', obb: {...structuredClone(row.obb),
+      observation_provenance: {observation_id: 'rgbd-0', generation: 1}}}]};
+  return data;
+}
+
+test('OBB overlay uses measured rotation, dimensions and permanent ID separately from map bounds', () => {
+  const data = obbPreview();
+  const before = structuredClone(data);
+  const layer = createPointcloudLayer();
+  layer.update(data);
+  const box = layer.object.children.find(child => child.name === 'obb:object-7');
+  assert.ok(box);
+  assert.equal(box.geometry.getAttribute('position').count, 24);
+  near(box.position.toArray(), [.5, .2, .7]);
+  near(box.quaternion.toArray(), [0, 0, Math.SQRT1_2, Math.SQRT1_2]);
+  box.geometry.computeBoundingBox();
+  near(box.geometry.boundingBox.max.toArray(), [.06, .025, .02]);
+  assert.equal(box.userData.status, 'current');
+  const disposed = [];
+  for (const resource of [box.geometry, box.material]) resource.addEventListener('dispose', () => disposed.push(resource));
+  layer.update(data, 'collision');
+  assert.equal(disposed.length, 2);
+  assert.equal(layer.object.children.find(child => child.name === 'obb:object-7').userData.status, 'retained');
+  layer.update(data, 'raw', {showObbs: false});
+  assert.equal(layer.object.children.some(child => child.name.startsWith('obb:')), false);
+  assert.deepEqual(data, before);
+  layer.dispose();
+});
+
+test('OBB diagnostics reject stale capture labels, identity mismatch, wrong generation and nonrigid pose', () => {
+  for (const change of [row => {row.generation = 2;}, row => {row.obb.instance_id = 'other';},
+    row => {row.obb.half_extents_m[0] = -1;}, row => {row.obb.T_frame_obb[0][0] = 2;},
+    row => {row.observation_id = 'old';}, row => {row.obb.frame = 'gripper_front';}]) {
+    const data = obbPreview();
+    change(data.object_obbs.observed[0]);
+    assert.throws(() => validatePointcloudPreview(data), /OBB/);
+  }
+});
+
+test('panel lists OBB IDs, dimensions and source observation, and toggles without capture requests', async () => {
+  const ui = harness();
+  const pending = ui.panel.setOpen(true);
+  ui.requests[0].resolve(obbPreview());
+  await pending;
+  assert.match(ui.text(), /object-7/);
+  assert.match(ui.text(), /120.*50.*40/);
+  assert.match(ui.text(), /本次观测/);
+  ui.byTag('button').find(button => button.textContent === '显示点云').listeners.click();
+  ui.byTag('button').find(button => button.textContent === '隐藏 OBB').listeners.click();
+  assert.equal(ui.overlays.at(-1).children.some(child => child.name.startsWith('obb:')), false);
+  ui.byTag('select')[0].value = 'collision';
+  ui.byTag('select')[0].listeners.change();
+  assert.match(ui.text(), /历史保留.*rgbd-0/);
+  assert.equal(ui.requests.length, 1);
+  ui.panel.dispose();
+});
+
 test('collision display uses actual mapper voxels and inferred cuboid, never raw cloud bounds', () => {
   const layer = createPointcloudLayer();
   const data = mappedPreview();

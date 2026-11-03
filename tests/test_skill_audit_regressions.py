@@ -5,7 +5,7 @@ from luna_mujoco.task_progress import TaskProgress
 
 
 def test_visible_unfinished_required_member_cannot_be_reported_complete():
-    progress = TaskProgress('move all cubes', 'collection', route='table_box')
+    progress = TaskProgress('move all cubes', 'collection')
     progress.observe([{'id': 'cube', 'kind': 'cube'}], 'frame')
     progress.assess_membership({'cube': 'required'})
     assert progress.terminal_status('complete') == 'needs_attention'
@@ -29,50 +29,17 @@ def test_unknown_evidence_or_rejected_action_does_not_consume_motion_retry_budge
     assert progress.failure['consecutive_same_code_count'] == 3
 
 
-async def test_same_capture_geometry_preserves_visual_semantics_without_api_repeat(tmp_path):
-    from test_rgbd_workflow import SensorRobot, VisionAlgorithms
+async def test_retired_inspection_cannot_call_visual_assistance(tmp_path):
+    from rgbd_workflow_fixture import SensorRobot, VisionAlgorithms
 
     from luna_mujoco.runner import Runner
-
-    class Visual:
-        calls = 0
-        enabled = True
-
-        def inspect_scene(self, capture, objects, instruction, **kwargs):
-            self.calls += 1
-            return {'observation_id': capture['observation_id'], 'objects': [
-                {'id': obj['id'], 'label': 'visible test object'} for obj in objects]}
-
-    class Views(VisionAlgorithms):
-        def observe(self, *args, source_hint=None, **kwargs):
-            result = super().observe(*args, source_hint=source_hint, **kwargs)
-            for camera, view in result['views'].items():
-                if camera not in source_hint.get('camera_ids', ['1', '2', '3']):
-                    view['instance_masks'] = {}
-            return result
-
-    runner = Runner(SensorRobot(), Views(), None, tmp_path)
-    runner.state.update(generation=1, task='grasp_place', attributes={'kind': 'cube', 'color': 'red'})
-    state = {'visual_plan': {'initial': 'initialize_inventory', 'fine': 'initialize_inventory'}}
-    runner.visual_assistance = Visual()
-    capture = runner.simulation.capture_rgbd()
-    await runner.observe(state, checkpoint='initial', capture=capture, camera_ids=['3'], purpose='scene')
-    await runner.execute('inspect_scene', state)
-    state['visual_plan'] = {'fine': 'initialize_inventory'}
-    await runner.observe(state, checkpoint='fine', capture=capture, purpose='geometry')
-    assert state['visual_scene']['observation_id'] == capture['observation_id']
-    assert state['observation']['objects'][0]['visual_semantics']['label'] == 'visible test object'
-    assert runner.visual_assistance.calls == 1
-    state['visual_plan'] = {'fine': 'initialize_inventory'}
-    await runner.observe(state, checkpoint='fine', capture=runner.simulation.capture_rgbd(), purpose='geometry')
-    assert 'visual_scene' not in state
-    assert 'visual_semantics' not in state['observation']['objects'][0]
-
-
+    runner = Runner(SensorRobot(), VisionAlgorithms(), None, tmp_path)
+    with pytest.raises(ValueError, match='unknown_skill:inspect_scene'):
+        await runner.execute('inspect_scene', {})
 
 
 async def test_new_observation_never_inherits_old_container_floor(tmp_path):
-    from test_rgbd_workflow import SensorRobot, VisionAlgorithms
+    from rgbd_workflow_fixture import SensorRobot, VisionAlgorithms
 
     from luna_mujoco.runner import Runner
 

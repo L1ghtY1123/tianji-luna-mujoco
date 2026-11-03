@@ -40,7 +40,7 @@ class GeometryPerception(Perception):
 
     def observe(self, capture, *, source_hint=None, **kwargs):
         hint = dict(source_hint or {'kind': 'cube', 'color': 'any'})
-        hint['visual_decision'] = {'source': 'jev', 'purpose': 'initialize_inventory'}
+        hint['visual_decision'] = {'source': 'responses_program', 'purpose': 'initialize_inventory'}
         inventory = self.visual_inventory
         identities = {key for values in inventory.identities.values() for key in values} if isinstance(
             inventory.identities, dict) else set(inventory.identities)
@@ -66,6 +66,8 @@ class GeometryPerception(Perception):
             identifier = 'marker-' + marker_color
             entities[identifier] = {'id': identifier, 'kind': 'marker', 'color': marker_color, 'roles': ['target_region']}
         hint.setdefault('scene_entities', entities)
+        hint.setdefault('visual_reference', {'observation_id': capture['observation_id'],
+            'entities': hint['scene_entities'], 'views': capture['views']})
         return super().observe(capture, source_hint=hint, **kwargs)
 
 

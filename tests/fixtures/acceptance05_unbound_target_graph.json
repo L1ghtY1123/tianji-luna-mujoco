@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "steps": [
+    {
+      "type": "skill",
+      "id": "select_target",
+      "skill": "identify_target",
+      "arguments": {
+        "target_id": "$target"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "select_destination",
+      "skill": "identify_destination",
+      "arguments": {
+        "destination_id": "$destination"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "map_selected_scene",
+      "skill": "build_scene",
+      "arguments": {
+        "scope": "decide",
+        "reason": "为源盒取物及桌面放置建立或更新所需的碰撞场景",
+        "entity_ids": [],
+        "exclusion_state": "selected"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "select_arm",
+      "skill": "choose_arm",
+      "arguments": {
+        "arm": "auto"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "generate_candidates",
+      "skill": "generate_grasps",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "plan_grasp",
+      "skill": "plan_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "execute_grasp",
+      "skill": "execute_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "verify_grasp",
+      "skill": "verify_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "plan_place",
+      "skill": "plan_place",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "execute_place",
+      "skill": "execute_place",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "verify_place",
+      "skill": "verify_place",
+      "arguments": {}
+    },
+    {
+      "type": "if",
+      "condition": "verify_place.success",
+      "then_steps": [],
+      "else_steps": [
+        {
+          "type": "stop",
+          "reason": "放置结果未获确认；需要人工关注，不能将未确认状态视为任务成功。"
+        }
+      ]
+    }
+  ]
+}

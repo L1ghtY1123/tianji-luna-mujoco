@@ -6,6 +6,8 @@ from copy import deepcopy
 import numpy as np
 
 from .carrying import carrying_geometry, carrying_spheres, carrying_touch_links, configure_gripper_feedback
+from .geometry import front_tcp_offset
+from .release_clearance import carrying_geometry_coverage
 
 ATTACHMENT_CAPACITY = 31
 
@@ -17,7 +19,7 @@ def reserve_attachment_links(robot):
     for arm, side in (('A', 'L'), ('B', 'R')):
         link = 'jev_carried_object_' + arm
         kin.setdefault('extra_links', {})[link] = {
-            'fixed_transform': [0, 0, 0, 1, 0, 0, 0], 'joint_name': 'jev_carry_joint_' + arm,
+            'fixed_transform': [*front_tcp_offset(arm).tolist(), 1, 0, 0, 0], 'joint_name': 'jev_carry_joint_' + arm,
             'joint_type': 'FIXED', 'link_name': link, 'parent_link_name': 'TCP_Link_' + side}
         if link not in kin['collision_link_names']:
             kin['collision_link_names'].append(link)
@@ -83,11 +85,19 @@ class ResidentRobotGeometry:
                         balls[:len(spheres)] = backend._torch.as_tensor(spheres, **planner.device_cfg.as_torch_dict())
                     params.update_link_spheres('jev_carried_object_' + arm, balls)
                 seen.add(id(params))
-        if changed_feedback and self.peer_robot is not None:
+        peer_arm = 'B' if backend.arm == 'A' else 'A'
+        previous_feedback = json.loads(self.feedback_key)
+        if (changed_feedback and self.peer_robot is not None
+                and feedback[peer_arm] != previous_feedback[peer_arm]):
             peer = configure_gripper_feedback(self.peer_robot, feedback, self.urdf_path)
             peer_cfg = KinematicsCfg.from_data_dict(peer, device_cfg=planner.device_cfg)
             backend._peer_kinematics.update_kinematics_config(peer_cfg.kinematics_config)
-            reference = Kinematics(KinematicsCfg.from_data_dict(robot,
+            # This temporary model computes link transforms only. Its collision
+            # pairs are unused; the active and peer collision models above keep
+            # their full configured spheres and self-collision checks.
+            reference_robot = deepcopy(robot)
+            reference_robot['robot_cfg']['kinematics'].update(collision_link_names=None, collision_spheres=None)
+            reference = Kinematics(KinematicsCfg.from_data_dict(reference_robot,
                 tool_frames=self.peer_links, device_cfg=planner.device_cfg))
             zero = backend._torch.zeros((1, len(reference.joint_names)), **planner.device_cfg.as_torch_dict())
             poses = reference.get_link_poses(zero, self.peer_links)
@@ -129,6 +139,7 @@ class ResidentRobotGeometry:
 
     @staticmethod
     def _evidence(backend, binding):
+        backend.carrying_geometry_coverage = carrying_geometry_coverage(binding)
         if not hasattr(backend, 'effective_config'):
             return
         geometry = None if binding is None else carrying_geometry(binding)
@@ -138,4 +149,5 @@ class ResidentRobotGeometry:
             carried_link=None if binding is None else 'jev_carried_object_' + binding.arm,
             carrying_owner_id=None if binding is None else binding.owner_id,
             attachment_geometry=geometry, resident_attachment_capacity=ATTACHMENT_CAPACITY,
+            geometry_coverage=backend.carrying_geometry_coverage,
             gripper_configuration_source='measured_feedback')

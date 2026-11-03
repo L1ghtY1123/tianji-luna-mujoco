@@ -74,5 +74,6 @@ def test_observation_execution_boundary_rejects_unvalidated_dictionary():
 
 def test_new_settings_preserve_legacy_release_migration():
     settings = PlanningSettings.model_validate({'release_margin_m': .02})
-    assert settings.place_release_height_m == settings.trajectory_collision_clearance_m
+    assert settings.place_release_height_m == 0.
+    assert settings.trajectory_collision_clearance_m == .005
     assert settings.attachment.sphere_budget == 24

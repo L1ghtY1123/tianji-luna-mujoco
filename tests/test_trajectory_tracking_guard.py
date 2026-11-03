@@ -67,4 +67,6 @@ def test_completed_trajectory_preserves_peak_tracking_evidence():
     for arm in simulation._desired_q:
         simulation._desired_q[arm][:] = .2
     Simulation._update_trajectories(simulation)
+    simulation._data.time = 1.2
+    Simulation._update_trajectories(simulation)
     assert simulation._commands["A"].result["max_tracking_error_rad"] == pytest.approx(.001)

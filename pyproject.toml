@@ -9,13 +9,15 @@ description = "Responses skill programs and Decisions verification with MuJoCo p
 requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2.10,<3",
+  "jsonschema>=4.23,<5",
   "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-dotenv>=1.1,<2",
-  "numpy>=2,<3", "scipy>=1.15,<2", "mujoco==3.10.0", "trimesh>=4.6,<5",
+  "numpy>=2,<3", "scipy>=1.15,<2", "mujoco==3.10.0", "trimesh>=4.6,<5", "rtree==1.4.1",
   "httpx>=0.28,<1", "msgpack>=1.1,<2", "PyYAML>=6,<7", "websockets>=14,<17", "Pillow>=11,<13"
 ]
 
 [project.optional-dependencies]
 pointcloud = ["open3d==0.19.0"]
+mesh-tools = ["fast-simplification==0.1.13"]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.26,<2", "ruff>=0.12"]
 
 [project.scripts]

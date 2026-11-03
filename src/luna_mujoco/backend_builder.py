@@ -22,11 +22,13 @@ from .carrying import (
     carrying_spheres,
     configure_gripper_feedback,
 )
-from .place_batch import PLACE_BATCH_CAPACITY, place_batch_items_from_result
-from .release_clearance import release_clearance_evidence
+from .geometry import front_tool_robot_config
+from .planning_timing import measured
+from .release_clearance import carrying_geometry_coverage, release_clearance_evidence
 from .resident_robot import ResidentRobotGeometry, reserve_attachment_links
 from .sdk_scene import sdk_scene_model
 from .trajectory_postprocessing import (
+    EndpointPoseMismatch,
     add_pose_derivatives,
     add_trajectory_derivatives,
     pre_release_place_from_result,
@@ -45,7 +47,6 @@ from tianji_curobo.contracts import (
     CuroboToolError,
     NativeGraspBatchItem,
     NativeIkBatchResult,
-    PlanGraspBatchRequest,
     PlanPlaceRequest,
 )
 from tianji_curobo.curobo_robot_config import (
@@ -136,6 +137,45 @@ class GraspItemWithToolPose(NativeGraspBatchItem):
     grasp_endpoint_fk: dict | None = None
 
 
+@measured('place_endpoint_fk')
+def place_endpoint_errors(backend, request, phase, joints_rad):
+    """Verify returned samples against the request, never the SDK's mutable goal."""
+    from scipy.spatial.transform import Rotation
+
+    position = np.array(request.goal_position_m, dtype=float)
+    quaternion = np.array(request.goal_quaternion_wxyz, dtype=float)
+    rotation = Rotation.from_quat(quaternion[[1, 2, 3, 0]])
+    if phase == "approach":
+        offset = np.zeros(3)
+        offset["xyz".index(request.approach_axis)] = request.approach_offset_m
+        position += rotation.apply(offset) if request.approach_in_tool_frame else offset
+    elif phase != "place":
+        raise ValueError("invalid pre-release phase")
+    state = backend._state(np.rad2deg(joints_rad).tolist())
+    actual_positions, actual_quaternions = backend._tool_pose_arrays(state, sample_count=1)
+    actual_rotation = Rotation.from_quat(actual_quaternions[0, [1, 2, 3, 0]])
+    position_error = float(np.linalg.norm(actual_positions[0] - position))
+    rotation_error = float((rotation.inv() * actual_rotation).magnitude())
+    config = backend.motion_planner.trajopt_solver.config
+    position_tolerance = float(config.position_tolerance)
+    rotation_tolerance = float(config.orientation_tolerance)
+    if (not np.isfinite([position_error, rotation_error, position_tolerance, rotation_tolerance]).all()
+            or position_tolerance < 0 or rotation_tolerance < 0):
+        raise ValueError("invalid endpoint FK or configured pose tolerance")
+    if position_error > position_tolerance or rotation_error > rotation_tolerance:
+        raise EndpointPoseMismatch({
+            "source": "curobo_public_compute_kinematics", "frame": "world",
+            "arm": backend.arm, "tool_frame": backend.tool_frame, "compound_phase": phase,
+            "goal_position_m": position.tolist(), "goal_quaternion_wxyz": quaternion.tolist(),
+            "achieved_position_m": actual_positions[0].tolist(),
+            "achieved_quaternion_wxyz": actual_quaternions[0].tolist(),
+            "joint_names": list(backend.joint_names), "joints_rad": np.asarray(joints_rad).tolist(),
+            "position_error_m": position_error, "rotation_error_rad": rotation_error,
+            "position_tolerance_m": position_tolerance, "rotation_tolerance_rad": rotation_tolerance,
+        })
+    return position_error, rotation_error
+
+
 class ValidatedBatchBackend(_NativeCuroboBackend):
     def warmup(self):
         if not self.ik_only:
@@ -166,13 +206,31 @@ class ValidatedBatchBackend(_NativeCuroboBackend):
                 "joint_names": list(self.joint_names), "joints_rad": list(joints_rad),
                 "T_world_tcp": matrix[0].tolist()}
 
+    def tool_fk_batch_evidence(self, joint_rows, scene_token):
+        if not joint_rows:
+            return ()
+        position = self._torch.as_tensor(joint_rows, device=self._device, dtype=self._dtype)
+        state = self._joint_state_type.from_position(position, joint_names=list(self.joint_names))
+        pose = self.motion_planner.compute_kinematics(state).tool_poses.get_link_pose(self.tool_frame)
+        matrices = pose.get_matrix().detach().cpu().numpy().reshape(-1, 4, 4)
+        if matrices.shape != (len(joint_rows), 4, 4) or not np.isfinite(matrices).all():
+            raise CuroboToolError("invalid achieved tool FK batch", code="CUROBO_INVALID_RESULT",
+                                  stage="validation", status=500)
+        return tuple({"source": "curobo_public_compute_kinematics", "frame": "world",
+                      "arm": self.arm, "tool_frame": self.tool_frame, "scene_token": scene_token,
+                      "joint_names": list(self.joint_names), "joints_rad": list(joints),
+                      "T_world_tcp": matrix.tolist()}
+                     for joints, matrix in zip(joint_rows, matrices, strict=True))
+
+    @measured('ik_solve_hardcheck_and_fk')
     def solve_ik_batch_native(self, request):
         started = time.perf_counter()
         result = super().solve_ik_batch_native(request)
         solved = time.perf_counter()
-        poses = tuple(self.tool_fk_evidence(item.joints_rad, request.scene_token)
-                      if item.reachable else None for item in result.items)
-        logging.getLogger(__name__).info("IK timing arm=%s count=%d solve_and_hard_check_s=%.4f per_candidate_fk_s=%.4f",
+        reachable_poses = iter(self.tool_fk_batch_evidence(
+            [item.joints_rad for item in result.items if item.reachable], request.scene_token))
+        poses = tuple(next(reachable_poses) if item.reachable else None for item in result.items)
+        logging.getLogger(__name__).info("IK timing arm=%s count=%d solve_and_hard_check_s=%.4f batched_fk_s=%.4f",
             self.arm, len(result.items), solved - started, time.perf_counter() - solved)
         return IkBatchWithToolPoses(result.items, result.scene_token, result.solve_time_s, poses)
 
@@ -186,76 +244,8 @@ class ValidatedBatchBackend(_NativeCuroboBackend):
         self.carrying_link = link
         self.carrying_spheres_tool = spheres.detach().cpu().numpy().copy()
         self.carrying_scene_token = binding.scene_token
+        self.carrying_geometry_coverage = carrying_geometry_coverage(binding)
 
-    def plan_place_batch_native(self, request):
-        from scipy.spatial.transform import Rotation
-
-        if not isinstance(request, PlanGraspBatchRequest) or len(request.goal_matrices_world) != PLACE_BATCH_CAPACITY:
-            raise ValueError(f"place batch requires exactly {PLACE_BATCH_CAPACITY} validated goal matrices")
-        if (getattr(self, "carrying_link", None) != f"jev_carried_object_{request.arm}"
-                or getattr(self, "carrying_scene_token", None) != request.scene_token
-                or getattr(self, "carrying_spheres_tool", None) is None):
-            raise CuroboToolError("place batch requires the current uploaded attachment",
-                code="CUROBO_RELEASE_GEOMETRY_STALE", stage="validation", status=422)
-        matrices = np.asarray(request.goal_matrices_world, dtype=float)
-        quaternions = Rotation.from_matrix(matrices[:, :3, :3]).as_quat()[:, [3, 0, 1, 2]]
-        def query_world_cost(world):
-            tensor = self._torch.as_tensor(world, device=self._device, dtype=self._dtype)
-            return self._motion_clearance_checker.get_collision_distance(tensor).detach().cpu().numpy().copy()
-        clearance = []
-        for matrix, quaternion in zip(matrices, quaternions, strict=True):
-            endpoint = SimpleNamespace(arm=request.arm, goal_position_m=matrix[:3, 3],
-                goal_quaternion_wxyz=quaternion,
-                trajectory_collision_clearance_m=request.trajectory_collision_clearance_m)
-            clearance.append(release_clearance_evidence(self.carrying_spheres_tool, endpoint,
-                query_world_cost, scene_token=request.scene_token))
-        current = self._state(request.start_joints_deg)
-        state = self._joint_state_type.from_position(current.position.repeat(PLACE_BATCH_CAPACITY, 1),
-            joint_names=list(self.joint_names))
-        target = self._pose_type(
-            position=self._torch.as_tensor(matrices[:, :3, 3], device=self._device, dtype=self._dtype),
-            quaternion=self._torch.as_tensor(quaternions, device=self._device, dtype=self._dtype))
-        goal = self._goal_tool_pose_type.from_poses({self.tool_frame: target},
-            ordered_tool_frames=[self.tool_frame], num_goalset=1)
-        result = None
-        self.motion_planner.last_grasp_result = None
-        try:
-            try:
-                # The application has already filtered place goals with held-object
-                # IK. The public planner still runs its own IK before TrajOpt;
-                # its internal preflight cannot be skipped through this API.
-                result = self.motion_planner.plan_grasp(goal, state,
-                    grasp_approach_axis=request.approach_axis,
-                    grasp_approach_offset=request.approach_offset_m,
-                    grasp_approach_in_tool_frame=request.approach_in_tool_frame,
-                    plan_approach_to_grasp=True, plan_grasp_to_lift=False, disable_collision_links=[])
-            finally:
-                try:
-                    self.motion_planner.update_tool_pose_criteria({self.tool_frame: self._tool_pose_criteria_type()})
-                except Exception as error:
-                    raise CuroboToolError("cuRobo batch criteria restoration failed",
-                        code="CUROBO_GRASP_RESTORE_FAILED", stage="validation", status=500) from error
-            try:
-                items = place_batch_items_from_result(result, self.joint_names,
-                    _planner_interpolation_dt(self.motion_planner))
-            except (ValueError, TypeError, AttributeError) as error:
-                clear_frames(error.__traceback__)
-                raise CuroboToolError(str(error), code="CUROBO_INVALID_TRAJECTORY",
-                    stage="validation", status=500) from error
-            for item, evidence in zip(items, clearance, strict=True):
-                item["release_clearance"] = evidence
-                if evidence["conflict"]:
-                    item.update(success=False, place_success=False, phases={}, status="release_clearance_conflict")
-                    continue
-                if not item["success"]:
-                    continue
-                # The SDK has already checked its raw path. The application
-                # checks the final, time-scaled command after interpolation.
-            return {"items": items, "batch_size": PLACE_BATCH_CAPACITY, "batch_capacity": PLACE_BATCH_CAPACITY,
-                "pose_call_timings": list(getattr(self.motion_planner, "pose_call_timings", []))}
-        finally:
-            result = None
-            self.motion_planner.last_grasp_result = None
 
     def destroy(self):
         try:
@@ -268,10 +258,13 @@ class ValidatedBatchBackend(_NativeCuroboBackend):
             super().destroy()
 
     def plan_grasp_batch_native(self, request):
+        from .grasp_contact import gripping_pad_links
+
         started = time.perf_counter()
         self.motion_planner.last_grasp_result = None
         try:
-            result = super().plan_grasp_batch_native(request)
+            with self.motion_planner.grasp_contacts(gripping_pad_links(self.arm)):
+                result = super().plan_grasp_batch_native(request)
             result = add_trajectory_derivatives(result, self.motion_planner.last_grasp_result)
         finally:
             self.motion_planner.last_grasp_result = None
@@ -324,7 +317,11 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
         return self.motion_planner.warmup(enable_graph=True,
             num_warmup_iterations=self._warmup_iterations)
 
-    def resolve_release_height(self, request, gripper_spheres):
+    def query_world_sphere_costs(self, spheres_world_m):
+        tensor = self._torch.as_tensor(spheres_world_m, device=self._device, dtype=self._dtype)
+        return self._motion_clearance_checker.get_collision_distance(tensor).detach().cpu().numpy().copy()
+
+    def resolve_release_height(self, request, gripper_spheres, *, search=None):
         from .demo_placement import resolve_release_height
 
         if (getattr(self, "carrying_link", None) != f"jev_carried_object_{request.arm}"
@@ -333,12 +330,8 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
             raise CuroboToolError("release height requires the current uploaded attachment",
                 code="CUROBO_RELEASE_GEOMETRY_STALE", stage="validation", status=422)
 
-        def query_world_cost(world):
-            tensor = self._torch.as_tensor(world, device=self._device, dtype=self._dtype)
-            return self._motion_clearance_checker.get_collision_distance(tensor).detach().cpu().numpy().copy()
-
-        return resolve_release_height(self.carrying_spheres_tool, gripper_spheres, request, query_world_cost,
-                                      scene_token=self.carrying_scene_token)
+        return resolve_release_height(self.carrying_spheres_tool, gripper_spheres, request, self.query_world_sphere_costs,
+                                      scene_token=self.carrying_scene_token, search=search)
 
     def _plan_pre_release_native(self, request):
         """Use the public two-phase mode without constructing a vendor place plan."""
@@ -372,18 +365,27 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
             for sdk_name, phase_name in (("approach", "approach"), ("grasp", "place")):
                 if not _success_flag_is_true(getattr(result, f"{sdk_name}_success", None)):
                     status = str(getattr(result, "status", "") or "")
+                    # These public SDK statuses precede both approach and place.
+                    # A missing plan does not by itself prove kinematic impossibility.
+                    if status in {"Goalset planning returned None.", "No grasp in goal set was reachable."}:
+                        sdk_name, phase_name = "goalset", "release_goal_preflight"
                     raise CuroboToolError(f"cuRobo {sdk_name} planning failed", code="CUROBO_GRASP_FAILED",
                         stage="trajopt", status=422, details={"arm": self.arm, "phase": sdk_name,
                             "compound_phase": phase_name, "status": status})
             try:
                 return pre_release_place_from_result(result, self.joint_names,
-                    _planner_interpolation_dt(self.motion_planner))
+                    _planner_interpolation_dt(self.motion_planner),
+                    endpoint_errors=lambda phase, joints: place_endpoint_errors(self, request, phase, joints))
+            except CuroboToolError as error:
+                clear_frames(error.__traceback__)
+                raise
             except ValueError as error:
                 # Failed derivative conversion frames otherwise retain the
                 # borrowed SDK result while this validation error is reported.
                 clear_frames(error.__traceback__)
                 raise CuroboToolError(str(error), code="CUROBO_INVALID_TRAJECTORY",
-                    stage="validation", status=500, details={"arm": self.arm}) from error
+                    stage="validation", status=500,
+                    details=error.evidence if isinstance(error, EndpointPoseMismatch) else {"arm": self.arm}) from error
         finally:
             # Exception tracebacks must not retain the SDK's reused GPU buffers.
             result = None
@@ -403,13 +405,14 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
     def attach_measured_carrying(self, binding, joints_deg):
         # Configured spheres already reach IK, graph and checker, whose models
         # are built separately. Public AttachmentManager updates TrajOpt's same
-        # measured link without touching any private SDK state.
+        # carrying link without touching any private SDK state.
         spheres = self._torch.as_tensor(carrying_spheres(binding), device=self._device, dtype=self._dtype)
         state = self._state(joints_deg)
         self.motion_planner.attachment_manager.update(spheres, state, link_name=f"jev_carried_object_{binding.arm}")
         self.carrying_link = f"jev_carried_object_{binding.arm}"
         self.carrying_spheres_tool = spheres.detach().cpu().numpy().copy()
         self.carrying_scene_token = binding.scene_token
+        self.carrying_geometry_coverage = carrying_geometry_coverage(binding)
 
     def plan_place_native(self, request):
         self.motion_planner.last_grasp_result = None
@@ -427,9 +430,9 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
             # Typed PlanPlaceRequest has no scene token. The runtime validates the
             # binding and refreshes this upload from it under its scene/GPU lock.
             evidence = release_clearance_evidence(self.carrying_spheres_tool, request, query_world_cost,
-                                                  scene_token=self.carrying_scene_token)
+                scene_token=self.carrying_scene_token, geometry_coverage=self.carrying_geometry_coverage)
             if evidence["conflict"]:
-                raise CuroboToolError("release_clearance_conflict: attached surface spheres violate hard world clearance at the requested release goal",
+                raise CuroboToolError("release_clearance_conflict: attachment spheres violate hard world clearance at the requested release goal",
                     code="release_clearance_conflict", stage="validation", status=422, details=evidence)
             retained = self._plan_pre_release_native(request)
             return retained
@@ -547,7 +550,7 @@ def create_support_frame_robot_config(robot_config, frame):
 
 
 def build_geometry_backend(runtime, arm, *, batch_size, ik_only, batch_planner_type=None,
-                           single_planner_type=None):
+                           single_planner_type=None, compound_planner=False):
     """Assemble the A/B application adapter using only public NVIDIA classes."""
     # Isolated SDK comparisons may inject the public planner constructor.
     # Production keeps the configured adapter and its advanced settings.
@@ -573,6 +576,7 @@ def build_geometry_backend(runtime, arm, *, batch_size, ik_only, batch_planner_t
         combined, arm, urdf_path=runtime._urdf_path, asset_root_path=runtime._asset_root_path,
     )
     robot = _exclude_collision_links(robot, runtime._excluded_collision_links)
+    robot = front_tool_robot_config(robot, [arm])
     feedback = getattr(runtime, "gripper_feedback", None)
     base_robot = deepcopy(robot)
     robot = reserve_attachment_links(configure_gripper_feedback(robot, {"A": 0., "B": 0.}, runtime._urdf_path))
@@ -605,10 +609,10 @@ def build_geometry_backend(runtime, arm, *, batch_size, ik_only, batch_planner_t
         planner = InverseKinematics(ik_config)
     else:
         if batch_size is None:
-            sdk = (single_planner_type or MotionPlanner)(motion_config)
+            sdk = (single_planner_type or (BatchMotionPlanner if compound_planner else MotionPlanner))(motion_config)
         else:
             sdk = (batch_planner_type or BatchMotionPlanner)(motion_config)
-        planner = PublicPlanner(sdk, settings, batch=batch_size is not None)
+        planner = PublicPlanner(sdk, settings, batch=batch_size is not None or compound_planner)
     # The hard checker shares the optimizer's measured gripper configuration
     # and original spheres, including the frozen peer.
     checker = _create_world_clearance_checker(
@@ -646,6 +650,7 @@ def build_geometry_backend(runtime, arm, *, batch_size, ik_only, batch_planner_t
         warmup_iterations=1, warmup_joint_space=False,
     )
     backend.configured_carrying_link = carrying_link
+    backend.carrying_geometry_coverage = carrying_geometry_coverage(carrying)
     backend.ik_only = ik_only
     backend.resident_geometry = ResidentRobotGeometry(base_robot, runtime._urdf_path,
         peer_robot=base_peer_config, peer_links=peer_links)
@@ -661,11 +666,11 @@ def build_geometry_backend(runtime, arm, *, batch_size, ik_only, batch_planner_t
     effective.update(optimizer_attachment=carrying_link is not None,
                      attachment_geometry=attachment_geometry,
                      carried_link=carrying_link,
-                     geometry_coverage="measured_surface_voxels_with_uncertainty" if carrying_link else None,
+                     geometry_coverage=backend.carrying_geometry_coverage,
                      full_object_coverage=False,
                      carrying_owner_id=None if carrying is None else carrying.owner_id,
                      gripper_configuration_source="measured_feedback" if feedback is not None else "configured_open_gripper")
-    if batch_size is None and not ik_only:
+    if batch_size is None and not ik_only and not compound_planner:
         effective.update(finetune_attempts=None, finetune_dt_scale=None,
             finetune_settings_applied=False,
             api_limitations=["Pinned single MotionPlanner.plan_pose does not expose batch finetuning controls"])
@@ -689,6 +694,7 @@ def build_dual_geometry_backend(runtime):
     combined = yaml.safe_load(runtime._robot_config_path.read_text(encoding="utf-8"))
     robot = create_dual_arm_robot_config(combined, urdf_path=runtime._urdf_path,
                                          asset_root_path=runtime._asset_root_path)
+    robot = front_tool_robot_config(robot, ['A', 'B'])
     base_robot = deepcopy(robot)
     robot = reserve_attachment_links(configure_gripper_feedback(robot, {"A": 0., "B": 0.}, runtime._urdf_path))
     scene = {k: v for k, v in (runtime._scene_model or {}).items() if k != "voxel"}

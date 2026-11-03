@@ -1,0 +1,36 @@
+{
+  "id": "return_to_initial_pose",
+  "description": "Return both empty hands to the actual joint posture recorded at task start, using the current or explicitly authorized retained collision scene. If already there, verify measured joints without movement. This is distinct from the operator observation posture. No implicit observation or completion judgment is inserted. The graph includes this skill when the user requires final return.",
+  "inputs": [
+    "initial_joint_reference",
+    "current_robot_feedback",
+    "latest_collision_scene",
+    "planning_settings"
+  ],
+  "requires": {
+    "scene_available": true,
+    "grasp_held": false
+  },
+  "provides": [
+    "at_initial_pose"
+  ],
+  "capability": "Return both empty hands to the actual joint posture recorded at task start, using the current or explicitly authorized retained collision scene",
+  "outputs": [
+    "pose_verification",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "initial_pose_reference_stale",
+    "initial_pose_unconfirmed",
+    "return_requires_verified_release",
+    "observation_motion_requires_current_map",
+    "service_or_execution_failure"
+  ],
+  "invalidates_observation": true,
+  "planning_effects": {
+    "observed": false,
+    "observation_pose_ready": null,
+    "grasp_view_ready": null
+  },
+  "recovery_retry_safe": true
+}

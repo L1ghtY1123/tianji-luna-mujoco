@@ -11,10 +11,29 @@ from tianji_curobo._curobo_impl import (
 from tianji_curobo.contracts import CuroboToolError
 from tianji_curobo.dual_contracts import JOINT_NAMES
 
+from .geometry import TCP_FRAMES
 from .planning_contracts import DualValidationRequest
 
 
 class ValidatedDualBackend(_NativeDualCuroboBackend):
+    def front_goal(self, matrices):
+        """The dual transport contract uses millimetres; public SDK Pose uses metres."""
+        from scipy.spatial.transform import Rotation
+
+        poses = {}
+        for arm, frame in TCP_FRAMES.items():
+            matrix = np.asarray(matrices[arm], dtype=float)
+            quaternion = Rotation.from_matrix(matrix[:3, :3]).as_quat()[[3, 0, 1, 2]]
+            poses[frame] = self._pose_type(
+                position=self._torch.as_tensor(matrix[:3, 3] / 1000.,
+                    device=self._device, dtype=self._dtype).unsqueeze(0),
+                quaternion=self._torch.as_tensor(quaternion,
+                    device=self._device, dtype=self._dtype).unsqueeze(0))
+        if set(self.tool_frames) != set(poses):
+            raise ValueError('dual planner requires both gripper-front tool frames')
+        return self._goal_tool_pose_type.from_poses(
+            poses, ordered_tool_frames=list(self.tool_frames), num_goalset=1)
+
     def warmup(self):
         planner = self.motion_planner
         planner.warmup(enable_graph=True, num_warmup_iterations=1)
@@ -38,7 +57,7 @@ class ValidatedDualBackend(_NativeDualCuroboBackend):
                 goal, current, max_attempts=request.max_attempts, enable_graph_attempt=1)
         else:
             result = self.motion_planner.plan_pose(
-                self._dual_goal(request.goal_transforms_world), current,
+                self.front_goal(request.goal_transforms_world), current,
                 max_attempts=request.max_attempts, enable_graph_attempt=1)
         if result is None or not bool(np.all(_success_matrix(result))):
             raise CuroboToolError("cuRobo found no collision-free dual-arm trajectory",

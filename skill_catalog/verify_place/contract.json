@@ -1,0 +1,41 @@
+{
+  "id": "verify_place",
+  "description": "Verify this transfer after completed release and retreat. Use one frozen three-camera RGB capture and one Decisions request to judge the destination support/container relationship and whether the target is still held. The operator accepts approximate visual placement; do not require exact post-release XYZ or a visible configured-region marker. Keep target appearance, destination identity and the current transfer location clause separate from CAD retrieval, prior processing, later observation/return and overall completion. No SAM3, FoundationPose, OBB fitting or post-release depth measurement is called. Actual release endpoint, gripper feedback and capture/action bindings are checked independently. After confirmation, update/invalidate the released entity map from execution feedback; this is a predicted transform, not a newly measured pose or full scene rebuild. Reuse unchanged post-release evidence; unknown never causes automatic capture, motion or retry. The graph must explicitly select this skill to obtain visual delivery evidence. execute_place does not invoke it. Returning to an observation posture is a separate graph action, including the operator-required return after each verified delivery. Verification never moves either arm. It never appends global inventory closure, including for the final object; the graph selects verify_task_completion separately.",
+  "requires": {
+    "needs_place": true,
+    "released": true,
+    "place_execution_completed": true,
+    "place_verification_completed": false
+  },
+  "provides": [
+    "place_verification_completed"
+  ],
+  "inputs": [
+    "original_release_binding",
+    "current_post_release_rgb",
+    "target_id",
+    "destination_id",
+    "initial_visual_reference",
+    "placement_zone"
+  ],
+  "capability": "Verify this completed transfer after release and retreat",
+  "outputs": [
+    "place_verification_completed",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure",
+    "visual_destination_unconfirmed",
+    "visual_placement_rejected",
+    "release_verification_binding_changed"
+  ],
+  "invalidates_observation": false,
+  "planning_effects": {
+    "table_release_verified": null
+  },
+  "recovery_retry_safe": true
+}

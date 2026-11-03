@@ -1,11 +1,18 @@
 # User CAD assets
 
+The independent CAD asset repository is the sibling `../CAD` directory
+(`C:/project/CAD` on Windows). This project's `resources/cad` contains runtime
+copies and derived MuJoCo meshes, not the authoritative asset repository.
+The released grasp library is in
+`CAD/grasps/THREADED_VISUAL_SAMPLE_MM/tianji/grasp_poses.json`.
+Its poses refer to the original CAD origin in metres and to the EEF between
+the fingers, not the centered simulation mesh frame described below.
+
 The active originals in `source/` are byte-for-byte copies supplied by the
 user from `C:/Users/l1ght/OneDrive/Desktop/CAD/`. SHA256 values, source bounds,
 conversion parameters and every generated mesh hash are in `manifest.json`.
 The STEP SI_UNIT and both STL headers explicitly declare millimetres.
-`source/pink.stl` is retained only as the superseded original for historical
-provenance; it is not an additional catalog choice. The active pink source is
+The superseded `source/pink.stl` is removed from the active assets. The active pink source is
 `tripo_convert_891be992-2e91-4d83-b19a-dbbfcfa1acd1_flat_bottom_110mm.stl`.
 
 | Asset ID | Native X × Y × Z (mm) | Original topology |

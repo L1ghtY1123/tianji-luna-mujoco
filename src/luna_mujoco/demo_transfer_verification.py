@@ -5,19 +5,103 @@ import math
 from copy import deepcopy
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
 from scipy.spatial import ConvexHull
 
 from .decision_conditions import condition, parse_answers
-from .observation_labels import project_placement_regions
+from .inventory_reference import current_inventory_entities
 from .verification import gripper_open_confirmed
 from .visual_api import VisualAPI, VisualInventoryError
-from .visual_inventory import choice, image_part, reference_content, valid_assigned_slot
+from .visual_inventory import image_part, valid_assigned_slot
+
+PLACEMENT_VERIFICATION_SCOPE = (
+    ' This predicate checks only the current transfer placement relationship and the original '
+    'language location/orientation constraints applicable to this transfer. It does not check '
+    'CAD selection, grasp algorithms, earlier processing steps, later observation poses, final '
+    'robot return or overall task completion; those have separate checks. Historical appearance '
+    'descriptions may mention a former support or location, which is not required now. '
+    'Use all three CURRENT RGB views together to locate the reference target and judge its '
+    'support/containment and separation from the gripper. An occluded view does not negate a '
+    'clear view; actual contradictory evidence must remain uncertain. Do not re-identify the '
+    'whole inventory or require exact coordinates. The operator accepts approximate visual '
+    'placement; configured regions have no visible marker and their planned XY is checked '
+    'against execution feedback separately. Do not require a post-release depth measurement. '
+    'An action receipt alone does not prove landing.')
 
 
 def _require(condition, reason):
     if not condition:
         raise ValueError("release_verification_" + reason)
+
+
+def _execution_key(evidence):
+    return hashlib.sha256(json.dumps({key: value for key, value in evidence.items() if key != 'sha256'},
+        sort_keys=True, allow_nan=False, default=lambda value: value.tolist()).encode()).hexdigest()
+
+
+def freeze_release_execution(state, context, run_id):
+    """Keep historical release proof without any executable trajectory."""
+    plan, execution = context['place_plan'], context['demo_place_execution']
+    evidence = {'owner_id': run_id, **{key: state[key] for key in (
+        'target_id', 'destination_id', 'arm', 'generation')},
+        'scene': {key: context['scene'][key] for key in (
+            'scene_token', 'observation_id', 'generation', 'target_id')},
+        'place': {key: deepcopy(plan[key]) for key in (
+            'arm', 'target_id', 'destination_id', 'generation', 'scene_token', 'observation_id',
+            'carrying_binding', 'placement_request')},
+        'release_reference': deepcopy(plan['goal']['release_reference']),
+        # Raw sensing/map snapshots remain in their original archives. Repeating
+        # them here serializes all RGBD arrays on every integrity check. Keep
+        # every held execution/geometry field and its existing source IDs.
+        'held': {key: deepcopy(value) for key, value in context['holding'].items()
+                 if key not in {'observation', 'scene', 'scene_observation'}},
+        'execution': {key: deepcopy(execution[key]) for key in ('arm', 'released', 'open_confirmed')},
+        **{key: deepcopy(context[key]) for key in (
+            'pending_transfer', 'release_tcp', 'release_endpoint_evidence')},
+        'completed_feedback': deepcopy(execution['completed_feedback'])}
+    if 'placement_zone' in plan:
+        evidence['place']['placement_zone'] = deepcopy(plan['placement_zone'])
+    evidence['execution']['stages'] = {
+        'release_collision_check': deepcopy(execution['stages']['release_collision_check'])}
+    evidence['sha256'] = _execution_key(evidence)
+    return evidence
+
+
+def release_execution_context(state, context, run_id):
+    evidence = context.get('release_execution_evidence')
+    if evidence is None:
+        return context
+    _require(evidence.get('owner_id') == run_id
+             and all(evidence.get(key) == state.get(key) for key in (
+                 'target_id', 'destination_id', 'arm', 'generation'))
+             and evidence.get('sha256') == _execution_key(evidence), 'execution_evidence_changed')
+    return {**context, 'scene': evidence['scene'], 'place_plan': evidence['place'],
+        'holding': evidence['held'], 'demo_place_execution': evidence['execution'],
+        **{key: evidence[key] for key in ('pending_transfer', 'release_tcp', 'release_endpoint_evidence')}}
+
+
+def released_target_map_is_current(context, target_id):
+    """A visual verdict alone cannot certify a new map or a retained old layer."""
+    evidence = context.get('release_execution_evidence', {})
+    completed = evidence.get('completed_feedback', {})
+    scene, measured = context['scene'], context.get('scene_observation', {})
+    record = scene.get('inventory_map', {}).get('entities', {}).get(target_id, {})
+    if (scene.get('coverage', {}).get('inventory_complete') is not True
+            or context.get('scene_refresh_required')
+            or record.get('status') not in {'observed', 'retained'}
+            or any(scene.get(key) != measured.get(key) for key in ('observation_id', 'generation'))
+            or scene.get('generation') != completed.get('generation')
+            or record.get('last_generation') != completed.get('generation')
+            or type(completed.get('time')) not in (int, float) or not math.isfinite(completed['time'])):
+        return False
+    for name in ('scene_observation', 'observation', 'inventory_observation', 'latest_capture',
+                 'initial_capture', 'post_place_capture', 'fine_capture'):
+        capture = context.get(name, {})
+        if (isinstance(capture, dict) and capture.get('observation_id') == record.get('last_observation_id')
+                and capture.get('generation') == completed['generation']
+                and type(capture.get('time')) in (int, float) and math.isfinite(capture['time'])
+                and capture['time'] >= completed['time']):
+            return True
+    return False
 
 
 def _overlap(first, second):
@@ -35,6 +119,7 @@ def _overlap(first, second):
 
 def build_release_binding(state, context, ledger, run_id, release):
     """Check the actual held/attachment/place/release records before any visual request."""
+    context = release_execution_context(state, context, run_id)
     target, arm, generation = state["target_id"], state["arm"], state["generation"]
     scene, plan, holding = context['scene'], context['place_plan'], context['holding']
     execution = context.get("demo_place_execution", {})
@@ -89,32 +174,36 @@ def build_release_binding(state, context, ledger, run_id, release):
              == placement.get("layout_revision"), "slot_invalid")
     completed = []
     for identifier in ledger.completed_ids:
-        if shared and ledger.records[identifier].get('destination_id') != state['destination_id']:
+        if ledger.records[identifier].get('destination_id') != state['destination_id']:
             continue
         prior = progress[identifier]
-        _require(valid_assigned_slot(prior) and prior.get("region_id") == current["region_id"]
-                 and prior["assigned_slot"]["layout_revision"] == current["assigned_slot"]["layout_revision"],
+        _require(valid_assigned_slot(prior) and prior.get("region_id") == current["region_id"],
                  "completed_slot_binding_invalid")
-        _require(prior["slot_id"] != current["slot_id"] and not _overlap(
-            prior["assigned_slot"]["polygon_world_xy_m"], current["assigned_slot"]["polygon_world_xy_m"]),
-            "slot_already_occupied")
+        if not placement.get('free_placement'):
+            _require(prior["assigned_slot"]["layout_revision"] == current["assigned_slot"]["layout_revision"],
+                     "completed_slot_binding_invalid")
+            _require(prior["slot_id"] != current["slot_id"] and not _overlap(
+                prior["assigned_slot"]["polygon_world_xy_m"], current["assigned_slot"]["polygon_world_xy_m"]),
+                "slot_already_occupied")
+        # A shared support polygon is not an occupied object footprint. Free
+        # placement retains the exact executed goal and collision evidence above;
+        # it must not reserve the entire table after the first delivery.
         completed.append({"entity_id": identifier, "region_id": prior["region_id"],
                           "slot_id": prior["slot_id"], "assigned_slot": deepcopy(prior["assigned_slot"])})
     binding = {**expected, "target_id": target, "destination_id": state["destination_id"],
         "region_id": current["region_id"], "slot_id": current["slot_id"],
         "layout_revision": placement["layout_revision"], "assigned_slot": deepcopy(current["assigned_slot"]),
-        "stage_index": ledger.stage_index(target), "release_feedback_id": release["feedback_id"],
+        "transfer_index": ledger.transfer_index(target), "release_feedback_id": release["feedback_id"],
         "release_feedback_time": release_time, "held_feedback_id": held["feedback_id"],
         "release_tcp": deepcopy(context["release_tcp"]), "completed_slots": completed,
         "identity_source": "execution_chain", "source": "validated_held_attachment_place_release",
         "evidence": {"held": deepcopy(held), "attachment": deepcopy(attachment),
                      "release_endpoint": deepcopy(context["release_endpoint_evidence"]),
-                     "release_collision_check": deepcopy(check), "physical_release": deepcopy(release)},
-        "needs_visible_inventory_check": state["demo_task"].get('workflow') != 'unpack_transfer'
-            and state["demo_task"]["scope"] == "all"
-            and set(ledger.completed_ids) | {target} == set(state["demo_task"]["transport_ids"])}
+                     "release_collision_check": deepcopy(check), "physical_release": deepcopy(release)}}
     if "verified_perf_counter_ns" in release:
         binding["release_verified_perf_counter_ns"] = release["verified_perf_counter_ns"]
+    if 'placement_zone' in plan:
+        binding['placement_zone'] = deepcopy(plan['placement_zone'])
     binding["binding_id"] = hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest()
     return binding
 
@@ -143,42 +232,25 @@ def validate_release_capture(capture, binding):
     _require(valid_assigned_slot(binding), "slot_invalid")
 
 
-def projection_intersects_image(polygon):
-    """Clip the normalized convex slot polygon to the image; boundary contact is not area."""
-    clipped = [np.asarray(point, float) for point in polygon]
-    for axis, boundary, sign in ((0, 0., 1), (0, 1., -1), (1, 0., 1), (1, 1., -1)):
-        output = []
-        for first, second in zip(clipped, clipped[1:] + clipped[:1], strict=True):
-            a, b = sign * (first[axis] - boundary), sign * (second[axis] - boundary)
-            if (a >= 0) != (b >= 0):
-                output.append(first + a / (a - b) * (second - first))
-            if b >= 0:
-                output.append(second)
-        clipped = output
-    if len(clipped) < 3:
-        return False
-    points = np.asarray(clipped)
-    area = abs(np.sum(points[:, 0] * np.roll(points[:, 1], -1)
-                      - points[:, 1] * np.roll(points[:, 0], -1))) / 2.
-    return bool(area > 1e-12)
-
-
-PRIMARY_RELEASE_CHECKS = ("place_result",)
-
-
-def release_result_question(numeric_position=False):
-    if numeric_position:
-        return condition('place_result', 'A separate pink workpiece is visible on the main tabletop '
-            'in the CURRENT images. Pink robot parts and objects in boxes do not count.')
-    return choice("place_result", "Using all CURRENT views together, has the separate pink workpiece "
-        "been released onto the main tabletop in the designated cyan CURRENT area, rather than "
-        "remaining held by the gripper? Judge coarse placement using the object's base/support on the table; "
-        "its raised top and sides need not fit inside the projected 2D outline. One clear view is sufficient; "
-        "other views may be occluded or show projection overlap. Robot parts and pink objects still in the "
-        "source box do not count. Answer no for clear placement outside the area, retention by the gripper, "
-        "or a missing tabletop workpiece; unknown if the combined views cannot establish the result. "
-        "No precise contact, millimetre accuracy, fixed object orientation or full silhouette is required.",
-        ["yes", "no", "unknown"])
+def release_result_question(has_reference_image=True, placement_intent=None):
+    reference = 'REFERENCE crop' if has_reference_image else 'REFERENCE appearance description'
+    if placement_intent is not None:
+        relation = 'inside the identified destination container' if placement_intent['relation'] == 'inside' else 'resting on the identified destination support surface'
+        return condition('place_result', f'The target object identified by the {reference} is '
+            f'{relation} in the CURRENT views and visually satisfies the location/orientation clause '
+            'for this transfer in the supplied placement_intent and original instruction. '
+            'Use current_transfer to distinguish a final destination from a declared intermediate work area. '
+            'An intermediate release must respect original handling/location constraints and its bound work area, '
+            'but need not satisfy the later final destination or later processing effects; '
+            'this does not establish final task completion. A different destination alone grants no such permission. '
+            'Check visually distinguishable relative location and orientation against the original wording. '
+            'Do not reinterpret a specified viewpoint using a wrist camera after it moved. '
+            'An ambiguous target, destination or requested relationship stays uncertain. '
+            'Prior candidate acceptance is not evidence that the released object actually landed there; '
+            'release motion and an open gripper alone do not prove this relationship.'
+            + PLACEMENT_VERIFICATION_SCOPE)
+    return condition('place_result', f'The target object identified by the {reference} '
+                     'is visible on the tabletop in the CURRENT views.')
 
 
 def release_position_check(binding):
@@ -211,176 +283,164 @@ def release_position_check(binding):
                    'not a post-release observation. CURRENT images must still show the released workpiece.'}
 
 
-def release_region_annotation(rgb, projection):
-    """Outline the table plane without pointing to foreground object pixels."""
-    height, width = rgb.shape[:2]
-    image = Image.new('RGB', (width + 220, height), '#10212d')
-    image.paste(Image.fromarray(np.asarray(rgb, dtype=np.uint8)), (0, 0))
-    drawing = ImageDraw.Draw(image)
-    polygon = [(x * width, y * height) for x, y in projection['polygon']]
-    drawing.line(polygon + polygon[:1], fill='#69e2ff', width=2)
-    drawing.text((width + 10, 8), 'CURRENT table area', fill='#69e2ff', font=ImageFont.load_default(size=14))
-    return np.asarray(image)
-
-
-def release_task_context(reference, binding, instruction):
-    """Send recorded identities and stages, never simulator truth or commanded poses."""
-    task = reference['demo_task']
-    entities = reference.get('entities', {})
-    if binding['target_id'] not in entities or set(reference.get('views', {})) != {'1', '2', '3'}:
+def release_appearance_reference(reference, target_id):
+    """Use a historical appearance crop, without carrying its old location forward."""
+    target = current_inventory_entities(reference).get(target_id)
+    if not target or set(reference.get('views', {})) != {'1', '2', '3'}:
         raise VisualInventoryError('release_initial_reference_required')
-    fields = ('id', 'display_id', 'kind', 'color', 'description', 'reference_camera_id', 'bbox', 'initial_parent_id')
-    initial = {identifier: {key: deepcopy(entity[key]) for key in fields if key in entity}
-               for identifier, entity in entities.items()}
-    products = {identifier: {key: deepcopy(entity[key]) for key in fields if key in entity}
-                for identifier, entity in task.get('product_entities', {}).items()}
-    states = {identifier: {key: record[key] for key in
-                          ('phase', 'appearance', 'appearance_revision', 'to_table_arm', 'to_right_bin_arm')
-                          if key in record}
-              for identifier, record in task.get('item_lifecycle', {}).items()}
-    processes = {identifier: {key: record[key] for key in ('input_entity_id', 'output_entity_id', 'status')
-                             if key in record}
-                 for identifier, record in task.get('process_records', {}).items()}
-    return {'instruction': instruction, 'workflow': 'unpack_transfer',
-        'active_target_id': binding['target_id'], 'initial_inventory': initial,
-        'product_inventory': products, 'last_confirmed_lifecycle': states, 'process_records': processes,
-        'source_object_ids': task.get('source_object_ids', []),
-        'selected_input_ids': task.get('transport_ids', []),
-        'completed_process_ids': task.get('completed_process_ids', []),
-        'initial_observation_id': reference['observation_id'],
-        'current_stage': 'awaiting_table_release_verification_before_unpack',
-        'interpretation': 'INITIAL images, boxes and descriptions locate original entities; they are historical, '
-            'not claims about their CURRENT positions. The active target was the subject of the recorded '
-            'grasp and table-release action; its last confirmed lifecycle may still say wrapped_source '
-            'because table release is awaiting this decision. The action does not prove visual success. '
-            'Compare its INITIAL appearance with all CURRENT views. Other pink source items may remain '
-            'in the box. Evaluate only this active transfer, not whether all inventory items are on the table. '
-            'Pink foam packages a black workpiece; VLA unpacking follows successful table placement. '
-            'Black outputs use independent IDs linked by the process record. No current pose is supplied.'}
+    appearance = {key: target[key] for key in ('kind', 'color') if key in target}
+    if target.get('reference_camera_id') is None and target.get('bbox') is None:
+        # A newly verified product need not exist in the initial RGB. Never
+        # fabricate its crop from the retired input's frame or bounding box.
+        if target.get('description'):
+            appearance['description'] = target['description']
+        return appearance, None
+    camera, box = target.get('reference_camera_id'), np.asarray(target.get('bbox'), float)
+    if (camera not in reference['views'] or box.shape != (4,) or not np.isfinite(box).all()
+            or np.any(box < 0) or np.any(box > 1) or np.any(box[2:] <= box[:2])):
+        raise VisualInventoryError('release_target_reference_invalid')
+    rgb = reference['views'][camera]['rgb']
+    height, width = rgb.shape[:2]
+    x0, y0 = np.floor(box[:2] * [width, height]).astype(int)
+    x1, y1 = np.ceil(box[2:] * [width, height]).astype(int)
+    return appearance, image_part(rgb[y0:y1, x0:x1])
 
 
 def release_result_payload(capture, binding, reference, instruction=""):
-    from .observation_requirements import sufficiency_question
     validate_release_capture(capture, binding)
-    wrapped = reference.get('demo_task', {}).get('workflow') == 'unpack_transfer'
-    numeric_position = release_position_check(binding) if wrapped else None
-    stage_context = (
-        "This stage checks the visible separate pink object before unpacking. "
-        "Pink foam covers a black core; VLA removes this foam in the later unpacking stage. "
-        "According to the task prior, the black core is still covered at this stage; it is not the subject "
-        "of these questions. Do not require black pixels or a complete side profile to identify the pink object. "
-        "Do not require visual proof of foam material or wrapping structure; these are task priors only. "
-        "The prior is not proof that an object is visible; judge the CURRENT images. "
-        if wrapped else "")
-    slot = binding["assigned_slot"]
-    regions = [{"region_id": "CURRENT", "layout": {"cells": [slot], "floor_z_m": slot["floor_z_m"]}}]
-    projections = {row["camera_id"]: row for row in project_placement_regions(
-        capture, regions, require_visible_support=False) if projection_intersects_image(row["polygon"])}
-    if not projections:
-        raise VisualInventoryError("release_region_not_visible", evidence={"status": "unknown"})
-    content = [{"type": "input_text", "text": json.dumps({
-        "observation_id": capture["observation_id"], "binding_id": binding["binding_id"],
-        **({'task_context': release_task_context(reference, binding, instruction)} if wrapped else {})})},
-        {"type": "input_text", "text":
-        "The two identifiers above are audit markers, not visual evidence. Combine all three CURRENT views "
-        "of the same scene into one result. Repeated full images and annotated copies are not extra objects. "
-        + stage_context +
-        "Each camera has its original RGB and, when visible, "
-        "a copy marking the CURRENT tabletop region in cyan. Only the workpiece in CURRENT counts; "
-        "other workpieces outside CURRENT do not count. The outline marks the projected tabletop plane, "
-        "not an object identity pointer or evidence that an object is there. A raised top or side need not fit inside the 2D outline; "
-        "judge coarse placement on that table area, not exact footprint geometry. "
-        "Robot hardware, including pink rings or endcaps attached to the robot, never counts as the separate object, "
-        "even when it overlaps this outline in the image. The tabletop may be occluded by foreground robot parts. "
-        "A view that cannot see the workpiece does not veto another clear view. Answer unknown only when "
-        "the combined evidence is insufficient or conflicting; do not infer contact merely from projection overlap."}]
-    if wrapped:
-        context = json.loads(content[0]['text'])
-        context['release_position_check'] = numeric_position
-        feedback = capture['arms'][binding['arm']]
-        context['measured_gripper_state'] = {
-            'source': 'actual_robot_joint_feedback_at_current_capture',
-            'observation_id': capture['observation_id'], 'arm': binding['arm'],
-            'position_rad': feedback['gripper_position_rad'],
-            'open_limit_rad': feedback['gripper_limits_rad'][0],
-            'closed_limit_rad': feedback['gripper_limits_rad'][1],
-            'open_confirmed': True,
-            'meaning': 'The fingers are physically open, not merely commanded open. '
-                'This does not establish object location: verify the tabletop object from the CURRENT RGB. '
-                'An object below the open gripper may appear between its fingers in a wrist-camera '
-                'projection without being held.'}
+    release_position_check(binding)
+    appearance, reference_image = release_appearance_reference(reference, binding['target_id'])
+    context = {'observation_id': capture['observation_id'], 'binding_id': binding['binding_id'],
+        'target_id': binding['target_id'], 'destination_id': binding['destination_id'],
+        'appearance': appearance, 'destination_surface': 'tabletop',
+        'scope': 'Judge this object in the CURRENT views only. REFERENCE is a historical appearance crop; '
+            'it does not locate the object now. Use all CURRENT views together. Objects inside boxes '
+            'do not count as placed on the tabletop. XY and orientation are checked separately; '
+            'no visible placement marker is required.'}
+    placement_intent = binding.get('placement_zone', {}).get('intent')
+    from .release_region_reference import release_region_reference
+
+    region_reference = release_region_reference(capture, binding)
+    if region_reference is not None:
+        context['target_region_reference'] = region_reference
+    if placement_intent is not None:
+        zone = binding['placement_zone']
+        identities = [zone['support_entity_id'], *placement_intent.get('reference_ids', [])]
+        context.update(placement_intent=deepcopy(placement_intent),
+            destination_surface=placement_intent['relation'],
+            destination_and_reference_appearances={identifier: {key: value for key, value in
+                reference.get('entities', {}).get(identifier, {}).items()
+                if key in {'kind', 'color', 'description', 'appearance_keywords'}} for identifier in identities},
+            scope='Judge the target in the CURRENT view against the supplied placement relationship. '
+                'REFERENCE is historical appearance only. On a support and inside a container are '
+                'different relationships. Missing or occluded identity/relationship evidence stays unknown; '
+                'a commanded pose, release action or open gripper does not establish the final location.')
+        if 'original_requirement' in zone:
+            context.update(original_placement_requirement=deepcopy(zone['original_requirement']),
+                active_object_placement_requirement=deepcopy(zone.get('active_object_requirement')),
+                current_transfer=deepcopy(zone.get('current_transfer')),
+                placement_semantic_scope=zone.get('semantic_scope'),
+                inventory_reference_descriptions={identifier: {key: value for key, value in entity.items()
+                    if key in {'kind', 'color', 'description', 'appearance_keywords'}}
+                    for identifier, entity in reference.get('entities', {}).items()})
+    context['scope'] += PLACEMENT_VERIFICATION_SCOPE
+    feedback = capture['arms'][binding['arm']]
+    context['measured_gripper_state'] = {
+        'source': 'actual_robot_joint_feedback_at_current_capture',
+        'observation_id': capture['observation_id'], 'arm': binding['arm'],
+        'position_rad': feedback['gripper_position_rad'],
+        'open_limit_rad': feedback['gripper_limits_rad'][0],
+        'closed_limit_rad': feedback['gripper_limits_rad'][1],
+        'open_confirmed': True,
+        'meaning': 'The fingers are physically open, not merely commanded open. '
+            'This does not establish object location: verify the requested destination relation from CURRENT RGB. '
+            'An object below the open gripper may appear between its fingers in a wrist-camera '
+            'projection without being held.'}
+    content = [{'type': 'input_text', 'text': json.dumps(context)},
+               {'type': 'input_text', 'text': 'REFERENCE target appearance before transfer'}]
+    if reference_image is not None:
+        content.append(reference_image)
+    else:
+        context['scope'] = context['scope'].replace('a historical appearance crop',
+                                                   'the appearance description of this registered identity')
         content[0]['text'] = json.dumps(context)
-        content[1]['text'] = (
-            'Check the result of placing ONE pink workpiece from the left box onto the main tabletop. '
-            'INITIAL is historical; CURRENT shows the scene after opening the gripper and retreating. '
-            'Use all three CURRENT cameras together. One clear view is sufficient; other views may be occluded. '
-            'The cyan outline is the configured table region, not the silhouette of the object. '
-            'Release XY was checked numerically from measured robot feedback and held-object geometry. '
-            'Your task is to check the CURRENT visible outcome, not to measure contact or fit raised object pixels '
-            'inside the projected outline. Source-box objects and robot parts do not count. '
-            'A clear object on another surface or still held is a failure, even if the release action was recorded.')
-    questions = [release_result_question(wrapped)]
-    if wrapped:
-        questions.append(condition('workpiece_still_held',
-            'The CURRENT images show the separate pink workpiece still physically retained against the gripper '
-            'fingers, despite the measured open gripper and completed retreat. Positive evidence means '
-            'attachment/contact supporting the workpiece; appearing between open fingers in the wrist '
-            'camera, or overlapping the robot in the head camera, is not evidence of retention. '
-            'A separate object resting below the open gripper on the tabletop is not held.'))
-        questions.append(sufficiency_question(['place_result', 'workpiece_still_held']))
-    cameras = ("2", "3", "1")
-    if wrapped:
-        content.extend(reference_content(reference))
-        # Keep both wrists and finish with the head's overall table context.
-        cameras = ("1", "2", "3")
-    for camera in cameras:
-        rgb = capture["views"][camera]["rgb"]
-        content.extend([{"type": "input_text", "text": "CURRENT camera " + camera + " — original RGB"}, image_part(rgb)])
-        if camera not in projections:
-            continue
-        # CURRENT marks only the configured area. Initial identity annotations
-        # are supplied separately; the full execution binding stays in the archive.
-        image = release_region_annotation(rgb, projections[camera])
-        content.extend([{"type": "input_text", "text": "CURRENT camera " + camera + " — cyan region"}, image_part(image)])
-    if binding["needs_visible_inventory_check"]:
-        source_ids = reference["demo_task"]["source_object_ids"]
-        display_entities = {f"S{index + 1}": {
-            key: value for key, value in reference["entities"].get(identifier, {}).items()
-            if key in {"bbox", "reference_camera_id"}} for index, identifier in enumerate(source_ids)}
-        content.extend(reference_content({"views": reference["views"], "entities": display_entities}))
-        questions.append(choice("demo_unlisted_pink",
-            "Across all CURRENT images, is any visible pink workpiece additional to those in INITIAL references? "
-            "Count each physical workpiece once across cameras. Moved listed pieces are not extra; robot parts "
-            "do not count. none covers visible subjects only, not hidden contents. If uncertain choose unknown.",
-            ["none", "extra", "unknown"]))
+        content.append({'type': 'input_text', 'text': json.dumps(appearance)})
+    questions = [release_result_question(reference_image is not None, placement_intent)]
+    if region_reference is not None:
+        questions[0] = condition('place_result',
+            'The reference target is resting on the identified support surface or inside the identified '
+            'container, as required by placement_intent.relation, in the CURRENT RGB. Judge only this '
+            'support/containment relationship; proximity to the requested subregion and gripper retention '
+            'are separate questions. Do not rejudge CAD, processing history or task completion.')
+        questions.append(condition('placement_near_target',
+            'The released reference target is approximately at or near the requested region in CURRENT RGB. '
+            'Use target_region_reference and its projected support-plane outlines as spatial references, '
+            'not as observed object boundaries. Respect original location/orientation constraints for '
+            'current_transfer only; an intermediate work area need not be the final destination. '
+            'Allow qualitative placement error, perspective and object height; no exact XY is required. '
+            'If the needed location cannot be judged from any current view, remain uncertain. '
+            'This question does not check CAD identity, whether still held, or the whole task.'))
+    questions.append(condition('workpiece_still_held',
+        'The CURRENT images show the active task object still physically retained against the gripper '
+        'fingers, despite the measured open gripper and completed retreat. Positive evidence means '
+        'attachment/contact supporting the workpiece; appearing between open fingers in the wrist '
+        'camera, or overlapping the robot in the head camera, is not evidence of retention. '
+        'A separate object resting below the open gripper at its destination is not held.'))
+    # These two predicates are the actual visual completion criteria. Each has
+    # its own unknown probability interval; an extra meta-predicate would judge
+    # the same evidence again without adding a required observable property.
+    for camera in ('1', '2', '3'):
+        content.extend([{'type': 'input_text', 'text': 'CURRENT RGB camera ' + camera},
+                        image_part(capture['views'][camera]['rgb'])])
+        projected = [row for row in (region_reference or {}).get('projections', []) if row['camera_id'] == camera]
+        if projected:
+            from .observation_labels import raster_visual_annotations
+
+            content.extend([{'type': 'input_text', 'text': json.dumps({
+                'image_role': 'release_target_region_reference', 'camera_id': camera,
+                'observation_id': capture['observation_id'], 'meaning': region_reference['meaning']})},
+                image_part(raster_visual_annotations(capture['views'][camera]['rgb'], [], regions=projected))])
     return {"model": "gpt-6-luna", "input": [{"role": "user", "content": content}], "questions": questions}
 
 
 def verify_release_result(inventory, capture, binding, reference, instruction=""):
     from .observation_requirements import assessment
     payload = release_result_payload(capture, binding, reference, instruction)
+    if binding.get('placement_zone', {}).get('semantic_scope') == 'entire_region':
+        from .release_decision_input import scoped_release_payload
+
+        payload = scoped_release_payload(payload, binding['placement_zone']['support_entity_id'])
+    questions = payload['questions']
 
     def parse(body, evidence):
-        judgments, answers = parse_answers(body, payload['questions'], inventory.minimum_confidence)
+        judgments, answers = parse_answers(body, questions, inventory.minimum_confidence)
         by_name = {answer["name"]: answer for answer in answers}
-        predicate = payload['questions'][0]['type'] == 'predicate'
-        confidence = by_name["place_result"]['probability' if predicate else 'confidence']
+        confidence = min(by_name['place_result']['probability'],
+                         1. - by_name['workpiece_still_held']['probability'])
         status = "at_destination" if judgments["place_result"] == "yes" else "unknown"
-        if predicate:
-            confidence = min(confidence, 1. - by_name['workpiece_still_held']['probability'])
-            if judgments['workpiece_still_held'] != 'no':
-                status = 'unknown'
-        observation = (assessment(judgments, {'place_result': 'yes', 'workpiece_still_held': 'no'},
-                                   capture['observation_id']) if predicate else None)
-        if observation and observation['status'] != 'confirmed':
+        if judgments['workpiece_still_held'] != 'no':
             status = 'unknown'
+        required = {'place_result': 'yes', 'workpiece_still_held': 'no'}
+        if 'placement_near_target' in judgments:
+            required['placement_near_target'] = 'yes'
+            confidence = min(confidence, by_name['placement_near_target']['probability'])
+            if judgments['placement_near_target'] != 'yes':
+                status = 'unknown'
+        assessment_judgments, assessment_required = dict(judgments), dict(required)
+        observation = assessment(assessment_judgments, assessment_required,
+                                 capture['observation_id'], require_sufficiency=False)
+        if observation and observation['status'] != 'confirmed':
+            status = 'rejected' if observation['status'] == 'rejected' else 'unknown'
         visual = {"source": "openai_decisions", "identity_source": "execution_chain",
+            "diagnostic_checks": deepcopy(evidence.get('diagnostic_checks', [])),
             "observation_id": capture["observation_id"], "status": status, "confidence": confidence,
-            "confidence_rule": 'min_table_presence_and_not_held_probability' if predicate else 'place_result_answer_confidence',
+            "confidence_rule": 'min_destination_relationship_and_not_held_probability',
             "view_scope": "fused_current_three_rgb",
-            "primary_required_checks": ['place_result', 'workpiece_still_held'] if predicate else list(PRIMARY_RELEASE_CHECKS),
-            "completion_semantics": 'release_xy_verified_and_tabletop_object_separate' if predicate else 'released_in_region_and_separate',
-            **({'release_position_check': release_position_check(binding)} if predicate else {}),
+            "camera_ids": list(evidence['camera_ids']),
+            "primary_required_checks": list(required),
+            "completion_semantics": 'release_feedback_checked_and_visual_destination_and_object_separate',
+            "post_release_metric_pose_measured": False,
+            'release_position_check': release_position_check(binding),
             "judgments": judgments, "answers": answers,
             "target_id": binding["target_id"], "destination_id": binding["destination_id"],
             "region_id": binding["region_id"], "slot_id": binding["slot_id"],
@@ -389,12 +449,10 @@ def verify_release_result(inventory, capture, binding, reference, instruction=""
             **({'observation_assessment': observation} if observation else {})}
         check = {"source": "openai_decisions", "observation_id": capture["observation_id"],
                  "request_hash": evidence["request_hash"], "status": "not_requested"}
-        if binding["needs_visible_inventory_check"]:
-            check.update(status=judgments["demo_unlisted_pink"],
-                         confidence=by_name["demo_unlisted_pink"]["confidence"])
         return {"visual_evidence": visual, "demo_inventory_check": check,
                 "binding_id": binding["binding_id"], "observation_id": capture["observation_id"],
                 "evidence": {**evidence, "answers": answers}, "geometry_updated": False,
                 **({'observation_assessment': observation} if observation else {})}
 
-    return VisualAPI.request(inventory, payload, capture, "verify_release_result", parse)
+    result = VisualAPI.request(inventory, payload, capture, "verify_release_result", parse)
+    return result

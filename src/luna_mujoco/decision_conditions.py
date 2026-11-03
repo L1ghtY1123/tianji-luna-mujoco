@@ -33,13 +33,8 @@ def parse_answers(body, questions, threshold):
 
 
 def result_answers(body, name, threshold):
-    """Read current results and explicitly retained historical choice records."""
-    rows = body.get('answers')
-    legacy = isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict) and rows[0].get('type') == 'choice'
-    question = ({'type': 'choice', 'name': name, 'choices': [{'value': v} for v in ('yes', 'no', 'unknown')]}
-                if legacy else condition(name, ''))
-    judgments, answers = parse_answers(body, [question], threshold)
-    field = 'confidence' if legacy else 'probability'
-    return {'judgments': judgments, 'answers': answers, 'confidence': answers[0][field],
-            'confidence_rule': name + ('_answer_confidence' if legacy else '_predicate_probability'),
+    """Current result checks require predicate responses, including during recomputation."""
+    judgments, answers = parse_answers(body, [condition(name, '')], threshold)
+    return {'judgments': judgments, 'answers': answers, 'confidence': answers[0]['probability'],
+            'confidence_rule': name + '_predicate_probability',
             'view_scope': 'fused_current_three_rgb'}

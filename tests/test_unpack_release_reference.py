@@ -3,9 +3,10 @@ import json
 from copy import deepcopy
 
 import pytest
-from test_demo_lifecycle_perception import capture_and_action, client, record, work_area
+from processing_fixtures import capture_and_action, client, release_evidence, work_area
 
-from luna_mujoco import demo_lifecycle_perception as perception
+from luna_mujoco.robot_skills import processing_evidence as perception
+from luna_mujoco.robot_skills.evidence import table_release_reference
 from luna_mujoco.visual_api import VisualInventoryError
 from luna_mujoco.visual_inventory import image_part
 
@@ -17,16 +18,16 @@ def reference_inputs():
     for view in before['views'].values():
         view['rgb'] = view['rgb'].copy()
         view['rgb'][0, 0] = [231, 13, 101]
-    lifecycle = record('unpack_pending')
-    lifecycle['table_visual_evidence'].update(observation_id=before['observation_id'], source='openai_decisions')
-    metadata = perception.table_release_reference(before, lifecycle['table_visual_evidence'], 'run')
-    return current, action, before, lifecycle, metadata
+    release = release_evidence()
+    release.update(observation_id=before['observation_id'], source='openai_decisions')
+    metadata = table_release_reference(before, release, 'run')
+    return current, action, before, release, metadata
 
 
 def test_actual_before_and_current_images_have_separate_bound_roles():
-    current, action, before, lifecycle, metadata = reference_inputs()
+    current, action, before, release, metadata = reference_inputs()
     visual, calls = client()
-    result = perception.verify_unpacking(visual, current, target_id='pink', lifecycle=lifecycle,
+    result = perception.verify_unpacking(visual, current, target_id='pink', release_evidence=release,
         action_evidence=action, owner_id='run', work_area=work_area(),
         table_release_capture=before, table_release_reference=metadata, active_target_ids=['pink'])
     content = calls[0]['input'][0]['content']
@@ -38,8 +39,9 @@ def test_actual_before_and_current_images_have_separate_bound_roles():
     assert len({image['image_url'] for image in images}) == len(images)
     context = json.loads(content[0]['text'])
     assert 'table_release_reference' not in context
-    assert 'one scene' in context['views']
-    assert 'BEFORE UNPACKING, AFTER VERIFIED TABLE RELEASE RGB camera 3' in json.dumps(calls[0])
+    assert 'One camera is supplied independently' in context['views']
+    assert {json.loads(call['input'][0]['content'][0]['text'])['camera_id'] for call in calls} == {'1', '2', '3'}
+    assert 'BEFORE UNPACKING, AFTER VERIFIED TABLE RELEASE RGB camera ' + context['camera_id'] in json.dumps(calls[0])
     assert result['visual_evidence']['table_release_reference'] == metadata
     assert 'views' not in json.dumps(metadata)
 
@@ -47,7 +49,7 @@ def test_actual_before_and_current_images_have_separate_bound_roles():
 @pytest.mark.parametrize('mutation', ['missing_capture', 'missing_metadata', 'target', 'observation',
     'generation', 'release', 'binding', 'request', 'owner', 'pixels', 'views', 'future'])
 def test_missing_or_changed_release_reference_stops_without_model_call(mutation):
-    current, action, before, lifecycle, metadata = reference_inputs()
+    current, action, before, release, metadata = reference_inputs()
     if mutation == 'missing_capture':
         before = None
     elif mutation == 'missing_metadata':
@@ -68,17 +70,17 @@ def test_missing_or_changed_release_reference_stops_without_model_call(mutation)
         before.update(time=3., captured_perf_counter_ns=300)
     visual, calls = client()
     with pytest.raises(VisualInventoryError, match='table_release_reference'):
-        perception.verify_unpacking(visual, current, target_id='pink', lifecycle=lifecycle,
+        perception.verify_unpacking(visual, current, target_id='pink', release_evidence=release,
             action_evidence=action, owner_id='run', work_area=work_area(),
             table_release_capture=before, table_release_reference=metadata, active_target_ids=['pink'])
     assert not calls
 
 
 def test_before_images_and_valid_history_do_not_promote_uncertain_same_item():
-    current, action, before, lifecycle, metadata = reference_inputs()
+    current, action, before, release, metadata = reference_inputs()
     visual, _ = client({'unpack_result': ('yes', .77)})
-    result = perception.verify_unpacking(visual, current, target_id='pink', lifecycle=lifecycle,
+    result = perception.verify_unpacking(visual, current, target_id='pink', release_evidence=release,
         action_evidence=action, owner_id='run', work_area=work_area(),
         table_release_capture=before, table_release_reference=metadata, active_target_ids=['pink'])
     assert result['status'] == 'unknown' and not result['success']
-    assert result['appearance_revision'] == 0 and result['target_id'] == 'pink'
+    assert result['appearance'] == 'unconfirmed' and result['target_id'] == 'pink'

@@ -2,7 +2,8 @@ const GROUPS = {
   shared: ['共享 IK 参数', '机械臂评估与 plan_grasp_batch 共用 IK 参数。IK 优化 seeds 与 LM 初始解 seeds 分别控制优化起点数和初始解生成预算；random seed 是复现随机序列的编号，不是搜索数量。'],
   planner: ['cuRobo 规划参数', '按当前官方接口支持范围生效：seeds控制搜索预算，max attempts用于普通plan_pose；plan_grasp内部阶段使用官方默认。'],
   grasp: ['抓取 Approach / Lift', '设置抓取候选和接近、抓取、提升的几何条件。'],
-  place: ['放置 Approach / Lift', '粉件放到共享目标区域中心，保持抓取姿态，attachment参与规划，Z靠近10mm碰撞阈值。黑件普通plan_pose到右盒中心上方，保持lift姿态，Z允许较大余量。'],
+  place: ['放置 Approach / Lift', '设置放置接近与撤离条件。目标来自当前任务绑定；持物几何参与规划，路径仍须通过碰撞与观测覆盖检查。'],
+  vla: ['VLA 输入区域', '设置桌面不可见正方形的中心世界坐标 X/Y 和边长，单位米。放置后用三相机 RGBD 实测物体位置核验区域；VLA 保留既有姿态，并要求双臂到达配置的起始位姿。Responses 会收到这些前提。'],
   filter: ['可见点云过滤（默认关闭）', '只处理 RGBD 实测点；统计或半径过滤不能保证去除密集浮岛。DBSCAN 仅诊断点簇，不按点簇大小或桌面连通性删除障碍。'],
   observation: ['空手观察位姿 · 只读', 'A、B 臂各 7 个已标定参考关节角，用于计算观察 TCP 目标。校准值在此只读；运行仍须通过碰撞规划与 RGBD 覆盖检查。'],
   attachment: ['持物碰撞球', '允许1–31个球，默认24。覆盖实测及明确标注的尺寸先验补全，保留不确定度和余量；允许与同手夹爪组件接触，继续检查相机支架、上游、异臂和世界。'],
@@ -11,14 +12,14 @@ const GROUPS = {
 };
 
 const CATEGORIES = {
-  common: ['常用', '执行倍率与阶段停留。修改后需应用，下一次任务使用。'],
+  common: ['常用', '执行倍率、阶段停留与 VLA 输入位置。修改后需应用，下一次任务使用。'],
   experimental: ['实验调参', '解锁后可修改求解预算、几何、坐标轴与过滤；当前生效值不会被默认值覆盖。'],
   system: ['系统只读', '自碰撞状态与机器人观察标定保持当前生效值，网页不提供修改入口。'],
 };
 
 export function planningFieldCategory(name, field) {
-  if (name === 'self_collision_check' || name === 'place_release_height_m' || field.group === 'observation' || name.startsWith('observation.')) return 'system';
-  return field.group === 'execution' ? 'common' : 'experimental';
+  if (name === 'self_collision_check' || field.group === 'observation' || name.startsWith('observation.')) return 'system';
+  return ['execution', 'vla'].includes(field.group) ? 'common' : 'experimental';
 }
 
 function choiceLabel(value, field) {
@@ -162,7 +163,7 @@ export function createPlanningSettingsEditor(container, { document: ownerDocumen
           const choices = field.type === 'boolean' ? [true, false] : field.enum;
           const input = element(readOnly ? 'output' : choices ? 'select' : 'input');
           input.name = name;
-          input.disabled = readOnly || (advancedLocked && group !== 'execution');
+          input.disabled = readOnly || (advancedLocked && categoryName === 'experimental');
           if (readOnly) {
             input.textContent = choiceLabel(fieldValue(latest.settings, name), field);
           } else if (choices) {
@@ -218,7 +219,8 @@ export function createPlanningSettingsEditor(container, { document: ownerDocumen
     setAdvancedLocked(locked) {
       advancedLocked = locked;
       for (const [name, field] of schemaEntries) {
-        inputs.get(name).disabled = planningFieldCategory(name, field) === 'system' || (advancedLocked && field.group !== 'execution');
+        const fieldCategory = planningFieldCategory(name, field);
+        inputs.get(name).disabled = fieldCategory === 'system' || (advancedLocked && fieldCategory === 'experimental');
       }
     },
     load(payload) {

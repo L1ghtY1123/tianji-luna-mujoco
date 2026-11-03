@@ -1,0 +1,62 @@
+{
+  "id": "identify_target",
+  "recovery_retry_safe": true,
+  "description": "Bind an existing permanent instance ID as the current target, including a verified transformation product. Require current associated geometry. Reuse its confirmed creation/support/transfer evidence; only request a current support judgment if no usable support binding exists. This does not select a CAD asset, perform FoundationPose or generate grasps. Source support and intended destination are different relations. Unknown identity/support is reported for the graph to handle.",
+  "requires": {
+    "observed": true,
+    "task_assessed": true,
+    "recovery_needed": false,
+    "grasp_held": false
+  },
+  "provides": [
+    "target_selected"
+  ],
+  "inputs": [
+    "target_id",
+    "current_observation",
+    "task_inventory"
+  ],
+  "capability": "Bind an existing permanent instance ID as the current target, including a verified transformation product",
+  "outputs": [
+    "target_selected",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure",
+    "observed_support_unknown",
+    "observed_support_current_geometry_required"
+  ],
+  "invalidates_observation": false,
+  "planning_effects": {
+    "destination_selected": false,
+    "destination_ready": false,
+    "arm_selected": null,
+    "arms_evaluated": false,
+    "scene_ready": false,
+    "views_ready": null,
+    "grasps_ready": false,
+    "plan_ready": false,
+    "place_plan_ready": false,
+    "place_execution_completed": false,
+    "place_verification_completed": false,
+    "grasp_completed": false,
+    "verified": false,
+    "lifted": false,
+    "released": false,
+    "transport_plan_ready": false,
+    "transport_execution_completed": false,
+    "drop_completed": false,
+    "table_release_verified": false,
+    "vla_pose_ready": false,
+    "unpack_pending": false,
+    "unpack_verified": null,
+    "cycle_completed": false,
+    "destination_is_container": false,
+    "placement_resolved": false,
+    "placement_zone_ready": false
+  }
+}

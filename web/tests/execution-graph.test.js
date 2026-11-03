@@ -3,7 +3,7 @@ import test from 'node:test';
 import { buildExecutionGraph, graphSvg, layoutExecutionGraph } from '../src/execution-graph.js';
 import * as executionGraph from '../src/execution-graph.js';
 
-test('a process route joins source and independent product without merging their entity IDs', () => {
+test('historical process IDs never merge entity timelines or reconstruct a route', () => {
   const graph = buildExecutionGraph([
     { id: 1, kind: 'skill_start', invocation_id: 'left', target_id: 'pink-a', process_id: 'job-a', data: { skill: 'plan_grasp' } },
     { id: 2, kind: 'skill_complete', invocation_id: 'left', target_id: 'pink-a', process_id: 'job-a', data: { skill: 'plan_grasp' } },
@@ -14,13 +14,9 @@ test('a process route joins source and independent product without merging their
       display_id: 1, input_entity_id: 'pink-a', output_entity_id: 'black-a' } } } } },
   ]);
   const groups = executionGraph.buildObjectTimeline(graph);
-  const process = groups.find(group => group.processId === 'job-a');
-  assert.ok(process);
-  assert.equal(process.inputEntityId, 'pink-a');
-  assert.equal(process.outputEntityId, 'black-a');
-  assert.equal(process.displayId, 1);
-  assert.equal(process.stages.flatMap(stage => stage.nodes).filter(node => node.invocationId).length, 2);
-  assert.equal(groups.filter(group => group.processId).length, 1);
+  assert.deepEqual(groups.filter(group => group.targetId).map(group => group.targetId), ['pink-a', 'black-a']);
+  assert.ok(groups.every(group => !group.processId));
+  assert.ok(groups.every(group => group.transformations.length === 0));
 });
 
 test('object timeline preserves causal target groups and pending verification state', () => {
@@ -224,10 +220,11 @@ test('small consecutive phase subgraphs share a horizontal row', () => {
   assert.ok(layout.height < 600);
 });
 
-test('a rejected skill without a start record uses its explicit skill field for the phase', () => {
+test('a historical recovery event is retained without a dedicated recovery workflow', () => {
   const graph = buildExecutionGraph([{ id: 1, kind: 'skill_error', title: '步骤失败：recover_task',
     invocation_id: 'rejected', t_s: 1, data: { skill: 'recover_task', error: 'precondition' } }]);
-  assert.equal(layoutExecutionGraph(graph).groups[0].phase, 'recovery');
+  assert.equal(layoutExecutionGraph(graph).groups[0].phase, 'system');
+  assert.equal(graph.nodes[0].events[0].data.skill, 'recover_task');
 });
 
 test('a normal task wraps horizontal stages across a compact overview without losing routes', () => {

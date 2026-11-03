@@ -25,6 +25,8 @@ def decode_mapping_payload(payload):
     from .planning_settings import PlanningSettings
     from .semantic_transport import decode_project_semantic_request
 
+    if any(field in payload for field in ('demo_bin_priors', 'demo_completions')):
+        raise ValueError('synthetic_scene_geometry_unsupported:rebuild_from_registered_rgbd')
     if payload.get('retained_bin_ids') or payload.get('completed_transfer'):
         raise ValueError('predicted_scene_reuse_disabled')
     settings = PlanningSettings.model_validate(payload.get("planning_settings", {})).model_dump()
@@ -38,13 +40,16 @@ def decode_mapping_payload(payload):
     if type(demo_mapping) is not bool:
         raise ValueError('demo_mapping must be a boolean')
     demo_tables = payload.get('demo_tables')
-    demo_completions = payload.get('demo_completions', {})
-    demo_bin_priors = payload.get('demo_bin_priors', {})
     if demo_mapping and payload.get('mapping_mode', 'semantic') != 'semantic':
         raise ValueError('demo_inventory_semantic_mapping_required')
     if demo_mapping and not isinstance(demo_tables, dict):
         raise ValueError('demo_initial_table_evidence_required')
-    values = {name: value for name, value in payload.items() if name not in ("planning_settings", "exclusion_state", "gripper_joint_positions_rad", "selected_surface_world_m", "pointcloud_filter", "checkpoint", "held_instance_id", "camera_capture_metadata", "retained_bin_ids", "completed_transfer", "full_observation_complete", "mapping_max_sphere_radius_m", "instance_floor_heights_m", "demo_mapping", "demo_tables", "demo_completions", "demo_bin_priors")}
+    values = {name: value for name, value in payload.items() if name not in ("planning_settings", "exclusion_state", "gripper_joint_positions_rad", "selected_surface_world_m", "pointcloud_filter", "checkpoint", "held_instance_id", "camera_capture_metadata", "retained_bin_ids", "completed_transfer", "full_observation_complete", "mapping_max_sphere_radius_m", "instance_floor_heights_m", "demo_mapping", "demo_tables", "coverage_rgbd", "mapping_lifecycle")}
+    # Display-only OBB metadata must not enter SDK geometry or the collision token.
+    values.pop('object_obb_observations', None)
+    geometry_objects = values.pop('geometry_objects', None)
+    if geometry_objects is not None and not isinstance(geometry_objects, list):
+        raise ValueError('geometry_objects_requires_list')
     decoded = decode_project_semantic_request(values, exclusion_state=payload.get("exclusion_state", "selected"))
     feedback = payload.get("gripper_joint_positions_rad")
     if not isinstance(feedback, dict) or set(feedback) != {"A", "B"}:
@@ -67,6 +72,35 @@ def decode_mapping_payload(payload):
     if not isinstance(observation, str) or not observation or type(generation) is not int or generation < 1:
         raise ValueError("mapping observation identity or generation is invalid")
     views = decoded["views"]
+    lifecycle = payload.get('mapping_lifecycle', {})
+    if (not isinstance(lifecycle, dict) or set(lifecycle) - {
+            'required_entity_ids', 'invalidated_entity_ids', 'retired_entity_ids', 'workspace_bounds',
+            'max_retained_voxel_bytes', 'requested_scope', 'mapping_entity_ids', 'strategy_source', 'scope_reason'}):
+        raise ValueError('mapping_lifecycle_invalid')
+    from .inventory_map import mapping_strategy
+    strategy = mapping_strategy(**{key: lifecycle[key] for key in
+        ('requested_scope', 'mapping_entity_ids', 'strategy_source', 'scope_reason') if key in lifecycle})
+    coverage_views = None
+    if payload.get('coverage_rgbd') is not None:
+        coverage = decode_project_semantic_request(payload['coverage_rgbd'],
+                                                   exclusion_state=payload.get('exclusion_state', 'selected'))
+        if (coverage['observation_set_id'] != observation or coverage['selection_generation'] != generation
+                or set(coverage['views']) != set(views)):
+            raise ValueError('coverage_capture_identity_mismatch')
+        for camera, view in coverage['views'].items():
+            reference = views[camera]
+            if view['depth_left_m'].shape != reference['depth_left_m'].shape:
+                raise ValueError('coverage_capture_calibration_mismatch')
+            for key in ('left_intrinsics', 'T_base_left_camera', 'robot_joints_at_capture', 'stereo_sequence'):
+                if isinstance(view[key], dict):
+                    equal = view[key] == reference[key]
+                else:
+                    equal = np.array_equal(view[key], reference[key])
+                if not equal:
+                    raise ValueError('coverage_capture_calibration_mismatch')
+        coverage_views = coverage['views']
+    decoded['coverage_views'] = coverage_views
+    decoded['mapping_lifecycle'] = lifecycle
     if demo_mapping and tuple(views) != ('1', '2', '3'):
         raise ValueError('demo_mapping requires all three registered views')
     sequences = {view.get("stereo_sequence") for view in views.values()}
@@ -75,8 +109,6 @@ def decode_mapping_payload(payload):
         raise ValueError("mapping views must share one frozen capture")
     instance_ids = set().union(*(set(view["instance_masks"]) for view in views.values()))
     if demo_mapping:
-        from .demo_bin_geometry import validate_bin_priors
-        validate_bin_priors(demo_bin_priors, instance_ids, observation, generation)
         # Missing/unlisted returns are invalid observations, never free-space rays.
         for view in views.values():
             depth = np.asarray(view['depth_left_m'])
@@ -85,8 +117,6 @@ def decode_mapping_payload(payload):
             valid = retained & (np.asarray(view['valid_left_mask']) != 0) & np.isfinite(depth) & (depth > 0)
             view['depth_left_m'] = np.where(valid, depth, 0)
             view['valid_left_mask'] = valid.astype(np.uint8)
-        if not isinstance(demo_completions, dict) or set(demo_completions) - instance_ids:
-            raise ValueError('demo_completion_requires_current_inventory_instance')
     floors = payload.get('instance_floor_heights_m', {})
     if (not isinstance(floors, dict) or set(floors) - instance_ids
             or any(type(value) not in (int, float) or not np.isfinite(value) for value in floors.values())):
@@ -107,8 +137,8 @@ def decode_mapping_payload(payload):
                                   "planning_settings": settings, "full_observation_complete": full_observation,
                                   "mapping_max_sphere_radius_m": radius, "instance_floor_heights_m": floors,
                                   "demo_mapping": demo_mapping, "demo_tables": demo_tables,
-                                  "demo_completions": demo_completions,
-                                  'demo_bin_priors': demo_bin_priors},
+                                  'coverage_rgbd': payload.get('coverage_rgbd'), 'mapping_lifecycle': lifecycle,
+                                  **({'geometry_objects': geometry_objects} if geometry_objects is not None else {})},
                          sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     token = "rgbd:" + hashlib.sha256(content + exclusion.encode()).hexdigest()[:24]
     identity = {"scene_token": token, "observation_id": observation, "generation": generation,
@@ -125,13 +155,10 @@ def decode_mapping_payload(payload):
     decoded['demo_mapping'] = demo_mapping
     if demo_mapping:
         decoded['scene_policy'] = 'demo_inventory'
-        decoded['demo_tables'], decoded['demo_completions'] = demo_tables, demo_completions
-        decoded['demo_bin_priors'] = demo_bin_priors
+        decoded['demo_tables'] = demo_tables
         identity.update(demo_mapping=True, collision_world_source='inventory_semantic_esdf_and_cached_table_cuboids',
                         unobserved_space='unknown', observed_free_motion_gate=False,
                         unlisted_depth_policy='discard_without_free_space_claim')
-        if selected in demo_completions and exclusion in ('selected', 'held'):
-            identity['disabled_obstacle_names'] += (f'semantic_instance::{selected}::height_completion',)
     decoded["selected_surface_world_m"] = surface
     decoded["camera_capture_metadata"] = payload.get("camera_capture_metadata", {})
     decoded["planning_settings"] = settings
@@ -141,6 +168,29 @@ def decode_mapping_payload(payload):
     decoded["full_observation_complete"] = full_observation
     decoded["mapping_max_sphere_radius_m"] = radius
     decoded['instance_floor_heights_m'] = floors
+    if strategy:
+        identity['mapping_strategy'] = strategy
+    if strategy and strategy['requested_scope'] == 'local':
+        requested = set(strategy['mapping_entity_ids'])
+        if requested - instance_ids:
+            raise ValueError('local_mapping_entities_not_observed:' + ','.join(sorted(requested - instance_ids)))
+        for view in views.values():
+            view['instance_masks'] = {key: mask for key, mask in view['instance_masks'].items() if key in requested}
+        for key in ('instance_floor_heights_m',):
+            decoded[key] = {key_id: value for key_id, value in decoded.get(key, {}).items() if key_id in requested}
+        if selected not in requested:
+            # Mapper builds the requested obstacles; the final scene retains
+            # its independently selected target layer through reconciliation.
+            decoded['confirmed_instance_id'] = ''
+            decoded['exclusion_state'] = 'observation'
+            decoded['observation_only'] = True
+            if not demo_mapping:
+                decoded['scene_policy'] = 'all_instances'
+    if geometry_objects is not None:
+        decoded['geometry_objects'] = (geometry_objects if not strategy or strategy['requested_scope'] != 'local'
+            else [row for row in geometry_objects if row.get('id') in strategy['mapping_entity_ids']])
+        identity.update(geometry_policy='registered_cad_or_observed_obb',
+            collision_world_source='inventory_cad_meshes_obb_and_measured_table_cuboids')
     return decoded, identity
 
 

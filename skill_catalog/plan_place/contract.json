@@ -1,0 +1,49 @@
+{
+  "id": "plan_place",
+  "description": "Plan the current resolved placement using the official grasp-style approach and place phases with the post-lift attachment, then an open-gripper retreat after release. Preserve the selected XYZ/orientation and current world binding. Validate the phases with the configured hard collision clearance. No additional pose-selection strategy or cross-skill transport is inserted. It does not release or declare visual success.",
+  "requires": {
+    "needs_place": true,
+    "grasp_held": true,
+    "target_selected": true,
+    "destination_selected": true,
+    "scene_ready": true,
+    "place_plan_ready": false,
+    "released": false,
+    "recovery_needed": false,
+    "placement_resolved": true
+  },
+  "provides": [
+    "place_plan_ready"
+  ],
+  "inputs": [
+    "target_id",
+    "destination_id",
+    "arm",
+    "verified_holding",
+    "placement_request",
+    "collision_scene",
+    "planning_settings",
+    "placement_resolution"
+  ],
+  "capability": "Plan the current resolved placement using the official grasp-style approach and place phases with the post-lift attachment, then an open-gripper retreat after release",
+  "outputs": [
+    "place_plan_ready",
+    "execution_or_evidence_record",
+    "goal",
+    "selection_evidence",
+    "goal.release_reference.goal_workspace"
+  ],
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure",
+    "place_goal_workspace_rejected",
+    "place_no_valid_candidate",
+    "placement_semantic_selection_required",
+    "placement_resolution_requires_held_ik"
+  ],
+  "invalidates_observation": false,
+  "recovery_retry_safe": true
+}

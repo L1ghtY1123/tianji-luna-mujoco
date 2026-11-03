@@ -1,19 +1,21 @@
 import copy
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from test_rgbd_workflow import Choices, SensorRobot, VisionAlgorithms
+from rgbd_workflow_fixture import SensorRobot, VisionAlgorithms
 
 from luna_mujoco.runner import Runner
+from luna_mujoco.runtime.inventory import PolicyTaskProgress
 from luna_mujoco.task_progress import TaskProgress
 
 
-def identity_runner(tmp_path, algorithms=None, *, route='direct'):
-    runner = Runner(SensorRobot(), algorithms or VisionAlgorithms(), lambda record: Choices(), tmp_path)
+def identity_runner(tmp_path, algorithms=None):
+    runner = Runner(SensorRobot(), algorithms or VisionAlgorithms(), None, tmp_path)
     runner.state.update(task='grasp_place', generation=1, attributes={'kind': 'cube', 'color': 'red'},
                         destination_attributes={'kind': 'bin', 'color': 'blue'})
     runner.state['facts']['collection_task'] = True
-    runner.task_progress = TaskProgress('move the selected objects', 'collection', route=route)
+    runner.task_progress = TaskProgress('move the selected objects', 'collection')
     return runner
 
 
@@ -90,7 +92,7 @@ async def test_pending_release_visual_request_survives_cleared_holding_and_targe
 
 
 @pytest.mark.parametrize('next_destination_selected', [False, True])
-async def test_two_stage_route_keeps_visual_id_before_next_grasp(tmp_path, next_destination_selected):
+async def test_explicit_intermediate_transfer_keeps_visual_id_before_next_grasp(tmp_path, next_destination_selected):
     class IntermediateIds(VisionAlgorithms):
         def observe(self, capture, **kwargs):
             result = super().observe(capture, **kwargs)
@@ -106,10 +108,12 @@ async def test_two_stage_route_keeps_visual_id_before_next_grasp(tmp_path, next_
                     'object_id': marker['id'], 'visible_xy_fraction': .5}]
             return result
 
-    runner = identity_runner(tmp_path, IntermediateIds(), route='box_table_box')
+    runner = identity_runner(tmp_path, IntermediateIds())
+    runner.task_progress = PolicyTaskProgress('move the selected objects', 'collection')
     context = {}
     first = await observe_identity(runner, context)
     source, destination, marker = first['objects']
+    runner.task_progress.configure_task(SimpleNamespace(destination_ref=destination['id'], processing=[]), [source['id']])
     runner.task_progress.assess_membership({source['id']: 'required'})
     runner.task_progress.select(source, marker['id'])
     runner.task_progress.record_release(source['id'], feedback_id='release-on-marker')
@@ -123,7 +127,8 @@ async def test_two_stage_route_keeps_visual_id_before_next_grasp(tmp_path, next_
     current = await observe_identity(runner, context)
     assert current['objects'][0]['id'] == source['id']
     assert current['objects'][0]['measured_relationships'][0]['object_id'] == marker['id']
-    assert runner.task_progress.records[source['id']]['stage_index'] == 1
+    assert runner.task_progress.transfer_index(source['id']) == int(next_destination_selected)
+    assert len(runner.task_progress.records[source['id']]['transfers']) == 1
     assert runner.task_progress.completed_ids == []
 
 
@@ -151,3 +156,20 @@ async def test_temporarily_occluded_object_keeps_visual_reference_without_stale_
     restored = await observe_identity(runner, context)
     assert restored['objects'][0]['id'] == original['id']
     assert restored['mapping_unresolved'] == []
+
+
+async def test_initial_observation_keeps_new_tracks_in_preseeded_responses_reference(tmp_path):
+    class TrackedVision(VisionAlgorithms):
+        def observe(self, capture, **kwargs):
+            observation = super().observe(capture, **kwargs)
+            observation['visual_reference'] = {'observation_id': capture['observation_id']}
+            observation['visual_reference']['container_identity_tracks'] = {
+                'reference_observation_id': capture['observation_id'],
+                'generation': capture['generation'], 'proof': 'validated-rgbd'}
+            return observation
+    runner = identity_runner(tmp_path, TrackedVision())
+    capture = runner.simulation.capture_rgbd()
+    context = {'visual_inventory_reference': {'observation_id': capture['observation_id'],
+                                               'entities': {}, 'owner_id': runner.run_id}}
+    await observe_identity(runner, context, capture=capture)
+    assert context['visual_inventory_reference']['container_identity_tracks']['proof'] == 'validated-rgbd'

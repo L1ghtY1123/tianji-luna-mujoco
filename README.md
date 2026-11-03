@@ -1,63 +1,92 @@
 # Tianji Luna MuJoCo
 
-cuRobo使用锁定官方SDK的公开接口；项目封装另有碰撞模型、10mm硬净距及执行状态管理，并非只加参数和插值。2026-10-23调用与夹爪/attachment修订见[审计说明](docs/curobo-public-api-audit.md)，不得将SDK源码一致表述为整个调用流程与官方示例完全相同。
+自然语言和三相机初始 RGB 输入 GPT-6 Luna Responses，结合技能契约、配置区域及 CAD 目录，生成物体清单和显式 graph。运行时由 Decisions 判断当前证据、选择分支和恢复动作，由机器人 skills 完成感知、几何、规划与执行。
 
-2026-10-23 最终规则：VLA后无论当前Decisions能否确认黑件，双臂都必须回固定观测位姿。当前位置确认黑件时，先用同次RGBD分割测量黑件并加入保留背景场景（头部优先，深度不足依次尝试左/右腕）；未确认时不建立黑件，移除过时活动粉件层后回位。回位后重新采三RGBD、联合Decisions确认并分析全部当前清单实体，再重建全局2cm TSDF/ESDF；首次桌面cuboid继续复用。所有粉/黑抓取前都在观测位姿，禁止VLA位姿直接抓取。最后黑件入盒确认后也必须沿最新场景回初始位姿，成功回位才完成任务。
+## 当前实现
 
-逐件拆包演示：左盒粉色包装件 → 桌面共享目标区域 → 模拟VLA拆包 → 右臂抓黑色内件 → 右盒上方松爪投放。默认一个靠近机器人的粉色长方体包装件（原CAD紧致包围盒）；拆包后替换为黑色CAD工件，XY和yaw变化，黑件长轴水平平放。CAD真实尺寸：盒410×310×145mm、新平底粉件去凸条后约79.5×62.8×110mm、黑件44×56×74.5mm。VLA尚未实现，由明确标记的MuJoCo动作替代，不能作为视觉成功证据。
+- **一次初始 Responses**：输出 `version=2` 的 graph/subgraph/node/edge。旧 `steps` 执行器、绑定分支、前端解释器及额外 Responses 修正/重编排接口已经删除。
+- **永久物体 ID**：清单绑定实例及操作历史；CAD asset ID 表示模型，允许多个实例共享一个 CAD。每个任务输入拥有独立 subgraph 和完成账本。
+- **几何**：桌面使用 cuboid，未知物体使用当前观测更新的 OBB，已匹配 CAD 的物体使用 FoundationPose 当前位姿。生产模式为 `cad_obb`。
+- **CAD 配准**：SAM3 掩码、RGBD、内外参和匹配 CAD 输入 FoundationPose；选择有效深度最多的一个相机，输出转换到统一世界坐标。保留来源、标定及坐标绑定检查，取消额外几何残差复核与 ICP。已删除 SAM6D 备用入口。
+- **抓取**：有离线抓姿的 CAD 按执行臂选择对应抓姿；未知 OBB 使用 GraspGen。选臂依据任务约束、工作空间和可达性，颜色不绑定机械臂。
+- **attachment**：抬升成功且确认持物后建立；持物模型随臂、抓取变换、场景版本绑定。
+- **放置**：`perceive_placement_zone` 给出目标区域；普通区域按 4→8→16 分区提出 XY，Decisions 按语言约束选择，数值算法检查工作空间并求接近碰撞阈值的 Z。工作台指定区域使用配置 XY。`resolve_placement` 产生当前落点，`plan_place` 只规划该落点，不再保留另一套网格/yaw 搜索或旧 `plan_place_batch` 接口。
+- **技能清理**：当前 21 个注册能力；旧 `plan_transport / execute_transport / drop / verify_drop` 契约和执行器已删除，容器几何共用 `robot_skills/container_geometry.py`。
+- **轨迹**：调用固定版本的官方 cuRobo。抓取默认每批两个候选；已确定的放置目标使用 BatchMotionPlanner、batch=1。放置包含接近、放下及释放后的撤离。
+- **核验**：`verify_place` 一次读取三相机 RGB，由 Decisions 判断目标支撑/入容器关系及是否仍被夹持；不调用 SAM3、FoundationPose、OBB 或释放后深度测量。
+- **回位**：当前任务要求每件交付后双臂回配置 observation 位姿并观测，最终也处于该位姿。Responses 必须显式编排这些动作，runtime 不暗中插入流程。
 
-场景编辑可选择盒子CAD、粉色长方体包装件、黑色工件CAD，重复添加/删除实例，无旧30个上限；可改命名颜色或#RRGGBB、位置和yaw，CAD原始尺寸保持固定。桌子仍为规则几何，默认白色；固定桌面设置可修改命名颜色或#RRGGBB，应用场景后生效。1–4件菜单只是一组便捷预设，默认1件，不限制手动编辑的数量。
+## 目录与职责
 
-Windows：`C:/project/tianji-luna-mujoco`；Ubuntu：`/home/guangyu/projects/tianji-luna-mujoco`。无JEV/TypeSafe运行时依赖，原工程与服务独立保留。
+| 目录 | 职责 |
+| --- | --- |
+| `src/luna_mujoco/agent/` | Responses/Decisions 协议、问题和初始编排 |
+| `src/luna_mujoco/core/` | graph、任务等数据模型 |
+| `src/luna_mujoco/runtime/` | edge 执行、清单/账本、Decisions 恢复 |
+| `src/luna_mujoco/robot_skills/` | 注册技能实现 |
+| `skill_catalog/` | 技能说明、参数及前提/效果契约 |
+| `src/luna_mujoco/backend_builder.py`、`geometry_service.py` | 官方 cuRobo 适配和服务 |
+| `web/` | 工作台和实验回放 |
+| `tests/` | 当前行为回归及测试数据 |
+| `data/` | 实验、性能证据和清理前的不可执行快照 |
 
-2026-10-22场景坐标（模型中心，单位mm）：桌体 `[572,-26,532]`，左盒 `[481,573,571]`，右盒 `[481,-625,571]`，镜像轴为桌体中心Y=-26。取消两张小桌；桌体与两盒固定世界，碰撞保留。两个粉件绕世界Z旋转180°，粉件和黑件均保留重力。桌板厚80mm，因此桌面顶面Z=572mm。mock黑件局部Y旋转90°，初始底部留1mm间隙，重力落稳。
+独立 CAD 库位于 `/home/guangyu/projects/CAD`。生产通过 `LUNA_CAD_ROOT=/opt/cad` 的只读挂载使用它；`resources/cad/` 是同步维护的项目副本。蓝盒 1000 面、黑色工件 999 面，配准和碰撞使用同一表面，左右臂离线抓姿数值保持不变。
 
-## 使用
+## Git 上传与本地数据
 
-Ubuntu执行 `./start.sh`，停止 `./stop.sh`，状态 `scripts/demo-service.sh status`。网页 http://192.168.3.4:8350 ，后端8351、cuRobo8352、SAM38362、GraspGen8363。API配置只读挂载，项目不保存密钥。
+源码、技能契约、部署配置、`assets/`、`resources/` 和 `tests/fixtures/` 随 Git 保存；`.env`、`data/`、渲染缓存、依赖目录及构建输出由 `.gitignore` 排除。仅提交不含密钥的 `.env.example`，不要用 `git add -f` 上传运行数据或凭据。
 
-Compose将 `LUNA_DECISIONS_TIMEOUT_S` 显式传入视觉客户端，默认90秒，可在项目`.env`中设置为1–180秒；该网络等待预算不增加模型调用或自动重试。
+`data/` 有用，但不属于源码分发包：
 
-指令：“对于左侧盒子中的所有粉色待拆包物体，逐个拿出放到桌面目标区域，用VLA拆包取出黑色物体，再把黑色物体放到右侧盒子里。一个物体完成后再处理下一个。”也可指定数量。左腕初始RGB行顺序只决定物体编号，canonical ID和初始编号全程固定。执行顺序由初次观测的三视角RGBD实测质心到机器人基座的水平距离决定，由近到远；指定数量时选择最近N件。距离相同时沿原编号顺序，颜色和形状不参与排序；执行次序与显示编号独立。后续一次 `associate_inventory` Decisions接收同次三张CURRENT原图、候选标签/细节；仍有粉件时在同一请求加入INITIAL三RGB/原编号标签。`identity_N`确认当前工件角色，`wrapped_identity_N`结合可见外观、注册相机/原当前框连续性和实际逐ID操作记录确认原粉件身份，角色predicate概率及原身份choice confidence分别须达到0.8；全部剩余粉件仍须有已接受的camera2候选，但判断融合三视图，不要求每相机各自通过。唯一剩余角色、数量或位置不能单独证明身份。黑件在拆包视觉确认后建立独立entity ID，工序记录关联输入/产物；不要求粉黑外观同一性。右盒随机投放后的当前占据按集合表示，不逐成员重认ID。完整问题及unknown边界见[Decisions问题清单](docs/decisions-questions.md)。
+| 路径 | 用途与保留建议 |
+| --- | --- |
+| `data/experiments/` | 实验回放、相机图像、模型调用、轨迹和诊断证据。需要复现的记录应单独备份。 |
+| `data/experiments/.trash/` | 工作台删除实验后的可恢复回收区；删除操作会移入此处，仍占磁盘。确认不再需要恢复后才可清理。 |
+| `data/runs/` 及各审计目录 | 历史运行、性能分析和排错材料；按实验价值保留，不上传 Git。 |
+| `data/render_meshes/` | 网页渲染网格缓存，可由当前模型生成；历史回放可能引用旧缓存。 |
+| `data/foundationpose-registry/` | FoundationPose 当前部署挂载的模型注册库，运行需要，不能随历史实验一起清空。 |
 
-## 执行与证据
+2026-11-03 检查时，`data/` 约 140 GiB，其中实验回收区约 96 GiB；这些是本机占用，不计入 Git 提交。本文中的 `data/` 证据链接指向本地归档，GitHub 克隆不会包含这些记录。
 
-一次gpt-6-luna Responses读取三RGB，生成固定清单、每个物体两段执行臂及有界skill程序。原粉件与黑色产物使用独立entity ID，工序ID串起输入、拆包和投放；桌面放置只是中间阶段，右盒Decisions确认才完成。不使用隐藏固定程序替代模型输出。
+在新机器部署时，还需单独准备 `.env`、OpenAI 配置、Compose 指定的本地镜像、独立 CAD 库及 FoundationPose 注册库。注册库可备份迁移，或使用 `scripts/provision_foundationpose_registry.py`，结合匹配固定版本的服务包、CAD 库和已有 seed registry 准备；仅克隆本仓库不等于已具备完整运行环境。
 
-所有用户指定目标均为夹爪前端位姿。撤离完成后采当前三RGB，单次Decisions联合判断place_result（桌面独立粉件）、workpiece_still_held（仍被夹持）、observation_sufficient（当前证据是否足够确认或否定这些条件）。前两项分别须yes/no，充分性须yes；概率≥0.8为yes、≤0.2为no，其余unknown。释放XY由实际前端反馈数值核验，不能拿动作历史替代当前像素。证据不足时沿最近的保留场景回固定观测位姿，采新三图再核验一次；没有确认放置成功前不建立粉件局部碰撞。仍不足停止。明确失败不重复观察。全过程绑定原始持物、释放与场景更新链；成功仅推进table_released。确认后刷新局部粉件障碍，首次桌面及背景地图复用。
+## 启动
 
-mock VLA后，当前三RGB合并一次Decisions，判断unpack_result（主桌独立黑件）、wrapper_removed（活动粉件已经拆出黑件）、observation_sufficient（当前证据充分性）。BEFORE是本工序已验证的桌面粉件图；其他粉件仍在左盒不影响结果，不要求跨外观身份匹配。黑件可见时以同次RGBD测量并加入局部障碍，移除过时活动粉件层；无可用深度/不可见时按用户指定不创建黑件障碍，移除过时层后回位。无论当前结果如何，都必须双臂回固定观测位姿，采新三RGBD并重新联合Decisions。三项均yes后，以当前实测点云核对指定执行臂工作空间；通过才创建独立黑件ID，保留工序输入/产物关联。最多两次判断、一次回位；仍缺证据或不可达则停止。随后observe_scene分析当前清单，build_scene重建全局2cm TSDF/ESDF，复用首次桌面cuboid后才能抓取。
+Ubuntu 使用现有镜像和项目 `.env`：
 
-实际attachment运输、开爪后，单次Decisions联合CURRENT三RGB、BEFORE三RGB及同盒局部放大图，判断current_item_added（本次右盒新增黑件）和observation_sufficient。须两项yes；新增主体或轮廓可以证明增加，不要求随机堆叠后逐个数清N+1，不重认盒内个体ID，旧件移动或历史数量不证明增加。证据不足时，先发布明确标为动作推导、尚未视觉确认的盒内保守包络，再回固定观测位姿采新三图核验一次；不重建全局地图。仍不足不计完成。确认后才完成产物及工序，保留released_in_bin_and_visible_addition语义，并更新确认后的动作包络供回位。
+```bash
+cd /home/guangyu/projects/tianji-luna-mujoco
+LUNA_UID=$(id -u) LUNA_GID=$(id -g) docker compose -f deploy/demo.compose.yaml up -d
+docker compose -f deploy/demo.compose.yaml ps
+```
 
-粉件和黑件抓取前均须双臂回到固定观测位姿，分析全部当前清单实体并建立唯一最新2cm全局TSDF/ESDF，首次RANSAC桌面cuboid复用。VLA后当前位置的局部黑件障碍仅用于回位，不能代替观测位姿全局建图。地图、清单和GraspGen必须绑定同次capture和generation。C编号仅为临时候选；确认身份后同一永久ID/相机合并掩码，不按描述新建ID。初始粉件ID保持，黑件用独立产物ID，完成件按右盒集合几何处理。未知身份、缺几何、版本过期均停止，不把看不到的区域当作空闲。
+Windows PowerShell 打开工作台：
 
-SAM3用多种颜色、形状和位置描述。GraspGen每轮保持3/6/10次服务调用、最多300/600/1000个原始返回。全部结果先按执行臂转换并进行方向筛选、执行臂夹爪对称方向选择及名义可达性筛选，再按原分数顺序最多取256/512/1000个进入IK。禁止先按分数截断再做方向筛选，避免漏掉低分但方向合格的位姿；未提交IK的合格者单独记录，不记为失败。完整原始位姿和筛后索引均归档，官方推理与cuRobo算法不变。每次官方推理num_grasps=200、topk_num_grasps=100不变。只有当前池IK或规划确定性耗尽才进入下一轮，固定输入及有限候选池预算，不设置额外规划总时限，错误/unknown不重试。
+```powershell
+Start-Process 'http://192.168.3.4:8350'
+```
 
-粉件保持抓取旋转，夹爪前端对准固定共享区域中心XY=[0.50160,0.11646]m，无分区。Z根据attachment、当前夹爪与世界碰撞选择接近10mm间隙的高度。直接调用官方plan_grasp的接近/放下两阶段，不使用plan_place_batch；两段均闭爪attachment。第三段按全开夹爪、detach规划，使用官方plan_pose配合ToolPoseCriteria.linear_motion，沿高级设置撤离轴lift，避免自由绕弯扫过刚释放的物体。只检查当前闭合与全开端点，不检查开爪扫掠，不加2mm终点上限。 黑件lift后带attachment，用官方普通plan_pose将夹爪前端放到右盒靠机器人的半区上方。机器人+X向前，XY取当前配准盒腔包围范围中心向-X偏移X宽度的1/4（近侧半区中心）；保持实际lift旋转。用户坐标均为夹爪前端，SDK法兰目标减去R@[0,0,0.185]，不使用持物中心，不检查整件投影包含。Z保留宽松选择：持物最低点高于当前盒体占据上界10cm，并可提高到缩短肩腕距离的高度。附件与机器人/场景的三维10mm碰撞检查、当前闭爪/全开detach端点及高级设置五次插值/时间伸长保持。盒边界只来自最新发布的该ID体素/CAD配准，不从仿真真值或原SAM飞点求高度；版本、边界不完整或无解时停止。
+如果使用 SSH 本地转发，在一个 PowerShell 窗口保持连接：
 
-Attachment默认24球，上限31；历史超限设置显式迁移。同手夹爪全部9链接允许重叠，TCP相机支架、上游、异臂、世界检查保留。MuJoCo位置伺服，关闭夹爪不修改手臂位置目标，不加入任务力/力矩控制。
+```powershell
+ssh -N -L 8350:127.0.0.1:8350 guangyu@192.168.3.4
+```
 
-缺失高度仅在实测顶部、支撑面与已知尺寸一致时补：包装110mm、平放黑件44mm（来自CAD目录）；完整点云不补，投放后倾斜物体不套世界Z高度。Decisions判断工序/遮挡，不能生成未知深度。
+另一个窗口运行 `Start-Process 'http://127.0.0.1:8350'`。工作台端口为 8350，cuRobo 服务端口为 8352。五个容器当前 CPU 配额总计 4 核。
 
-界面展示冻结的初始物体档案、当前场景实体、待拆包、已拆包待投放、处理中及已完成；当前场景不重复统计历史粉件/黑件与纯数值区域，右盒使用集合几何；完成数量按工序计数。回放按工序串起粉件与黑件两段动作并分别显示其ID，包含每次Responses/Decisions图像、SAM3分割、GG/IK/轨迹筛选点云和mock几何版本。见[skill手册](docs/luna-skills-guide.md)、[实现计划](docs/superpowers/plans/2026-10-21-unpack-transfer.md)。
+## 开发与验证
 
-## 验证
+安装项目及开发依赖后运行 `python -m pytest -q` 和 `python -m ruff check src tests --select F`。普通任务可通过 `scripts/validate_demo_run.py --instruction "自然语言任务" --output data/acceptance.json` 验收。
 
-当前逐件拆包每个结果/清单观察采用一次三相机融合Decisions。无item_lifecycle的旧桌面搬运兼容路径在已有完成槽追踪时仍保留“完成件对应→其余清单”两次同帧请求，尚未合并；详见[问题清单](docs/decisions-questions.md)。协议文档与本地检查不替代真实模型和完整运动验收，历史失败实验不改写。
+新增技能需要契约、参数 schema 和 handler；不得在 controller 中添加固定任务流程。执行前检查观测/场景版本、身份、机器人反馈、工作空间与碰撞，不能用模型判断替代数值检查。未通过的判断沿 graph 失败或恢复分支处理，不伪造成功。
 
-Python：`python -m pytest`；web：`pnpm test`、`pnpm build`。完整仿真：`scripts/validate_demo_run.py --count 2 --record-video --output data/unpack-run.json`。CPU替身测试和服务健康不能代替完整物理任务验收。
+当前设计和证据：
 
+- [框架、模型输入与代码清理核对](docs/framework-cleanup-20261103.md)
+- [当前 CAD 与落点策略](docs/cad-runtime-policy-20261102.md)
+- [显式 graph 与运行恢复](docs/native-graph-implementation.md)
+- [Decisions 问题协议](docs/decisions-questions.md)
+- [选臂、attachment 与放置性能](docs/arm-attachment-place-audit-20261103.md)
+- [低面数 CAD 与 GPU 审计](docs/lowpoly-and-gpu-audit-20261103.md)
 
-2026-10-22 常驻预热（本段替代早期按持物几何新建配置的行为）：接收任务前按保存设置预热13个配置：A/B各IK100、批4/16、普通单臂、单目标抓放，加双臂及A/B位置可达性。ready在全部完成后发布。两侧各预留31个持物球，夹爪反馈和附件通过公开几何API原位更新，换物、换臂、detach和重置地图保留兼容规划器。重置清空地图与证据，首次任务仍须观测建图。仅显式改变求解参数、工具拓扑或超出场景容量时重建。生产实例是官方原类；plan_grasp内部不再覆盖plan_pose，重试/finetune采用其公开接口支持范围。详见docs/curobo-public-api-audit.md。
-
-
-
-
-2026-10-23 回放与收尾：完整归档 GraspGen 服务返回的全部候选（包括超出本轮采样预算者），分别查看原始生成、方向/名义可达性预筛选及执行臂夹爪对称方向选择、batched IK、plan_grasp_batch 四阶段。每个候选显示按执行臂标定转换的完整 XYZ 坐标轴，X 红、Y 绿、Z 蓝；没有凭 Z 补造 X 或额外生成位姿。已归档最终预筛选索引包括可达性筛选结果；旧实验缺失的原始输出不补造。最后一件黑件 verify_drop 成功后，保留入盒动作障碍包络，双臂必须沿最新场景返回初始观测位姿，回位失败不报告任务成功，不重新建图。局部目标更新返回的碰撞实体清单包含保留的背景层。
-
-放置 Approach 与 Lift 默认均为world +Z 100mm，沿用官方plan_grasp的偏移语义；10mm碰撞阈值不变。实验参数与执行流程移除封装自设的抓取/放置规划总时限，保留HTTP通信超时和用户取消。抓取/放置的同类参数统一显示为Approach和Lift。
-
-执行已验证的带物接近、放下轨迹。松爪前检查实际关节、夹爪、attachment、目标区域与10mm碰撞阈值；开爪确认、detach、阶段等待后沿设定轴lift。这里不采结果图、不分割或建立粉件局部障碍。lift完成后由verify_place调用Decisions；只有放置已确认才用同次RGBD建立粉件局部障碍，之后才能移动到VLA位姿。顺序不可提前。
-
-2026-10-23：放置停留按墙钟预算计入阶段检查，超时单独记录；结果观测充分性只检查当前节点列出的条件，历史对照可用于所要求的变化判断。全局TSDF/ESDF固定2cm，官方算法源码保持只读。
+带日期的旧实验文档只记录当时实现，不代表当前接口或当前要求。

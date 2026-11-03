@@ -1,0 +1,43 @@
+{
+  "id": "generate_grasps",
+  "description": "Generate candidates for the bound target and selected arm. Known CAD loads that arm offline grasps in the source CAD frame and transforms them through the current FoundationPose pose; it does not call GraspGen. Unknown OBB objects use GraspGen online. Keep current observation/model/frame provenance. Generation does not prove IK, collision clearance, contact or path feasibility. A CAD/offline-library failure is explicit, not an automatic switch to GraspGen.",
+  "requires": {
+    "target_selected": true,
+    "arm_selected": true,
+    "grasp_completed": false,
+    "views_ready": true,
+    "scene_ready": true,
+    "destination_ready": true,
+    "grasp_view_ready": true
+  },
+  "provides": [
+    "grasps_ready"
+  ],
+  "inputs": [
+    "target_id",
+    "arm",
+    "current_observation",
+    "placement_request",
+    "planning_settings"
+  ],
+  "capability": "Generate candidates for the bound target and selected arm",
+  "outputs": [
+    "grasps_ready",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure",
+    "container_placement_region_unavailable"
+  ],
+  "invalidates_observation": false,
+  "recovery_retry_safe": true,
+  "planning_effects": {
+    "plan_ready": false,
+    "placement_resolved": false,
+    "place_plan_ready": false
+  }
+}

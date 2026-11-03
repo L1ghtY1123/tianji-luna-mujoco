@@ -1,7 +1,4 @@
 """Ordinary attached pose planning uses the retained world and actual command."""
-import hashlib
-import json
-import threading
 from copy import deepcopy
 
 import numpy as np
@@ -19,96 +16,6 @@ def workspace(arm, positions):
     return [{'reachable': True, 'position_world_m': value} for value in positions]
 
 
-class PoseService:
-    def __init__(self, observation, arm, *, bad=None, cancelled=None):
-        self.observation, self.arm = observation, arm
-        self.bad, self.cancelled, self.calls = bad, cancelled, []
-
-    def __call__(self, path, payload):
-        self.calls.append((path, deepcopy(payload)))
-        if path == '/tools/plan_carried_pose':
-            q = np.asarray(self.observation['arms'][self.arm]['joints_rad'])
-            values = np.array([q, q + .03, q + .06])
-            side = 'L' if self.arm == 'A' else 'R'
-            trajectory = {'joint_names': [f'Joint{i}_{side}' for i in range(1, 8)],
-                'positions_rad': values.tolist(), 'velocities_rad_s': np.zeros_like(values).tolist(),
-                'accelerations_rad_s2': np.zeros_like(values).tolist(), 'interpolation_dt_s': .02}
-            if self.bad == 'derivatives':
-                trajectory.pop('velocities_rad_s')
-            if self.cancelled is not None:
-                self.cancelled.set()
-            return {'ok': True, 'attached': self.bad != 'detached',
-                'scene_token': 'stale' if self.bad == 'token' else payload['scene_token'],
-                'trajectory': trajectory,
-                'collision_evidence': {'optimizer_attachment': self.bad != 'optimizer'}}
-        assert path == '/carrying/validate'
-        assert payload['phase'] == 'transport'
-        validate_phase_request(payload)
-        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':'),
-                                          allow_nan=False).encode()).hexdigest()
-        return {'scene_token': payload['scene_token'], 'binding_sha256': digest,
-                'attached': True, 'collision_free': self.bad != 'collision'}
-
-
-@pytest.mark.parametrize('arm', ['A', 'B'])
-@pytest.mark.parametrize('scale', [1., 2.5])
-def test_single_attached_pose_preserves_goal_and_checks_quintic_command(arm, scale):
-    observation, scene, holding, _ = placement_inputs()
-    holding['arm'] = arm
-    original = deepcopy(holding)
-    goal = pose(.36)
-    service = PoseService(observation, arm)
-    result = DemoAlgorithms(curobo_request=service, workspace_lookup=workspace).plan_attached_pose(
-        observation, 'seen-red', arm, scene, holding, goal,
-        planning_settings={'time_scale': scale})
-    assert [p for p, _ in service.calls] == ['/tools/plan_carried_pose', '/carrying/validate']
-    payload = service.calls[0][1]
-    np.testing.assert_allclose(payload['goal_position_m'], goal[:3, 3])
-    assert payload['carrying_binding']['arm'] == arm
-    assert payload['planning_settings']['trajectory_collision_clearance_m'] == .01
-    assert 'trajectory_point_scale' not in payload
-    assert len(result['command']['positions_rad']) == int(2 * scale) + 1
-    assert result['command']['dt'] == .02
-    assert service.calls[1][1]['positions_rad'] == result['command']['positions_rad']
-    np.testing.assert_allclose(result['goal'], goal)
-    assert result['scene_token'] == scene['scene_token'] and holding == original
-
-
-@pytest.mark.parametrize('fault', ['token', 'detached', 'optimizer', 'derivatives', 'collision'])
-def test_untrusted_pose_result_cannot_produce_an_executable_command(fault):
-    observation, scene, holding, _ = placement_inputs()
-    service = PoseService(observation, 'A', bad=fault)
-    with pytest.raises(AlgorithmError):
-        DemoAlgorithms(curobo_request=service, workspace_lookup=workspace).plan_attached_pose(
-            observation, 'seen-red', 'A', scene, holding, pose())
-    if fault != 'collision':
-        assert len(service.calls) == 1
-
-
-@pytest.mark.parametrize('fault', ['unverified', 'detached', 'wrong_arm', 'wrong_target'])
-def test_transport_rejects_invalid_holding_before_backend(fault):
-    observation, scene, holding, _ = placement_inputs()
-    if fault == 'unverified': holding['verified'] = False
-    elif fault == 'detached': holding['attached'] = False
-    elif fault == 'wrong_arm': holding['arm'] = 'B'
-    else: holding['instance_id'] = 'another'
-    service = PoseService(observation, 'A')
-    with pytest.raises(AlgorithmError):
-        DemoAlgorithms(curobo_request=service, workspace_lookup=workspace).plan_attached_pose(
-            observation, 'seen-red', 'A', scene, holding, pose())
-    assert not service.calls
-
-
-def test_cancel_after_pose_service_stops_before_command_validation():
-    observation, scene, holding, _ = placement_inputs()
-    event = threading.Event()
-    service = PoseService(observation, 'A', cancelled=event)
-    with pytest.raises(AlgorithmError):
-        DemoAlgorithms(curobo_request=service, workspace_lookup=workspace).plan_attached_pose(
-            observation, 'seen-red', 'A', scene, holding, pose(), cancelled=event)
-    assert len(service.calls) == 1
-
-
 def test_transport_phase_requires_a_measured_binding():
     with pytest.raises(ValueError, match='requires'):
         validate_phase_request({'phase': 'transport'})
@@ -117,46 +24,33 @@ def test_transport_phase_requires_a_measured_binding():
         validate_phase_request({'phase': 'transport', 'carrying_binding': {'state': 'preflight'}})
 
 
-def test_unpacked_reachability_does_not_query_the_right_box_floor():
+def test_container_reachability_uses_selected_kind_not_global_stage():
     observation, _, _, _ = placement_inputs()
-    observation['stage'] = 'unpacked'
+    next(item for item in observation['objects'] if item['id'] == 'demo-destination')['kind'] = 'bin'
     queries = []
     def lookup(arm, positions):
         queries.append((arm, positions))
         return workspace(arm, positions)
     result = DemoAlgorithms(workspace_lookup=lookup).evaluate_reachability(
         observation, 'seen-red', 'demo-destination', requested_arm='B')
-    assert len(queries) == 1 and len(queries[0][1]) == 1
-    assert result['B']['destination'] is None and result['B']['reachable']
+    assert len(queries[0][1]) == 1 and all(arm == 'B' and len(points) <= 2 for arm, points in queries)
+    assert result['B']['destination_workspace_context']['tested_count'] == 3
+    assert result['B']['destination']['reachable'] is None and result['B']['reachable']
+    assert result['B']['destination_candidates'] == []
     assert result['B']['destination_id'] == 'demo-destination'
-    assert result['B']['destination_status'] == 'pending_actual_lift_transport_goal'
-
-
-@pytest.mark.parametrize('answer', [False, 'malformed'])
-def test_actual_transport_goal_must_pass_workspace_before_planning(answer):
-    observation, scene, holding, _ = placement_inputs()
-    queries = []
-    def lookup(arm, positions):
-        queries.append((arm, positions))
-        return [{'reachable': answer, 'position_world_m': positions[0]}]
-    algorithm = DemoAlgorithms(workspace_lookup=lookup,
-        curobo_request=lambda *args: pytest.fail('unreachable goal was submitted'))
-    goal = pose(.36)
-    with pytest.raises(AlgorithmError, match='workspace'):
-        algorithm.plan_attached_pose(observation, 'seen-red', 'A', scene, holding, goal)
-    assert queries == [('A', [goal[:3, 3].tolist()])]
+    assert result['B']['destination_status'] == 'pending_above_container_pose'
+    assert result['B']['feasibility_scope'] == 'source_position_workspace_only'
 
 
 @pytest.mark.parametrize('arm', ['A', 'B'])
-def test_unpacked_generation_has_no_table_slot_requirement_but_keeps_direction_and_insertion(arm):
+def test_explicit_transport_request_has_no_table_slot_requirement_but_keeps_direction_and_insertion(arm):
     observation, _, _, _ = placement_inputs()
-    observation['stage'] = 'unpacked'
     client = GraspClient()
     request = {'object_id': 'seen-red', 'transport_region': {
         'center_world_xy_m': [.3, .2 if arm == 'A' else -.2],
         'occupied_top_z_m': .65, 'observation_id': observation['observation_id']}}
     result = DemoAlgorithms(graspgen_client=client).generate_grasps(
-        observation, 'seen-red', arm=arm, placement_request=request)
+        observation, 'seen-red', arm=arm, placement_request=request, planning_settings={'grasp_insertion_m': .01, 'grasp_maximum_tilt_deg': 45., 'grasp_require_away_from_robot': True})
     assert len(client.calls) == 3
     assert result['fixed_slot_reach_filter']['applied'] is True
     assert result['fixed_slot_reach_filter']['screening_scope'] == 'nominal_transport_wrist_reach'
@@ -165,9 +59,9 @@ def test_unpacked_generation_has_no_table_slot_requirement_but_keeps_direction_a
     assert [candidate['index'] for candidate in result['candidates']] == [6, 7, 8]
 
 
-def test_unpacked_source_and_final_fk_skip_width_prediction_but_keep_nominal_bounds(monkeypatch):
+def test_verified_product_source_and_final_fk_skip_width_prediction_but_keep_nominal_bounds(monkeypatch):
     observation, scene, grasps, item = inputs('B')
-    observation['stage'] = 'unpacked'
+    bind_verified_product(observation)
     monkeypatch.setattr(DemoAlgorithms, '_gripper_quality', lambda *args: pytest.fail('legacy width heuristic'))
     algorithm = DemoAlgorithms(curobo_request=lambda *args: {
         'scene_token': scene['scene_token'], 'batch_size': 1, 'items': [item]})
@@ -209,27 +103,79 @@ def test_dual_vla_pose_uses_retained_scene_and_validates_both_commands():
     assert calls[0][1]['planning_settings']['time_scale'] == 2.5
 
 
-def test_action_envelope_is_explicitly_derived_and_retokens_retained_scene():
+def test_scene_invalidation_retokens_without_inventing_geometry():
     _, scene, _, _ = placement_inputs()
     before = deepcopy(scene)
-    bounds = {'minimum_world_m': [.2, -.7, .4], 'maximum_world_m': [.3, -.5, .7]}
     calls = []
     def service(path, body):
         calls.append((path, deepcopy(body)))
         return {'scene_token': 'updated', 'exclusion_state': 'released', 'rgbd_remapped': False}
-    result = DemoAlgorithms(curobo_request=service).publish_action_envelope(
-        scene, 'seen-red', bounds, 'drop-4', source='verified_drop_action_bounds')
+    result = DemoAlgorithms(curobo_request=service).invalidate_scene_entity(
+        scene, 'seen-red', 'drop-4', source='verified_drop_action_bounds')
     assert scene == before
     assert result['scene_token'] == 'updated' and result['rgbd_remapped'] is False
     assert calls[0][0] == '/perception/update'
-    assert calls[0][1]['operation'] == 'action_envelope'
-    assert calls[0][1]['bounds'] == bounds and calls[0][1]['action_id'] == 'drop-4'
+    assert calls[0][1]['operation'] == 'invalidate'
+    assert 'bounds' not in calls[0][1]
+    assert calls[0][1]['action_id'] == 'drop-4'
     assert calls[0][1]['source'] == 'verified_drop_action_bounds'
 
 
-@pytest.mark.parametrize('bounds', [None, {'minimum_world_m': [0, 0, 0], 'maximum_world_m': [1, 0, 1]}])
-def test_action_envelope_rejects_malformed_geometry_without_sending(bounds):
+@pytest.mark.parametrize('target,action,source', [('', 'action-1', 'mock_vla'),
+    ('seen-red', '', 'mock_vla'), ('seen-red', 'action-1', 'invented')])
+def test_scene_invalidation_requires_identity_and_action_provenance(target, action, source):
     _, scene, _, _ = placement_inputs()
-    algorithm = DemoAlgorithms(curobo_request=lambda *args: pytest.fail('invalid envelope was submitted'))
-    with pytest.raises((TypeError, ValueError)):
-        algorithm.publish_action_envelope(scene, 'seen-red', bounds, 'action-1')
+    algorithm = DemoAlgorithms(curobo_request=lambda *args: pytest.fail('invalid request submitted'))
+    with pytest.raises(ValueError):
+        algorithm.invalidate_scene_entity(scene, target, action, source=source)
+
+
+def bind_verified_product(observation):
+    observation['inventory_state'] = {'entities': {'seen-red': {
+        'id': 'seen-red', 'processing_skill': 'vla_unpack', 'process_id': 'process-1',
+        'input_entity_id': 'wrapped-source', 'identity_source': 'confirmed_current_product_creation',
+        'creation_evidence': {'source': 'confirmed_unpack_process_output', 'output_entity_id': 'seen-red',
+            'input_entity_id': 'wrapped-source', 'process_id': 'process-1', 'processing_skill': 'vla_unpack',
+            'generation': observation['generation'], 'observation_id': 'creation-observation',
+            'action_id': 'effect-1', 'request_hash': 'confirmed-effect'}}}}
+
+
+@pytest.mark.parametrize('mutation', ['none', 'unrelated_target', 'wrong_generation', 'missing_action', 'wrong_input', 'no_metadata'])
+def test_only_bound_verified_product_metadata_can_skip_width_prediction(monkeypatch, mutation):
+    observation, scene, grasps, item = inputs('B')
+    bind_verified_product(observation)
+    entity = observation['inventory_state']['entities']['seen-red']
+    if mutation == 'unrelated_target':
+        entity['creation_evidence']['output_entity_id'] = 'other'
+    elif mutation == 'wrong_generation':
+        entity['creation_evidence']['generation'] = observation['generation'] + 1
+    elif mutation == 'missing_action':
+        entity['creation_evidence'].pop('action_id')
+    elif mutation == 'wrong_input':
+        entity['creation_evidence']['input_entity_id'] = 'other'
+    elif mutation == 'no_metadata':
+        observation.pop('inventory_state')
+    observation['stage'] = 'unpacked'  # Obsolete external tags cannot grant exemptions.
+    predictions = []
+    def predict(*args):
+        predictions.append(True)
+        return {'accepted': True}
+    monkeypatch.setattr(DemoAlgorithms, '_gripper_quality', predict)
+    algorithm = DemoAlgorithms(curobo_request=lambda *args: {
+        'scene_token': scene['scene_token'], 'batch_size': 1, 'items': [item]})
+    candidates = algorithm.evaluate_arms(observation, 'seen-red', grasps, scene, requested_arm='B')['B']['valid_candidates']
+    assert candidates
+    assert bool(predictions) is (mutation != 'none')
+
+
+def test_old_stage_tag_cannot_disable_reachability_for_a_support_destination(monkeypatch):
+    from luna_mujoco.algorithms import Algorithms
+    observation = {'stage': 'unpacked', 'objects': [{'id': 'support', 'kind': 'marker'}]}
+    calls = []
+    def evaluate(self, snapshot, target, destination_id=None, **kwargs):
+        calls.append(destination_id)
+        return {'A': {'reachable': True}}
+    monkeypatch.setattr(Algorithms, 'evaluate_reachability', evaluate)
+    with pytest.raises(ValueError, match='placement_requires_measured_floor'):
+        DemoAlgorithms().evaluate_reachability(observation, 'item', 'support')
+    assert not calls

@@ -19,6 +19,11 @@
         <label class="search-label" for="experiment-search">搜索名称或指令</label>
         <input id="experiment-search" type="search" placeholder="筛选实验…" />
         <p id="experiment-count" class="muted" aria-live="polite">正在读取实验…</p>
+        <div class="experiment-selection">
+          <label class="select-experiments"><input id="select-all-experiments" type="checkbox" />全选筛选结果</label>
+          <p id="selected-count" class="muted" aria-live="polite">已选 0 条</p>
+          <div class="actions"><button id="delete-selected" class="button danger" disabled>删除所选</button><button id="clear-selection" class="button" disabled>取消选择</button></div>
+        </div>
         <div id="experiment-list" class="experiment-list"></div>
         <details class="storage-details"><summary>存储位置</summary><p id="experiment-root" class="muted"></p></details>
       </aside>
@@ -30,7 +35,7 @@
             <p id="experiment-instruction"></p>
             <p id="experiment-meta" class="muted"></p>
             <div id="replay-metrics" class="replay-metrics"></div>
-            <p id="experiment-errors" class="inline-error" hidden></p>
+            <div id="experiment-errors" class="inline-error" hidden></div>
             <details class="archive-management"><summary>实验管理与下载</summary>
             <form id="rename-form" class="name-form"><label for="experiment-name">实验名称</label><input id="experiment-name" maxlength="200" placeholder="未命名实验" /><button id="save-experiment" class="button primary" type="submit">保存名称</button><button id="discard-experiment" class="button danger" type="button" hidden>删除实验</button></form>
             <div class="export-links"><a id="review-export" class="button" download>下载审阅 ZIP</a><a id="full-export" class="button" download>下载完整 ZIP</a><span class="muted">审阅包含视频与 JSON；大型数组和采样文件见完整包。</span></div>
@@ -38,10 +43,11 @@
           </section>
           <section class="replay-view panel">
             <div class="tabs" role="tablist" aria-label="回放视图">
-              <button id="tab-graph" role="tab" aria-controls="view-graph" aria-selected="true" data-view="graph">执行流程</button>
+              <button id="tab-graph" role="tab" aria-controls="view-graph" aria-selected="true" data-view="graph">graph</button>
               <button id="tab-inventory" role="tab" aria-controls="view-inventory" aria-selected="false" data-view="inventory" tabindex="-1">物体清单</button>
               <button id="tab-video" role="tab" aria-controls="view-video" aria-selected="false" data-view="video" tabindex="-1">视频</button>
               <button id="tab-observations" role="tab" aria-controls="view-observations" aria-selected="false" data-view="observations" tabindex="-1">观测图</button>
+              <button id="tab-collision" role="tab" aria-controls="view-collision" aria-selected="false" data-view="collision" tabindex="-1">阶段碰撞场景</button>
               <button id="tab-data" role="tab" aria-controls="view-data" aria-selected="false" data-view="data" tabindex="-1">原始数据</button>
             </div>
             <div id="replay-timeline" class="timeline">
@@ -51,33 +57,37 @@
             </div>
             <section id="view-video" class="tab-view" role="tabpanel" aria-labelledby="tab-video">
               <div class="video-grid">
-                <figure class="video-card"><figcaption><strong>主场景</strong><span id="scene-time" class="video-time">00:00:00.000</span></figcaption><div class="video-frame"><video id="scene-video" preload="metadata" muted playsinline aria-label="主场景录制视频"></video><p id="scene-video-message" class="video-message">尚未载入视频</p></div><p id="scene-video-status" class="muted"></p></figure>
-                <figure class="video-card cameras-card"><figcaption><strong>三相机 · 左腕 / 头部 / 右腕</strong><span id="cameras-time" class="video-time">00:00:00.000</span></figcaption><div class="video-frame"><video id="cameras-video" preload="metadata" muted playsinline aria-label="三相机水平拼接录制视频"></video><p id="cameras-video-message" class="video-message">尚未载入视频</p></div><p id="cameras-video-status" class="muted"></p></figure>
+                <figure class="video-card"><figcaption><strong>主场景</strong><span id="scene-time" class="video-time">00:00:00.000</span></figcaption><div class="video-frame"><video id="scene-video" preload="auto" muted playsinline aria-label="主场景录制视频"></video><p id="scene-video-message" class="video-message">尚未载入视频</p></div><p id="scene-video-status" class="muted"></p></figure>
+                <figure class="video-card cameras-card"><figcaption><strong>三相机 · 左腕 / 头部 / 右腕</strong><span id="cameras-time" class="video-time">00:00:00.000</span></figcaption><div class="video-frame"><video id="cameras-video" preload="auto" muted playsinline aria-label="三相机水平拼接录制视频"></video><p id="cameras-video-message" class="video-message">尚未载入视频</p></div><p id="cameras-video-status" class="muted"></p></figure>
               </div>
               <p class="view-note muted">两路视频共用任务时间轴。录制采样时刻、缺帧和编码详情可在「数据」中的 video-metadata.json 查看。</p>
             </section>
             <section id="view-observations" class="tab-view" role="tabpanel" aria-labelledby="tab-observations" hidden>
-              <div class="section-heading"><h2>观测时刻</h2><span id="observation-count" class="badge">0 帧</span></div>
-              <p class="view-note muted">同一次拍摄只列一次；旧帧上的身份、选中和夹持状态变化保留在标注版本中。</p>
+              <div class="section-heading"><h2>观测时刻</h2><span id="observation-count" class="badge">0 帧</span><button id="responses-reference" class="button">Responses 初始参考框</button></div>
+              <p class="view-note muted">按实际拍摄顺序列出，名称来自采集用途和关联技能。同一画面用于多次判断时仍只列一次；下方分别说明模型使用记录与图像标注。</p>
               <label class="search-label" for="observation-select">选择观测时刻</label>
               <div class="observation-controls"><select id="observation-select" disabled aria-label="选择观测帧与标注版本"></select><button id="observation-seek" class="button" disabled>定位任务时间</button></div>
               <p id="observation-meta" class="view-note muted" aria-live="polite">本次实验未保存观测标注图。</p>
-              <div class="annotation-revisions"><label for="observation-revision">同帧标注版本</label><select id="observation-revision"></select><p id="observation-reuse-note" class="inline-warning" hidden></p></div>
+              <details class="observation-use"><summary>采集用途与模型使用记录</summary>
+                <p id="observation-source" class="view-note muted"></p>
+                <p id="observation-analysis" class="view-note"></p>
+              </details>
+              <div class="annotation-revisions"><label for="observation-revision">同一画面的图像版本</label><select id="observation-revision"></select><p id="observation-reuse-note" class="inline-warning" hidden></p></div>
               <div id="observation-cameras" class="observation-grid"></div>
               <div id="observation-artifacts" class="artifact-links"></div>
             </section>
             <section id="view-graph" class="tab-view" role="tabpanel" aria-labelledby="tab-graph" hidden>
-              <div class="section-heading"><h2>实际执行流程</h2><span class="badge">按发生顺序</span></div>
-              <p class="view-note muted">点击步骤查看算法与动作；点击 Responses / Decisions 查看实际问题、回答和输入图片。</p>
+              <section class="policy-panel">
+                <div class="graph-toolbar"><h2>graph</h2><div class="actions"><a id="standalone-graph" class="button" target="_blank" rel="noopener">全宽查看 ↗</a><button id="export-svg" class="button" title="导出当前编排视图与图例；恢复扩展见完整 JSON">视图 SVG</button><button id="export-png" class="button" title="导出当前编排视图与图例">视图 PNG</button><button id="export-json" class="button" title="包含全部初始及运行时 node / edge">完整 JSON</button></div></div>
+                <div class="graph-controls actions"><button id="graph-zoom-in" class="button" aria-label="放大 graph">＋</button><button id="graph-zoom-out" class="button" aria-label="缩小 graph">−</button><button id="graph-fit" class="button">适应可读宽度</button><button id="graph-reset" class="button">100%</button><span class="muted">长 graph 横向滚动；实际执行顺序见各 scope 下方记录</span></div>
+                <div id="policy-plan" aria-live="polite"></div>
+              </section>
+              <details class="execution-evidence"><summary>执行证据与模型调用</summary>
               <div class="workflow-layout">
                 <nav id="object-timeline" class="workflow" aria-label="执行步骤与模型调用"></nav>
                 <aside class="node-details"><div class="section-heading"><h2 id="node-title">选择一个步骤</h2></div><p id="node-meta" class="muted">选择步骤或模型调用，查看对应证据。</p><button id="seek-node" class="button" hidden>定位视频</button><div id="node-artifacts" class="artifact-links"></div><div id="node-evidence" class="node-evidence" aria-live="polite"></div><details id="node-diagnostics" class="node-diagnostics"><summary>原始事件与诊断 <span id="detail-event-count" class="badge">0</span></summary><div id="node-files" class="artifact-links"></div><div id="node-trace" class="trace-list"></div></details></aside>
               </div>
-              <details class="full-call-graph"><summary>展开完整调用图与导出</summary>
-              <div class="graph-toolbar"><p class="muted">完整调用图保留原始事件顺序与调用关系。拖动画布平移，滚轮缩放。</p><div class="actions"><a id="standalone-graph" class="button" target="_blank" rel="noopener">独立查看 ↗</a><button id="export-svg" class="button">导出 SVG</button><button id="export-png" class="button">导出 PNG</button></div></div>
-              <div class="graph-controls actions"><button id="graph-zoom-in" class="button" aria-label="放大执行图">＋ 放大</button><button id="graph-zoom-out" class="button" aria-label="缩小执行图">− 缩小</button><button id="graph-fit" class="button">适合画布</button><button id="graph-reset" class="button">100% / 重置</button></div>
-              <p id="graph-warning" class="inline-warning" hidden></p>
-              <div id="execution-graph" class="execution-graph" aria-label="实际执行图画布"></div></details>
+              </details>
             </section>
             <section id="view-inventory" class="tab-view" role="tabpanel" aria-labelledby="tab-inventory" hidden>
               <div class="section-heading"><h2>清单如何变化</h2><span class="badge">归档证据</span></div>
@@ -87,8 +97,16 @@
               <div id="inventory-board"></div>
               <details class="legacy-inventory"><summary>完整清单字段与诊断（任务结束时）</summary><section id="replay-object-list" class="object-list" hidden></section></details>
             </section>
+            <section id="view-collision" class="tab-view" role="tabpanel" aria-labelledby="tab-collision" hidden>
+              <h2>各次建图的实际碰撞场景</h2>
+              <p class="muted">青色 CAD · 绿色 OBB · 粉色桌面 CUBOID · 灰色已排除几何。拖动旋转，滚轮缩放。</p>
+              <label for="collision-stage">选择建图阶段</label><select id="collision-stage"></select>
+              <p id="collision-status" class="muted" role="status"></p>
+              <div id="collision-preview" style="height: 560px; min-height: 320px;"></div>
+              <ul id="collision-entities"></ul>
+            </section>
             <section id="view-data" class="tab-view" role="tabpanel" aria-labelledby="tab-data" hidden>
-              <p class="muted">点击 JSON 文件预览模型图片、分割掩码及 3D 候选。NPZ 保留原始精度；大点云预览明确显示抽样点数，可下载全量数组。</p>
+              <p class="muted">点击图片、视频或 JSON 即可预览；原始文件可下载。</p>
               <div class="data-layout"><div><label class="search-label" for="file-search">筛选文件</label><input id="file-search" type="search" placeholder="例如 artifacts、npz…" /><div id="file-list" class="file-list"></div></div><section class="file-preview"><div class="section-heading"><h2 id="file-title">数据预览</h2><a id="file-download" class="button" download hidden>下载原文件</a></div><div id="array-references" class="artifact-links"></div><div id="file-evidence"></div><pre id="file-content">选择一个 JSON 文件查看。</pre></section></div>
             </section>
           </section>
@@ -98,11 +116,13 @@
     <dialog id="observation-dialog" class="observation-dialog" aria-labelledby="observation-image-title">
       <div class="section-heading"><h2 id="observation-image-title">观测图</h2><button id="observation-close" class="button">关闭</button></div>
       <p id="observation-image-meta" class="muted"></p>
-      <div class="observation-image-controls actions"><button id="observation-annotated" class="button" aria-pressed="true">标注图</button><button id="observation-raw" class="button" aria-pressed="false">原始 RGB</button><button id="observation-zoom-out" class="button" aria-label="缩小观测图">− 缩小</button><output id="observation-zoom-label">100%</output><button id="observation-zoom-in" class="button" aria-label="放大观测图">＋ 放大</button><button id="observation-zoom-fit" class="button">适合宽度</button><a id="observation-open-file" class="button" target="_blank" rel="noopener">打开归档图 ↗</a></div>
+      <div class="observation-image-controls actions"><button id="observation-raw" class="button" aria-pressed="true">实际采集 RGB</button><button id="observation-annotated" class="button" aria-pressed="false">程序结果叠加（非模型输入）</button><button id="observation-zoom-out" class="button" aria-label="缩小观测图">− 缩小</button><output id="observation-zoom-label">100%</output><button id="observation-zoom-in" class="button" aria-label="放大观测图">＋ 放大</button><button id="observation-zoom-fit" class="button">适合宽度</button><a id="observation-open-file" class="button" target="_blank" rel="noopener">打开归档叠加图 ↗</a></div>
       <p id="observation-image-status" class="muted" role="status"></p>
+      <div id="observation-image-models" class="actions"></div>
       <div class="observation-image-viewport"><img id="observation-image" alt="所选观测图" /></div>
     </dialog>
     <dialog id="discard-dialog"><form method="dialog"><h2>删除所选实验？</h2><p id="discard-name"></p><p>该实验会从列表移入实验存储目录的 .trash 回收区，包含视频与原始数据。文件继续保留，可从本地回收区恢复。</p><div class="actions"><button class="button" value="cancel">保留记录</button><button class="button danger" value="discard">确认移入回收区</button></div></form></dialog>
+    <dialog id="batch-discard-dialog" aria-labelledby="batch-discard-title"><form method="dialog"><h2 id="batch-discard-title">批量删除实验？</h2><p id="batch-discard-count"></p><ul id="batch-discard-names"></ul><p>所选实验会移入本地回收区，视频与原始数据仍保留。正在录制、编码或下载的记录不会删除。</p><div class="actions"><button class="button" value="cancel" autofocus>取消</button><button class="button danger" value="discard">确认删除所选</button></div></form></dialog>
     <script type="module" src="/src/replay.js"></script>
   </body>
 </html>

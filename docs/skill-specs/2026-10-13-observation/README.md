@@ -4,7 +4,7 @@
 
 **当前执行状态：** 用户已确认实施。运行时已接入 observe_scene、observe_geometry、observe_result、check_scene_changes、update_scene；move_to_observe 已拆出隐式分割/建图；observe 仅供旧记录兼容，不在实时目录。盒内目标按最新要求复用原体素，不执行额外局部重建/包络/未知空间门槛。下方为历史讨论，对当前接口不具覆盖效力；精确定义见仓库 skills/ 和 [实现说明](../../observation-inventory.md)。生产部署状态以执行记录为准。
 
-统一要求：[JEV skill 规范](../../skill-standards/jev-skill-standard/SKILL.md)。当前 19 项技能与定义的差异：[现状核对](current-skill-audit.md)。格式与独立演练结果：[验证记录](validation.md)。
+统一要求：历史 JEV skill 规范（已于 2026-10-30 按用户要求删除；当前遵循 AGENTS.md 与 Luna skill 手册）。当前 19 项技能与定义的差异：[现状核对](current-skill-audit.md)。格式与独立演练结果：[验证记录](validation.md)。
 
 后续讨论的执行方案：[连续抓放的观测、物体清单与场景更新](../../superpowers/plans/2026-10-13-observation-inventory-scene-update.md)。方案包含最新策略、修改顺序和验收标准，尚未代表实现或部署。
 

@@ -46,7 +46,7 @@ def binding_for(case):
     if case['points'] is None:
         return None
     return CarryingBinding(case['arm'], 'geometry-audit', 'capture', 1,
-        'audit-scene', 'target', 'tool', 'held', tuple(map(tuple, case['points'])), .005)
+        'audit-scene', 'target', 'gripper_front', 'held', tuple(map(tuple, case['points'])), .005)
 
 
 def reference(output):
@@ -71,6 +71,11 @@ def reference(output):
         for name, value in values.items():
             data.qpos[int(model.joint(name).qposadr[0])] = value
         mujoco.mj_fwdPosition(model, data)
+        body = model.body('TCP_Link_' + ('L' if case['arm'] == 'A' else 'R')).id
+        front = np.eye(4)
+        front[:3, :3] = data.xmat[body].reshape(3, 3)
+        front[:3, 3] = data.xpos[body] + front[:3, :3] @ [0., 0., .185]
+        case['expected_front_pose'] = front.tolist()
         expected = {}
         for link in kin['collision_link_names']:
             body = model.body(link).id
@@ -82,7 +87,7 @@ def reference(output):
         if binding is not None:
             body = model.body('TCP_Link_' + ('L' if case['arm'] == 'A' else 'R')).id
             balls = np.asarray(carrying_spheres(binding))
-            balls[:, :3] = balls[:, :3] @ data.xmat[body].reshape(3, 3).T + data.xpos[body]
+            balls[:, :3] = (balls[:, :3] + [0., 0., .185]) @ data.xmat[body].reshape(3, 3).T + data.xpos[body]
             expected['jev_carried_object_' + case['arm']] = balls.tolist()
         case['expected_spheres'] = expected
     output.write_text(json.dumps(rows), encoding='utf-8')
@@ -121,9 +126,14 @@ def gpu(reference_path, output):
                     targets = [('planner', planner.kinematics), ('checker', backend._motion_clearance_checker.kinematics)]
                     if not ik_only:
                         targets += [('ik', planner.ik_solver.kinematics), ('graph', planner.graph_planner.kinematics)]
-                    errors = {}
+                    errors, fk_errors = {}, {}
                     for label, kin in targets:
-                        balls = kin.compute_kinematics(state).robot_spheres.detach().cpu().numpy().reshape(-1, 4)
+                        result = kin.compute_kinematics(state)
+                        pose = result.tool_poses.get_link_pose('gripper_front_' + arm).get_matrix()
+                        matrix = pose.detach().cpu().numpy().reshape(4, 4)
+                        fk_errors[label] = float(np.max(np.abs(matrix - case['expected_front_pose'])))
+                        assert fk_errors[label] < 5e-6, (arm, capacity, case['phase'], label, fk_errors[label])
+                        balls = result.robot_spheres.detach().cpu().numpy().reshape(-1, 4)
                         params = kin.config.kinematics_config
                         differences = []
                         for link, expected in case['expected_spheres'].items():
@@ -142,7 +152,8 @@ def gpu(reference_path, output):
                             assert count <= 31
                         errors[label] = max(differences)
                     row = {'arm': arm, 'capacity': capacity, 'ik_only': ik_only,
-                           'phase': case['phase'], 'max_sphere_error_m': errors, 'attached': binding is not None}
+                           'phase': case['phase'], 'max_sphere_error_m': errors,
+                           'front_fk_matrix_max_error': fk_errors, 'attached': binding is not None}
                     report.append(row)
                     print(json.dumps(row), flush=True)
             finally:

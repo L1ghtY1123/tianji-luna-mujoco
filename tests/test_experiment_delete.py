@@ -180,7 +180,8 @@ async def test_http_file_response_pins_archive_until_interrupted_send_ends(tmp_p
         return {"type": "http.disconnect"}
 
     with pytest.raises(RuntimeError, match="disconnected"):
-        await response({"type": "http", "method": "GET", "headers": [], "extensions": {}}, receive, send)
+        await response({"type": "http", "method": "GET", "headers": [], "extensions": {},
+                        "asgi": {"spec_version": "2.4"}}, receive, send)
     assert store.delete(session.id)["deleted"]
 
 
@@ -205,7 +206,8 @@ async def test_http_export_pins_archive_through_transmission_and_cleans_interrup
         return {"type": "http.disconnect"}
 
     with pytest.raises(send_error, match="download interrupted"):
-        await response({"type": "http", "method": "GET", "headers": [], "extensions": {}}, receive, send)
+        await response({"type": "http", "method": "GET", "headers": [], "extensions": {},
+                        "asgi": {"spec_version": "2.4"}}, receive, send)
     assert not response.path.exists()
     assert store.delete(session.id)["deleted"]
 

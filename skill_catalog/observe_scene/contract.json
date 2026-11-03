@@ -1,0 +1,46 @@
+{
+  "id": "observe_scene",
+  "description": "Associate current SAM3 subjects across three calibrated RGBD views with permanent inventory IDs. Update unknown objects as OBBs, known objects as FoundationPose CAD poses, and tables as measured cuboids. An explicit unknown_obb object skips CAD retrieval. Confirmed CAD model bindings persist; new poses use the best valid-depth camera, or instance-seeded tracking when its motion context is unchanged. Accept source-bound FoundationPose poses directly, without point/depth fit validation or ICP. The CAD/OBB path does not run the CPU robot-mesh ray filter. Both capture modes reuse unchanged sensor evidence; elapsed time or an unknown answer alone does not cause a new acquisition. Identical successful analysis is reusable; identical failed analysis is not repeated. Keep unobserved inventory records as dated history. This skill neither moves the robot nor publishes a collision map. Use a legal changed viewpoint when evidence is insufficient. Use this capability when current instance masks and geometric poses are needed. It is not a prerequisite for every Decisions request: release verification, visual task completion and visibility diagnostics can consume the current three-camera RGB directly. A confidence failure alone does not establish occlusion or authorize movement; diagnose not-visible, cropped and occluded evidence separately.",
+  "inputs": [
+    "scene_entities",
+    "visual_reference",
+    "current_rgbd",
+    "task_spec"
+  ],
+  "requires": {
+    "grasp_held": false
+  },
+  "provides": [
+    "observed",
+    "inventory_ready",
+    "grasp_view_ready"
+  ],
+  "capability": "Associate current SAM3 subjects across three calibrated RGBD views with permanent inventory IDs",
+  "outputs": [
+    "observed",
+    "inventory_ready",
+    "grasp_view_ready",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure",
+    "cad_pose_estimation_failed",
+    "cad_retrieval_uncertain",
+    "observation_unchanged_since_failed_analysis"
+  ],
+  "invalidates_observation": false,
+  "recovery_retry_safe": true,
+  "recovery_result_reusable": true,
+  "planning_effects": {
+    "placement_resolved": false,
+    "place_plan_ready": false,
+    "placement_zone_ready": false
+  },
+  "recovery_result_ignored_arguments": [
+    "capture_mode"
+  ]
+}

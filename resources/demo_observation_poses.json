@@ -120,14 +120,14 @@
       "2": {
         "visible_source_count": 1,
         "source_pixels_by_object": {
-          "pink_cylinder_1": 4866
+          "pink_cylinder_1": 7152
         },
-        "bin_visible_pixels": 89123,
+        "bin_visible_pixels": 90496,
         "bin_bounds_px": [
-          50,
+          33,
           0,
-          493,
-          238
+          505,
+          232
         ],
         "valid_depth_pixels": 307200,
         "T_world_camera": [
@@ -160,16 +160,16 @@
       "3": {
         "visible_source_count": 1,
         "source_pixels_by_object": {
-          "pink_cylinder_1": 1679
+          "pink_cylinder_1": 3261
         },
-        "bin_visible_pixels": 20123,
+        "bin_visible_pixels": 18029,
         "bin_bounds_px": [
           0,
-          154,
-          181,
-          288
+          190,
+          145,
+          358
         ],
-        "valid_depth_pixels": 230400,
+        "valid_depth_pixels": 307200,
         "T_world_camera": [
           [
             -0.01454722709711409,
@@ -202,57 +202,57 @@
       "camera_id": "2",
       "opening_corners_px": [
         [
-          476.26802881250774,
-          -32.55256791112848
+          487.65012665521033,
+          -55.94510313292352
         ],
         [
-          108.06076004584838,
-          -84.80146212735255
+          95.29306308647807,
+          -111.53204961481794
         ],
         [
-          45.99900098498267,
-          189.22650397431534
+          29.16082830850911,
+          180.00288360690564
         ],
         [
-          494.212611076063,
-          222.4945097562791
+          506.7716492353578,
+          215.39629976818293
         ]
       ],
       "envelope_corners_px": [
         [
-          476.26802881250774,
-          -32.55256791112848
+          487.65012665521033,
+          -55.94510313292352
         ],
         [
-          108.06076004584838,
-          -84.80146212735255
+          95.29306308647807,
+          -111.53204961481794
         ],
         [
-          45.99900098498267,
-          189.22650397431534
+          29.16082830850911,
+          180.00288360690564
         ],
         [
-          494.212611076063,
-          222.4945097562791
+          506.7716492353578,
+          215.39629976818293
         ],
         [
-          427.6113717083621,
-          56.367619902377754
+          435.8022009790024,
+          38.655974943376776
         ],
         [
-          153.00188542818705,
-          24.32960478224973
+          143.18176459840558,
+          4.5711304967418585
         ],
         [
-          116.82176073109733,
-          231.7997554977795
+          104.628675917539,
+          225.29603458157627
         ],
         [
-          433.54280801459646,
-          252.4311067442199
+          442.1226653730225,
+          247.24547169002588
         ]
       ],
-      "minimum_edge_margin_px": -84.80146212735255,
+      "minimum_edge_margin_px": -111.53204961481794,
       "full_envelope_inside_image": false,
       "acceptance_gate": false,
       "scope": "offline full-bin frustum diagnostic only; inspect recognizable bin and all objects in rendered RGBD"
@@ -357,8 +357,8 @@
       "destination": {
         "region_id": "demo_destination",
         "center_offset_from_main_table_m": [
-          -0.1,
-          0.1
+          -0.0704,
+          0.14246
         ],
         "size_m": 0.32,
         "physical_marker": false
@@ -430,7 +430,7 @@
     "1": {
       "source_object_count": 1,
       "source_pixels_by_object": {
-        "pink_cylinder_1": 4866
+        "pink_cylinder_1": 7152
       },
       "all_source_objects_visible": true,
       "mujoco_robot_scene_contacts": 0,
@@ -443,14 +443,14 @@
         ]
       },
       "endpoint_collision_clear": true,
-      "evidence_path": "data/place-result-cc543b/white-table-observation/evidence.json",
-      "evidence_sha256": "463257712ada42564c6b249ba6de5378d3f4b0d1460e2be67035e57e4236a8b3"
+      "evidence_path": "data/observation-reuse-camera-validation/evidence.json",
+      "evidence_sha256": "5148f46e9e45bf807287d3fd0dd21404e09e645f5c1585a2cf211aa258981523"
     },
     "2": {
       "source_object_count": 2,
       "source_pixels_by_object": {
-        "pink_cylinder_1": 4873,
-        "pink_cylinder_2": 5368
+        "pink_cylinder_1": 7170,
+        "pink_cylinder_2": 8066
       },
       "all_source_objects_visible": true,
       "mujoco_robot_scene_contacts": 0,
@@ -468,15 +468,15 @@
         ]
       },
       "endpoint_collision_clear": true,
-      "evidence_path": "data/place-result-cc543b/white-table-observation/count-2/evidence.json",
-      "evidence_sha256": "abbf6df9bb76c827cfe27e0d67df54511aeddfa9fa3b51042bf8230ae9d68819"
+      "evidence_path": "data/observation-reuse-camera-validation/count-2/evidence.json",
+      "evidence_sha256": "8f8b2060377a816c5cbb79530404a1f6310a264433c6cd766aca470d4851f5e8"
     },
     "3": {
       "source_object_count": 3,
       "source_pixels_by_object": {
-        "pink_cylinder_1": 4934,
-        "pink_cylinder_2": 4751,
-        "pink_cylinder_3": 4627
+        "pink_cylinder_1": 6811,
+        "pink_cylinder_2": 6770,
+        "pink_cylinder_3": 7123
       },
       "all_source_objects_visible": true,
       "mujoco_robot_scene_contacts": 0,
@@ -499,16 +499,16 @@
         ]
       },
       "endpoint_collision_clear": true,
-      "evidence_path": "data/place-result-cc543b/white-table-observation/count-3/evidence.json",
-      "evidence_sha256": "9619374c2a10cd2a58aa202561df337b3c553e78e55760f6662e9324c806d7e4"
+      "evidence_path": "data/observation-reuse-camera-validation/count-3/evidence.json",
+      "evidence_sha256": "1059bf48d3b38cc1d9f7df7fa5a2aa280e5d5dc5d38a285185b582029f7fefdc"
     },
     "4": {
       "source_object_count": 4,
       "source_pixels_by_object": {
-        "pink_cylinder_1": 3637,
-        "pink_cylinder_2": 4826,
-        "pink_cylinder_3": 3366,
-        "pink_cylinder_4": 4527
+        "pink_cylinder_1": 6400,
+        "pink_cylinder_2": 6638,
+        "pink_cylinder_3": 5728,
+        "pink_cylinder_4": 5363
       },
       "all_source_objects_visible": true,
       "mujoco_robot_scene_contacts": 0,
@@ -536,22 +536,22 @@
         ]
       },
       "endpoint_collision_clear": true,
-      "evidence_path": "data/place-result-cc543b/white-table-observation/count-4/evidence.json",
-      "evidence_sha256": "6671b7b032be1936d0294fdde752b00644d93e05750e16fb8ade2e2e491a45be"
+      "evidence_path": "data/observation-reuse-camera-validation/count-4/evidence.json",
+      "evidence_sha256": "9a5188d4ab0f165ff03b5011c9b9f80defb78638cbdf669d70545b081cc96ab3"
     }
   },
   "source_sha256": {
     "assets/marvin_urdf/marvin_with_grippers.urdf": "cad92ac6d4dd94a9651c79b383520efe7fafadaabcd83aff5b17222e7eab0dea",
-    "resources/cameras/calibration.json": "c4007b0a4dffecfa8db709712681239d14bc733ccd2474c662afaae20a3d49a1",
-    "resources/curobo/marvin_gui_dual.yml": "8e03e5136f817be7ed49f9a95e66fa9ccc6c38e867d247741cd146eb2dc75385",
-    "resources/demo-config.json": "e13e1d896f2faa960aa871ac2d7d98feb550f7cf88a98bf503cc4016e7649029",
-    "src/luna_mujoco/model_builder.py": "4903ad536964aef5741c0b260861da13e5af67a863db1a78c102afd991049d9c",
+    "resources/cameras/calibration.json": "0d453120bf5146876fb56f549e00e8ee69e41bc39d073b7fe0105c3e118d5aa2",
+    "resources/curobo/marvin_gui_dual.yml": "6aae69c87395ab76fcd0cc63140c157b8b91077cf9a1ca766e3ff81cf1db77e6",
+    "resources/demo-config.json": "5e95b754a1f315c455d8086963cf195a7209bb01709b18cd063c4ad0addd0698",
+    "src/luna_mujoco/model_builder.py": "25d42c48c3d25b1ddaf5703d66d87da312f0a15fae8992fca9ec8f38f6fc8bc3",
     "src/luna_mujoco/cameras.py": "1311fd65087eff22a3e27f07823dad9b38bbd5cbb4ae727ddd760068c36eaa5b",
-    "src/luna_mujoco/demo_scene.py": "b8ee1eeefe3499525c734649fc8c0ea18ce825e2c1d2a0e187d50d7b8e899782",
-    "src/luna_mujoco/cad_assets.py": "9ac39269920827622f4a6eea34b2c06d6eb8e2adc23d3d1fd0476d7a1601e88f",
-    "src/luna_mujoco/geometry.py": "a403e0fe495482b507ecd09f7e4fb740931f41d3bc9ce6ee16b1ae1035dee479",
-    "resources/cad/manifest.json": "9c8d64371f00778377e4b1dc5dfdbb1ad07629152ce7c0a28e5246df6ea845ae",
-    "scripts/build_cad_assets.py": "953bcedcdbbe9522f59cb252edf12509b9d9bcafb7a3284b331a6edef9354054",
+    "src/luna_mujoco/demo_scene.py": "7731a3f34b7f553c010e95f35cc493c034b71708e96cb3b0aa385876366f64ca",
+    "src/luna_mujoco/cad_assets.py": "b6f5fe2db4a79e6becdbf079d5f93dbdf58b43ddb1d9aedd1f1092c3febcaf7f",
+    "src/luna_mujoco/geometry.py": "83d4dadfc8bbbece00f311807316e77d2c2ec932a9178c3dec20859ac179a08c",
+    "resources/cad/manifest.json": "8bf7c9b54fa71e69953f6d0afd82b4d63927e76d6a10295dfb3e4a1cc63598fd",
+    "scripts/build_cad_assets.py": "190a8dd2fcc31fa62611077fd179f1b180ede4967d7001bb359a10cbd7e0b858",
     "scripts/calibrate_demo_observation_poses.py": "5f4142adfa85e9b1f06dedc3f16556a0c4a44552df2d65a6211d75535bc35647"
   },
   "startup_joints_rad": {

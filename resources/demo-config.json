@@ -6,25 +6,25 @@
   "main_table": {"position": [0.572, -0.026, 0.532], "size": [0.60, 0.80, 0.08], "color": "white"},
   "source_bin": {
     "id": "blue_source_bin", "kind": "cad", "asset_id": "blue_box", "color": "blue",
-    "position": [0.481, 0.573, 0.571], "size": [0.410, 0.310, 0.145],
-    "yaw_deg": 90, "mass_kg": 0.5, "fixed": true
+    "position": [0.460, 0.540, 0.571], "size": [0.410, 0.310, 0.145],
+    "yaw_deg": 0, "mass_kg": 0.5, "fixed": true
   },
   "right_bin": {
     "id": "blue_right_bin", "kind": "cad", "asset_id": "blue_box", "color": "blue",
-    "position": [0.481, -0.625, 0.571], "size": [0.410, 0.310, 0.145],
+    "position": [0.460, -0.625, 0.571], "size": [0.410, 0.310, 0.145],
     "yaw_deg": -90, "mass_kg": 0.5, "fixed": true
   },
   "source_objects": {
     "asset_id": "pink_wrapped",
     "mass_kg": 0.08,
     "yaw_deg": 180,
-    "single_object_offset_xy_m": [0.0, -0.08],
-    "row_start_offset_xy_m": [0.04, -0.105],
-    "row_step_xy_m": [-0.04, 0.07],
-    "two_object_offsets_xy_m": [[0.0, -0.08], [0.0, 0.08]],
+    "single_object_offset_xy_m": [0.0, -0.03],
+    "row_start_offset_xy_m": [-0.10, -0.03],
+    "row_step_xy_m": [0.10, 0.0],
+    "two_object_offsets_xy_m": [[-0.08, 0.0], [0.08, 0.0]],
     "four_object_grid": {
-      "x_offsets_from_bin_center_m": [-0.07, 0.05],
-      "y_offsets_from_bin_center_m": [-0.115, 0.005]
+      "x_offsets_from_bin_center_m": [-0.08, 0.08],
+      "y_offsets_from_bin_center_m": [-0.05, 0.05]
     },
     "settling_gap_m": 0.001
   },

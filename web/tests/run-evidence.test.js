@@ -2,12 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runEvidence, runStatusSummary, taskProgressSummary } from '../src/run-evidence.js';
 
-test('process completion counts do not double-count input and output entities', () => {
-  const progress = { process_records: { first: {}, second: {} }, completed_process_ids: ['first'],
-    pending_unpack_ids: ['pink-2'], processing_ids: [], product_ids: ['black-1'],
-    completed: [{ id: 'pink-1' }, { id: 'black-1' }] };
-  assert.equal(taskProgressSummary(progress), '已完成 1 道工序 · 待拆包 1 件 · 处理中 0 件');
-  assert.equal(runEvidence({ task_progress: progress }).task_progress.completed_count, 1);
+test('historical process progress is not converted into modern counts or stages', () => {
+  const progress = { process_records: { first: {} }, completed_process_ids: ['first'], stage_index: 1 };
+  assert.equal(taskProgressSummary(progress), '历史清单：请查看归档原始记录');
+  assert.equal(runEvidence({ task_progress: progress }).task_progress, null);
 });
 
 test('run evidence displays holding, model stage, verification and preparation timing without raw clouds', () => {
@@ -52,23 +50,4 @@ test('runner provisional holding state has a Chinese label before visual confirm
   const text = runStatusSummary({ holding: { state: 'provisional', arm: 'A', verified: false, attached: false } });
   assert.match(text, /A 臂 暂定持物 · 未确认/);
   assert.equal(text.includes('provisional'), false);
-});
-
-test('collection summary displays measured progress and readable deferred reasons', () => {
-  const progress = { completed: [{ id: 'one', points_world_m: ['HIDDEN'] }],
-    deferred: [{ id: 'two', reason: 'grasp_verification_failed' }, { id: 'three', reason: 'private_backend_code' }] };
-  const text = taskProgressSummary(progress);
-  assert.match(text, /已完成 1 个.*暂缓 2 个/);
-  assert.match(text, /抓取未通过验证/);
-  assert.match(text, /需要重新评估/);
-  assert.equal(text.includes('private_backend_code'), false);
-  assert.match(runStatusSummary({ task_progress: progress }), /已完成 1 个/);
-  const evidence = runEvidence({ task_progress: progress });
-  assert.equal(evidence.task_progress.completed.length, 1);
-  assert.equal(JSON.stringify(evidence).includes('HIDDEN'), false);
-  assert.equal(taskProgressSummary(undefined), '');
-});
-
-test('archived progress summaries retain full counts when event arrays were summarized', () => {
-  assert.match(taskProgressSummary({ completed: { count: 25, first: [{ id: 'one' }] }, deferred: [] }), /已完成 25 个.*暂缓 0 个/);
 });

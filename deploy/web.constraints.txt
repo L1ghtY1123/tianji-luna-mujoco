@@ -2,6 +2,7 @@
 absl-py==2.5.0
 annotated-doc==0.0.5
 annotated-types==0.8.0
+attrs==26.1.0
 anyio==4.15.1
 certifi==2026.7.22
 click==8.5.0
@@ -17,6 +18,8 @@ httpcore2==2.13.1
 httpx==0.28.1
 httpx2==2.13.1
 idna==3.20
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
 logfire-api==5.1.1
 msgpack==1.2.2
 mujoco==3.10.0
@@ -29,6 +32,8 @@ pydantic-graph==2.47.0
 pydantic_core==2.46.5
 PyOpenGL==3.1.10
 python-dotenv==1.2.3
+referencing==0.37.0
+rpds-py==2026.9.1
 PyYAML==6.0.3
 scipy==1.18.1
 starlette==1.7.0

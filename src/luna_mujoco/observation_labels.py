@@ -1,4 +1,4 @@
-"""Display-only labels from current measured masks and the separate task ledger."""
+"""Capture-bound identity overlays; task state belongs to its own event timeline."""
 import base64
 from io import BytesIO
 from xml.etree.ElementTree import Element, SubElement, tostring
@@ -10,16 +10,37 @@ COLORS = {'red': '红色', 'green': '绿色', 'blue': '蓝色', 'black': '黑色
           'yellow': '黄色', 'gray': '灰色', 'orange': '橙色', 'pink': '粉色'}
 KINDS = {'cube': '方块', 'box': '长方体', 'sphere': '球体', 'cylinder': '圆柱',
          'bin': '盒子', 'marker': '放置区域', 'object': '物体', 'table': '桌面'}
-STATUSES = {'observed': '未搬运', 'selected': '当前目标', 'held': '夹持中',
-            'completed': '已搬运·释放已确认', 'deferred': '未完成·暂缓',
-            'pending': '中转完成·待下一段', 'unknown': '待确认任务归属',
-            'obstacle': '障碍物·不搬运', 'destination': '目的区域', 'container': '盒子·碰撞障碍',
-            'region': '放置区域'}
+IDENTITY_NAMES = {'openai_decisions': 'Decisions 已关联 ID',
+                  'measured_container_correspondence': 'RGBD 对应沿用 ID',
+                  'mixed_decisions_measured_container': 'Decisions 与 RGBD 对应关联 ID'}
+
+
+def responses_reference_labels(capture, reference):
+    """Draw the original model boxes on their input RGB, before any SAM result."""
+    items = []
+    for identifier, entity in reference.get('entities', {}).items():
+        camera, box = entity.get('reference_camera_id'), entity.get('bbox')
+        if camera not in capture['views'] or box is None:
+            continue
+        left, top, right, bottom = box
+        name = COLORS.get(entity.get('color'), '') + KINDS.get(entity.get('kind'), '物体')
+        items.append({'id': identifier, 'camera_id': camera, 'name': name,
+            'role': 'proposal', 'status': 'unverified', 'box_source': 'responses_reference_proposal',
+            'identity_source': 'responses_proposal_not_verified', 'geometry_status': 'not_measured',
+            'label': f'{name} · Responses 提议\nID {identifier}',
+            'x': left, 'y': top, 'width': right - left, 'height': bottom - top})
+    return {'observation_id': capture['observation_id'], 'generation': capture.get('generation'),
+        'analysis_status': 'responses_proposal', 'overlay_scope': 'initial_responses_reference',
+        'image_source': 'captured_rgb', 'overlay_source': 'responses_reference_proposal',
+        'used_as_model_input': False, 'items': items}
 
 
 def make_object_labels(observation, records, membership, *, holding=None, destination_id=None, placement_regions=()):
+    # Keep the compatibility argument, but never put later holding feedback on an old capture.
     labels = {'observation_id': observation['observation_id'], 'generation': observation.get('generation'),
-              'analysis_status': 'analyzed', 'items': []}
+              'analysis_status': 'analyzed', 'overlay_scope': 'capture_identity_geometry',
+              'image_source': 'captured_rgb', 'overlay_source': 'program_identity_summary',
+              'used_as_model_input': False, 'items': []}
     objects = list(observation['objects'])
     measured_ids = {obj['id'] for obj in objects}
     if observation.get('visual_discovery'):
@@ -34,13 +55,22 @@ def make_object_labels(observation, records, membership, *, holding=None, destin
             role = 'container' if obj['kind'] == 'bin' else 'region'
         if identifier == destination_id:
             role = 'destination'
-        status = record.get('status', 'observed') if role == 'target' else role
-        if holding and holding.get('instance_id') == identifier and holding.get('verified'):
-            status = 'held'
+        identity_source = obj.get('identity_source', 'unrecorded')
+        status = 'associated' if identity_source in IDENTITY_NAMES else 'unverified'
         number = record.get('display_id', obj.get('display_id'))
-        name = COLORS.get(obj.get('color'), obj.get('color', '')) + KINDS.get(obj.get('kind'), '物体')
+        color = obj.get('color')
+        name_source = 'measured_attributes'
+        if color not in COLORS:
+            color = observation.get('scene_entities', {}).get(identifier, {}).get('color')
+            name_source = 'inventory_description' if color in COLORS else 'generic_kind'
+        name = COLORS.get(color, '') + KINDS.get(obj.get('kind'), '物体')
         title = (f'#{number} ' if number is not None else '') + name
-        text = f'{title} · {STATUSES.get(status, status)}\nID {identifier}'
+        identity_text = IDENTITY_NAMES.get(identity_source, '身份依据未记录')
+        text = f'{title} · {identity_text}\nID {identifier}'
+        provenance = {'name_source': name_source, 'identity_source': identity_source,
+                      'measured_color': obj.get('color'),
+                      'point_count': obj.get('coverage', {}).get('point_count'),
+                      'collision_status': 'see_build_scene_event'}
         for camera, view in observation.get('views', {}).items():
             mask = view.get('instance_masks', {}).get(identifier)
             if mask is None or not np.any(mask):
@@ -49,7 +79,8 @@ def make_object_labels(observation, records, membership, *, holding=None, destin
                     left, top, right, bottom = obj['bbox']
                     cached_table = identifier in observation.get('demo_tables', {}).get('tables', {})
                     labels['items'].append({'id': identifier, 'display_id': number, 'camera_id': camera,
-                        'name': name, 'role': role, 'status': status,
+                        'name': name, 'role': role, 'status': 'unverified', **provenance,
+                        'box_source': 'responses_reference_proposal',
                         'geometry_status': 'cached_cuboid' if cached_table else 'missing',
                         'label': text + (' · 已缓存桌面几何' if cached_table else ' · 缺少当前几何'),
                         'x': left, 'y': top,
@@ -58,7 +89,9 @@ def make_object_labels(observation, records, membership, *, holding=None, destin
             rows, columns = np.nonzero(mask)
             height, width = mask.shape
             labels['items'].append({'id': identifier, 'display_id': number, 'camera_id': camera,
-                'name': name, 'role': role, 'status': status, 'label': text,
+                'name': name, 'role': role, 'status': status, 'label': text, **provenance,
+                'box_source': 'associated_instance_mask',
+                'geometry_status': 'registered_depth' if obj.get('coverage', {}).get('point_count') else 'mask_only',
                 'x': float(columns.min() / width), 'y': float(rows.min() / height),
                 'width': float((columns.max() - columns.min() + 1) / width),
                 'height': float((rows.max() - rows.min() + 1) / height)})
@@ -117,11 +150,85 @@ def group_candidate_boxes(items):
         else:
             match['display_label'] = (match.get('display_label', match['id']) + ' / '
                                       + item.get('display_label', item['id']))
+            if 'image_label' in match and 'image_label' in item:
+                match['image_label'] += ' / ' + item['image_label']
     return grouped
 
 
-def raster_visual_annotations(rgb, items, *, regions=(), table_polygon=(), frame_color=None):
-    """Keep all text in an added margin; only contours cross measured RGB."""
+def _near_box_annotations(rgb, items, regions, table_polygon, frame_color):
+    """Identity-only derived overlay: compact badges adjacent to their own boxes."""
+    image = Image.fromarray(np.asarray(rgb, dtype=np.uint8)).copy()
+    width, height = image.size
+    drawing = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=max(12, min(18, round(width / 36))))
+    color = frame_color if frame_color is not None else (235, 235, 235)
+    boxes, labels = [], []
+    for item in items:
+        if 'box' not in item:
+            raise ValueError('near_box_annotations_require_boxes')
+        box = tuple(np.asarray(item['box']) * [width, height, width, height])
+        boxes.append(box)
+        # Preserve every proposal outline, including near-identical candidates.
+        drawing.rectangle(box, outline='black', width=4)
+        drawing.rectangle(box, outline=color, width=2)
+    for item in group_candidate_boxes(items):
+        box = tuple(np.asarray(item['box']) * [width, height, width, height])
+        labels.append((item.get('image_label', item.get('display_label', item['id'])), box))
+    for region in regions:
+        polygon = [(x * width, y * height) for x, y in region['polygon']]
+        drawing.line(polygon + polygon[:1], fill='#69e2ff', width=2)
+        points = np.asarray(polygon)
+        box = (*points.min(0), *points.max(0))
+        boxes.append(box)
+        labels.append((f"{region['region_id']} slot {region['slot_id']}", box))
+    if table_polygon:
+        polygon = [(x * width, y * height) for x, y in table_polygon]
+        drawing.line(polygon + polygon[:1], fill=color, width=2)
+        points = np.asarray(polygon)
+        box = (*points.min(0), *points.max(0))
+        boxes.append(box)
+        labels.append(('TABLE', box))
+
+    def overlap(first, second):
+        return max(0, min(first[2], second[2]) - max(first[0], second[0])) * max(
+            0, min(first[3], second[3]) - max(first[1], second[1]))
+
+    placed = []
+    for label, box in labels:
+        left, top, right, bottom = box
+        text_box = drawing.textbbox((0, 0), label, font=font)
+        label_width = min(width, text_box[2] - text_box[0] + 8)
+        label_height = min(height, text_box[3] - text_box[1] + 8)
+        positions = [
+            (left, top - label_height - 3), (right - label_width, top - label_height - 3),
+            (left, bottom + 3), (right - label_width, bottom + 3),
+            (left - label_width - 3, top), (right + 3, top),
+            (left + 2, top + 2), (right - label_width - 2, top + 2),
+            (left + 2, bottom - label_height - 2), (right - label_width - 2, bottom - label_height - 2)]
+        candidates = [(x, y, x + label_width, y + label_height) for x, y in positions
+                      if x >= 0 and y >= 0 and x + label_width <= width and y + label_height <= height]
+        if not candidates:
+            x = max(0, min(left, width - label_width))
+            y = max(0, min(top, height - label_height))
+            candidates = [(x, y, x + label_width, y + label_height)]
+        # Avoid other labels first, then subjects; ties favor the adjacent upper edge.
+        badge = min(candidates, key=lambda candidate: (
+            sum(overlap(candidate, previous) for previous in placed),
+            sum(overlap(candidate, subject) for subject in boxes), overlap(candidate, box)))
+        placed.append(badge)
+        drawing.rectangle(badge, fill='#101010', outline='white', width=1)
+        drawing.text((badge[0] + 4 - text_box[0], badge[1] + 4 - text_box[1]),
+                     label, font=font, fill='white')
+    return np.asarray(image)
+
+
+def raster_visual_annotations(rgb, items, *, regions=(), table_polygon=(), frame_color=None,
+                              label_layout='margin'):
+    """Default margin layout; identity callers may opt into adjacent short badges."""
+    if label_layout == 'near_box':
+        return _near_box_annotations(rgb, items, regions, table_polygon, frame_color)
+    if label_layout != 'margin':
+        raise ValueError('invalid_visual_annotation_layout')
     items = group_candidate_boxes(items)
     height, width = rgb.shape[:2]
     font = ImageFont.load_default(size=14)

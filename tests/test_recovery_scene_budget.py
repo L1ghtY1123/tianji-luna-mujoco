@@ -1,6 +1,6 @@
 
 import pytest
-from test_rgbd_workflow import SensorRobot, VisionAlgorithms
+from rgbd_workflow_fixture import SensorRobot, VisionAlgorithms
 
 from luna_mujoco.runner import Runner
 

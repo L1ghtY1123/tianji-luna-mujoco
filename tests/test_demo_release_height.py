@@ -11,46 +11,46 @@ from test_release_clearance import request
 from luna_mujoco import demo_placement
 
 
-def test_frozen_loaded_release_reserve_covers_observed_sag_without_lowering_actual_gate():
+def test_archived_completed_release_binding_requires_fresh_measured_geometry():
+    from luna_mujoco.placement import visible_reference_tool_m
     fixture = json.loads((Path(__file__).parent / "fixtures/luna_loaded_release.json").read_text(encoding="utf-8"))
-    fixture["holding"]["arm"] = "A"
-    old = fixture["goal"]["release_reference"]
-    polygon = old["region_polygon_world_xy_m"]
-    destination = {"id": "destination", "placement_reference": {"floor_z_m": old["floor_z_m"],
-                                                               "source": old["floor_source"]}}
-    placement = {"object_id": fixture["holding"]["instance_id"], "slot_id": 1, "layout": {
-        "floor_z_m": old["floor_z_m"], "region_polygon_world_xy_m": polygon,
-        "cells": [{"slot_id": 1, "center_world_xy_m": old["target_reference_world_xy_m"],
-                   "polygon_world_xy_m": old["slot_polygon_world_xy_m"]}]}}
-    goal = demo_placement.fixed_release_goal(destination, fixture["holding"], placement,
-        old["attachment_spheres_tool_m"], old["gripper_spheres_tool_m"],
-        clearance_m=.01, observation_id="frozen")
-    reference = goal["release_reference"]
-    assert reference["planning_reserve_m"] == .0001
-    assert reference["required_clearance_m"] == .01
-    assert reference["attachment_floor_gap_m"] == pytest.approx(.0101)
-    assert reference["planning_reserve_reason"] == "observed_loaded_position_servo_tracking_error"
-    transform = np.asarray(goal["T_world_tcp"])
+    with pytest.raises(ValueError, match="synthetic_scene_geometry_unsupported"):
+        visible_reference_tool_m(fixture["holding"])
+
+
+def test_loaded_release_reserve_covers_archived_tracking_error_without_reusing_completed_geometry():
+    from test_demo_planning import placement_inputs
+    # The archive supplies only a measured servo error, never object geometry.
+    fixture = json.loads((Path(__file__).parent / "fixtures/luna_loaded_release.json").read_text(encoding="utf-8"))
+    error_z = fixture["actual_tcp_world"][2][3] - fixture["goal"]["T_world_tcp"][2][3]
+    observation, _, holding, placement = placement_inputs()
+    destination = next(obj for obj in observation['objects'] if obj['id'] == 'demo-destination')
+    goal = demo_placement.fixed_release_goal(destination, holding, placement,
+        holding['attachment_evidence']['attachment_spheres_tool_m'],
+        [[0., 0., .1, .01]], clearance_m=.01, observation_id=observation['observation_id'])
+    reference = goal['release_reference']
+    assert reference['planning_reserve_m'] == .0001
+    assert reference['required_clearance_m'] == .01
+    assert reference['attachment_floor_gap_m'] == pytest.approx(.0101)
     from scipy.spatial.transform import Rotation
 
     from luna_mujoco.planning_contracts import PlanPlaceRequest
-    quaternion = Rotation.from_matrix(transform[:3, :3]).as_quat(scalar_first=True)
-    proof = resolve(old["attachment_spheres_tool_m"], old["gripper_spheres_tool_m"],
-        PlanPlaceRequest.create(arm="A", start_joints_deg=[0.] * 7, other_joints_deg=[0.] * 7,
-                goal_position_m=transform[:3, 3].tolist(), goal_quaternion_wxyz=quaternion.tolist(),
-                trajectory_collision_clearance_m=.01, freq_hz=50, max_attempts=32),
-        lambda spheres: np.zeros(spheres.shape[:-1]))
-    goal = demo_placement.apply_release_height(goal, proof, scene_token="scene-current")
-    actual = np.asarray(fixture["actual_tcp_world"])
-    # Replay the recorded tracking error at the new nominal clearance;
-    # archived geometry and the original 5 mm run remain unchanged.
-    actual[2, 3] += .01 - old["required_clearance_m"]
-    assert demo_placement.release_endpoint_evidence(goal, fixture["holding"], actual)["at_release_goal"] is False
-    actual[2, 3] += .0001
-    verdict = demo_placement.release_endpoint_evidence(goal, fixture["holding"], actual)
-    assert verdict["at_release_goal"] is True
-    assert verdict["attachment_floor_gap_m"] == pytest.approx(.0100777900348788595)
-    assert verdict["required_clearance_m"] == .01
+    transform = np.asarray(goal['T_world_tcp'])
+    planning_request = PlanPlaceRequest.create(arm='A', start_joints_deg=[0.] * 7,
+        other_joints_deg=[0.] * 7, goal_position_m=transform[:3, 3].tolist(),
+        goal_quaternion_wxyz=Rotation.from_matrix(transform[:3, :3]).as_quat(scalar_first=True).tolist(),
+        trajectory_collision_clearance_m=.01, freq_hz=50, max_attempts=32)
+    proof = resolve(reference['attachment_spheres_tool_m'], reference['gripper_spheres_tool_m'],
+        planning_request, lambda spheres: np.zeros(spheres.shape[:-1]))
+    goal = demo_placement.apply_release_height(goal, proof, scene_token='scene-current')
+    actual = np.asarray(goal['T_world_tcp']).copy()
+    actual[2, 3] += error_z - reference['planning_reserve_m']
+    assert not demo_placement.release_endpoint_evidence(goal, holding, actual)['at_release_goal']
+    actual[2, 3] += reference['planning_reserve_m']
+    verdict = demo_placement.release_endpoint_evidence(goal, holding, actual)
+    assert verdict['at_release_goal']
+    assert verdict['attachment_floor_gap_m'] >= .01
+    assert verdict['required_clearance_m'] == .01
 
 
 def resolve(attachment, gripper, goal, query):
@@ -73,7 +73,8 @@ def test_measured_surface_above_analytic_plane_sets_first_clear_height_with_fixe
     assert proof["height_increase_m"] == pytest.approx(.002)
     assert proof["last_conflicting_z_m"] == pytest.approx(.701)
     assert proof["resolution_m"] == .001
-    assert len(seen) == 3
+    assert len(seen) == 1
+    assert seen[0].shape == (1, 21, 2, 4)
     assert all(item[0, 0, 0, 3] == pytest.approx(.025) for item in seen)
     assert proof["final_world_collision_costs"] == [0., 0.]
     assert goal.goal_position_m == (.5, .2, .7)
@@ -101,8 +102,9 @@ def test_no_feasible_height_stops_after_bounded_sweep_without_claiming_safe_pose
     with pytest.raises(ValueError, match="release_height_no_valid_goal") as caught:
         resolve([[0., 0., 0., .01]], [[0., 0., 0., .01]], request(), query)
     assert caught.value.code == "release_height_no_valid_goal"
-    assert len(queries) == 101
-    assert caught.value.details["maximum_height_increase_m"] == .1
+    assert len(queries) == 1
+    assert len(caught.value.details['tested_heights']) == 21
+    assert caught.value.details["maximum_height_increase_m"] == .02
 
 
 @pytest.mark.parametrize("cost", [np.nan, np.inf, -.01])

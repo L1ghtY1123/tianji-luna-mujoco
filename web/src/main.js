@@ -1,3 +1,4 @@
+import { renderFailureReport } from './failure-report.js';
 import './styles.css';
 import { request } from './api.js';
 import { loadCadAssets } from './cad-assets.js';
@@ -99,8 +100,8 @@ function errorMessage(error) {
   return hint ? `${hint}（${message}）` : `操作未完成：${message}。当前证据不足以确定更具体原因。`;
 }
 
-function showError(error) {
-  const message = errorMessage(error);
+function showError(error, { recorded = false } = {}) {
+  const message = recorded ? String(error) : errorMessage(error);
   if (byId('planning-dialog').open) {
     byId('planning-error').textContent = message;
     byId('planning-error').hidden = false;
@@ -393,8 +394,9 @@ function renderRunDetails() {
     ? `${ikStep ? 'Batched IK 批次' : '规划批次'} ${step.batch_index} / ${step.batch_count ?? '—'} · ${candidates} · Arm ${step.arm ?? '—'}${Number.isFinite(step.success_count) ? ` · 成功 ${step.success_count} 个` : ''}` : '';
   byId('run-last-error').hidden = !running || !step?.last_error;
   byId('run-last-error').textContent = step?.last_error ? `上一批次结果：${step.last_error}` : '';
-  byId('run-failure').hidden = !failure;
-  byId('run-failure').textContent = failure;
+  renderFailureReport(byId('run-failure'), state.run, state.events, { document,
+    additionalErrors: state.run.algorithm_cleanup_error
+      ? [errorMessage(`algorithm_cleanup_failed_reset_to_retry:${state.run.algorithm_cleanup_error}`)] : [] });
   byId('algorithm-pending').hidden = !pending;
 }
 
@@ -460,7 +462,7 @@ function applyState(payload) {
   byId('destination-value').textContent = state.run.destination_id ?? '—';
   byId('arm-value').textContent = state.run.arm ? `Arm ${state.run.arm}` : '—';
   const failure = runFailure();
-  if (failure && failure !== lastRunError) showError(failure);
+  if (failure && failure !== lastRunError) showError(failure, { recorded: true });
   lastRunError = failure;
   if (snapshot.physics_error) showError(`物理仿真出错：${snapshot.physics_error}。请检查后端日志并重启仿真。`);
   const previousEvents = state.events;
@@ -470,7 +472,7 @@ function applyState(payload) {
   renderTaskClock();
   if (state.events !== previousEvents) renderTrace(state.events);
   const facts = state.run.facts;
-  objectList.render(state.run.task_progress);
+  objectList.render(state.run.task_progress, state.run.task_inventory, state.run.policy_graph, state.events);
   const metrics = state.run.metrics;
   byId('performance-summary').hidden = !metrics;
   if (metrics) {

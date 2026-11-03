@@ -1,7 +1,7 @@
 import threading
 
 import pytest
-from test_runner import Algorithms, Decisions, Sim
+from test_runner import Algorithms, Sim
 
 from luna_mujoco.runner import Runner
 
@@ -32,7 +32,7 @@ class WaitingPlanner(Algorithms):
 
 @pytest.mark.parametrize("timeout_s", [None, 180])
 async def test_service_timeout_is_not_relabelled_as_runner_deadline(tmp_path, timeout_s):
-    runner = Runner(Sim(), Algorithms(), lambda record: Decisions(), tmp_path)
+    runner = Runner(Sim(), Algorithms(), None, tmp_path)
 
     def service_timeout():
         raise TimeoutError("service read timed out")

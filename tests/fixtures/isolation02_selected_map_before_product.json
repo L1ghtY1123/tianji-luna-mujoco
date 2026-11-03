@@ -1,0 +1,200 @@
+{
+  "version": 1,
+  "steps": [
+    {
+      "type": "skill",
+      "id": "select_package",
+      "skill": "identify_target",
+      "arguments": {
+        "target_id": "instance-f24483814b334268"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "bind_unpack_area",
+      "skill": "identify_destination",
+      "arguments": {
+        "destination_id": "vla-unpack-input"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "select_first_leg_arm",
+      "skill": "choose_arm",
+      "arguments": {
+        "arm": "auto"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "map_first_leg",
+      "skill": "build_scene",
+      "arguments": {
+        "scope": "decide",
+        "reason": "Refresh collision geometry for grasping the package and placing it at the configured VLA input region.",
+        "entity_ids": [],
+        "exclusion_state": "selected"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "make_package_grasps",
+      "skill": "generate_grasps",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "plan_package_grasp",
+      "skill": "plan_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "grasp_package",
+      "skill": "execute_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "confirm_package_held",
+      "skill": "verify_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "plan_package_placement",
+      "skill": "plan_place",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "place_package_at_input",
+      "skill": "execute_place",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "verify_package_at_input",
+      "skill": "verify_place",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "prepare_vla",
+      "skill": "prepare_unpack",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "run_vla_unpack",
+      "skill": "vla_unpack",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "verify_unpack_result",
+      "skill": "verify_unpack",
+      "arguments": {}
+    },
+    {
+      "type": "if",
+      "condition": "verify_unpack_result.success",
+      "then_steps": [],
+      "else_steps": [
+        {
+          "type": "stop",
+          "reason": "VLA unpack result was not confirmed; do not infer a product or proceed without verified evidence."
+        }
+      ]
+    },
+    {
+      "type": "skill",
+      "id": "observe_product",
+      "skill": "observe_scene",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "map_product_scene",
+      "skill": "build_scene",
+      "arguments": {
+        "scope": "decide",
+        "reason": "Refresh the collision scene with current measured post-unpack geometry before manipulating the derived product.",
+        "entity_ids": [],
+        "exclusion_state": "selected"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "select_black_product",
+      "skill": "identify_target",
+      "arguments": {
+        "target_id": "$product"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "bind_final_box",
+      "skill": "identify_destination",
+      "arguments": {
+        "destination_id": "instance-bdc3227997a041cb"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "select_final_leg_arm",
+      "skill": "choose_arm",
+      "arguments": {
+        "arm": "auto"
+      }
+    },
+    {
+      "type": "skill",
+      "id": "make_product_grasps",
+      "skill": "generate_grasps",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "plan_product_grasp",
+      "skill": "plan_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "grasp_product",
+      "skill": "execute_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "confirm_product_held",
+      "skill": "verify_grasp",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "plan_product_transport",
+      "skill": "plan_transport",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "transport_product",
+      "skill": "execute_transport",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "release_product_in_box",
+      "skill": "drop",
+      "arguments": {}
+    },
+    {
+      "type": "skill",
+      "id": "verify_product_in_box",
+      "skill": "verify_drop",
+      "arguments": {}
+    }
+  ]
+}

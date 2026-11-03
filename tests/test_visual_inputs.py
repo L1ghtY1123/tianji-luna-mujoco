@@ -61,7 +61,7 @@ def test_identity_unknown_is_not_silently_removed():
                           entities={'red': {'kind': 'cube', 'color': 'red'}})
 
 
-def test_decisions_images_and_metadata_exclude_mask_interior_and_depth():
+def test_decisions_inputs_only_change_provenance_hashes_when_mask_or_depth_changes():
     capture, detection = fixture()
     entities = {'red': {'kind': 'cube', 'color': 'red', 'bbox': [.1, .1, .5, .7]}}
     reference = deepcopy(capture)
@@ -80,7 +80,28 @@ def test_decisions_images_and_metadata_exclude_mask_interior_and_depth():
         inventory = VisualInventory(api_key='test', client=client_with_answers({'identity_0': 'red'}, calls))
         inventory.resolve(capture, [detection], instruction='move red', entities=entities, reference=reference)
     assert len(calls) == 2
-    assert calls[0] == calls[1]
+    normalized = deepcopy(calls)
+    changed_hashes = []
+    for call in normalized:
+        stamps = []
+        for part in call['input'][0]['content']:
+            if part['type'] != 'input_text' or not part['text'].startswith('{'):
+                continue
+            metadata = json.loads(part['text'])
+            provenance = metadata.get('candidate_provenance')
+            if provenance is None:
+                continue
+            # Provenance binds the actual source arrays. Only their hashes may
+            # change; raw mask/depth values must not enter the visual judgment.
+            for stamp in (provenance['mask'], provenance['silhouette_mask'],
+                          provenance['view']['depth_m'], provenance['view']['valid_depth']):
+                assert set(stamp) == {'sha256', 'shape', 'dtype'}
+                stamps.append(stamp.pop('sha256'))
+            part['text'] = json.dumps(metadata)
+        assert len(stamps) == 4
+        changed_hashes.append(stamps)
+    assert all(before != after for before, after in zip(*changed_hashes, strict=True))
+    assert normalized[0] == normalized[1]
     assert sum(part['type'] == 'input_image' for part in calls[0]['input'][0]['content']) == 3
 
 
@@ -230,7 +251,8 @@ def test_display_region_projection_does_not_require_rgb_pixels():
 
 
 @pytest.mark.parametrize('failure', ['http', 'transport', 'malformed'])
-def test_failed_request_audit_is_bounded_sanitized_and_cached(failure):
+def test_failed_request_audit_is_bounded_sanitized_and_cached(failure, monkeypatch):
+    monkeypatch.setattr("luna_mujoco.visual_api.time.sleep", lambda _: None)
     capture, detection = fixture()
     events, requests = [], []
     def handle(request):
@@ -246,7 +268,7 @@ def test_failed_request_audit_is_bounded_sanitized_and_cached(failure):
     for _ in range(2):
         with pytest.raises(VisualInventoryError):
             inventory.resolve(capture, [detection], instruction='move red', entities={'red': {'kind': 'cube'}})
-    assert len(events) == len(requests) == 1
+    assert len(events) == len(requests) == (1 if failure == 'malformed' else 6)
     assert events[0]['error'] and events[0]['observation_id'] == 'frame-1'
     assert 'never-save-me' not in json.dumps(events[0])
     assert len(json.dumps(events[0]['response'])) < 20000

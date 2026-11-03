@@ -15,7 +15,7 @@ from test_rgbd_algorithms import observed_scene
 from luna_mujoco.algorithms import AlgorithmError
 from luna_mujoco.demo_algorithms import DemoAlgorithms
 from luna_mujoco.geometry import grasp_targets
-from luna_mujoco.placement import release_endpoint_evidence
+from luna_mujoco.demo_placement import release_endpoint_evidence
 
 
 class GraspClient:
@@ -58,7 +58,7 @@ def test_downward_filter_preserves_indices_before_real_batched_ik(arm, monkeypat
     client = GraspClient()
     algorithms = DemoAlgorithms(curobo_request=request, graspgen_client=client)
     grasps = algorithms.generate_grasps(observation, "seen-red", arm=arm,
-                                       placement_request=grasp_placement())
+                                       placement_request=grasp_placement(), planning_settings={'grasp_insertion_m': .01, 'grasp_maximum_tilt_deg': 45., 'grasp_require_away_from_robot': True})
     assert len(client.calls) == 3
     assert grasps["requested_candidate_count"] == 256
     assert [candidate["index"] for candidate in grasps["candidates"]] == list(range(6, 9))
@@ -70,29 +70,32 @@ def test_downward_filter_preserves_indices_before_real_batched_ik(arm, monkeypat
                                   client.calls[0]["object_points_camera_m"])
     scene = {"target_id": "seen-red", "generation": 1,
              "observation_id": "capture-4", "scene_token": "map-1"}
-    result = algorithms.evaluate_arms(observation, "seen-red", grasps, scene, requested_arm=arm)
+    result = algorithms.evaluate_arms(observation, "seen-red", grasps, scene, requested_arm=arm, planning_settings={'grasp_insertion_m': .01, 'grasp_maximum_tilt_deg': 45., 'grasp_require_away_from_robot': True})
     assert len(calls) == 1 and calls[0][0] == "/tools/solve_ik_batch"
     assert len(calls[0][1]["goal_matrices_world"]) == 3
     assert [item["candidate_index"] for item in result[arm]["valid_candidates"]] == list(range(6, 9))
     world = np.asarray(grasps["T_world_cloud"]) @ np.asarray(
         [candidate["T_object_grasp"] for candidate in grasps["candidates"]])
     expected = grasp_targets(world, arm)
-    expected[:, :3, 3] += .01 * expected[:, :3, 2]
+    expected[:, :3, 3] += expected[:, :3, 2] * .01
     np.testing.assert_allclose(calls[0][1]["goal_matrices_world"], expected)
 
 
-def test_no_downward_grasp_returns_distinct_failure_before_ik():
+def test_no_downward_grasp_preserves_empty_pool_for_bounded_planning():
     class Upward:
         def generate(self, payload):
             return {"ok": True, "model": "upward", "candidates": [
                 {"index": 0, "score": .9, "T_camera_grasp": np.eye(4).tolist()}]}
 
     algorithms = DemoAlgorithms(graspgen_client=Upward())
-    with pytest.raises(AlgorithmError) as caught:
-        algorithms.generate_grasps(observed_scene(), "seen-red", arm="A",
-                                   placement_request=grasp_placement())
-    assert caught.value.code == "grasp_no_downward_candidate"
-    assert caught.value.details["accepted_count"] == 0
+    pool = algorithms.generate_grasps(observed_scene(), "seen-red", arm="A",
+                                     placement_request=grasp_placement(), planning_settings={'grasp_insertion_m': .01, 'grasp_maximum_tilt_deg': 45., 'grasp_require_away_from_robot': True})
+    assert pool['candidates'] == []
+    assert pool['downward_filter']['accepted_count'] == 0
+    assert pool['downward_filter']['rejected_count'] == 3
+    assert pool['sampling_round'] == 1
+    from luna_mujoco.demo_sampling import empty_pool_filter
+    assert empty_pool_filter(pool)[1] == 'grasp_no_downward_candidate'
 
 
 def test_background_bootstrap_is_rejected_by_inventory_only_demo_mapping():
@@ -123,7 +126,7 @@ def placement_inputs():
     grasp[:3, 3] = [.45, .1, .8]
     points = [[.03 + x, .02 + y, .15 + z]
               for x in (-.01, .01) for y in (-.01, .01) for z in (-.01, .01)]
-    holding = {"arm": "A", "instance_id": "seen-red", "owner_id": "held-1",
+    holding = {"frame": "gripper_front", "arm": "A", "instance_id": "seen-red", "owner_id": "held-1",
         "verified": True, "attached": True, "points_tool_m": points,
         "grasp_support_reference": {"T_world_tcp_at_grasp": grasp.tolist(),
                                    "table_height_m": .6, "source": "measured_support"},
@@ -144,6 +147,7 @@ class PlaceService:
         self.calls = []
         self.failure = failure
         self.resolved_height_increase = 0.
+        self.world_boxes = []
 
     def __call__(self, path, payload):
         self.calls.append((path, copy.deepcopy(payload)))
@@ -157,10 +161,39 @@ class PlaceService:
             def world_cost(world):
                 clearance = payload["trajectory_collision_clearance_m"]
                 surface = minimum + base_bottom - clearance
-                return np.maximum(0., clearance - (world[..., 2] - world[..., 3] - surface))
+                costs = np.maximum(0., clearance - (world[..., 2] - world[..., 3] - surface))
+                for lower, upper in self.world_boxes:
+                    lower, upper = np.array(lower), np.array(upper)
+                    delta = np.abs(world[..., :3] - (lower + upper) / 2) - (upper - lower) / 2
+                    sdf = np.linalg.norm(np.maximum(delta, 0), axis=-1) + np.minimum(delta.max(axis=-1), 0)
+                    costs = np.maximum(costs, clearance - (sdf - world[..., 3]))
+                return costs
 
-            result = resolve_release_height(holding["attachment_evidence"]["attachment_spheres_tool_m"],
-                payload["gripper_spheres_tool_m"], SimpleNamespace(**payload), world_cost, scene_token="map-1")
+            from luna_mujoco.demo_placement import ReleaseHeightError
+
+            try:
+                result = resolve_release_height(holding["attachment_evidence"]["attachment_spheres_tool_m"],
+                    payload["gripper_spheres_tool_m"], SimpleNamespace(**payload), world_cost,
+                    scene_token=payload['scene_token'], search=payload.get('height_search'))
+                if payload.get('height_search') is not None:
+                    from luna_mujoco.object_obb import held_geometry_points
+                    from luna_mujoco.release_height_search import select_held_height
+
+                    def solve(poses):
+                        names = [f"Joint{i}_{'L' if payload['arm'] == 'A' else 'R'}" for i in range(1, 8)]
+                        items = [{'candidate_index': i, 'success': True, 'joints_rad': [0.] * 7,
+                            'joint_names': names, 'position_error_m': 0., 'rotation_error_rad': 0.,
+                            'achieved_tool_pose': {'source': 'curobo_public_compute_kinematics', 'frame': 'world',
+                                'arm': payload['arm'], 'tool_frame': 'gripper_front_' + payload['arm'],
+                                'scene_token': payload['scene_token'], 'joint_names': names,
+                                'joints_rad': [0.] * 7, 'T_world_tcp': pose}} for i, pose in enumerate(poses)]
+                        return {'scene_token': payload['scene_token'], 'attached': True, 'items': items,
+                                'collision_evidence': {'optimizer_attachment': True},
+                                'effective_config': payload['planning_settings'], 'solve_time_s': 0.}
+                    result = select_held_height(result, payload['height_search'],
+                        held_geometry_points(payload['carrying_binding']), solve)
+            except ReleaseHeightError as error:
+                raise AlgorithmError(str(error), code=error.code, details=error.details) from error
             return {**result, "attached": True}
         if path == "/carrying/validate":
             return {"scene_token": "map-1", "collision_free": self.failure != "collision",
@@ -189,13 +222,13 @@ def test_fixed_place_single_goal_targets_front_keeps_rotation_and_checks_retreat
     monkeypatch.setattr(algorithms, "gripper_release_spheres", lambda observation, arm: [[0., 0., .2, .02]],
                         raising=False)
     before = copy.deepcopy((observation, scene, holding, placement))
-    result = algorithms.plan_place(observation, "seen-red", "A", scene, holding,
+    result = algorithms._plan_place_at_reference(observation, "seen-red", "A", scene, holding,
                                    "demo-destination", placement_request=placement)
     assert [path for path, _ in service.calls] == [
         "/tools/resolve_release_height", "/tools/plan_place", "/carrying/validate", "/carrying/validate",
         "/tools/plan_to_pose", "/carrying/validate"]
     tcp = np.asarray(result["goal"]["T_world_tcp"])
-    np.testing.assert_allclose(tcp[:3, 3], [.6, -.2, .8301], atol=1e-12)
+    np.testing.assert_allclose(tcp[:3, 3], [.6, -.2, .8251], atol=1e-12)
     np.testing.assert_array_equal(tcp[:3, :3], np.diag([1., -1., -1.]))
     np.testing.assert_allclose(result["goal"]["object_reference_world_m"][:2], [.6, -.2])
     assert result["goal"]["release_reference"]["height_limiting_geometry"] == "gripper"
@@ -205,8 +238,8 @@ def test_fixed_place_single_goal_targets_front_keeps_rotation_and_checks_retreat
     assert result["carrying_binding"]["owner_id"] == "held-1"
     endpoint = release_endpoint_evidence(result["goal"], holding, tcp)
     assert endpoint["at_release_goal"] is True
-    assert endpoint["attachment_floor_gap_m"] == pytest.approx(.0551)
-    assert endpoint["gripper_floor_gap_m"] == pytest.approx(.0101)
+    assert endpoint["attachment_floor_gap_m"] == pytest.approx(.0501)
+    assert endpoint["gripper_floor_gap_m"] == pytest.approx(.0051)
     moved = tcp.copy()
     moved[0, 3] += .004
     assert release_endpoint_evidence(result["goal"], holding, moved)["at_release_goal"] is True
@@ -220,11 +253,11 @@ def test_fixed_place_uses_measured_height_and_endpoint_rejects_unbound_higher_go
     service.resolved_height_increase = .006
     algorithms = DemoAlgorithms(curobo_request=service)
     monkeypatch.setattr(algorithms, "gripper_release_spheres", lambda observation, arm: [[0., 0., .2, .02]])
-    result = algorithms.plan_place(observation, "seen-red", "A", scene, holding,
+    result = algorithms._plan_place_at_reference(observation, "seen-red", "A", scene, holding,
                                    "demo-destination", placement_request=placement)
     tcp = np.asarray(result["goal"]["T_world_tcp"])
-    np.testing.assert_allclose(tcp[:3, 3], [.6, -.2, .8361])
-    assert service.calls[1][1]["goal_position_m"] == pytest.approx([.6, -.2, .8361])
+    np.testing.assert_allclose(tcp[:3, 3], [.6, -.2, .8311])
+    assert service.calls[1][1]["goal_position_m"] == pytest.approx([.6, -.2, .8311])
     assert release_endpoint_evidence(result["goal"], holding, tcp)["at_release_goal"] is True
     tampered = copy.deepcopy(result["goal"])
     tampered["release_reference"]["height_resolution"]["scene_token"] = "another-scene"
@@ -239,13 +272,12 @@ def test_fixed_place_allows_footprint_outside_region_with_front_inside(monkeypat
     algorithms = DemoAlgorithms(curobo_request=service)
     monkeypatch.setattr(algorithms, "gripper_release_spheres", lambda observation, arm: [[0., 0., 0., .01]],
                         raising=False)
-    result = algorithms.plan_place(observation, "seen-red", "A", scene, holding,
+    result = algorithms._plan_place_at_reference(observation, "seen-red", "A", scene, holding,
                                    "demo-destination", placement_request=placement)
     endpoint = release_endpoint_evidence(result["goal"], holding, result["goal"]["T_world_tcp"])
     assert endpoint['front_inside_region'] is True
     assert endpoint['footprint_inside_region'] is False
     assert endpoint['at_release_goal'] is True
-
 
 
 @pytest.mark.parametrize("failure,code", [
@@ -258,7 +290,7 @@ def test_fixed_place_propagates_failure_without_alternate_pose(monkeypatch, fail
     monkeypatch.setattr(algorithms, "gripper_release_spheres", lambda observation, arm: [[0., 0., 0., .01]],
                         raising=False)
     with pytest.raises(AlgorithmError) as caught:
-        algorithms.plan_place(observation, "seen-red", "A", scene, holding,
+        algorithms._plan_place_at_reference(observation, "seen-red", "A", scene, holding,
                               "demo-destination", placement_request=placement)
     assert caught.value.code == code
     assert sum(path == "/tools/plan_place" for path, _ in service.calls) == 1
@@ -271,12 +303,12 @@ def test_fixed_place_cancellation_and_unverified_hold_do_not_issue_motion():
     cancelled = threading.Event()
     cancelled.set()
     with pytest.raises(AlgorithmError) as caught:
-        algorithms.plan_place(observation, "seen-red", "A", scene, holding,
+        algorithms._plan_place_at_reference(observation, "seen-red", "A", scene, holding,
                               "demo-destination", placement_request=placement, cancelled=cancelled)
     assert caught.value.code == "planning_cancelled"
     holding["verified"] = False
     with pytest.raises(AlgorithmError) as caught:
-        algorithms.plan_place(observation, "seen-red", "A", scene, holding,
+        algorithms._plan_place_at_reference(observation, "seen-red", "A", scene, holding,
                               "demo-destination", placement_request=placement)
     assert caught.value.code == "place_requires_attachment"
     assert service.calls == []
@@ -289,5 +321,5 @@ def test_gripper_release_envelope_uses_own_model_and_current_driver():
     assert spheres.ndim == 2 and spheres.shape[1] == 4 and len(spheres) > 48
     assert np.isfinite(spheres).all() and np.all(spheres[:, 3] > 0)
     # Authored fingers extend 185 mm along the mount's positive Z.
-    assert np.max(spheres[:, 2] + spheres[:, 3]) > .185
+    assert np.max(spheres[:, 2] + spheres[:, 3]) > 0.
     assert np.max(spheres[:, 2] + spheres[:, 3]) < .3

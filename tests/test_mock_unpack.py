@@ -45,7 +45,7 @@ def test_mock_unpack_preserves_run_robot_controls_other_objects_and_baseline(sim
         before = {key: getattr(sim._data, key).copy() for key in
                   ("qpos", "qvel", "ctrl", "act", "qacc_warmstart", "qfrc_applied", "xfrc_applied")}
         before_time, revision = sim._data.time, sim._revision
-        receipt = sim.mock_unpack(AREA, task_id="task", generation=sim._generation,
+        receipt = sim.unpack_at_pose(AREA, task_id="task", generation=sim._generation,
                                   target_id="canonical-1", owner_id="run-1")
         assert receipt["source"] == "mock_vla"
         assert receipt["is_visual_evidence"] is False
@@ -69,7 +69,9 @@ def test_mock_unpack_preserves_run_robot_controls_other_objects_and_baseline(sim
         item = next(obj for obj in sim.snapshot()["objects"] if obj["id"] == physical_id)
         assert item["kind"] == "cad" and item["asset_id"] == "black_core" and item["color"] == "black"
         assert item["size"] == [.044, .056, .0745]
-        np.testing.assert_allclose(item["position"], [.56, -.22, .595], atol=1e-12)
+        np.testing.assert_allclose(item["position"], receipt["after"]["position"], atol=1e-12)
+        from luna_mujoco.workspace import WorkspaceAtlas
+        assert WorkspaceAtlas().query("B", [item["position"]])[0]["reachable"]
         np.testing.assert_allclose(np.asarray(item["T_world_object"])[:3, :3],
                                    scene_object_rotation(receipt["after"]), atol=1e-12)
         assert sim._model.geom("object_visual_" + physical_id).type == mujoco.mjtGeom.mjGEOM_MESH
@@ -88,7 +90,7 @@ def test_mock_unpack_requires_one_supported_pink_entity_without_mutation(simulat
             simulation._data.qpos[q:q + 3] = [.43 + .06 * index, 0 if index < count else .6, .61]
         before, model, revision = integration_state(simulation), simulation._model, simulation._revision
         with pytest.raises(ValueError, match="unique.*pink"):
-            simulation.mock_unpack(AREA, generation=simulation._generation)
+            simulation.unpack_at_pose(AREA, generation=simulation._generation)
         np.testing.assert_array_equal(integration_state(simulation), before)
         assert simulation._model is model and simulation._revision == revision
 
@@ -97,12 +99,12 @@ def test_mock_unpack_failed_compile_rolls_back_and_stale_generation_rejects(simu
     with simulation._condition:
         before, model = integration_state(simulation), simulation._model
         with pytest.raises(StaleCommandError):
-            simulation.mock_unpack(AREA, generation=simulation._generation - 1)
+            simulation.unpack_at_pose(AREA, generation=simulation._generation - 1)
         def fail(_):
             raise RuntimeError("compile failed")
         monkeypatch.setattr(simulation._builder, "build", fail)
         with pytest.raises(RuntimeError, match="compile failed"):
-            simulation.mock_unpack(AREA, generation=simulation._generation)
+            simulation.unpack_at_pose(AREA, generation=simulation._generation)
         np.testing.assert_array_equal(integration_state(simulation), before)
         assert simulation._model is model
 
@@ -117,7 +119,7 @@ def test_mock_unpack_rejects_unsupported_output_pose_without_mutation(simulation
     with simulation._condition:
         before = integration_state(simulation)
         with pytest.raises(ValueError, match="output"):
-            simulation.mock_unpack(AREA, output, generation=simulation._generation)
+            simulation.unpack_at_pose(AREA, output, generation=simulation._generation)
         np.testing.assert_array_equal(integration_state(simulation), before)
 
 
@@ -131,7 +133,7 @@ def test_recording_snapshot_binds_manifest_revision_to_actual_shape(simulation):
         assert pink_rows and all(row['type'] == 'box' for row in pink_rows)
         old_urls = {row['mesh_url'] for row in pink_rows if 'mesh_url' in row}
         old_bytes = {url: Path(url.removeprefix("/")).read_bytes() for url in old_urls}
-        receipt = simulation.mock_unpack(AREA, generation=simulation._generation)
+        receipt = simulation.unpack_at_pose(AREA, generation=simulation._generation)
         second = simulation.recording_snapshot(first["manifest_revision"])
         update = second["geometry_update"]
         assert update["geometry_manifest"]["revision"] == second["manifest_revision"]
@@ -148,11 +150,11 @@ def test_mock_unpack_rejects_active_gripper_or_arm_lock(simulation):
     with simulation._motion_locks["A"], simulation._condition:
         before = integration_state(simulation)
         with pytest.raises(RuntimeError, match="idle_arms"):
-            simulation.mock_unpack(AREA, generation=simulation._generation)
+            simulation.unpack_at_pose(AREA, generation=simulation._generation)
         np.testing.assert_array_equal(integration_state(simulation), before)
 
 
-def test_default_unpacked_cad_stays_in_head_observation_frame(simulation):
+def test_configured_example_unpacked_cad_stays_in_head_observation_frame(simulation):
     """At least one camera must cover the part; the head also supports local mapping."""
     import trimesh
 
@@ -164,7 +166,7 @@ def test_default_unpacked_cad_stays_in_head_observation_frame(simulation):
     calibration = load_calibration()["cameras"]
     with simulation._condition:
         target = simulation._unpack_target(AREA)
-        output = simulation._unpack_output(target, None)
+        output = simulation._unpack_output(target, {"position": [.44, -.30, .595], "yaw_deg": 210.})
         mujoco.mj_fwdPosition(simulation._model, simulation._data)
         for camera_id in ("3",):
             transform = camera_pose(simulation._model, simulation._data, camera_id)
@@ -186,23 +188,23 @@ def test_mock_unpack_does_not_select_floating_or_partially_outside_entity(simula
         q = int(simulation._model.joint("free_pink_cylinder_1").qposadr[0])
         simulation._data.qpos[q:q + 3] = position
         with pytest.raises(ValueError, match="unique.*pink"):
-            simulation.mock_unpack(AREA, generation=simulation._generation)
+            simulation.unpack_at_pose(AREA, generation=simulation._generation)
 
 
 def test_mock_unpack_rejects_output_collision_without_partial_swap(simulation):
     with simulation._condition:
         q = int(simulation._model.joint("free_pink_cylinder_2").qposadr[0])
-        simulation._data.qpos[q:q + 3] = [.56, -.22, .61]
+        simulation._data.qpos[q:q + 3] = [.44, -.30, .61]
         before, model = integration_state(simulation), simulation._model
         with pytest.raises(ValueError, match="output_collides"):
-            simulation.mock_unpack(AREA, generation=simulation._generation)
+            simulation.unpack_at_pose(AREA, {"position": [.44, -.30, .595], "yaw_deg": 210.}, generation=simulation._generation)
         assert simulation._model is model
         np.testing.assert_array_equal(integration_state(simulation), before)
 
 
 def test_capture_from_previous_geometry_revision_cannot_publish_after_unpack(simulation, monkeypatch):
     def render_during_change(model, data, generation, arms):
-        simulation.mock_unpack(AREA, generation=generation)
+        simulation.unpack_at_pose(AREA, generation=generation)
         return {"generation": generation, "observation_id": "old-shape"}
     monkeypatch.setattr(simulation, "_render_capture", render_during_change)
     with pytest.raises(StaleCommandError, match="geometry changed"):
@@ -218,13 +220,15 @@ def test_mock_output_clears_vla_hands_including_local_mapping_padding(simulation
     from luna_mujoco.carrying import configure_gripper_feedback
     from luna_mujoco.kinematics import robot_model
     from luna_mujoco.model_builder import ARM_JOINTS
+    from luna_mujoco.planning_settings import PlanningSettings
+    from luna_mujoco.vla_configuration import vla_unpack_configuration
 
     root = Path(__file__).resolve().parents[1]
     config = yaml.safe_load((root / 'resources/curobo/marvin_gui_dual.yml').read_text())
     kin = configure_gripper_feedback(config, {'A': 0., 'B': 0.},
         root / 'assets/marvin_urdf/marvin_with_grippers.urdf')['robot_cfg']['kinematics']
-    model, goals = robot_model(), {'A': [-86, 76, 88, -90, 2, 14, -24],
-                                  'B': [106, 61, -113, -78, 27, 36, 37]}
+    capability = vla_unpack_configuration()
+    model, goals = robot_model(), capability['preparation_joints_deg']
     data = mujoco.MjData(model)
     for name, value in kin['lock_joints'].items():
         data.qpos[int(model.joint(name).qposadr[0])] = value
@@ -233,11 +237,12 @@ def test_mock_output_clears_vla_hands_including_local_mapping_padding(simulation
             data.qpos[int(model.joint(name).qposadr[0])] = value
     mujoco.mj_fwdPosition(model, data)
     with simulation._condition:
-        output = simulation._unpack_output(simulation._unpack_target(AREA), None)
-    # Covers every flat yaw, plus the measured obstacle's 2cm margin.
+        output = simulation._unpack_output(simulation._unpack_target(AREA), {"position": [.44, -.30, .595], "yaw_deg": 210.})
+    # Scene-authoring envelope: every sampled XY, every flat yaw, and 2cm padding.
     half = np.asarray(output['size']) / 2
     xy_radius = np.linalg.norm(half[1:]) + .02
     extents = np.array([xy_radius, xy_radius, half[0] + .02])
+    extents[:2] += np.asarray(capability['output_region']['size_xy_m']) / 2
     center = np.asarray(output['position'])
     for link in kin['collision_link_names']:
         body = model.body(link).id
@@ -246,16 +251,16 @@ def test_mock_output_clears_vla_hands_including_local_mapping_padding(simulation
             radius = sphere['radius'] + kin['collision_sphere_buffer'].get(link, 0.)
             offset = np.abs(world - center) - extents
             gap = np.linalg.norm(np.maximum(offset, 0)) + min(max(offset), 0) - radius
-            assert gap >= .01, (link, gap)
+            assert gap >= PlanningSettings().trajectory_collision_clearance_m, (link, gap)
 
 
-def test_mock_output_visible_to_head_at_required_observation_pose(simulation):
+def test_configured_example_output_visible_to_head_at_observation_pose(simulation):
     """Scene-authoring check: actual occlusion, not only projection into the frame."""
     from luna_mujoco.cameras import CAMERA_NAMES
     from luna_mujoco.model_builder import ARM_JOINTS
 
     with simulation._condition:
-        simulation.mock_unpack(AREA, generation=simulation._generation)
+        simulation.unpack_at_pose(AREA, {"position": [.44, -.30, .595], "yaw_deg": 210.}, generation=simulation._generation)
         model, data = simulation._model, simulation._data
         for arm, angles in demo_observation_poses().items():
             for name, value in zip(ARM_JOINTS[arm], angles, strict=True):
@@ -273,3 +278,52 @@ def test_mock_output_visible_to_head_at_required_observation_pose(simulation):
                 renderer.update_scene(data, camera=CAMERA_NAMES['3'], scene_option=options)
                 segmentation = renderer.render()
                 assert np.sum(segmentation[:, :, 0] == geometry) >= 300, yaw
+
+
+def test_configured_output_region_visible_to_camera_union_at_dual_vla_pose(simulation):
+    """Scene-authoring evidence only: no rendered truth enters task perception."""
+    import trimesh
+
+    from luna_mujoco.cad_assets import CAD_ROOT, cad_asset
+    from luna_mujoco.cameras import CAMERA_NAMES, camera_pose, load_calibration
+    from luna_mujoco.model_builder import ARM_JOINTS
+    from luna_mujoco.vla_configuration import vla_unpack_configuration
+
+    capability = vla_unpack_configuration()
+    region = capability['output_region']
+    center = np.asarray(region['center_world_xy_m'])
+    half = np.asarray(region['size_xy_m']) / 2
+    asset = cad_asset('black_core')
+    vertices = np.asarray(trimesh.load_mesh(CAD_ROOT / asset['visual']['path']).vertices)
+    calibration = load_calibration()['cameras']['3']['intrinsics']
+    with simulation._condition:
+        simulation.unpack_at_pose(AREA, {'position': [*center, .595], 'yaw_deg': 210.},
+                                  generation=simulation._generation)
+        model, data = simulation._model, simulation._data
+        for arm, angles in capability['preparation_joints_deg'].items():
+            for name, value in zip(ARM_JOINTS[arm], np.deg2rad(angles), strict=True):
+                data.qpos[int(model.joint(name).qposadr[0])] = value
+        address = int(model.joint('free_pink_cylinder_1').qposadr[0])
+        geometry = model.geom('object_visual_pink_cylinder_1').id
+        options = mujoco.MjvOption()
+        options.geomgroup[3] = 0
+        with mujoco.Renderer(model, height=480, width=640) as renderer:
+            renderer.enable_segmentation_rendering()
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    data.qpos[address:address+2] = center + half * [dx, dy]
+                    mujoco.mj_forward(model, data)
+                    transform = camera_pose(model, data, '3')
+                    rotation = scene_object_rotation({'yaw_deg': 210., 'pitch_deg': 90.})
+                    world = vertices @ rotation.T + data.qpos[address:address+3]
+                    optical = (world - transform[:3, 3]) @ transform[:3, :3]
+                    u = calibration['fx'] * optical[:, 0] / optical[:, 2] + calibration['cx']
+                    v = calibration['fy'] * optical[:, 1] / optical[:, 2] + calibration['cy']
+                    assert np.all(optical[:, 2] > 0)
+                    assert 0 <= u.min() and u.max() < calibration['width']
+                    assert 0 <= v.min() and v.max() < calibration['height']
+                    pixels = []
+                    for camera in ('1', '2', '3'):
+                        renderer.update_scene(data, camera=CAMERA_NAMES[camera], scene_option=options)
+                        pixels.append(np.sum(renderer.render()[:, :, 0] == geometry))
+                    assert max(pixels) >= 300, (dx, dy, pixels)

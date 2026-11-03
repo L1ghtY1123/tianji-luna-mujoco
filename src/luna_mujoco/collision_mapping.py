@@ -5,32 +5,49 @@ Distance samples retain native XYZ flat indices; they are not visibility claims.
 """
 import struct
 from copy import deepcopy
+from pathlib import Path
 
 import numpy as np
 
 
-def _bin_shell_metadata(name, identity):
-    for identifier, completion in identity.get('mapping_diagnostics', {}).get('bin_shell_completions', {}).items():
-        prefix = f'semantic_instance::{identifier}::bin_shell::'
-        part = name[len(prefix):]
-        if name.startswith(prefix) and part in {**completion.get('cuboids', {}), **completion.get('meshes', {})}:
-            if (completion.get('instance_id') != identifier
-                    or any(completion.get(key) != identity[key] for key in ('observation_id', 'generation'))):
-                raise ValueError('demo_bin_shell_published_identity_mismatch')
-            return {'geometry_source': completion['source'], 'instance_id': identifier,
-                'observation_id': completion['observation_id'], 'generation': completion['generation'],
-                'synthetic_geometry_is_measured': False, 'face': part,
-                **({'asset_id': completion['asset_id'], 'cad_sha256': completion['cad_sha256'],
-                    'part_sha256': completion['part_sha256'][part]} if 'meshes' in completion else {})}
-    if '::bin_shell::' in name:
-        raise ValueError('demo_bin_shell_published_provenance_missing')
-    return {}
+def _cad_mesh(geometry):
+    """Verify the published path/hash against the project catalog before exporting."""
+    from scipy.spatial.transform import Rotation
+
+    from .cad_perception import CadCatalog
+
+    catalog = CadCatalog.from_file()
+    record = catalog.record(geometry['asset_id'])
+    mesh = catalog.geometry(record['mesh_key'])
+    if (geometry.get('geometry_source') != 'registered_cad'
+            or geometry.get('source_sha256') != mesh['source_sha256']
+            or geometry.get('mesh_sha256') != mesh['mesh_sha256']
+            or Path(geometry['file_path']).resolve() != Path(mesh['path']).resolve()
+            or any(key in geometry for key in ('vertices', 'faces', 'scale', 'file_string', 'urdf_path'))):
+        raise ValueError('published_cad_mesh_binding_changed')
+    pose = np.asarray(geometry['pose'], dtype=float)
+    if (pose.shape != (7,) or not np.isfinite(pose).all()
+            or not np.isclose(np.linalg.norm(pose[3:]), 1., atol=1e-6, rtol=0)):
+        raise ValueError('invalid_published_cad_pose')
+    rotation = Rotation.from_quat(pose[3:], scalar_first=True).as_matrix()
+    vertices = np.asarray(mesh['vertices_m'], dtype=float)
+    world = vertices @ rotation.T + pose[:3]
+    return mesh, world.min(0), world.max(0)
+
+
+def _geometry_metadata(geometry):
+    return {key: deepcopy(geometry[key]) for key in ('geometry_source', 'instance_id', 'asset_id',
+            'source_sha256', 'mesh_sha256', 'observation_id', 'generation', 'geometry_observation_ids')
+            if key in geometry}
 
 
 def collision_layer_bounds(grids, model, identity):
-    """World bounds of published cells/cuboids, without sampling or changing them."""
+    """World bounds of published cells, cuboids and verified complete CAD meshes."""
     from scipy.spatial.transform import Rotation
 
+    from .inventory_map import require_native_inventory_geometry
+
+    require_native_inventory_geometry(model)
     disabled = set(identity.get("disabled_obstacle_names", ()))
     layers = {}
     for grid in grids:
@@ -59,18 +76,14 @@ def collision_layer_bounds(grids, model, identity):
         half = np.abs(Rotation.from_quat(pose[3:], scalar_first=True).as_matrix()) @ dims / 2
         layers[name] = {"kind": "cuboid", "enabled": name not in disabled,
                         "source": "published_cuboid_bounds",
+                        **_geometry_metadata(cuboid),
                         "minimum_world_m": (pose[:3] - half).tolist(),
-                        "maximum_world_m": (pose[:3] + half).tolist(),
-                        **_bin_shell_metadata(name, identity)}
-    for name, mesh in model.get('mesh', {}).items():
-        vertices, pose = np.asarray(mesh.get('vertices'), float), np.asarray(mesh.get('pose'), float)
-        if (vertices.ndim != 2 or vertices.shape[1] != 3 or not len(vertices)
-                or pose.shape != (7,) or not np.isfinite(vertices).all() or not np.isfinite(pose).all()):
-            raise ValueError('invalid_published_mesh_bounds')
-        world = vertices @ Rotation.from_quat(pose[3:], scalar_first=True).as_matrix().T+pose[:3]
-        layers[name] = {'kind': 'mesh', 'enabled': name not in disabled, 'source': 'published_mesh_bounds',
-            'minimum_world_m': world.min(0).tolist(), 'maximum_world_m': world.max(0).tolist(),
-            **_bin_shell_metadata(name, identity)}
+                        "maximum_world_m": (pose[:3] + half).tolist()}
+    for name, geometry in model.get('mesh', {}).items():
+        _, lower, upper = _cad_mesh(geometry)
+        layers[name] = {'kind': 'mesh', 'enabled': name not in disabled,
+                        'source': 'published_cad_mesh_bounds', **_geometry_metadata(geometry),
+                        'minimum_world_m': lower.tolist(), 'maximum_world_m': upper.tolist()}
     return {**{key: identity[key] for key in ("scene_token", "observation_id", "generation")}, "layers": layers}
 
 
@@ -80,6 +93,9 @@ def _sample_indices(count, maximum):
 
 def collision_scene_preview(candidate, grids, model, identity, *, maximum_surface_points=15000):
     """Snapshot exactly the map products used by update_voxel_scene, without rebuilding."""
+    from .inventory_map import require_native_inventory_geometry
+
+    require_native_inventory_geometry(model)
     integration = candidate.integration
     data = integration.pointcloud_data
     count = struct.unpack_from('<I', data)[0]
@@ -121,33 +137,52 @@ def collision_scene_preview(candidate, grids, model, identity, *, maximum_surfac
                      'sign_convention': 'negative_inside_positive_outside',
                      'visibility_certificate': False},
         })
+    mesh_layers = {}
+    for name, geometry in model.get('mesh', {}).items():
+        mesh, lower, upper = _cad_mesh(geometry)
+        # STL repeats vertices per triangle. Exact deduplication changes neither
+        # coordinates nor triangles and avoids sending those repeated values.
+        vertices, indices = np.unique(mesh['vertices_m'], axis=0, return_inverse=True)
+        faces = indices[np.asarray(mesh['faces'], dtype=int)]
+        mesh_layers[name] = {'name': name, 'enabled': name not in disabled, 'role': 'semantic_instance',
+            **_geometry_metadata(geometry), 'pose_wxyz': list(geometry['pose']),
+            'vertices_local_m': vertices.tolist(), 'faces': faces.tolist(), 'sampling': 'none',
+            'vertex_count': len(vertices), 'face_count': len(faces),
+            'minimum_world_m': lower.tolist(), 'maximum_world_m': upper.tolist()}
+    hybrid = bool(mesh_layers) or any(item.get('geometry_source') == 'observed_obb'
+                                    for item in model.get('cuboid', {}).values())
     table = candidate.table
-    return deepcopy({
+    # Mesh arrays were converted to fresh lists above. Copying the whole result
+    # again traverses hundreds of thousands of triangle indices on every build.
+    # Only the small metadata borrowed from live map state needs a deep copy.
+    return {
         'status': 'available', 'frame': 'world', 'units': 'm',
         **{key: identity[key] for key in ('scene_token', 'observation_id', 'generation')},
         'voxel_layers': layers,
         'cuboid_layers': [{'name': name, 'enabled': name not in disabled,
-            'role': 'bin_shell_completion', 'provenance': metadata['geometry_source'],
-            'model': dict(value), **metadata}
-            for name, value in model.get('cuboid', {}).items()
-            if (metadata := _bin_shell_metadata(name, identity))],
+                           'role': 'semantic_instance' if value.get('geometry_source') == 'observed_obb'
+                                   else 'measured_table', **_geometry_metadata(value), 'model': deepcopy(value)}
+                          for name, value in model.get('cuboid', {}).items()],
         'table': {'name': 'semantic_table_forbidden', 'enabled': True,
-                  'provenance': 'inferred_ransac_support_completion', 'model': dict(table.model),
+                  'provenance': 'inferred_ransac_support_completion', 'model': deepcopy(table.model),
                   'height_m': float(table.height_m), 'normal_xyz': list(table.normal_xyz),
                   'ransac_inlier_count': int(table.inlier_count),
-                  'support_plane': getattr(table, 'support_plane', None),
+                  'support_plane': deepcopy(getattr(table, 'support_plane', None)),
                   'completion': {'xy_expansion_m': .05,
                                  'below_plane_m': float(table.height_m - (table.model['pose'][2] - table.model['dims'][2] / 2)),
                                  'above_plane_m': float(table.model['pose'][2] + table.model['dims'][2] / 2 - table.height_m),
                                  'robot_facing_crop': True}},
-        'mapping_diagnostics': identity.get('mapping_diagnostics', {}),
-        'mesh_layers': {name: dict(value) for name, value in model.get('mesh', {}).items()},
-        'camera_metrics': {key: dict(value) for key, value in candidate.camera_metrics.items()},
-        'coverage': {'full_environment_coverage': False, 'unknown_space_motion_gate': False,
-                     'collision_scope': ('sam3_instances_and_measured_table' if identity.get('semantic_only_active')
+        'mapping_diagnostics': deepcopy(identity.get('mapping_diagnostics', {})),
+        'mesh_layers': mesh_layers,
+        'camera_metrics': deepcopy(dict(candidate.camera_metrics)),
+        'coverage': {**deepcopy(identity.get('coverage', {})), 'full_environment_coverage': False,
+                     'sensor_coverage_role': identity.get('sensor_coverage_role', 'diagnostic_for_model_mapping_strategy'),
+                     'unknown_space_motion_gate': bool(identity.get('observed_free_motion_gate')),
+                     'collision_scope': ('registered_inventory_geometry_and_measured_table' if hybrid else
+                                         'sam3_instances_and_measured_table' if identity.get('semantic_only_active')
                                          else 'measured_table_footprint_obstacles_and_inferred_support'),
-                     'unknown_policy': 'unobserved_regions_not_independently_rejected',
-                     'surface_policy': ('measured_tsdf_esdf_with_separately_labeled_bin_shell_geometry'
-                        if identity.get('mapping_diagnostics', {}).get('bin_shell_completions') else
-                        'visible_returns_with_tsdf_esdf_inference_no_hidden_object_completion')},
-    })
+                     'unknown_policy': ('swept_unknown_regions_rejected' if identity.get('observed_free_motion_gate')
+                                        else 'motion_coverage_not_certified'),
+                     'surface_policy': ('registered_cad_meshes_and_observed_obb_solid_envelopes' if hybrid else
+                                        'visible_returns_with_tsdf_esdf_inference_no_hidden_object_completion')},
+    }

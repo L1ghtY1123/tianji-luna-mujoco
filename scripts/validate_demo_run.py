@@ -12,6 +12,7 @@ def main():
     parser.add_argument("--url", default="http://192.168.3.4:8350")
     parser.add_argument("--count", type=int, choices=range(1, 5), default=2)
     parser.add_argument("--requested", type=int, choices=range(1, 5))
+    parser.add_argument("--instruction", help="Natural-language task; defaults to the unpack scenario")
     parser.add_argument("--record-video", action="store_true")
     parser.add_argument("--timeout", type=float, default=1200)
     parser.add_argument("--output", type=Path, required=True)
@@ -19,7 +20,7 @@ def main():
     if args.requested is not None and args.requested > args.count:
         parser.error("requested count must not exceed scene count")
     quantity = f'{args.requested}个' if args.requested is not None else '所有'
-    instruction = (f'对于左侧盒子中的{quantity}粉色待拆包物体，逐个拿出放到桌面目标区域，'
+    instruction = args.instruction or (f'对于左侧盒子中的{quantity}粉色待拆包物体，逐个拿出放到桌面目标区域，'
                    '用VLA拆包取出黑色物体，再把黑色物体放到右侧盒子里。一个物体完成后再处理下一个。')
     with httpx.Client(base_url=args.url, timeout=60,
                       limits=httpx.Limits(max_keepalive_connections=0)) as client:

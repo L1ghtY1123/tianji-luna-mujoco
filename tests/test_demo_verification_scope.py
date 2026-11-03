@@ -89,8 +89,8 @@ def test_verification_perception_discards_untrusted_bin_and_keeps_mapping_unreso
     }
     entities["table"] = {"kind": "table", "bbox": [0, 0, 1, 1], "reference_camera_id": "3"}
     reference = {"observation_id": capture["observation_id"], "entities": entities, "views": {},
-                 "demo_task": {"source_bin_id": "bin", "source_object_ids": ["pink"], "destination_table_id": "table"},
-                 "demo_program": {"version": 1, "steps": [{"type": "stop", "reason": "fixture"}]}}
+                 "task_spec": {"source_ref": "bin", "target_refs": ["pink"], "destination_ref": "table"},
+                 "policy_graph": {"version": 1, "steps": [{"type": "stop", "reason": "fixture"}]}}
 
     class Detector:
         def segment(self, rgb, text, timestamp_us):
@@ -120,17 +120,18 @@ def test_rejected_pink_proposal_is_unassigned_and_not_evidence_of_an_extra_workp
     assert len(result["groups"]) == 1
     assert [entry["camera_id"] for entry in result["groups"][0]] == ["2"]
     assert result["demo_inventory_check"]["status"] == "none"
-    assert result["evidence"]["answers"][1]["choice"] == "reject"
+    assert result["evidence"]["answers"][1]["choice"] == "unknown"
+    assert result['evidence']['identity_correspondence'][1]['probabilities']['pink'] == pytest.approx(.09)
 
 
 def test_explicit_confident_extra_object_stops_with_the_actual_answer_evidence():
     capture, detections, entities, reference = inputs(("2",))
-    inventory = DemoVisualInventory(api_key="test", client=clients([("pink", .99)], extra="extra"))
-    with pytest.raises(VisualInventoryError, match="demo_unlisted_pink_object") as caught:
+    inventory = DemoVisualInventory(api_key="test", client=clients([("pink", .99)], extra="unlisted"))
+    with pytest.raises(VisualInventoryError, match="scene_unlisted_object") as caught:
         inventory.resolve(capture, detections, instruction="move one", entities=entities,
                           reference=reference, purpose="verify_transfer")
-    assert caught.value.evidence["answers"][-1]["name"] == "demo_unlisted_pink"
-    assert caught.value.evidence["answers"][-1]["choice"] == "extra"
+    assert caught.value.evidence["answers"][-1]["name"] == "scene_inventory_closure"
+    assert caught.value.evidence["answers"][-1]["choice"] == "unlisted"
     assert caught.value.evidence["answers"][-1]["confidence"] == .99
 
 
@@ -147,7 +148,7 @@ def test_projected_region_duplicates_are_removed_but_distinct_slots_and_geometry
     assigned = {**first, "floor_z_m": 1., "layout_revision": "revision"}
     calls = []
     inventory = DemoVisualInventory(api_key="test", client=client_with_answers(
-        {"visibility_pink": "visible", "progress_pink": "at_destination", "demo_unlisted_pink": "none"}, calls))
+        {"visibility_pink": "visible", "progress_pink": "at_destination", "scene_inventory_closure": "none"}, calls))
     inventory.resolve(capture, [], instruction="move all", entities={"pink": {"kind": "object", "color": "pink"}},
                       placement_regions=[region], progress={"pink": {"destination_id": "table",
                           "region_id": "region:table", "slot_id": 1, "assigned_slot": assigned}})

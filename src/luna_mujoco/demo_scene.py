@@ -9,7 +9,6 @@ from copy import deepcopy
 from pathlib import Path
 
 from .cad_assets import cad_asset
-from .model_builder import normalize_scene
 from .observation_motion import observation_poses
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +22,8 @@ def load_demo_config(path=CONFIG_PATH):
 
 def demo_scene(object_count=None, config=None):
     """Build the configured pair, single/three-object row, or four-object grid."""
+    from .model_builder import normalize_scene
+
     config = load_demo_config() if config is None else config
     object_count = config["object_count"] if object_count is None else object_count
     if isinstance(object_count, bool) or not isinstance(object_count, int) or not 1 <= object_count <= 4:

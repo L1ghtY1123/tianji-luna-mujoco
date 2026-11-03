@@ -23,43 +23,44 @@ def inventory_call(*, reference=None, answer="none", confidence=.99):
         payload = json.loads(request.content)
         calls.append(payload)
         answers = [{"name": question["name"], "type": "choice",
-                    "choice": answer if question["name"] == "demo_unlisted_pink" else "visible",
-                    "confidence": confidence if question["name"] == "demo_unlisted_pink" else .99}
+                    "choice": answer if question["name"] == "scene_inventory_closure" else "visible",
+                    "confidence": confidence if question["name"] == "scene_inventory_closure" else .99}
                    for question in payload["questions"]]
         return httpx.Response(200, json={"model": "gpt-6-luna", "answers": answers})
 
     inventory = DemoVisualInventory(api_key="test", client=httpx.Client(transport=httpx.MockTransport(respond)))
     result = inventory.resolve(capture, [], instruction="move all", entities=entities, reference=reference,
                                purpose="verify_transfer")
-    question = next(item for item in calls[0]["questions"] if item["name"] == "demo_unlisted_pink")
+    question = next(item for item in calls[0]["questions"] if item["name"] == "scene_inventory_closure")
     context = json.loads(calls[0]["input"][0]["content"][0]["text"])
     return result, question, context
 
 
-def test_question_names_permanent_task_source_ids_and_assesses_only_visible_subjects():
-    task = {"source_bin_id": "frozen-bin", "source_object_ids": ["frozen-pink-1", "frozen-pink-2"]}
-    _, question, context = inventory_call(reference={"demo_task": task})
-    assert context["source_inventory"] == task
-    assert all(identifier in question["instructions"]
-               for identifier in ["frozen-bin", "frozen-pink-1", "frozen-pink-2"])
-    assert "VISIBLE" in question["instructions"]
-    assert "Occluded interior alone does not mean extra or unknown" in question["instructions"]
-    assert "does not claim the source bin is empty or hidden contents are absent" in question["instructions"]
-    assert "none requires a clear source-bin view" not in question["instructions"]
-    assert "every visible pink task subject matches a permanent source ID" in question["instructions"]
+def test_question_uses_declared_task_candidate_ids_and_only_visible_evidence():
+    task = {"source_ref": "frozen-bin", "target_refs": ["frozen-pink-1", "frozen-pink-2"],
+            "target_selector": "requested task objects"}
+    _, question, context = inventory_call(reference={"task_spec": task})
+    assert context["source_inventory"] == {
+        "source_id": "frozen-bin", "source_object_ids": task["target_refs"]}
+    assert all(identifier in question["instructions"] for identifier in task["target_refs"])
+    assert "CURRENT full RGB" in question["instructions"]
+    assert "does not certify hidden space" in question["instructions"]
+    assert "task_spec.target_selector" in question["instructions"]
+    assert "Do not infer hidden contents or empty space" in context["rules"]
 
 
-def test_without_demo_task_source_context_uses_container_parentage_not_all_pink_entities():
+def test_without_task_context_color_and_parentage_do_not_invent_task_candidates():
     _, question, context = inventory_call()
-    assert context["source_inventory"] == {"source_bin_id": "source-bin", "source_object_ids": ["source-pink"]}
-    assert "source-bin" in question["instructions"] and "source-pink" in question["instructions"]
-    assert "other-pink" not in question["instructions"]
+    assert context["source_inventory"] == {"source_id": None, "source_object_ids": []}
+    guide = json.loads(question["instructions"].split(" Visible-source reference guide: ", 1)[1])
+    assert guide["references"] == []
+    assert guide["listed_reference_count"] == 0
 
 
 @pytest.mark.parametrize("answer,confidence,expected", [
     ("none", .79, "unknown"),
     ("none", .8, "none"),
-    ("extra", .79, "unknown"),
+    ("unlisted", .79, "unknown"),
     ("unknown", .99, "unknown"),
 ])
 def test_visible_scope_change_keeps_confidence_and_unknown_parsing(answer, confidence, expected):

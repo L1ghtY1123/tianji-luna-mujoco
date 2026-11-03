@@ -22,7 +22,7 @@ def inventory(count=3):
     observation = {'observation_id': 'initial-head', 'objects': objects, 'views': {'3': {
         'instance_masks': masks, 'T_world_camera': camera,
         'intrinsics': {'fx': 100., 'fy': 100., 'cx': 40., 'cy': 20.}}}}
-    progress = TaskProgress('搬运所有指定物体', 'collection', route='table_box')
+    progress = TaskProgress('搬运所有指定物体', 'collection')
     progress.observe(objects, 'initial-head')
     progress.assess_membership(dict.fromkeys(masks, 'required'))
     progress.freeze_inventory(observation)
@@ -69,54 +69,6 @@ def test_four_slots_follow_initial_head_rows_and_object_two_keeps_slot_two():
     after = progress.placement_request(destination['id'])
     assert after['slot_id'] == 3 and after['target_count'] == 3
     assert after['layout_revision'] == before['layout_revision']
-
-
-def test_occupied_assigned_slot_keeps_tcp_candidates_for_three_dimensional_check():
-    target, destination, holding, spheres = region_inputs('bin')
-    progress, observation = inventory()
-    progress.select(observation['objects'][1], destination['id'])
-    progress.bind_placement_region(destination, observation)
-    request = progress.placement_request(destination['id'])
-    options = {'spheres_tool_m': spheres, 'clearance_m': .01, 'placement_request': request}
-    candidates = placement.release_candidates(target, destination, holding, **options)
-    assert len(candidates) == 18
-    assert {goal['release_reference']['slot_id'] for goal in candidates} == {2}
-    center = request['layout']['cells'][1]['center_world_xy_m']
-    obstacle = [[x, y, .7] for x in np.linspace(center[0] - .06, center[0] + .06, 25)
-                for y in np.linspace(center[1] - .06, center[1] + .06, 25)]
-    goals = placement.release_candidates(target, destination, holding, **options,
-        observation={'objects': [{'id': 'obstacle', 'points_world_m': obstacle}]})
-    assert len(goals) == 18
-    for goal in goals:
-        assert goal['release_reference']['slot_id'] == 2
-        np.testing.assert_allclose(np.asarray(goal['T_world_tcp'])[:2, 3], center)
-
-
-@pytest.mark.parametrize('slot_floor_visible', [True, False])
-def test_frozen_slot_checks_current_floor_samples_not_a_new_inner_rectangle(slot_floor_visible):
-    target, destination, holding, spheres = region_inputs('bin')
-    progress, observation = inventory()
-    progress.select(observation['objects'][1], destination['id'])
-    progress.bind_placement_region(destination, observation)
-    request = progress.placement_request(destination['id'])
-    # A new view chooses a different supported rectangle, while the assigned
-    # slot and the actual measured floor samples remain independent of it.
-    destination['placement_reference']['region_polygon_world_xy_m'] = [
-        [.58, -.32], [.68, -.32], [.68, -.08], [.58, -.08]]
-    if not slot_floor_visible:
-        points = destination['points_world_m']
-        destination['points_world_m'] = points[points[:, 0] < .68]
-    options = {'spheres_tool_m': spheres, 'clearance_m': .01, 'placement_request': request}
-    if not slot_floor_visible:
-        with pytest.raises(placement.PlacementError, match='placement_slot_support_unobserved'):
-            placement.release_candidates(target, destination, holding, **options)
-        return
-    goals = placement.release_candidates(target, destination, holding, **options)
-    assert goals
-    for goal in goals:
-        assert goal['release_reference']['slot_id'] == 2
-        np.testing.assert_allclose(goal['release_reference']['target_reference_world_xy_m'],
-                                   request['layout']['cells'][1]['center_world_xy_m'])
 
 
 def test_measured_support_translation_preserves_slot_labels_and_invalidates_layout_revision():

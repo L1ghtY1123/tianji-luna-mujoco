@@ -8,7 +8,6 @@ from test_rgbd_algorithms import observed_scene
 from test_semantic_builder import builder, request
 
 from luna_mujoco.algorithms import Algorithms
-from luna_mujoco.demo_geometry import complete_source_height
 from luna_mujoco.perception_mapping import decode_mapping_payload, mapping_builder_payload
 
 
@@ -78,141 +77,32 @@ def test_demo_partial_views_remain_all_three_without_background_fallback():
     assert not np.any(result["views"]["1"]["depth_left_m"])
 
 
-def test_labelled_height_completion_adds_separate_cuboid_not_measured_voxels():
-    value, _, mapper, _ = builder()
-    payload = request("selected") | {"demo_mapping": True, "scene_policy": "demo_inventory",
-        "demo_tables": table_evidence(), "demo_completions": {"source": {
-            "source": "measured_surface_and_user_height_prior", "height_prior_m": .10,
-            "synthetic_points_are_measured": False,
-            "completed_bounds_world_m": [[.5, .7, .6], [.56, .74, .7]]}}}
-    candidate = value.build(payload)
-    model = candidate.scene_model["cuboid"]["semantic_instance::source::height_completion"]
-    np.testing.assert_allclose(model["dims"], [.06, .04, .10])
-    assert sum(len(points) for points in mapper.instances["source"][0].values()) == 2
+def test_asset_identity_never_adds_geometry_priors_to_native_request(monkeypatch):
+    import builtins
 
-
-def test_selected_completion_is_disabled_together_with_its_voxel_layer():
-    completion = {"source": "measured_surface_and_user_height_prior", "height_prior_m": .10,
-                  "synthetic_points_are_measured": False,
-                  "completed_bounds_world_m": [[.5, .7, .6], [.56, .74, .7]]}
-    _, identity = decode_mapping_payload(wire() | {"demo_mapping": True, "demo_tables": table_evidence(),
-                                                  "demo_completions": {"source": completion}})
-    assert identity["disabled_obstacle_names"] == (
-        "semantic_instance::source", "semantic_instance::source::height_completion")
-
-
-def completed_black_observation():
+    original_import = builtins.__import__
+    def reject_cad_import(name, *args, **kwargs):
+        if name.rsplit(".", 1)[-1] in {"cad_assets", "trimesh"}:
+            raise AssertionError("mapping must not import CAD geometry")
+        return original_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", reject_cad_import)
     snapshot = observed_scene()
-    snapshot.update(demo_mapping=True, demo_tables=table_evidence(), stage="unpacked")
-    instance = snapshot["objects"][0]
-    instance.update(color="black", current_appearance="unpacked", appearance_revision=1,
-                    lifecycle_phase="unpacked_confirmed")
-    instance["points_world_m"][:, 2] = .66
-    complete_source_height(instance, support_z_m=.6, support_source="cached_measured_table_plane",
-                           observation_id=snapshot["observation_id"], height_prior_m=.06)
-    return snapshot
+    snapshot.update(demo_mapping=True, demo_tables=table_evidence())
+    snapshot['objects'][0].update(kind='bin', asset_id='blue_box')
+    sent = []
+    Algorithms(curobo_request=lambda path, body: (sent.append(body) or {'scene_token': 'map'})).build_scene(
+        snapshot, 'seen-red')
+    decoded, _ = decode_mapping_payload(sent[0])
+    assert 'demo_bin_priors' not in sent[0] and 'demo_completions' not in sent[0]
+    assert 'demo_bin_priors' not in decoded and 'demo_completions' not in decoded
 
 
-def build_demo_snapshot(snapshot):
-    value, _, mapper, _ = builder()
-    captured = {}
+def test_old_completed_snapshot_is_rejected_before_any_service_call():
+    from luna_mujoco.algorithms import AlgorithmError
 
-    def service(path, payload):
-        assert path == "/perception/build"
-        decoded, identity = decode_mapping_payload(payload)
-        captured.update(payload=payload, identity=identity,
-                        candidate=value.build(mapping_builder_payload(decoded)))
-        return {"scene_token": identity["scene_token"]}
-
-    Algorithms(curobo_request=service).build_scene(snapshot, "seen-red")
-    return captured, mapper
-
-
-def test_build_scene_accepts_current_confirmed_black_completion_without_changing_measurements():
-    snapshot = completed_black_observation()
-    original = deepcopy(snapshot["objects"][0])
-    captured, mapper = build_demo_snapshot(snapshot)
-    model = captured["candidate"].scene_model["cuboid"]["semantic_instance::seen-red::height_completion"]
-    np.testing.assert_allclose(model["dims"], [.04, .04, .06], atol=1e-7)
-    np.testing.assert_allclose(model["pose"][:3], [.5, .1, .63], atol=1e-7)
-    assert captured["identity"]["disabled_obstacle_names"] == (
-        "semantic_instance::seen-red", "semantic_instance::seen-red::height_completion")
-    context = captured["payload"]["demo_completions"]["seen-red"]["instance_context"]
-    assert context == {"instance_id": "seen-red", "observation_id": "capture-4", "color": "black",
-                       "current_appearance": "unpacked", "appearance_revision": 1,
-                       "lifecycle_phase": "unpacked_confirmed"}
-    np.testing.assert_array_equal(snapshot["objects"][0]["points_world_m"], original["points_world_m"])
-    np.testing.assert_array_equal(snapshot["objects"][0]["completed_geometry_points_world_m"],
-                                  original["completed_geometry_points_world_m"])
-    assert snapshot["objects"][0]["geometry_completion"] == original["geometry_completion"]
-    # Only measured RGBD is integrated; the separately labelled completion is a cuboid.
-    assert sum(len(points) for points in mapper.instances["seen-red"][0].values()) == 64 * 3
-
-
-def test_height_completion_preserves_scene_workspace_bounds():
-    captured, mapper = build_demo_snapshot(completed_black_observation())
-    assert captured["candidate"].bounds is mapper.bounds
-
-
-@pytest.mark.parametrize('appearance,asset,axis', [('wrapped', 'pink_wrapped', 2),
-    ('unpacked', 'black_core', 0), ('unpacked', 'black_core', 2)])
-def test_current_cad_height_prior_passes_through_real_mapping_boundary(appearance, asset, axis):
-    from luna_mujoco.cad_assets import cad_asset
-
-    snapshot = completed_black_observation()
-    instance = snapshot['objects'][0]
-    height = cad_asset(asset)['size_m'][axis]
-    instance.update(color='pink' if appearance == 'wrapped' else 'black', current_appearance=appearance,
-        appearance_revision=0 if appearance == 'wrapped' else 1,
-        lifecycle_phase='wrapped_source' if appearance == 'wrapped' else 'unpacked_confirmed')
-    instance['points_world_m'][:, 2] = .6 + height
-    complete_source_height(instance, support_z_m=.6,
-        support_source='measured_bin_floor' if appearance == 'wrapped' else 'cached_measured_table_plane',
-        observation_id=snapshot['observation_id'], height_prior_m=height)
-    captured, _ = build_demo_snapshot(snapshot)
-    model = captured['candidate'].scene_model['cuboid']['semantic_instance::seen-red::height_completion']
-    assert model['dims'][2] == pytest.approx(height, abs=1e-7)
-
-
-def test_build_scene_accepts_current_wrapped_pink_ten_cm_prior():
-    snapshot = completed_black_observation()
-    instance = snapshot['objects'][0]
-    instance.update(color='pink', current_appearance='wrapped', appearance_revision=0,
-                    lifecycle_phase='wrapped_source')
-    instance['points_world_m'][:, 2] = .7
-    complete_source_height(instance, support_z_m=.6, support_source='measured_bin_floor',
-                           observation_id=snapshot['observation_id'], height_prior_m=.10)
-    captured, _ = build_demo_snapshot(snapshot)
-    model = captured['candidate'].scene_model['cuboid']['semantic_instance::seen-red::height_completion']
-    assert model['dims'][2] == pytest.approx(.10)
-
-
-@pytest.mark.parametrize("change", ["pink", "missing_context", "released", "old_observation",
-                                   "zero_revision", "bool_revision", "wrong_height_source", "unpacked_ten_cm",
-                                   "wrong_support_source", "unauthorized_height"])
-def test_build_scene_rejects_wrongly_bound_black_height_completion(change):
-    snapshot = completed_black_observation()
-    instance = snapshot["objects"][0]
-    if change == "pink":
-        instance.update(color="pink", current_appearance="wrapped", appearance_revision=0)
-    elif change == "missing_context":
-        for key in ("current_appearance", "appearance_revision", "lifecycle_phase"):
-            instance.pop(key)
-    elif change == "released":
-        instance["lifecycle_phase"] = "right_bin_released"
-    elif change == "old_observation":
-        instance["geometry_completion"]["observation_id"] = "old-capture"
-    elif change == "zero_revision":
-        instance["appearance_revision"] = 0
-    elif change == "bool_revision":
-        instance["appearance_revision"] = True
-    elif change == "wrong_height_source":
-        instance["geometry_completion"]["height_prior_source"] = "user_specified_100mm"
-    elif change == "wrong_support_source":
-        instance["geometry_completion"]["support_source"] = "mock_commanded_pose"
-    elif change == "unauthorized_height":
-        instance["geometry_completion"]["height_prior_m"] = .08
-    else:
-        instance["geometry_completion"].update(height_prior_m=.10, height_prior_source="user_specified_100mm")
-    with pytest.raises(ValueError, match="demo_height_completion_invalid"):
-        build_demo_snapshot(snapshot)
+    snapshot = observed_scene()
+    snapshot['objects'][0]['completed_geometry_points_world_m'] = [[0, 0, 0]]
+    def service(*args):
+        raise AssertionError('obsolete synthetic geometry reached service')
+    with pytest.raises(AlgorithmError, match='^synthetic_scene_geometry_unsupported:reobserve_required$'):
+        Algorithms(curobo_request=service).build_scene(snapshot, 'seen-red')

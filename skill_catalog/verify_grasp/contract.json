@@ -1,0 +1,34 @@
+{
+  "id": "verify_grasp",
+  "description": "Check the actual gripper and lift/holding evidence for the bound target and arm. Return success or an explicit failed/unknown condition. It does not move, recapture, plan, silently close again or install an attachment before lift.",
+  "requires": {
+    "lifted": true,
+    "verified": false
+  },
+  "provides": [
+    "verified"
+  ],
+  "inputs": [
+    "target_id",
+    "arm",
+    "grasp_execution",
+    "fresh_gripper_feedback"
+  ],
+  "capability": "Check the actual gripper and lift/holding evidence for the bound target and arm",
+  "outputs": [
+    "verified",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure"
+  ],
+  "invalidates_observation": false,
+  "planning_effects": {
+    "grasp_held": true,
+    "grasp_completed": true
+  }
+}

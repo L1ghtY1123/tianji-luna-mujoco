@@ -44,7 +44,12 @@ async def test_attachment_and_place_planning_share_one_measured_snapshot(tmp_pat
     runner.verify_scene = verify_scene
     runner.call_algorithm = call
     runner.execution_stage = stage
-    result = await runner.execute('plan_place', context)
+    from luna_mujoco.runtime.controller import PolicyController
+    from luna_mujoco.skills import NoArguments
+    runner.registry.register('plan_place', NoArguments, lambda *_: None)
+    runner._bind_region = lambda observation: {}
+    context['placement_resolution'] = {'fixture': 'already resolved; this test isolates snapshot freshness'}
+    result = await PolicyController.execute(runner, 'plan_place', context)
     assert result['ok']
     assert len(inputs) == 2
     assert inputs[0] is inputs[1]

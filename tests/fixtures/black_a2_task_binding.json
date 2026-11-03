@@ -1,0 +1,497 @@
+{
+  "source_experiment": "54e6713e48184315bcb91fd581ea9e44",
+  "source_events": [
+    21,
+    30,
+    32
+  ],
+  "context": {
+    "task": {
+      "instruction": "用左臂把桌面上的黑色工件放入左侧蓝色盒子里的空位。不要拆包。完成后双臂回观测位姿并观测；任务结束回开始时的双臂位姿。",
+      "supported": true,
+      "reason": "单件桌面工件直接放入图像中左侧的蓝色盒子；不进行拆包或其他物体变换。用户明确要求每件交付后双臂回观测位姿并观测，最后再回到任务开始时的双臂位姿。",
+      "scope": "ids",
+      "target_selector": "桌面上的黑色工件",
+      "target_refs": [
+        "instance-ffc10783025b404d"
+      ],
+      "quantity": 1,
+      "source_ref": "instance-5f1bda21275249aa",
+      "destination_ref": "instance-deda56bef68d4fd5",
+      "work_area_ref": null,
+      "selection_order": "explicit",
+      "processing": [],
+      "completion_conditions": [
+        "黑色工件已放入左侧蓝色盒子，并经当前观测确认交付。",
+        "交付后双臂已到观测位姿并完成库存观测。",
+        "最终双臂回到任务开始时记录的关节位姿，并由反馈确认。"
+      ],
+      "completion_pose": "initial",
+      "constraints": [
+        "使用左臂",
+        "不要拆包"
+      ],
+      "source_inventory_complete": "unknown"
+    },
+    "object_task": {
+      "instruction": "用左臂把桌面上的黑色工件放入左侧蓝色盒子里的空位。不要拆包。完成后双臂回观测位姿并观测；任务结束回开始时的双臂位姿。",
+      "supported": true,
+      "reason": "把已确认的黑色工件从桌面直接放入指定的左侧蓝色盒子，不拆包；交付验证后按要求回观测位姿并观测。",
+      "scope": "ids",
+      "target_selector": "桌面上的黑色工件",
+      "target_refs": [
+        "instance-ffc10783025b404d"
+      ],
+      "quantity": 1,
+      "source_ref": "instance-5f1bda21275249aa",
+      "destination_ref": "instance-deda56bef68d4fd5",
+      "work_area_ref": null,
+      "selection_order": "explicit",
+      "processing": [],
+      "completion_conditions": [
+        "工件已放入指定蓝色盒子并经验证。"
+      ],
+      "completion_pose": null,
+      "constraints": [
+        "使用左臂",
+        "不要拆包"
+      ],
+      "source_inventory_complete": "unknown"
+    },
+    "target_id": null,
+    "destination_id": null,
+    "candidate_ids": [
+      "instance-ffc10783025b404d"
+    ],
+    "configured_regions": {
+      "demo-destination": {
+        "description": "configured unmarked work area on the measured main table",
+        "region": {
+          "region_id": "demo_destination",
+          "center_world_xy_m": [
+            0.5015999999999999,
+            0.11646000000000001
+          ],
+          "size_m": 0.32,
+          "region_polygon_world_xy_m": [
+            [
+              0.3415999999999999,
+              -0.043539999999999995
+            ],
+            [
+              0.6616,
+              -0.043539999999999995
+            ],
+            [
+              0.6616,
+              0.27646000000000004
+            ],
+            [
+              0.3415999999999999,
+              0.27646000000000004
+            ]
+          ],
+          "physical_marker": false,
+          "source": "configured_destination_intent"
+        }
+      },
+      "vla-unpack-input": {
+        "description": "unmarked square VLA input region centered on configured XY on the measured table; choose any feasible point inside",
+        "capability": "vla_unpack",
+        "region": {
+          "region_id": "vla-unpack-input",
+          "center_world_xy_m": [
+            0.5015999999999999,
+            0.11646000000000001
+          ],
+          "size_m": 0.32,
+          "region_polygon_world_xy_m": [
+            [
+              0.3415999999999999,
+              -0.043539999999999995
+            ],
+            [
+              0.6616,
+              -0.043539999999999995
+            ],
+            [
+              0.6616,
+              0.27646000000000004
+            ],
+            [
+              0.3415999999999999,
+              0.27646000000000004
+            ]
+          ],
+          "physical_marker": false,
+          "source": "configured_vla_input_intent",
+          "precise_xy": false,
+          "required_robot_configurations": [
+            {
+              "id": "vla_unpack_preparation",
+              "scope": "specified_arms",
+              "joints_deg": {
+                "A": [
+                  -86,
+                  76,
+                  88,
+                  -90,
+                  2,
+                  14,
+                  -24
+                ],
+                "B": [
+                  106,
+                  61,
+                  -113,
+                  -78,
+                  27,
+                  36,
+                  37
+                ]
+              },
+              "gripper_positions_rad": {
+                "A": 0.0,
+                "B": 0.0
+              }
+            }
+          ]
+        }
+      }
+    },
+    "configured_bindings": {},
+    "current_entities": [
+      {
+        "id": "instance-ffc10783025b404d",
+        "kind": "object",
+        "color": "black",
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3"
+          ],
+          "sam3_camera_ids": [
+            "3"
+          ],
+          "point_count": 1068,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        }
+      },
+      {
+        "id": "instance-3914131c383b4e9f",
+        "kind": "bin",
+        "color": "blue",
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3"
+          ],
+          "sam3_camera_ids": [
+            "3"
+          ],
+          "point_count": 14999,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        }
+      },
+      {
+        "id": "instance-deda56bef68d4fd5",
+        "kind": "bin",
+        "color": "blue",
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3",
+            "2"
+          ],
+          "sam3_camera_ids": [
+            "3",
+            "2"
+          ],
+          "point_count": 110677,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        }
+      },
+      {
+        "id": "demo-destination",
+        "kind": "marker",
+        "color": "unmarked",
+        "coverage": {
+          "camera_ids": [],
+          "configured_region": true
+        }
+      },
+      {
+        "id": "vla-unpack-input",
+        "kind": "marker",
+        "color": "unmarked",
+        "coverage": {
+          "camera_ids": [],
+          "configured_region": true
+        }
+      }
+    ]
+  },
+  "observation": {
+    "observation_id": "rgbd-2-4072709f04544b18964255a01ecf4bc9",
+    "generation": 2,
+    "scene_entities": {
+      "instance-5f1bda21275249aa": {
+        "id": "instance-5f1bda21275249aa",
+        "kind": "table",
+        "color": "white",
+        "description": "白色桌面，黑色工件当前位于其上。",
+        "bbox": [
+          0.15,
+          0.275,
+          0.917,
+          0.827
+        ],
+        "appearance_keywords": [
+          "white",
+          "flat",
+          "rectangular"
+        ],
+        "reference_camera_id": "3",
+        "initial_parent_id": null,
+        "identity_source": "openai_responses_proposal",
+        "visual_membership": "excluded",
+        "roles": [
+          "table",
+          "collision"
+        ]
+      },
+      "instance-ffc10783025b404d": {
+        "id": "instance-ffc10783025b404d",
+        "kind": "object",
+        "color": "black",
+        "description": "桌面上的黑色小工件。",
+        "bbox": [
+          0.347,
+          0.531,
+          0.405,
+          0.615
+        ],
+        "appearance_keywords": [
+          "black",
+          "small",
+          "dark"
+        ],
+        "reference_camera_id": "3",
+        "initial_parent_id": "instance-5f1bda21275249aa",
+        "identity_source": "openai_responses_proposal",
+        "visual_membership": "required",
+        "roles": [
+          "collision"
+        ],
+        "segmentation_query": {
+          "kind": "object",
+          "color": "black",
+          "prompt": "black workpiece",
+          "aliases": [
+            "black object"
+          ]
+        },
+        "display_id": 1
+      },
+      "instance-deda56bef68d4fd5": {
+        "id": "instance-deda56bef68d4fd5",
+        "kind": "bin",
+        "color": "blue",
+        "description": "图像中位于左侧的蓝色盒子；任务要求放入盒内空位。",
+        "bbox": [
+          0.0,
+          0.375,
+          0.227,
+          0.835
+        ],
+        "appearance_keywords": [
+          "blue",
+          "box-shaped",
+          "open"
+        ],
+        "reference_camera_id": "3",
+        "initial_parent_id": null,
+        "identity_source": "openai_responses_proposal",
+        "visual_membership": "excluded",
+        "roles": [
+          "container",
+          "collision"
+        ],
+        "segmentation_query": {
+          "kind": "bin",
+          "color": "blue",
+          "prompt": "blue box",
+          "aliases": [
+            "blue container"
+          ]
+        }
+      },
+      "instance-3914131c383b4e9f": {
+        "id": "instance-3914131c383b4e9f",
+        "kind": "bin",
+        "color": "blue",
+        "description": "图像中位于右侧的另一个蓝色盒子，不是指定目的地。",
+        "bbox": [
+          0.827,
+          0.394,
+          1.0,
+          0.746
+        ],
+        "appearance_keywords": [
+          "blue",
+          "box-shaped",
+          "open"
+        ],
+        "reference_camera_id": "3",
+        "initial_parent_id": null,
+        "identity_source": "openai_responses_proposal",
+        "visual_membership": "excluded",
+        "roles": [
+          "container",
+          "collision"
+        ],
+        "segmentation_query": {
+          "kind": "bin",
+          "color": "blue",
+          "prompt": "blue box",
+          "aliases": [
+            "blue container"
+          ]
+        }
+      }
+    },
+    "objects": [
+      {
+        "id": "instance-ffc10783025b404d",
+        "kind": "object",
+        "color": "black",
+        "position": [
+          0.4501895881100987,
+          0.1470165615308374,
+          0.6113964263419533
+        ],
+        "visible_centroid_world": [
+          0.4501895881100987,
+          0.1470165615308374,
+          0.6113964263419533
+        ],
+        "source": "sam3_rgb_mask_and_registered_depth",
+        "observation_provenance": {
+          "observation_id": "rgbd-2-4072709f04544b18964255a01ecf4bc9",
+          "generation": 2,
+          "capture_time": 80.1810000000188,
+          "checkpoint": "initial"
+        },
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3"
+          ],
+          "sam3_camera_ids": [
+            "3"
+          ],
+          "point_count": 1068,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        }
+      },
+      {
+        "id": "instance-3914131c383b4e9f",
+        "kind": "bin",
+        "color": "blue",
+        "position": [
+          0.4925111328488915,
+          -0.5364227851606765,
+          0.5652543680573616
+        ],
+        "visible_centroid_world": [
+          0.4925111328488915,
+          -0.5364227851606765,
+          0.5652543680573616
+        ],
+        "source": "sam3_rgb_mask_and_registered_depth",
+        "observation_provenance": {
+          "observation_id": "rgbd-2-4072709f04544b18964255a01ecf4bc9",
+          "generation": 2,
+          "capture_time": 80.1810000000188,
+          "checkpoint": "initial"
+        },
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3"
+          ],
+          "sam3_camera_ids": [
+            "3"
+          ],
+          "point_count": 14999,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        }
+      },
+      {
+        "id": "instance-deda56bef68d4fd5",
+        "kind": "bin",
+        "color": "blue",
+        "position": [
+          0.45023449796391307,
+          0.5304488275283166,
+          0.5464635125757727
+        ],
+        "visible_centroid_world": [
+          0.45023449796391307,
+          0.5304488275283166,
+          0.5464635125757727
+        ],
+        "source": "sam3_rgb_mask_and_registered_depth",
+        "observation_provenance": {
+          "observation_id": "rgbd-2-4072709f04544b18964255a01ecf4bc9",
+          "generation": 2,
+          "capture_time": 80.1810000000188,
+          "checkpoint": "initial"
+        },
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3",
+            "2"
+          ],
+          "sam3_camera_ids": [
+            "3",
+            "2"
+          ],
+          "point_count": 110677,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        }
+      }
+    ]
+  },
+  "original_judgments": {
+    "source_identity": {
+      "status": "yes",
+      "probability": 0.9
+    },
+    "destination_identity": {
+      "status": "yes",
+      "probability": 1.0
+    },
+    "destination_requirement_matches": {
+      "status": "no",
+      "probability": 0.18
+    },
+    "target_0": {
+      "status": "yes",
+      "probability": 1.0
+    }
+  }
+}

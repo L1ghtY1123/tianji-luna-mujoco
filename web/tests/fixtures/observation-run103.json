@@ -1,0 +1,1393 @@
+[
+  {
+    "id": 4,
+    "kind": "observation_recorded",
+    "title": "保存算法观察",
+    "invocation_id": null,
+    "t_s": 1.0916399681009352,
+    "data": {
+      "checkpoint": "initial",
+      "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+      "observation_artifact": "observations/frame-0001.json",
+      "camera_ids": [
+        "1",
+        "2",
+        "3"
+      ]
+    }
+  },
+  {
+    "id": 5,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": null,
+    "t_s": 1.0970453154295683,
+    "data": {
+      "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+      "object_labels": {
+        "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+        "generation": 2,
+        "analysis_status": "unprocessed",
+        "items": []
+      },
+      "annotated_rgb": {
+        "1": "observations/labels-00005-camera-1.svg",
+        "2": "observations/labels-00005-camera-2.svg",
+        "3": "observations/labels-00005-camera-3.svg"
+      }
+    }
+  },
+  {
+    "id": 7,
+    "kind": "visual_decisions_call",
+    "title": "Responses 初始任务编排",
+    "invocation_id": null,
+    "t_s": 65.57358429813758,
+    "data": {
+      "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+      "endpoint": "/v1/responses",
+      "purpose": "compile_task",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 10,
+    "kind": "skill_start",
+    "title": "observe_scene",
+    "invocation_id": "skill-0001",
+    "t_s": 65.58482344308868,
+    "data": {
+      "arguments": {},
+      "target_id": null
+    }
+  },
+  {
+    "id": 12,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0001",
+    "t_s": 93.74021074920893,
+    "data": {
+      "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+      "endpoint": "/v1/decisions",
+      "purpose": "associate_inventory",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 15,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0001",
+    "t_s": 94.28827266208827,
+    "data": {
+      "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+      "object_labels": {
+        "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+        "generation": 2,
+        "analysis_status": "analyzed",
+        "items": [
+          {
+            "id": "instance-f77da825be844101",
+            "display_id": null,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          },
+          {
+            "id": "instance-88d83368c67b4ed8",
+            "display_id": null,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          },
+          {
+            "id": "instance-fed76c92b49243f6",
+            "display_id": 1,
+            "camera_id": "3",
+            "name": "unknown方块",
+            "status": "observed"
+          },
+          {
+            "id": "instance-fed76c92b49243f6",
+            "display_id": 1,
+            "camera_id": "2",
+            "name": "unknown方块",
+            "status": "observed"
+          }
+        ],
+        "regions": []
+      },
+      "annotated_rgb": {
+        "3": "observations/labels-00015-camera-3.svg",
+        "2": "observations/labels-00015-camera-2.svg",
+        "1": "observations/labels-00015-camera-1.svg"
+      }
+    }
+  },
+  {
+    "id": 19,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": null,
+    "t_s": 95.38502793107182,
+    "data": {
+      "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+      "endpoint": "/v1/decisions",
+      "purpose": "semantic_judgments",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 24,
+    "kind": "skill_start",
+    "title": "identify_target",
+    "invocation_id": "skill-0002",
+    "t_s": 95.40064073121175,
+    "data": {
+      "arguments": {
+        "target_id": "instance-fed76c92b49243f6"
+      },
+      "target_id": null
+    }
+  },
+  {
+    "id": 25,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0002",
+    "t_s": 95.40473348041996,
+    "data": {
+      "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+      "object_labels": {
+        "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+        "generation": 2,
+        "analysis_status": "analyzed",
+        "items": [
+          {
+            "id": "instance-f77da825be844101",
+            "display_id": 4,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          },
+          {
+            "id": "instance-88d83368c67b4ed8",
+            "display_id": 3,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          },
+          {
+            "id": "instance-fed76c92b49243f6",
+            "display_id": 1,
+            "camera_id": "3",
+            "name": "unknown方块",
+            "status": "selected"
+          },
+          {
+            "id": "instance-fed76c92b49243f6",
+            "display_id": 1,
+            "camera_id": "2",
+            "name": "unknown方块",
+            "status": "selected"
+          }
+        ],
+        "regions": []
+      },
+      "annotated_rgb": {
+        "3": "observations/labels-00025-camera-3.svg",
+        "2": "observations/labels-00025-camera-2.svg",
+        "1": "observations/labels-00025-camera-1.svg"
+      }
+    }
+  },
+  {
+    "id": 28,
+    "kind": "skill_start",
+    "title": "identify_destination",
+    "invocation_id": "skill-0003",
+    "t_s": 95.41375799942762,
+    "data": {
+      "arguments": {
+        "destination_id": "vla-unpack-input",
+        "destination_kind": "support_region",
+        "orientation_mode": "free"
+      },
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 31,
+    "kind": "skill_start",
+    "title": "choose_arm",
+    "invocation_id": "skill-0004",
+    "t_s": 95.42548751132563,
+    "data": {
+      "arguments": {
+        "arm": "auto"
+      },
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 36,
+    "kind": "skill_start",
+    "title": "build_scene",
+    "invocation_id": "skill-0005",
+    "t_s": 95.54276234004647,
+    "data": {
+      "arguments": {
+        "scope": "decide",
+        "reason": "为从左侧盒子抓取粉色待拆包物体并放入VLA输入区域建立当前碰撞场景。",
+        "entity_ids": [],
+        "exclusion_state": "selected"
+      },
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 38,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0005",
+    "t_s": 96.6847965773195,
+    "data": {
+      "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+      "endpoint": "/v1/decisions",
+      "purpose": "semantic_judgments",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 45,
+    "kind": "skill_start",
+    "title": "generate_grasps",
+    "invocation_id": "skill-0006",
+    "t_s": 97.50295642623678,
+    "data": {
+      "arguments": {},
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 53,
+    "kind": "skill_start",
+    "title": "plan_grasp",
+    "invocation_id": "skill-0007",
+    "t_s": 99.68315573735163,
+    "data": {
+      "arguments": {},
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 69,
+    "kind": "skill_start",
+    "title": "execute_grasp",
+    "invocation_id": "skill-0008",
+    "t_s": 109.40798274427652,
+    "data": {
+      "arguments": {},
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 106,
+    "kind": "skill_start",
+    "title": "verify_grasp",
+    "invocation_id": "skill-0009",
+    "t_s": 123.0081894621253,
+    "data": {
+      "arguments": {},
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 107,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0009",
+    "t_s": 123.18033548910171,
+    "data": {
+      "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+      "object_labels": {
+        "observation_id": "rgbd-2-6c4986bf29d343ffa6c98da234284b4c",
+        "generation": 2,
+        "analysis_status": "analyzed",
+        "items": [
+          {
+            "id": "instance-f77da825be844101",
+            "display_id": 4,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          },
+          {
+            "id": "instance-88d83368c67b4ed8",
+            "display_id": 3,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          },
+          {
+            "id": "instance-fed76c92b49243f6",
+            "display_id": 1,
+            "camera_id": "3",
+            "name": "unknown方块",
+            "status": "held"
+          },
+          {
+            "id": "instance-fed76c92b49243f6",
+            "display_id": 1,
+            "camera_id": "2",
+            "name": "unknown方块",
+            "status": "held"
+          }
+        ],
+        "regions": []
+      },
+      "annotated_rgb": {
+        "3": "observations/labels-00107-camera-3.svg",
+        "2": "observations/labels-00107-camera-2.svg",
+        "1": "observations/labels-00107-camera-1.svg"
+      }
+    }
+  },
+  {
+    "id": 111,
+    "kind": "skill_start",
+    "title": "plan_place",
+    "invocation_id": "skill-0010",
+    "t_s": 123.19427374424413,
+    "data": {
+      "arguments": {},
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 121,
+    "kind": "skill_start",
+    "title": "execute_place",
+    "invocation_id": "skill-0011",
+    "t_s": 131.87267733598128,
+    "data": {
+      "arguments": {},
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 154,
+    "kind": "skill_start",
+    "title": "verify_place",
+    "invocation_id": "skill-0012",
+    "t_s": 147.4599692323245,
+    "data": {
+      "arguments": {},
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 156,
+    "kind": "observation_recorded",
+    "title": "保存算法观察",
+    "invocation_id": "skill-0012",
+    "t_s": 155.89747643005103,
+    "data": {
+      "checkpoint": "post_place",
+      "observation_id": "rgbd-2-6d03fbaec4e84976ae7e647ffe0363f6",
+      "observation_artifact": "observations/frame-0002.json",
+      "camera_ids": [
+        "1",
+        "2",
+        "3"
+      ]
+    }
+  },
+  {
+    "id": 157,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0012",
+    "t_s": 155.90336541133001,
+    "data": {
+      "observation_id": "rgbd-2-6d03fbaec4e84976ae7e647ffe0363f6",
+      "object_labels": {
+        "observation_id": "rgbd-2-6d03fbaec4e84976ae7e647ffe0363f6",
+        "generation": 2,
+        "analysis_status": "unprocessed",
+        "items": []
+      },
+      "annotated_rgb": {
+        "1": "observations/labels-00157-camera-1.svg",
+        "2": "observations/labels-00157-camera-2.svg",
+        "3": "observations/labels-00157-camera-3.svg"
+      }
+    }
+  },
+  {
+    "id": 159,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0012",
+    "t_s": 156.79664309043437,
+    "data": {
+      "observation_id": "rgbd-2-6d03fbaec4e84976ae7e647ffe0363f6",
+      "endpoint": "/v1/decisions",
+      "purpose": "verify_release_result",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 160,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0012",
+    "t_s": 157.03855192102492,
+    "data": {
+      "observation_id": "rgbd-2-6d03fbaec4e84976ae7e647ffe0363f6",
+      "endpoint": "/v1/decisions",
+      "purpose": "verify_release_result",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 161,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0012",
+    "t_s": 157.07460474222898,
+    "data": {
+      "observation_id": "rgbd-2-6d03fbaec4e84976ae7e647ffe0363f6",
+      "endpoint": "/v1/decisions",
+      "purpose": "verify_release_result",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 170,
+    "kind": "skill_start",
+    "title": "observe_scene",
+    "invocation_id": "skill-0013",
+    "t_s": 161.3622297323309,
+    "data": {
+      "arguments": {},
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 171,
+    "kind": "observation_recorded",
+    "title": "保存算法观察",
+    "invocation_id": "skill-0013",
+    "t_s": 161.71316811721772,
+    "data": {
+      "checkpoint": "initial",
+      "observation_id": "rgbd-2-f63295f30f484835ad2df47dabaab7ea",
+      "observation_artifact": "observations/frame-0003.json",
+      "camera_ids": [
+        "1",
+        "2",
+        "3"
+      ]
+    }
+  },
+  {
+    "id": 172,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0013",
+    "t_s": 161.71976281842217,
+    "data": {
+      "observation_id": "rgbd-2-f63295f30f484835ad2df47dabaab7ea",
+      "object_labels": {
+        "observation_id": "rgbd-2-f63295f30f484835ad2df47dabaab7ea",
+        "generation": 2,
+        "analysis_status": "unprocessed",
+        "items": []
+      },
+      "annotated_rgb": {
+        "1": "observations/labels-00172-camera-1.svg",
+        "2": "observations/labels-00172-camera-2.svg",
+        "3": "observations/labels-00172-camera-3.svg"
+      }
+    }
+  },
+  {
+    "id": 174,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0013",
+    "t_s": 163.8472291282378,
+    "data": {
+      "observation_id": "rgbd-2-f63295f30f484835ad2df47dabaab7ea",
+      "endpoint": "/v1/decisions",
+      "purpose": "associate_completed_objects",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 175,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0013",
+    "t_s": 165.73371367016807,
+    "data": {
+      "observation_id": "rgbd-2-f63295f30f484835ad2df47dabaab7ea",
+      "endpoint": "/v1/decisions",
+      "purpose": "associate_inventory",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 178,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0013",
+    "t_s": 166.80368806328624,
+    "data": {
+      "observation_id": "rgbd-2-f63295f30f484835ad2df47dabaab7ea",
+      "object_labels": {
+        "observation_id": "rgbd-2-f63295f30f484835ad2df47dabaab7ea",
+        "generation": 2,
+        "analysis_status": "analyzed",
+        "items": [
+          {
+            "id": "instance-f77da825be844101",
+            "display_id": 4,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          },
+          {
+            "id": "instance-88d83368c67b4ed8",
+            "display_id": 3,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          },
+          {
+            "id": "instance-fed76c92b49243f6",
+            "display_id": 1,
+            "camera_id": "3",
+            "name": "unknown方块",
+            "status": "observed"
+          },
+          {
+            "id": "instance-fed76c92b49243f6",
+            "display_id": 1,
+            "camera_id": "2",
+            "name": "unknown方块",
+            "status": "observed"
+          }
+        ],
+        "regions": []
+      },
+      "annotated_rgb": {
+        "3": "observations/labels-00178-camera-3.svg",
+        "2": "observations/labels-00178-camera-2.svg",
+        "1": "observations/labels-00178-camera-1.svg"
+      }
+    }
+  },
+  {
+    "id": 182,
+    "kind": "skill_start",
+    "title": "build_scene",
+    "invocation_id": "skill-0014",
+    "t_s": 166.92778584640473,
+    "data": {
+      "arguments": {
+        "scope": "decide",
+        "reason": "包装物已释放且旧清单观测失效；为双臂VLA准备动作建立当前场景。",
+        "entity_ids": [],
+        "exclusion_state": "observation"
+      },
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 184,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0014",
+    "t_s": 168.16141556110233,
+    "data": {
+      "observation_id": "rgbd-2-f63295f30f484835ad2df47dabaab7ea",
+      "endpoint": "/v1/decisions",
+      "purpose": "semantic_judgments",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 191,
+    "kind": "skill_start",
+    "title": "prepare_unpack",
+    "invocation_id": "skill-0015",
+    "t_s": 169.15216541709378,
+    "data": {
+      "arguments": {},
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 200,
+    "kind": "skill_start",
+    "title": "vla_unpack",
+    "invocation_id": "skill-0016",
+    "t_s": 175.17630062205717,
+    "data": {
+      "arguments": {},
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 204,
+    "kind": "skill_start",
+    "title": "verify_unpack",
+    "invocation_id": "skill-0017",
+    "t_s": 175.51213767332956,
+    "data": {
+      "arguments": {},
+      "target_id": "instance-fed76c92b49243f6"
+    }
+  },
+  {
+    "id": 205,
+    "kind": "observation_recorded",
+    "title": "保存算法观察",
+    "invocation_id": "skill-0017",
+    "t_s": 176.49973060702905,
+    "data": {
+      "checkpoint": "post_unpack",
+      "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+      "observation_artifact": "observations/frame-0004.json",
+      "camera_ids": [
+        "1",
+        "2",
+        "3"
+      ]
+    }
+  },
+  {
+    "id": 206,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0017",
+    "t_s": 176.50996654340997,
+    "data": {
+      "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+      "object_labels": {
+        "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+        "generation": 2,
+        "analysis_status": "unprocessed",
+        "items": []
+      },
+      "annotated_rgb": {
+        "1": "observations/labels-00206-camera-1.svg",
+        "2": "observations/labels-00206-camera-2.svg",
+        "3": "observations/labels-00206-camera-3.svg"
+      }
+    }
+  },
+  {
+    "id": 208,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0017",
+    "t_s": 177.5576022141613,
+    "data": {
+      "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+      "endpoint": "/v1/decisions",
+      "purpose": "verify_unpacking",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 209,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0017",
+    "t_s": 177.86589591903612,
+    "data": {
+      "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+      "endpoint": "/v1/decisions",
+      "purpose": "verify_unpacking",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 210,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0017",
+    "t_s": 177.969879378099,
+    "data": {
+      "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+      "endpoint": "/v1/decisions",
+      "purpose": "verify_unpacking",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 224,
+    "kind": "skill_start",
+    "title": "observe_scene",
+    "invocation_id": "skill-0018",
+    "t_s": 178.7376675293781,
+    "data": {
+      "arguments": {},
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 226,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0018",
+    "t_s": 181.3037180332467,
+    "data": {
+      "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+      "endpoint": "/v1/decisions",
+      "purpose": "associate_inventory",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 229,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0018",
+    "t_s": 181.49134825216606,
+    "data": {
+      "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+      "object_labels": {
+        "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+        "generation": 2,
+        "analysis_status": "analyzed",
+        "items": [
+          {
+            "id": "product-9c45400b50ed465c8652613f8a6ad989",
+            "display_id": 7,
+            "camera_id": "3",
+            "name": "黑色物体",
+            "status": "observed"
+          },
+          {
+            "id": "instance-f77da825be844101",
+            "display_id": 4,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          },
+          {
+            "id": "instance-88d83368c67b4ed8",
+            "display_id": 3,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          }
+        ],
+        "regions": []
+      },
+      "annotated_rgb": {
+        "3": "observations/labels-00229-camera-3.svg",
+        "2": "observations/labels-00229-camera-2.svg",
+        "1": "observations/labels-00229-camera-1.svg"
+      }
+    }
+  },
+  {
+    "id": 233,
+    "kind": "skill_start",
+    "title": "identify_target",
+    "invocation_id": "skill-0019",
+    "t_s": 181.68540596030653,
+    "data": {
+      "arguments": {
+        "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+      },
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 234,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0019",
+    "t_s": 181.69120367011055,
+    "data": {
+      "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+      "object_labels": {
+        "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+        "generation": 2,
+        "analysis_status": "analyzed",
+        "items": [
+          {
+            "id": "product-9c45400b50ed465c8652613f8a6ad989",
+            "display_id": 7,
+            "camera_id": "3",
+            "name": "黑色物体",
+            "status": "selected"
+          },
+          {
+            "id": "instance-f77da825be844101",
+            "display_id": 4,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          },
+          {
+            "id": "instance-88d83368c67b4ed8",
+            "display_id": 3,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          }
+        ],
+        "regions": []
+      },
+      "annotated_rgb": {
+        "3": "observations/labels-00234-camera-3.svg",
+        "2": "observations/labels-00234-camera-2.svg",
+        "1": "observations/labels-00234-camera-1.svg"
+      }
+    }
+  },
+  {
+    "id": 237,
+    "kind": "skill_start",
+    "title": "identify_destination",
+    "invocation_id": "skill-0020",
+    "t_s": 181.7047463040799,
+    "data": {
+      "arguments": {
+        "destination_id": "instance-f77da825be844101",
+        "destination_kind": "container",
+        "orientation_mode": "free"
+      },
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 240,
+    "kind": "skill_start",
+    "title": "choose_arm",
+    "invocation_id": "skill-0021",
+    "t_s": 181.71414725808427,
+    "data": {
+      "arguments": {
+        "arm": "auto"
+      },
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 244,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0021",
+    "t_s": 183.36099753016606,
+    "data": {
+      "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+      "endpoint": "/v1/decisions",
+      "purpose": "semantic_judgments",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 248,
+    "kind": "skill_start",
+    "title": "build_scene",
+    "invocation_id": "skill-0022",
+    "t_s": 183.38593841530383,
+    "data": {
+      "arguments": {
+        "scope": "decide",
+        "reason": "根据拆包后的当前清单和已选黑色产物，为抓取及右侧盒投放建立目标绑定场景。",
+        "entity_ids": [],
+        "exclusion_state": "selected"
+      },
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 250,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0022",
+    "t_s": 185.2004742193967,
+    "data": {
+      "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+      "endpoint": "/v1/decisions",
+      "purpose": "semantic_judgments",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 257,
+    "kind": "skill_start",
+    "title": "generate_grasps",
+    "invocation_id": "skill-0023",
+    "t_s": 185.8347317641601,
+    "data": {
+      "arguments": {},
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 265,
+    "kind": "skill_start",
+    "title": "plan_grasp",
+    "invocation_id": "skill-0024",
+    "t_s": 186.61114392103627,
+    "data": {
+      "arguments": {},
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 281,
+    "kind": "skill_start",
+    "title": "execute_grasp",
+    "invocation_id": "skill-0025",
+    "t_s": 201.94068583101034,
+    "data": {
+      "arguments": {},
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 318,
+    "kind": "skill_start",
+    "title": "verify_grasp",
+    "invocation_id": "skill-0026",
+    "t_s": 215.3169033122249,
+    "data": {
+      "arguments": {},
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 319,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0026",
+    "t_s": 215.3617460723035,
+    "data": {
+      "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+      "object_labels": {
+        "observation_id": "rgbd-2-1dca6d2cb2ab4d8e8d308fd6c34bdae3",
+        "generation": 2,
+        "analysis_status": "analyzed",
+        "items": [
+          {
+            "id": "product-9c45400b50ed465c8652613f8a6ad989",
+            "display_id": 7,
+            "camera_id": "3",
+            "name": "黑色物体",
+            "status": "held"
+          },
+          {
+            "id": "instance-f77da825be844101",
+            "display_id": 4,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "destination"
+          },
+          {
+            "id": "instance-88d83368c67b4ed8",
+            "display_id": 3,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          }
+        ],
+        "regions": []
+      },
+      "annotated_rgb": {
+        "3": "observations/labels-00319-camera-3.svg",
+        "2": "observations/labels-00319-camera-2.svg",
+        "1": "observations/labels-00319-camera-1.svg"
+      }
+    }
+  },
+  {
+    "id": 323,
+    "kind": "skill_start",
+    "title": "plan_transport",
+    "invocation_id": "skill-0027",
+    "t_s": 215.4892254699953,
+    "data": {
+      "arguments": {},
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 329,
+    "kind": "skill_start",
+    "title": "execute_transport",
+    "invocation_id": "skill-0028",
+    "t_s": 226.1515001100488,
+    "data": {
+      "arguments": {},
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 337,
+    "kind": "skill_start",
+    "title": "drop",
+    "invocation_id": "skill-0029",
+    "t_s": 229.4590009842068,
+    "data": {
+      "arguments": {},
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 349,
+    "kind": "skill_start",
+    "title": "verify_drop",
+    "invocation_id": "skill-0030",
+    "t_s": 232.1190071911551,
+    "data": {
+      "arguments": {},
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 350,
+    "kind": "observation_recorded",
+    "title": "保存算法观察",
+    "invocation_id": "skill-0030",
+    "t_s": 232.35430685523897,
+    "data": {
+      "checkpoint": "post_place",
+      "observation_id": "rgbd-2-b47f2091130648c39e208da608882349",
+      "observation_artifact": "observations/frame-0005.json",
+      "camera_ids": [
+        "1",
+        "2",
+        "3"
+      ]
+    }
+  },
+  {
+    "id": 351,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0030",
+    "t_s": 232.36064185015857,
+    "data": {
+      "observation_id": "rgbd-2-b47f2091130648c39e208da608882349",
+      "object_labels": {
+        "observation_id": "rgbd-2-b47f2091130648c39e208da608882349",
+        "generation": 2,
+        "analysis_status": "unprocessed",
+        "items": []
+      },
+      "annotated_rgb": {
+        "1": "observations/labels-00351-camera-1.svg",
+        "2": "observations/labels-00351-camera-2.svg",
+        "3": "observations/labels-00351-camera-3.svg"
+      }
+    }
+  },
+  {
+    "id": 353,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0030",
+    "t_s": 233.259246672038,
+    "data": {
+      "observation_id": "rgbd-2-b47f2091130648c39e208da608882349",
+      "endpoint": "/v1/decisions",
+      "purpose": "verify_bin_drop",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 354,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0030",
+    "t_s": 233.88336120918393,
+    "data": {
+      "observation_id": "rgbd-2-b47f2091130648c39e208da608882349",
+      "endpoint": "/v1/decisions",
+      "purpose": "verify_bin_drop",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 355,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0030",
+    "t_s": 233.90758874919266,
+    "data": {
+      "observation_id": "rgbd-2-b47f2091130648c39e208da608882349",
+      "endpoint": "/v1/decisions",
+      "purpose": "verify_bin_drop",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 363,
+    "kind": "skill_start",
+    "title": "observe_scene",
+    "invocation_id": "skill-0031",
+    "t_s": 234.08740977803245,
+    "data": {
+      "arguments": {},
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 364,
+    "kind": "observation_recorded",
+    "title": "保存算法观察",
+    "invocation_id": "skill-0031",
+    "t_s": 234.87649411242455,
+    "data": {
+      "checkpoint": "initial",
+      "observation_id": "rgbd-2-d3302f23e7b94f20b0b918568bba1682",
+      "observation_artifact": "observations/frame-0006.json",
+      "camera_ids": [
+        "1",
+        "2",
+        "3"
+      ]
+    }
+  },
+  {
+    "id": 365,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0031",
+    "t_s": 234.88362466637045,
+    "data": {
+      "observation_id": "rgbd-2-d3302f23e7b94f20b0b918568bba1682",
+      "object_labels": {
+        "observation_id": "rgbd-2-d3302f23e7b94f20b0b918568bba1682",
+        "generation": 2,
+        "analysis_status": "unprocessed",
+        "items": []
+      },
+      "annotated_rgb": {
+        "1": "observations/labels-00365-camera-1.svg",
+        "2": "observations/labels-00365-camera-2.svg",
+        "3": "observations/labels-00365-camera-3.svg"
+      }
+    }
+  },
+  {
+    "id": 367,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0031",
+    "t_s": 238.49717387836426,
+    "data": {
+      "observation_id": "rgbd-2-d3302f23e7b94f20b0b918568bba1682",
+      "endpoint": "/v1/decisions",
+      "purpose": "associate_inventory",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 370,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0031",
+    "t_s": 238.863307335414,
+    "data": {
+      "observation_id": "rgbd-2-d3302f23e7b94f20b0b918568bba1682",
+      "object_labels": {
+        "observation_id": "rgbd-2-d3302f23e7b94f20b0b918568bba1682",
+        "generation": 2,
+        "analysis_status": "analyzed",
+        "items": [
+          {
+            "id": "product-9c45400b50ed465c8652613f8a6ad989",
+            "display_id": 7,
+            "camera_id": "1",
+            "name": "黑色物体",
+            "status": "completed"
+          },
+          {
+            "id": "instance-f77da825be844101",
+            "display_id": 4,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "destination"
+          },
+          {
+            "id": "instance-88d83368c67b4ed8",
+            "display_id": 3,
+            "camera_id": "3",
+            "name": "蓝色盒子",
+            "status": "container"
+          }
+        ],
+        "regions": []
+      },
+      "annotated_rgb": {
+        "3": "observations/labels-00370-camera-3.svg",
+        "2": "observations/labels-00370-camera-2.svg",
+        "1": "observations/labels-00370-camera-1.svg"
+      }
+    }
+  },
+  {
+    "id": 374,
+    "kind": "skill_start",
+    "title": "build_scene",
+    "invocation_id": "skill-0032",
+    "t_s": 239.07341659627855,
+    "data": {
+      "arguments": {
+        "scope": "decide",
+        "reason": "黑色产物已释放到右侧盒子；为安全返回任务初始姿态更新当前碰撞场景。",
+        "entity_ids": [],
+        "exclusion_state": "observation"
+      },
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 376,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0032",
+    "t_s": 240.49515111511573,
+    "data": {
+      "observation_id": "rgbd-2-d3302f23e7b94f20b0b918568bba1682",
+      "endpoint": "/v1/decisions",
+      "purpose": "semantic_judgments",
+      "http_status": 200,
+      "error": null
+    }
+  },
+  {
+    "id": 383,
+    "kind": "skill_start",
+    "title": "return_to_initial_pose",
+    "invocation_id": "skill-0033",
+    "t_s": 241.59827709710225,
+    "data": {
+      "arguments": {},
+      "target_id": "product-9c45400b50ed465c8652613f8a6ad989"
+    }
+  },
+  {
+    "id": 390,
+    "kind": "observation_recorded",
+    "title": "保存算法观察",
+    "invocation_id": "skill-0033",
+    "t_s": 247.5300706573762,
+    "data": {
+      "checkpoint": "fine",
+      "observation_id": "rgbd-2-69208b8535404b81b52a115819be0a8d",
+      "observation_artifact": "observations/frame-0007.json",
+      "camera_ids": [
+        "1",
+        "2",
+        "3"
+      ]
+    }
+  },
+  {
+    "id": 391,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0033",
+    "t_s": 247.53854891425,
+    "data": {
+      "observation_id": "rgbd-2-69208b8535404b81b52a115819be0a8d",
+      "object_labels": {
+        "observation_id": "rgbd-2-69208b8535404b81b52a115819be0a8d",
+        "generation": 2,
+        "analysis_status": "unprocessed",
+        "items": []
+      },
+      "annotated_rgb": {
+        "1": "observations/labels-00391-camera-1.svg",
+        "2": "observations/labels-00391-camera-2.svg",
+        "3": "observations/labels-00391-camera-3.svg"
+      }
+    }
+  },
+  {
+    "id": 394,
+    "kind": "observation_recorded",
+    "title": "保存算法观察",
+    "invocation_id": "skill-0033",
+    "t_s": 248.16305800527334,
+    "data": {
+      "checkpoint": "task_completion",
+      "observation_id": "rgbd-2-49e335855e4c4eb8b74733dc41911e3f",
+      "observation_artifact": "observations/frame-0008.json",
+      "camera_ids": [
+        "1",
+        "2",
+        "3"
+      ]
+    }
+  },
+  {
+    "id": 395,
+    "kind": "observation_annotated",
+    "title": "观测 RGB：名称、ID、搬运状态",
+    "invocation_id": "skill-0033",
+    "t_s": 248.16939586540684,
+    "data": {
+      "observation_id": "rgbd-2-49e335855e4c4eb8b74733dc41911e3f",
+      "object_labels": {
+        "observation_id": "rgbd-2-49e335855e4c4eb8b74733dc41911e3f",
+        "generation": 2,
+        "analysis_status": "unprocessed",
+        "items": []
+      },
+      "annotated_rgb": {
+        "1": "observations/labels-00395-camera-1.svg",
+        "2": "observations/labels-00395-camera-2.svg",
+        "3": "observations/labels-00395-camera-3.svg"
+      }
+    }
+  },
+  {
+    "id": 397,
+    "kind": "visual_decisions_call",
+    "title": "Decisions 图片判断",
+    "invocation_id": "skill-0033",
+    "t_s": 250.06741013238207,
+    "data": {
+      "observation_id": "rgbd-2-49e335855e4c4eb8b74733dc41911e3f",
+      "endpoint": "/v1/decisions",
+      "purpose": "semantic_judgments",
+      "http_status": 200,
+      "error": null
+    }
+  }
+]

@@ -22,7 +22,7 @@ async def test_each_planning_phase_uses_sdk_budgets_without_wrapper_deadlines(
                         generation=1, planning_attempts=[], current_step={'skill': skill})
     settings = PlanningSettings().model_dump()
     context = {"observation": {"observation_id": "current", "objects": []},
-               "scene": {"observation_id": "current"}, "evaluations": {},
+               "scene": {"observation_id": "current"}, "evaluations": {}, 'placement_resolution': {},
                "planning_settings": settings, "holding": {"attached": True, 'verified': True,
                    'attachment_evidence': {'attached': True}}}
     calls = []
@@ -32,7 +32,12 @@ async def test_each_planning_phase_uses_sdk_budgets_without_wrapper_deadlines(
         return {"planned": skill}
 
     runner.call_algorithm = capture_algorithm_call
-    result = await runner.execute(skill, context, None)
+    from luna_mujoco.runtime.controller import PolicyController
+    from luna_mujoco.skills import NoArguments
+    runner.registry.register('plan_place', NoArguments, lambda *_: None)
+    runner._bind_region = lambda observation: {}
+    result = (await PolicyController.execute(runner, skill, context) if skill == 'plan_place'
+              else await runner.execute(skill, context))
     assert result == {"planned": skill}
     assert len(calls) == 1
     assert calls[0][0] is getattr(algorithms, skill)

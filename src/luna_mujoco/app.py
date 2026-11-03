@@ -2,6 +2,7 @@
 import argparse
 import asyncio
 import copy
+import json
 import os
 import time
 from contextlib import asynccontextmanager
@@ -44,10 +45,10 @@ class DemoPresetRequest(BaseModel):
 
 
 def create_app(simulation=None, algorithms=None, decisions_factory=None, data_dir=None, *,
-               experiment_dir=None, demo_mode=True):
+               experiment_dir=None, environment_assumptions=None):
     server_instance_id = str(uuid4())
-    if not demo_mode:
-        raise ValueError("Only the Luna Responses program controller is available")
+    if decisions_factory is not None:
+        raise ValueError("legacy_decisions_factory_not_supported")
     load_dotenv(ROOT / ".env", override=False)
     if simulation is None:
         from .demo_scene import demo_observation_poses, demo_scene
@@ -72,9 +73,13 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
         Path(data_dir) / "experiments" if data_dir is not None else
         ROOT / "data" / "experiments")
     experiments = ExperimentStore(experiment_root)
-    from .demo_runner import DemoRunner
-    runner = DemoRunner(simulation, algorithms, decisions_factory, run_directory,
-                    planning_settings=settings, visual_assistance=visual_assistance, experiments=experiments)
+    from .runtime.controller import PolicyController
+    if environment_assumptions is None:
+        conditions_path = ROOT / 'resources/workcell_assumptions.json'
+        environment_assumptions = json.loads(conditions_path.read_text(encoding='utf-8')) if conditions_path.is_file() else {}
+    runner = PolicyController(simulation, algorithms, decisions_factory, run_directory,
+                    planning_settings=settings, visual_assistance=visual_assistance, experiments=experiments,
+                    environment_assumptions=environment_assumptions)
     operations = asyncio.Lock()
     health_cache = {"at": 0., "value": {}}
     from .workspace import WorkspaceAtlas
@@ -105,6 +110,12 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
     def state(event_start=0):
         run = {**copy.deepcopy(runner.state), "algorithm_pending": runner.algorithm_pending,
                "algorithm_cleanup_error": runner.algorithm_cleanup_error}
+        # Failure archives keep complete solver inputs; live JSON uses the same
+        # bounded sensor/array summaries as events. Preserve the structured
+        # failure_report and policy graph without truncating their checks/nodes.
+        for key in ('error_details', 'policy_failure'):
+            if key in run:
+                run[key] = public_summary(run[key])
         if runner.experiment is not None:
             run["experiment"] = runner.experiment.summary()
         holding = runner.holding_state
@@ -269,12 +280,11 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
                 status = await asyncio.to_thread(algorithms.health)
             except Exception as error:  # noqa: BLE001 — service boundary reports unavailable, never success
                 status = {"algorithms": {"ready": False, "error": type(error).__name__}}
-            if demo_mode:
-                status["controller"] = {"ready": True, "name": "responses_program"}
-                status["luna"] = {"ready": bool(runner.visual_inventory and runner.visual_inventory.api_key),
-                                  "model": "gpt-6-luna", "api_verified": any(
-                                      e["kind"] == "visual_decisions_call" and not e["data"].get("error")
-                                      for e in runner.events)}
+            status["controller"] = {"ready": True, "name": "responses_program"}
+            status["luna"] = {"ready": bool(runner.visual_inventory and runner.visual_inventory.api_key),
+                              "model": "gpt-6-luna", "api_verified": any(
+                                  e["kind"] == "visual_decisions_call" and not e["data"].get("error")
+                                  for e in runner.events)}
             status["mujoco"] = {"ready": True, "time": simulation.snapshot()["time"]}
             health_cache.update(at=time.monotonic(), value=status)
         return health_cache["value"]
@@ -299,12 +309,11 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
     async def configure(scene: dict):
         return await scene_action(simulation.configure, scene)
 
-    if demo_mode:
-        @app.post("/api/demo/preset")
-        async def demo_preset(request: DemoPresetRequest):
-            from .demo_scene import demo_observation_poses, demo_scene
-            return await scene_action(partial(simulation.configure, initial_joints=demo_observation_poses()),
-                                      demo_scene(request.object_count))
+    @app.post("/api/demo/preset")
+    async def demo_preset(request: DemoPresetRequest):
+        from .demo_scene import demo_observation_poses, demo_scene
+        return await scene_action(partial(simulation.configure, initial_joints=demo_observation_poses()),
+                                  demo_scene(request.object_count))
 
     @app.post("/api/settle")
     async def settle():

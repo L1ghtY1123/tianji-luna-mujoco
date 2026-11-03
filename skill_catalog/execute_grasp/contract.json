@@ -1,0 +1,37 @@
+{
+  "id": "execute_grasp",
+  "description": "Execute the selected current approach/grasp trajectory, close the gripper, validate actual closure/start/collision state, then execute the planned lift. The first lift has no object attachment, as configured by the user. Preserve partial physical effects on failure; never replay them as an ordinary retry. Return measured execution/holding evidence. Attachment is prepared only after successful lift and holding confirmation.",
+  "requires": {
+    "plan_ready": true,
+    "arm_selected": true,
+    "lifted": false,
+    "grasp_completed": false,
+    "recovery_needed": false
+  },
+  "provides": [
+    "lifted"
+  ],
+  "inputs": [
+    "bound_grasp_plan",
+    "current_robot_feedback",
+    "collision_scene",
+    "planning_settings"
+  ],
+  "capability": "Execute the selected current approach/grasp trajectory, close the gripper, validate actual closure/start/collision state, then execute the planned lift",
+  "outputs": [
+    "lifted",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure"
+  ],
+  "invalidates_observation": true,
+  "planning_effects": {
+    "observed": false,
+    "at_initial_pose": false
+  }
+}

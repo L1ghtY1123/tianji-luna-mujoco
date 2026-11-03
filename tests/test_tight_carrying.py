@@ -10,7 +10,7 @@ from luna_mujoco.carrying import CarryingBinding, carrying_geometry
 def measured_binding(points, **settings):
     payload = {
         "arm": "A", "owner_id": "tight-fit", "observation_id": "obs", "generation": 1,
-        "scene_token": "scene", "instance_id": "object", "frame": "tool", "state": "held",
+        "scene_token": "scene", "instance_id": "object", "frame": "gripper_front", "state": "held",
         "points_tool_m": np.asarray(points).tolist(), "uncertainty_m": .005, "margin_m": .001,
     } | settings
     scene = {"scene_token": "scene", "observation_id": "obs", "generation": 1, "target_id": "object"}

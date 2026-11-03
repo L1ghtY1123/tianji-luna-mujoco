@@ -6,21 +6,27 @@ import numpy as np
 import pytest
 
 from luna_mujoco.demo_grasp import filter_transport_reach, transport_tcp_height
+from luna_mujoco.geometry import front_tcp_pose
 
 
 @pytest.mark.parametrize('arm', ['A', 'B'])
 def test_loose_height_never_lowers_the_carried_bottom_below_bin_clearance(arm):
-    assert transport_tcp_height(np.eye(3), -.2, 1.1, arm) == pytest.approx(1.4)
+    # The loose height may raise further to shorten shoulder-to-wrist reach.
+    assert transport_tcp_height(np.eye(3), -.2, 1.1, arm) - .2 >= 1.1 + .10
 
 
 def test_v21_loose_transport_height_keeps_reachable_grasp_instead_of_fixed_z_rejection():
     frozen = json.loads((Path(__file__).parent / 'fixtures/v21_transport_height.json').read_text())
+    frozen['candidate']['T_world_tcp'] = front_tcp_pose(frozen['candidate']['T_world_tcp'], 'B').tolist()
     accepted, evidence = filter_transport_reach([frozen['candidate']], frozen['points_world_m'], 'B', frozen)
     assert frozen['old_reach']['nominal_transport_wrist_distance_m'] > evidence['reach_screening_limit_m']
     assert accepted == [frozen['candidate']]
     row = evidence['candidate_evidence'][0]
     assert row['nominal_transport_wrist_distance_m'] == pytest.approx(row['horizontal_wrist_distance_m'])
-    assert row['nominal_mount_world_m'][2] > frozen['old_reach']['nominal_mount_world_m'][2]
+    from luna_mujoco.geometry import mount_tcp_pose
+    planned = np.asarray(frozen['candidate']['T_world_tcp'])
+    planned[:3, 3] = row['nominal_tcp_world_m']
+    assert mount_tcp_pose(planned, 'B')[2, 3] > frozen['old_reach']['nominal_mount_world_m'][2]
 
 
 def test_v17_grasp_cannot_reach_bin_even_at_best_height():
@@ -30,7 +36,7 @@ def test_v17_grasp_cannot_reach_bin_even_at_best_height():
     request = {'object_id': 'black', 'transport_region': {
         'center_world_xy_m': [.4809930434711731, -.6250034124693048],
         'occupied_top_z_m': .663499968, 'observation_id': 'current'}}
-    candidate = {'index': 7, 'score': .9, 'T_world_tcp': pose.tolist()}
+    candidate = {'index': 7, 'score': .9, 'T_world_tcp': front_tcp_pose(pose, 'B').tolist()}
     accepted, evidence = filter_transport_reach([candidate], points, 'B', request)
     assert accepted == []
     assert evidence['candidate_evidence'][0]['horizontal_wrist_distance_m'] > evidence['reach_screening_limit_m'] + .01
@@ -42,7 +48,7 @@ def test_transport_screen_preserves_candidates_and_order(arm, sign):
     pose = np.eye(4)
     pose[:3, :3] = np.diag([1., -1., -1.])
     pose[:3, 3] = [.30, sign * .25, .82]
-    candidates = [{'index': i, 'score': i / 10, 'T_world_tcp': pose.tolist()} for i in (3, 2)]
+    candidates = [{'index': i, 'score': i / 10, 'T_world_tcp': front_tcp_pose(pose, 'B').tolist()} for i in (3, 2)]
     request = {'transport_region': {'center_world_xy_m': [.30, sign * .35],
         'occupied_top_z_m': .66, 'observation_id': 'current'}}
     accepted, evidence = filter_transport_reach(candidates, np.array([[.30, sign * .25, .61]]), arm, request)

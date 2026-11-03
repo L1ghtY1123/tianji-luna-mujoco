@@ -3,7 +3,7 @@
 The copied wrapper's 10 mm lower limit is an application policy. The public
 cuRobo configurations and hard world checker accept a distance in metres.
 Keep all copied structural validation, but validate clearance with this
-project's 10 mm minimum. No solver or vendor module is patched.
+project's configurable nonnegative distance. No solver or vendor module is patched.
 """
 import sys
 from dataclasses import replace
@@ -32,6 +32,8 @@ class _ProjectClearance:
         # supported policy value. Restore our separately validated distance
         # before the request can reach a backend or dataclass serialization.
         object.__setattr__(self, "trajectory_collision_clearance_m", max(.01, clearance))
+        if has_optimizer:
+            object.__setattr__(self, "optimizer_collision_activation_distance_m", max(.03, activation))
         super().__post_init__()
         object.__setattr__(self, "trajectory_collision_clearance_m", clearance)
         if has_optimizer:
@@ -56,8 +58,9 @@ class _ProjectDualClearance:
         clearance, activation = _profile(values.get("trajectory_collision_clearance_m", .01),
             values.get("optimizer_collision_activation_distance_m", .03))
         request = super().from_mapping({**values, "trajectory_collision_clearance_m": max(.01, clearance),
-                                       "optimizer_collision_activation_distance_m": activation})
-        return replace(request, trajectory_collision_clearance_m=clearance)
+                                       "optimizer_collision_activation_distance_m": max(.03, activation)})
+        return replace(request, trajectory_collision_clearance_m=clearance,
+                       optimizer_collision_activation_distance_m=activation)
 
 
 class DualPlanRequest(_ProjectDualClearance, dual_contracts.DualPlanRequest):

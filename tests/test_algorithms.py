@@ -43,7 +43,7 @@ def test_arm_orientation_and_tcp_offsets():
     b = grasp_targets(world, "B")
     np.testing.assert_allclose(a[0,:3,:3], np.diag([-1,-1,1]))
     np.testing.assert_allclose(b[0,:3,:3], np.eye(3))
-    assert b[0,2,3] == pytest.approx(.010)
+    assert b[0,2,3] == pytest.approx(.195)
 
 
 def test_evaluate_keeps_original_candidate_indices_and_arms():
@@ -115,22 +115,16 @@ def test_grasp_pool_reports_actual_count_and_propagates_second_request_failure()
 
 
 def test_scene_layers_disable_only_target_for_entire_operation(monkeypatch):
+    from types import SimpleNamespace
     from unittest.mock import MagicMock
 
     from luna_mujoco import geometry_service
-    from luna_mujoco.geometry import geometry_payload
-
-    monkeypatch.setattr(geometry_service, "make_grid",
-                        lambda name, kind, size, pose: (name, {"dims": size, "voxel_size": .01}))
-    state = snapshot()
-    # Legacy geometry utility is tested separately from online RGBD build_scene.
-    state["objects"][0].update(size=[.05] * 3, quaternion=[1., 0., 0., 0.])
-    state["objects"].append({**state["objects"][0], "id": "blue", "position": [.7,0,.63]})
     runtime = geometry_service.GeometryRuntime()
-    result = runtime.build_geometry(geometry_payload(state, "red"))
-    assert result["excluded_object_ids"] == ["red"]
-    assert result["collision_objects"] == ["blue"]
-    assert runtime.geometry_grids == ["geometry_table", "semantic_instance::red", "semantic_instance::blue"]
+    runtime.geometry_scene = {'scene_token': 'rgbd-test', 'target_id': 'red'}
+    runtime.geometry_grids = [SimpleNamespace(name='semantic_instance::' + name,
+        dims=[.04] * 3, voxel_size=.02) for name in ('red', 'blue')]
+    runtime.geometry_model = {'voxel': {grid.name: {'dims': grid.dims, 'voxel_size': .02}
+                                      for grid in runtime.geometry_grids}}
     calls = []
     class Backend:
         motion_planner = MagicMock()

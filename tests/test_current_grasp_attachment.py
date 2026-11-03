@@ -2,6 +2,7 @@
 
 import copy
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import numpy as np
 import pytest
@@ -107,6 +108,19 @@ async def test_grasp_reference_records_actual_closure_tcp_and_feedback_source(tm
     assert reference['feedback_time'] == 2.
 
 
+async def test_missing_source_support_is_rejected_before_any_gripper_or_arm_command(tmp_path):
+    runner, context, current, _, _, _ = fixture(tmp_path)
+    runner.state['current_step'] = {'skill': 'execute_grasp'}
+    context['plan'] = {'T_world_tcp': current['arms']['A']['tcp']}
+    context['scene_observation']['objects'][0]['points_world_m'] = []
+    runner.verify_scene = AsyncMock()
+    runner.gripper = AsyncMock(side_effect=AssertionError('must validate static support before motion'))
+    with pytest.raises(ValueError, match='source_support_unobservable'):
+        await runner.execute_grasp(context)
+    runner.gripper.assert_not_awaited()
+    assert not context.get('execution_started')
+
+
 @pytest.mark.parametrize("options", [{"closed_fraction": 1.}])
 async def test_failed_hold_verification_never_replaces_reference_or_prepares_attachment(tmp_path, options):
     runner, context, _, prepared, _, scene_calls = fixture(tmp_path, **options)
@@ -177,12 +191,22 @@ async def test_rebuilt_held_scene_needs_no_current_source_object(tmp_path):
     assert parsed.observation_id == current['observation_id']
     assert parsed.measurement_provenance['reference_observation_id'] == 'before-closure'
 
-    current['objects'] = [{'id': 'bin', 'kind': 'bin', 'placement_reference': {
-        'position_world_m': [.6, .2, .61], 'floor_z_m': .61}}]
-    def planning_request(path, body):
-        assert path == '/tools/solve_ik_batch'
-        assert body['carrying_binding']['points_tool_m'] == bound['points_tool_m']
-        raise RuntimeError('planner_reached_without_current_source')
-    runner.algorithms.request = planning_request
-    with pytest.raises(RuntimeError, match='planner_reached_without_current_source'):
-        runner.algorithms.plan_place(current, 'source', 'A', scene, context['holding'], 'bin')
+
+@pytest.mark.parametrize('operation', ['execute_grasp', 'capture_holding_reference'])
+async def test_grasp_support_receives_confirmed_task_record_outside_scene_inventory(tmp_path, monkeypatch, operation):
+    runner, context, current, _, _, _ = fixture(tmp_path)
+    record = {'id': 'source', 'initial_source': {'task_source_evidence': {'request_hash': 'confirmed'}}}
+    runner.task_progress = SimpleNamespace(records={'source': record})
+    runner.state['current_step'] = {'skill': 'execute_grasp'}
+    context['plan'] = {'T_world_tcp': current['arms']['A']['tcp'], 'lift_clearance': {'target_id': 'source'}}
+    runner.verify_scene = AsyncMock()
+    runner.gripper = AsyncMock()
+    def check(observation, target_id, tcp, **kwargs):
+        assert kwargs['source_record'] is record
+        assert kwargs['source_reference'] is context['plan']['lift_clearance']
+        assert kwargs['scene_token'] == context['scene']['scene_token']
+        raise ValueError('support_boundary_reached')
+    monkeypatch.setattr('luna_mujoco.runner.grasp_support_reference', check)
+    with pytest.raises(ValueError, match='support_boundary_reached'):
+        await getattr(runner, operation)(context)
+    runner.gripper.assert_not_awaited()

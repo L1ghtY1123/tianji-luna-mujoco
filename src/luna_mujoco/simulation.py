@@ -18,6 +18,10 @@ from .model_builder import ARM_JOINTS, DEFAULT_SCENE, GRIP_DRIVERS, TCP_BODIES, 
 MAX_TRAJECTORY_TRACKING_ERROR_RAD = .03
 
 
+class GripperLimitError(ValueError):
+    code = 'gripper_position_outside_authored_limits'
+
+
 class StaleCommandError(RuntimeError):
     """The scene was reset or reconfigured while a request was in flight."""
 
@@ -40,6 +44,11 @@ class Trajectory:
     error: str | None = None
     result: dict = field(default_factory=dict)
     max_tracking_error_rad: float = 0.
+    position_tolerance_rad: float = .005
+    velocity_tolerance_rad_s: float = .03
+    stable_window_s: float = .08
+    settle_timeout_s: float = 3.
+    stable_since_s: float | None = None
 
 
 def _transform(position, rotation):
@@ -67,6 +76,7 @@ class Simulation:
         self._error = None
         self._generation = 1
         self._revision = 1
+        self._command_revision = 0
         self._confirmed = False
         self._baseline = None
         self._commands = {}
@@ -182,9 +192,13 @@ class Simulation:
                     generation = self._generation
                     revision = self._revision
                     arms = self._robot_snapshot()["arms"]
+                    command_revision = self._command_revision
+                    active_commands = list(self._commands)
                 captured = self._sensor_executor.submit(self._render_capture, model, data, generation, arms).result()
                 captured["captured_monotonic_s"] = captured_monotonic_s
                 captured["captured_perf_counter_ns"] = captured_perf_counter_ns
+                captured['command_revision'] = command_revision
+                captured['active_commands'] = active_commands
                 with self._condition:
                     self._check_generation(generation)
                     if revision != self._revision:
@@ -253,10 +267,16 @@ class Simulation:
                          "gripper_position_rad": float(self._data.qpos[self._grip_q[arm]]),
                          "gripper_limits_rad": self._model.joint(GRIP_DRIVERS[arm]).range.tolist(),
                          "gripper_closed_command": self._desired_grip[arm] == float(self._model.joint(GRIP_DRIVERS[arm]).range[1]),
+                         "gripper_closing_command": self._desired_grip[arm] > float(self._model.joint(GRIP_DRIVERS[arm]).range[0]),
+                         "gripper_command_position_rad": self._desired_grip[arm],
                          "gripper_position_samples": [[t, q] for g, t, q in self._gripper_history[arm]
                                                       if g == self._generation and t >= self._data.time - 1.1]}
-            arms[arm]['tcp_front'] = front_tcp_pose(arms[arm]['tcp'], arm).tolist()
+            arms[arm]['tcp_mount'] = arms[arm]['tcp']
+            arms[arm]['tcp'] = front_tcp_pose(arms[arm]['tcp_mount'], arm).tolist()
+            arms[arm]['tcp_front'] = arms[arm]['tcp']
+            arms[arm]['tcp_frame'] = 'gripper_front_' + arm
         return {"generation": self._generation, "time": float(self._data.time), "confirmed": self._confirmed,
+                'manifest_revision': self._revision, 'command_revision': self._command_revision,
                 "arms": arms, "physics_error": self._error, "active_commands": list(self._commands)}
 
     def _check_running(self):
@@ -360,13 +380,21 @@ class Simulation:
             self._desired_v[arm] = np.zeros(7)
             error = float(np.max(np.abs(command.positions[-1] - self._data.qpos[self._arm_q[arm]])))
             speed = float(np.max(np.abs(self._data.qvel[self._arm_v[arm]])))
-            if elapsed >= duration + 0.08 and error < MAX_TRAJECTORY_TRACKING_ERROR_RAD and speed < 0.08:
+            if error <= command.position_tolerance_rad and speed <= command.velocity_tolerance_rad_s:
+                if command.stable_since_s is None:
+                    command.stable_since_s = float(self._data.time)
+            else:
+                command.stable_since_s = None
+            stable_duration = (0. if command.stable_since_s is None else
+                               float(self._data.time) - command.stable_since_s)
+            if command.stable_since_s is not None and stable_duration >= command.stable_window_s:
                 command.done = True
                 command.result = {"arm": arm, "generation": command.generation,
                                   "duration_s": elapsed, "max_final_error_rad": error,
                                   "max_tracking_error_rad": command.max_tracking_error_rad,
+                                  "stable_duration_s": stable_duration, "final_velocity_rad_s": speed,
                                   "joints_rad": self._data.qpos[self._arm_q[arm]].tolist()}
-            elif elapsed > duration + 2.0:
+            elif elapsed > duration + command.settle_timeout_s:
                 command.done = True
                 command.error = f"arm {arm} failed to track trajectory: final error {error:.4f} rad"
 
@@ -399,7 +427,10 @@ class Simulation:
             arms[arm] = {"joints_rad": data.qpos[self._arm_q[arm]].tolist(),
                          "tcp": _transform(data.xpos[body_id], data.xmat[body_id]),
                          "gripper_closed_fraction": self._gripper_fraction(arm)}
-            arms[arm]['tcp_front'] = front_tcp_pose(arms[arm]['tcp'], arm).tolist()
+            arms[arm]['tcp_mount'] = arms[arm]['tcp']
+            arms[arm]['tcp'] = front_tcp_pose(arms[arm]['tcp_mount'], arm).tolist()
+            arms[arm]['tcp_front'] = arms[arm]['tcp']
+            arms[arm]['tcp_frame'] = 'gripper_front_' + arm
         geometry_poses = []
         for index in self._geometry_ids:
             quaternion = np.empty(4)
@@ -456,6 +487,8 @@ class Simulation:
 
     def _unpack_output(self, target, output_pose):
         from .cad_assets import cad_asset
+        from .vla_configuration import vla_unpack_configuration
+        from .workspace import WorkspaceAtlas
 
         asset = cad_asset("black_core")
         half = np.asarray(asset["size_m"]) / 2
@@ -463,29 +496,49 @@ class Simulation:
         top = table["position"][2] + table["size"][2] / 2
         if output_pose is not None and set(output_pose) != {"position", "yaw_deg"}:
             raise ValueError("mock_unpack_output_requires_position_and_yaw_only")
-        # Keep the output on the right tabletop with room for the right wrist.
-        # Visibility and collision are checked from RGBD after the mock action;
-        # an occluded current view still requires the observation-pose return.
-        pose = ({"position": [.56, -.22, top + half[0] + .001], "yaw_deg": target["yaw_deg"] + 30}
-                if output_pose is None else output_pose)
+        if not hasattr(self, '_unpack_workspace'):
+            self._unpack_workspace = WorkspaceAtlas()
+        region = vla_unpack_configuration()['output_region']
+        center = np.asarray(region['center_world_xy_m'])
+        half_region = np.asarray(region['size_xy_m']) / 2
+        if output_pose is None:
+            if not hasattr(self, '_unpack_rng'):
+                self._unpack_rng = np.random.default_rng()
+            # The configured right-hand work region constrains the effect,
+            # not the planner. The sampled truth never leaves the simulator.
+            yaw = 210.
+            world_half = np.abs(scene_object_rotation({'yaw_deg': yaw, 'pitch_deg': 90.})) @ half
+            lower = np.asarray(table['position'][:2]) - np.asarray(table['size'][:2]) / 2 + world_half[:2] + .001
+            upper = np.asarray(table['position'][:2]) + np.asarray(table['size'][:2]) / 2 - world_half[:2] - .001
+            lower = np.maximum(lower, center - half_region)
+            upper = np.minimum(upper, center + half_region)
+            if np.any(upper <= lower):
+                raise ValueError('mock_unpack_output_no_supported_right_workspace')
+            positions = np.column_stack((self._unpack_rng.uniform(lower, upper, (512, 2)),
+                                         np.full(512, top + world_half[2] + .001)))
+            chosen = next((point for point in positions
+                           if self._unpack_workspace.query('B', [point.tolist()])[0]['reachable']), None)
+            if chosen is None:
+                raise ValueError('mock_unpack_output_no_supported_right_workspace')
+            pose = {'position': chosen.tolist(), 'yaw_deg': yaw}
+        else:
+            pose = output_pose
         position = np.asarray(pose["position"], dtype=float)
         yaw = float(pose["yaw_deg"])
         rotation = scene_object_rotation({'yaw_deg': yaw, 'pitch_deg': 90.})
         world_half = np.abs(rotation) @ half
         if (position.shape != (3,) or not np.isfinite(position).all() or not np.isfinite(yaw)
-                or position[1] >= table["position"][1]
+                or np.any(np.abs(position[:2] - center) > half_region)
                 or abs(position[2] - top - world_half[2] - .001) > .001
                 or np.any(np.abs(position[:2] - table["position"][:2]) + world_half[:2] > np.array(table["size"][:2]) / 2)):
             raise ValueError("mock_unpack_output_must_be_flat_supported_inside_right_tabletop")
-        if np.linalg.norm(position[:2] - target["position"][:2]) < .01:
-            raise ValueError("mock_unpack_output_requires_changed_position")
-        if abs((yaw - target["yaw_deg"] + 180) % 360 - 180) < 1:
-            raise ValueError("mock_unpack_output_requires_changed_yaw")
+        if not self._unpack_workspace.query('B', [position.tolist()])[0]['reachable']:
+            raise ValueError('mock_unpack_output_outside_right_workspace')
         return {"id": target["id"], "kind": "cad", "asset_id": asset["id"],
                 "color": "black", "size": asset["size_m"], "mass_kg": asset["demo_mass_kg"],
                 "position": position.tolist(), "yaw_deg": yaw, "pitch_deg": 90.}
 
-    def mock_unpack(self, work_area, output_pose=None, task_id=None, *, generation,
+    def unpack_at_pose(self, work_area, output_pose=None, task_id=None, *, generation,
                     target_id=None, owner_id=None):
         """Authorized simulation substitute, selecting a unique supported pink body.
 
@@ -543,14 +596,21 @@ class Simulation:
                 q, v = int(joint.qposadr[0]), int(joint.dofadr[0])
                 quaternion = np.empty(4)
                 mujoco.mju_mat2Quat(quaternion, scene_object_rotation(replacement).ravel())
-                data.qpos[q:q + 7] = [*replacement["position"], *quaternion]
-                data.qvel[v:v + 6] = 0
-                mujoco.mj_forward(model, data)
                 body_id = model.body("object_" + target["id"]).id
-                for contact in data.contact:
-                    bodies = model.geom_bodyid[[contact.geom1, contact.geom2]]
-                    if body_id in bodies and contact.dist < -1e-6:
-                        raise ValueError("mock_unpack_output_collides")
+                for attempt in range(128 if output_pose is None else 1):
+                    if attempt:
+                        replacement = self._unpack_output(target, None)
+                    data.qpos[q:q + 7] = [*replacement['position'], *quaternion]
+                    data.qvel[v:v + 6] = 0
+                    mujoco.mj_forward(model, data)
+                    collides = any(body_id in model.geom_bodyid[[contact.geom1, contact.geom2]]
+                                   and contact.dist < -1e-6 for contact in data.contact)
+                    if not collides:
+                        break
+                else:
+                    raise ValueError('mock_unpack_output_collides')
+                scene['objects'] = [replacement if item['id'] == target['id'] else item
+                                    for item in scene['objects']]
                 self._model, self._data, self._scene = model, data, scene
                 self._geometries = geometries
                 self._revision += 1
@@ -697,7 +757,10 @@ class Simulation:
             self._condition.notify_all()
             return self._snapshot()
 
-    def execute_trajectory(self, arm, positions_rad, dt, generation):
+    def execute_trajectory(self, arm, positions_rad, dt, generation, *, execution_settings=None):
+        from .planning_settings import PlanningSettings
+
+        settings = PlanningSettings.model_validate(execution_settings or {})
         self._check_arm(arm)
         positions = np.asarray(positions_rad, dtype=float)
         if positions.ndim != 2 or positions.shape[1] != 7 or len(positions) < 1 or not np.isfinite(positions).all():
@@ -712,9 +775,14 @@ class Simulation:
                 lower, upper = self._model.joint(name).range
                 if np.any(positions[:, index] < lower - 0.001) or np.any(positions[:, index] > upper + 0.001):
                     raise ValueError(f"trajectory exceeds {name} joint limits")
-            command = Trajectory(positions.copy(), float(dt), generation, float(self._data.time))
+            command = Trajectory(positions.copy(), float(dt), generation, float(self._data.time),
+                position_tolerance_rad=settings.motion_position_tolerance_rad,
+                velocity_tolerance_rad_s=settings.motion_stable_velocity_rad_s,
+                stable_window_s=settings.motion_stable_window_s,
+                settle_timeout_s=settings.motion_settle_timeout_s)
+            self._command_revision += 1
             self._commands[arm] = command
-            wall_deadline = time.monotonic() + max(10, len(positions) * dt * 4 + 5)
+            wall_deadline = time.monotonic() + max(10, (len(positions) * dt + settings.motion_settle_timeout_s) * 4 + 5)
             try:
                 while not command.done:
                     self._check_generation(generation)
@@ -732,7 +800,10 @@ class Simulation:
                         self._desired_q[arm] = self._data.qpos[self._arm_q[arm]].copy()
                         self._desired_v[arm] = np.zeros(7)
 
-    def execute_dual_trajectory(self, paths, dt, generation):
+    def execute_dual_trajectory(self, paths, dt, generation, *, execution_settings=None):
+        from .planning_settings import PlanningSettings
+
+        settings = PlanningSettings.model_validate(execution_settings or {})
         if set(paths) != {"A", "B"} or not np.isfinite(dt) or dt <= 0:
             raise ValueError("dual trajectory requires A/B paths and positive dt")
         positions = {arm: np.asarray(paths[arm], dtype=float) for arm in ("A", "B")}
@@ -751,10 +822,15 @@ class Simulation:
                     if np.any(path[:, index] < lower - .001) or np.any(path[:, index] > upper + .001):
                         raise ValueError(f"trajectory exceeds {name} joint limits")
             start_time = float(self._data.time)
-            commands = {arm: Trajectory(path.copy(), float(dt), generation, start_time)
+            commands = {arm: Trajectory(path.copy(), float(dt), generation, start_time,
+                position_tolerance_rad=settings.motion_position_tolerance_rad,
+                velocity_tolerance_rad_s=settings.motion_stable_velocity_rad_s,
+                stable_window_s=settings.motion_stable_window_s,
+                settle_timeout_s=settings.motion_settle_timeout_s)
                         for arm, path in positions.items()}
+            self._command_revision += 1
             self._commands.update(commands)
-            deadline = time.monotonic() + max(10, len(positions["A"]) * dt * 4 + 5)
+            deadline = time.monotonic() + max(10, (len(positions["A"]) * dt + settings.motion_settle_timeout_s) * 4 + 5)
             try:
                 while not all(command.done for command in commands.values()):
                     self._check_generation(generation)
@@ -799,23 +875,51 @@ class Simulation:
         lower, upper = self._model.joint(GRIP_DRIVERS[arm]).range
         return float(np.clip((self._data.qpos[self._grip_q[arm]] - lower) / (upper - lower), 0, 1))
 
-    def set_gripper(self, arm, closed, generation):
+    def set_gripper(self, arm, closed, generation, *, maximum_position_rad=None, execution_settings=None):
+        from .planning_settings import PlanningSettings
+        from .verification import GRIPPER_LIMIT_NOISE_TOLERANCE_RAD
+
+        settings = PlanningSettings.model_validate(execution_settings or {})
         self._check_arm(arm)
         if not isinstance(closed, bool):
             raise ValueError("closed must be a boolean")  # noqa: TRY004 - JSON validation uses ValueError.
         with self._motion_locks[arm], self._condition:
             self._check_generation(generation)
             lower, upper = self._model.joint(GRIP_DRIVERS[arm]).range
+            if maximum_position_rad is not None:
+                if (closed is not True or type(maximum_position_rad) not in (int, float)
+                        or not np.isfinite(maximum_position_rad) or not lower < maximum_position_rad <= upper):
+                    raise ValueError('bounded close requires a target inside the gripper limits')
+                upper = maximum_position_rad
+            self._command_revision += 1
             self._desired_grip[arm] = float(upper if closed else lower)
             start_time = float(self._data.time)
-            deadline = time.monotonic() + 8
+            deadline = time.monotonic() + max(8., settings.gripper_timeout_s * 4)
+            stable_since = None
+            stable_position = None
             while True:
                 self._check_generation(generation)
                 elapsed = self._data.time - start_time
                 speed = abs(self._data.qvel[self._grip_v[arm]])
-                if elapsed >= 0.5 and speed < 0.015 or elapsed >= 2.0:
+                position = float(self._data.qpos[self._grip_q[arm]])
+                tolerance = settings.holding_position_tolerance_fraction * (upper - lower)
+                if speed <= settings.gripper_stable_velocity_rad_s:
+                    if stable_since is None or abs(position - stable_position) > tolerance:
+                        stable_since, stable_position = float(self._data.time), position
+                else:
+                    stable_since, stable_position = None, None
+                stable_duration = 0. if stable_since is None else float(self._data.time) - stable_since
+                if stable_since is not None and stable_duration >= settings.holding_stable_window_s:
+                    authored_lower, authored_upper = self._model.joint(GRIP_DRIVERS[arm]).range
+                    noise = GRIPPER_LIMIT_NOISE_TOLERANCE_RAD
+                    if not authored_lower - noise <= position <= authored_upper + noise:
+                        raise GripperLimitError(f'gripper_position_outside_authored_limits: arm={arm}, '
+                                         f'actual_rad={position:.12g}, minimum_rad={authored_lower:.12g}, '
+                                         f'maximum_rad={authored_upper:.12g}, command_rad={self._desired_grip[arm]:.12g}')
                     return {"arm": arm, "generation": generation, "closed_command": closed,
-                            "gripper_closed_fraction": self._gripper_fraction(arm), "duration_s": elapsed}
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("physics did not settle the gripper before the wall-clock timeout")
+                            "gripper_position_rad": position,
+                            "gripper_closed_fraction": self._gripper_fraction(arm), "duration_s": elapsed,
+                            "stable_duration_s": stable_duration, "final_velocity_rad_s": float(speed)}
+                if elapsed >= settings.gripper_timeout_s or time.monotonic() >= deadline:
+                    raise TimeoutError(f"gripper_stability_timeout: arm {arm}, speed {speed:.6f} rad/s, elapsed {elapsed:.3f}s")
                 self._condition.wait(timeout=0.02)

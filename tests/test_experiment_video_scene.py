@@ -17,6 +17,10 @@ from luna_mujoco.model_builder import ModelBuilder
 @pytest.fixture
 def demo_recording():
     scene = demo_scene(3)
+    # Exercise recovery of an authored second support even when the current
+    # demo default uses only the main table.
+    scene["support_tables"] = [{"id": "recorded_support", "position": [.39, .66, .56],
+                                "size": [.34, .32, .08]}]
     builder = ModelBuilder()
     try:
         model = builder.build(scene)
@@ -150,10 +154,12 @@ def test_scene_encoder_switches_actual_model_geometry_at_recorded_revision(tmp_p
     rendered = []
     class Renderer:
         def __init__(self, model, **kwargs):
-            geom = model.geom("object_visual_" + item["id"])
+            visual_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "object_visual_" + item["id"])
+            geom = model.geom(visual_id) if visual_id >= 0 else model.geom("object_geom_" + item["id"])
             mesh_id = int(model.geom_dataid[geom.id])
-            rendered.append((int(geom.type[0]), model.mesh(mesh_id).name,
-                             int(model.mesh_facenum[mesh_id]), model.geom_rgba[geom.id].copy()))
+            rendered.append((int(geom.type[0]), model.mesh(mesh_id).name if mesh_id >= 0 else None,
+                             model.geom_size[geom.id].copy(), model.geom_rgba[geom.id].copy(),
+                             int(model.mesh_facenum[mesh_id]) if mesh_id >= 0 else None))
             self.scene = SimpleNamespace(geoms=[], ngeom=0)
         def update_scene(self, *args, **kwargs):
             pass
@@ -167,7 +173,8 @@ def test_scene_encoder_switches_actual_model_geometry_at_recorded_revision(tmp_p
             pass
     monkeypatch.setattr(mujoco, "Renderer", Renderer)
     assert len(list(video._scene_images(tmp_path, recording))) == 3
-    assert [row[0] for row in rendered] == [mujoco.mjtGeom.mjGEOM_MESH] * 2
-    assert [row[1] for row in rendered] == ["cad_pink_wrapped_visual", "cad_black_core_visual"]
-    assert [row[2] for row in rendered] == [10924, 90916]
+    assert [row[0] for row in rendered] == [mujoco.mjtGeom.mjGEOM_BOX, mujoco.mjtGeom.mjGEOM_MESH]
+    assert [row[1] for row in rendered] == [None, "cad_black_core_visual"]
+    assert [row[4] for row in rendered] == [None, 999]
+    np.testing.assert_allclose(rendered[0][2] * 2, cad_asset("pink_wrapped")["size_m"])
     assert max(rendered[-1][3][:3]) < .1

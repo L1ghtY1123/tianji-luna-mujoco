@@ -22,6 +22,27 @@ function editor() {
   };
 }
 
+test('VLA object XY is editable without unlocking solvers and preserves nested request settings', () => {
+  const ui = editor();
+  const payload = planningPayload();
+  payload.schema = { properties: { ...payload.schema.properties,
+    vla_unpack: { $ref: '#/$defs/VLAUnpackSettings' },
+  }, $defs: { VLAUnpackSettings: { properties: {
+    input_x_m: { type: 'number', title: '物体 X', group: 'vla', unit: 'm', step: .001 },
+    input_y_m: { type: 'number', title: '物体 Y', group: 'vla', unit: 'm', step: .001 },
+  } } } };
+  payload.settings.vla_unpack = { input_x_m: .5, input_y_m: -.1 };
+  ui.settings.load(payload);
+  assert.equal(ui.input('ik_num_seeds').disabled, true);
+  ui.change('vla_unpack.input_x_m', '.42');
+  ui.change('vla_unpack.input_y_m', '-.25');
+  assert.deepEqual(ui.settings.read().vla_unpack, { input_x_m: .42, input_y_m: -.25 });
+  assert.equal(ui.settings.read().ik_num_seeds, payload.settings.ik_num_seeds);
+  assert.deepEqual(payload.settings.vla_unpack, { input_x_m: .5, input_y_m: -.1 });
+  ui.change('vla_unpack.input_x_m', 'NaN');
+  assert.throws(() => ui.settings.read(), /有限/);
+});
+
 test('planning lengths and angles display in mm/degrees and convert back to SI', () => {
   const distance = planningSchema.properties.ik_position_threshold_m;
   const angle = planningSchema.properties.ik_rotation_threshold_rad;
@@ -212,7 +233,7 @@ test('visible placement height is ten millimeters and optional nested measured-p
   ui.settings.setAdvancedLocked(false);
   ui.change('pointcloud_filter.radius_m', '15');
   ui.change('pointcloud_filter.enabled', 'true');
-  assert.equal(ui.input('place_release_height_m').disabled, true);
+  assert.equal(ui.input('place_release_height_m').disabled, false);
   const values = ui.settings.read();
   assert.deepEqual(values.pointcloud_filter, { enabled: true, radius_m: .015, dbscan_preview: false });
   assert.equal(values.place_release_height_m, .01);

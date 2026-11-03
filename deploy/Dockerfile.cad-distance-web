@@ -1,0 +1,6 @@
+FROM tianji-luna-mujoco:0.6.0-cad-guangyu
+USER root
+# Replace Python point/triangle traversal with the public float64 AABB backend.
+# The existing CAD image already supplies the required NumPy and SciPy versions.
+RUN python -m pip install --no-cache-dir --only-binary=:all: --no-deps libigl==2.6.3
+USER 1000:1000

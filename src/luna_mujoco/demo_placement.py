@@ -7,13 +7,30 @@ import numpy as np
 from scipy.spatial import ConvexHull
 from scipy.spatial.transform import Rotation
 
-from .geometry import front_tcp_offset, rigid_matrix
+from .geometry import rigid_matrix
+from .object_obb import held_geometry_points
+from .placement import visible_reference_tool_m
 from .release_clearance import CLEARANCE_COST_EPSILON
 
 RELEASE_HEIGHT_STEP_M = .001
-MAX_RELEASE_HEIGHT_INCREASE_M = .1
+MAX_RELEASE_HEIGHT_INCREASE_M = .02
 RELEASE_PLANNING_RESERVE_M = .0001
 RELEASE_PLANNING_RESERVE_REASON = "observed_loaded_position_servo_tracking_error"
+
+
+def distributed_release_candidates(candidates, limit=12):
+    """Keep the best reach-ranked goal, then cover the measured region spatially."""
+    values = np.asarray(candidates)
+    if len(values) <= limit:
+        return values
+    selected = [0]
+    distance = np.sum((values - values[0]) ** 2, axis=1)
+    while len(selected) < limit:
+        distance[selected] = -1.
+        index = int(np.argmax(distance))
+        selected.append(index)
+        distance = np.minimum(distance, np.sum((values - values[index]) ** 2, axis=1))
+    return values[selected]
 
 
 class ReleaseHeightError(ValueError):
@@ -40,7 +57,7 @@ def release_geometry_digest(attachment, gripper):
     return hashlib.sha256(np.concatenate((attachment, gripper)).astype("<f8").tobytes()).hexdigest()
 
 
-def resolve_release_height(attachment_spheres, gripper_spheres, request, query_world_cost, *, scene_token):
+def resolve_release_height(attachment_spheres, gripper_spheres, request, query_world_cost, *, scene_token, search=None):
     """Choose the first clear 1 mm Z sample using the unchanged hard world checker."""
     attachment, gripper = sphere_array(attachment_spheres), sphere_array(gripper_spheres)
     position = np.asarray(request.goal_position_m, dtype=float)
@@ -62,27 +79,37 @@ def resolve_release_height(attachment_spheres, gripper_spheres, request, query_w
         "geometry_sha256": release_geometry_digest(attachment, gripper),
         "collision_source": "configured_hard_world_checker",
         "distance_reporting": "activation_cost_only", "tested_heights": []}
-    count = round(MAX_RELEASE_HEIGHT_INCREASE_M / RELEASE_HEIGHT_STEP_M) + 1
+    offsets = (np.arange(round(MAX_RELEASE_HEIGHT_INCREASE_M / RELEASE_HEIGHT_STEP_M) + 1)
+               * RELEASE_HEIGHT_STEP_M if search is None else np.asarray(search['bounds']['height_offsets_m']))
+    count = len(offsets)
+    evidence['scope'] = 'geometry_only_compatibility' if search is None else 'world_height_samples'
+    if search is not None:
+        evidence['maximum_height_increase_m'] = search['bounds']['maximum_height_increase_m']
+    query = np.broadcast_to(world, (1, count, len(spheres), 4)).copy()
+    query[0, :, :, 2] += offsets[:, None]
+    costs = np.asarray(query_world_cost(query), dtype=float)
+    if (costs.shape != query.shape[:-1] or not np.isfinite(costs).all() or np.any(costs < 0)):
+        raise ValueError("release_world_cost_requires_finite_nonnegative_per_sphere_values")
     for index in range(count):
-        increase = index * RELEASE_HEIGHT_STEP_M
-        query = world.copy()
-        query[:, 2] += increase
-        costs = np.asarray(query_world_cost(query[None, None]), dtype=float)
-        if (costs.shape != (1, 1, len(spheres)) or not np.isfinite(costs).all() or np.any(costs < 0)):
-            raise ValueError("release_world_cost_requires_finite_nonnegative_per_sphere_values")
-        conflicts = np.flatnonzero(costs[0, 0] > CLEARANCE_COST_EPSILON)
+        increase = float(offsets[index])
+        row = costs[0, index]
+        conflicts = np.flatnonzero(row > CLEARANCE_COST_EPSILON)
         z = float(position[2] + increase)
         evidence["tested_heights"].append({"z_m": z, "conflicting_sphere_indices": conflicts.tolist(),
-                                           "maximum_world_collision_cost": float(costs.max())})
-        if not len(conflicts):
+                                           "maximum_world_collision_cost": float(row.max())})
+        if search is not None:
+            evidence['tested_heights'][-1]['world_collision_costs'] = row.tolist()
+        elif not len(conflicts):
             return {**evidence, "selected_goal_position_m": [*position[:2].tolist(), z],
                 "height_increase_m": increase, "status": "first_clear_height_sample",
                 "last_conflicting_z_m": None if index == 0 else float(z - RELEASE_HEIGHT_STEP_M),
-                "final_world_collision_costs": costs[0, 0].tolist()}
+                "final_world_collision_costs": row.tolist()}
+    if search is not None:
+        return evidence
     raise ReleaseHeightError(evidence)
 
 
-def valid_height_resolution(reference, expected, minimum_z, *, scene_token):
+def valid_height_resolution(reference, expected, minimum_z, *, scene_token, holding=None):
     """Bind the reported first feasible sample to the exact goal and envelopes."""
     proof = reference.get("height_resolution", {})
     try:
@@ -95,6 +122,21 @@ def valid_height_resolution(reference, expected, minimum_z, *, scene_token):
         increase = float(proof["height_increase_m"])
         samples = proof["tested_heights"]
         index = round(increase / RELEASE_HEIGHT_STEP_M)
+        if 'height_search' in reference:
+            from .release_height_search import valid_held_height_resolution
+
+            return bool(holding is not None
+                and reference.get('planning_reserve_m') == RELEASE_PLANNING_RESERVE_M
+                and reference.get('planning_reserve_reason') == RELEASE_PLANNING_RESERVE_REASON
+                and proof['geometry_sha256'] == release_geometry_digest(attachment, gripper)
+                and proof['attachment_sphere_count'] == len(attachment)
+                and proof['gripper_sphere_count'] == len(gripper)
+                and proof['required_clearance_m'] == reference['required_clearance_m']
+                and np.allclose(initial, [*expected[:2, 3], minimum_z], atol=1e-9, rtol=0)
+                and np.allclose(selected, expected[:3, 3], atol=1e-9, rtol=0)
+                and np.allclose(rotation, expected[:3, :3], atol=1e-9, rtol=0)
+                and valid_held_height_resolution(reference, expected, minimum_z,
+                                                held_geometry_points(holding), scene_token))
         return bool(proof["scene_token"] == scene_token
             and reference.get("planning_reserve_m") == RELEASE_PLANNING_RESERVE_M
             and reference.get("planning_reserve_reason") == RELEASE_PLANNING_RESERVE_REASON
@@ -126,7 +168,7 @@ def valid_height_resolution(reference, expected, minimum_z, *, scene_token):
         return False
 
 
-def apply_release_height(goal, proof, *, scene_token):
+def apply_release_height(goal, proof, *, scene_token, holding=None):
     result = deepcopy(goal)
     transform = rigid_matrix(result["T_world_tcp"]).copy()
     minimum_z = transform[2, 3]
@@ -138,14 +180,17 @@ def apply_release_height(goal, proof, *, scene_token):
         raise ValueError("release_height_invalid_response") from error
     reference = result["release_reference"]
     reference["height_resolution"] = deepcopy(proof)
-    if not valid_height_resolution(reference, transform, minimum_z, scene_token=scene_token):
+    if not valid_height_resolution(reference, transform, minimum_z, scene_token=scene_token, holding=holding):
         raise ValueError("release_height_invalid_response")
     increase = transform[2, 3] - minimum_z
     for field in ("attachment_floor_gap_m", "gripper_floor_gap_m", "release_height_m", "requested_release_height_m"):
         reference[field] += increase
     reference["height_source"] = "first_clear_measured_world_z_above_analytic_minimum"
+    if 'height_search' in reference:
+        reference['height_source'] = 'lowest_sample_passing_tool_world_and_held_ik_with_configured_object_gap'
     if increase > 0:
-        reference["height_limiting_geometry"] = "measured_world"
+        reference["height_limiting_geometry"] = ("world_workspace_and_held_ik" if 'height_search' in reference
+                                                else "measured_world")
     result["scene_token"] = scene_token
     result["T_world_tcp"] = transform.tolist()
     result["object_reference_world_m"] = (
@@ -154,7 +199,7 @@ def apply_release_height(goal, proof, *, scene_token):
 
 
 def fixed_release_goal(destination, holding, placement_request, attachment_spheres, gripper_spheres,
-                       *, clearance_m, observation_id):
+                       *, clearance_m, observation_id, release_height_m=None):
     request = placement_request or {}
     layout = request.get("layout")
     if not isinstance(layout, dict):
@@ -170,7 +215,24 @@ def fixed_release_goal(destination, holding, placement_request, attachment_spher
     floor = float(cell.get("floor_z_m", layout.get("floor_z_m", support["floor_z_m"])))
     if not np.isfinite(floor) or abs(floor - float(support["floor_z_m"])) > .005:
         raise ValueError("placement_support_movement_unresolved")
-    center = np.asarray(cell["center_world_xy_m"], dtype=float)
+    center = np.asarray(request.get('selected_reference_world_xy_m', cell["center_world_xy_m"]), dtype=float)
+    precise = support.get('precise_xy') is True
+    fixed = support.get('fixed_xy') is True
+    if fixed:
+        configured = np.asarray(support.get('position_world_m'), dtype=float)
+        if (configured.shape != (3,) or not np.isfinite(configured).all()
+                or center.shape != (2,) or not np.allclose(center, configured[:2], atol=1e-9, rtol=0)):
+            raise ValueError('configured_placement_reference_changed')
+    if precise:
+        configured = np.asarray(support.get('position_world_m'), dtype=float)
+        tolerance = support.get('xy_tolerance_m')
+        if (configured.shape != (3,) or not np.isfinite(configured).all()
+                or type(tolerance) not in (int, float) or not np.isfinite(tolerance) or tolerance <= 0):
+            raise ValueError('precise_placement_requires_configured_xy_and_tolerance')
+        if (center.shape != (2,) or not np.allclose(center, configured[:2], atol=1e-9, rtol=0)
+                or request.get('xy_tolerance_m', tolerance) != tolerance):
+            raise ValueError('precise_placement_reference_changed')
+        center = configured[:2]
     points = np.asarray(holding["points_tool_m"], dtype=float)
     if (center.shape != (2,) or not np.isfinite(center).all()
             or points.ndim != 2 or points.shape[1] != 3 or not len(points)
@@ -180,7 +242,7 @@ def fixed_release_goal(destination, holding, placement_request, attachment_spher
     gripper = sphere_array(gripper_spheres)
     grasp = rigid_matrix(holding["grasp_support_reference"]["T_world_tcp_at_grasp"])
     rotation = grasp[:3, :3]
-    object_reference = front_tcp_offset(holding['arm'])
+    object_reference = visible_reference_tool_m(holding) if precise or fixed else np.zeros(3)
     goal = grasp.copy()
     goal[:2, 3] = center - (rotation @ object_reference)[:2]
     for polygon in (cell["polygon_world_xy_m"], layout["region_polygon_world_xy_m"]):
@@ -194,7 +256,10 @@ def fixed_release_goal(destination, holding, placement_request, attachment_spher
     gripper_bottom = lowest_sphere_z(gripper, rotation)
     # Explicit commanded-height reserve for measured loaded servo error; this
     # does not alter the hard world or actual-feedback clearance requirement.
-    planned_gap = float(clearance_m) + RELEASE_PLANNING_RESERVE_M
+    release_height_m = clearance_m if release_height_m is None else float(release_height_m)
+    if not np.isfinite(release_height_m) or release_height_m < 0:
+        raise ValueError('release height must be finite and nonnegative')
+    planned_gap = max(float(clearance_m), release_height_m) + RELEASE_PLANNING_RESERVE_M
     attachment_min_z = floor + planned_gap - attachment_bottom
     gripper_min_z = floor + planned_gap - gripper_bottom
     goal[2, 3] = max(attachment_min_z, gripper_min_z)
@@ -210,6 +275,7 @@ def fixed_release_goal(destination, holding, placement_request, attachment_spher
         "floor_z_m": floor, "floor_source": support.get("source"),
         "T_world_tcp_at_grasp": grasp.tolist(),
         "required_clearance_m": float(clearance_m),
+        "configured_release_height_m": release_height_m,
         "planning_reserve_m": RELEASE_PLANNING_RESERVE_M,
         "planning_reserve_reason": RELEASE_PLANNING_RESERVE_REASON,
         "release_height_m": float(attachment_gap),
@@ -226,11 +292,30 @@ def fixed_release_goal(destination, holding, placement_request, attachment_spher
         "region_polygon_world_xy_m": layout["region_polygon_world_xy_m"],
         "slot_polygon_world_xy_m": cell["polygon_world_xy_m"],
         "object_id": holding["instance_id"], "placement_target_count": request.get("target_count"),
+        "measured_object_reference_tool_m": visible_reference_tool_m(holding).tolist(),
+        "object_reference_world_xy_m": (rotation @ visible_reference_tool_m(holding) + goal[:3, 3])[:2].tolist(),
         "region_constraint": "finger_front_in_configured_region",
         "collision_policy": "three_dimensional_attachment_gripper_and_scene",
         "assumptions": ["rigid_hold_without_slip", "grasp_world_rotation_preserved",
                         "commanded_positions_reference_calibrated_finger_front"],
     }
+    if fixed:
+        reference.update(position_constraint='measured_object_reference_world_xy',
+            visible_reference_source='frozen_measured_visible_surface_centroid',
+            fixed_xy=True, configured_reference_world_xy_m=center.tolist(),
+            object_reference_definition='frozen_measured_visible_surface_centroid',
+            region_constraint='configured_xy_with_existing_region_and_pose_checks',
+            assumptions=['rigid_hold_without_slip', 'grasp_world_rotation_preserved',
+                         'measured_visible_surface_centroid_is_not_volume_center'])
+    if precise:
+        reference.update(position_constraint='measured_object_reference_world_xy', precise_xy=True,
+            xy_tolerance_m=tolerance,
+            object_reference_world_xy_m=(rotation @ object_reference + goal[:3, 3])[:2].tolist(),
+            object_reference_definition='measured_visible_surface_centroid_not_volume_center',
+            visible_reference_source='frozen_measured_visible_surface_centroid',
+            region_constraint='measured_object_reference_at_configured_xy',
+            assumptions=['rigid_hold_without_slip', 'grasp_world_rotation_preserved',
+                         'measured_visible_surface_centroid_is_not_volume_center'])
     return {"T_world_tcp": goal.tolist(), "destination_id": destination["id"],
         "candidate_index": 0, "yaw_delta_world_rad": 0., "frame": "world",
         "source": "fixed_demo_slot_and_measured_holding",
@@ -244,9 +329,7 @@ def release_endpoint_evidence(goal, holding, actual_tcp):
     actual = rigid_matrix(actual_tcp)
     expected = rigid_matrix(goal["T_world_tcp"])
     front_target = reference.get('position_constraint') == 'finger_front_world_xy'
-    measured_reference = (front_tcp_offset(holding['arm']) if front_target else np.asarray(
-        (holding.get("measurement_provenance") or {}).get("measured_reference_tool_m",
-        np.asarray(holding["points_tool_m"], dtype=float).mean(axis=0))))
+    measured_reference = np.zeros(3) if front_target else visible_reference_tool_m(holding)
     if not np.allclose(reference["tool_reference_point_m"], measured_reference, atol=1e-12, rtol=0):
         raise ValueError("release_tool_reference_changed")
     floor, clearance = float(reference["floor_z_m"]), float(reference["required_clearance_m"])
@@ -259,10 +342,17 @@ def release_endpoint_evidence(goal, holding, actual_tcp):
     angle = float(np.arccos(np.clip((np.trace(actual[:3, :3].T @ expected[:3, :3]) - 1) / 2, -1, 1)))
     attachment_gap = actual[2, 3] + lowest_sphere_z(attachment, actual[:3, :3]) - floor
     gripper_gap = actual[2, 3] + lowest_sphere_z(gripper, actual[:3, :3]) - floor
-    minimum_z = floor + clearance + RELEASE_PLANNING_RESERVE_M - min(
+    minimum_z = floor + max(clearance, reference.get('configured_release_height_m', clearance)) + RELEASE_PLANNING_RESERVE_M - min(
         lowest_sphere_z(attachment, expected[:3, :3]), lowest_sphere_z(gripper, expected[:3, :3]))
     finite = np.isfinite([floor, clearance, attachment_gap, gripper_gap, xy_error]).all()
-    height_valid = valid_height_resolution(reference, expected, minimum_z, scene_token=goal.get("scene_token"))
+    height_valid = valid_height_resolution(reference, expected, minimum_z, scene_token=goal.get("scene_token"), holding=holding)
+    object_gap, maximum_gap, gap_valid = None, None, True
+    if 'height_search' in reference:
+        from .release_height_search import object_floor_gap
+
+        object_gap = object_floor_gap(held_geometry_points(holding), actual, floor)
+        maximum_gap = reference['height_search']['bounds']['maximum_object_floor_gap_m']
+        gap_valid = object_gap <= maximum_gap + 1e-9
     world_sphere_xy = (attachment[:, :3] @ actual[:3, :3].T + actual[:3, 3])[:, :2]
     footprint_inside = True
     front_inside = True
@@ -271,10 +361,21 @@ def release_endpoint_evidence(goal, holding, actual_tcp):
         distance = world_sphere_xy @ hull.equations[:, :2].T + hull.equations[:, 2]
         footprint_inside = footprint_inside and bool(np.all(distance + attachment[:, 3, None] <= 1e-9))
         front_inside = front_inside and bool(np.all(actual_reference[:2] @ hull.equations[:, :2].T + hull.equations[:, 2] <= 1e-9))
-    region_valid = front_inside if front_target else footprint_inside
-    valid = bool(finite and clearance >= 0 and height_valid and region_valid
+    precise = reference.get('precise_xy') is True
+    xy_valid = True
+    if precise:
+        tolerance = reference.get('xy_tolerance_m')
+        object_xy = np.asarray(reference.get('object_reference_world_xy_m'), dtype=float)
+        xy_valid = bool(type(tolerance) in (int, float) and np.isfinite(tolerance) and tolerance > 0
+            and object_xy.shape == (2,) and np.allclose(object_xy, expected_reference[:2], atol=1e-9, rtol=0)
+            and np.allclose(object_xy, reference['target_reference_world_xy_m'], atol=1e-9, rtol=0)
+            and xy_error <= tolerance)
+    region_valid = front_inside if front_target or precise else footprint_inside
+    valid = bool(finite and clearance >= 0 and height_valid and region_valid and xy_valid and gap_valid
         and attachment_gap >= clearance - 1e-9 and gripper_gap >= clearance - 1e-9)
     return {"at_release_goal": valid, "attachment_floor_gap_m": float(attachment_gap),
+        "object_floor_gap_m": object_gap, "maximum_object_floor_gap_m": maximum_gap,
+        "object_floor_gap_valid": gap_valid,
         "gripper_floor_gap_m": float(gripper_gap), "position_error_m": position_error,
         "rotation_error_rad": angle, "reference_xy_error_m": xy_error,
         "actual_reference_world_m": actual_reference.tolist(),
@@ -282,11 +383,14 @@ def release_endpoint_evidence(goal, holding, actual_tcp):
         "tool_reference_point_m": measured_reference.tolist(), "required_clearance_m": clearance,
         "planning_reserve_m": reference.get("planning_reserve_m"),
         "planning_reserve_reason": reference.get("planning_reserve_reason"),
-        "acceptance_policy": ("finger_front_in_region_and_actual_geometry_clearance" if front_target else
+        "acceptance_policy": ("measured_object_reference_at_configured_xy_and_actual_geometry_clearance" if precise else
+                              "finger_front_in_region_and_actual_geometry_clearance" if front_target else
                               "object_footprint_in_region_and_actual_geometry_clearance"),
         "front_inside_region": front_inside,
         "footprint_inside_region": footprint_inside,
-        "position_tolerance_m": None, "rotation_tolerance_deg": None,
+        "position_tolerance_m": reference.get('xy_tolerance_m') if precise else None, "rotation_tolerance_deg": None,
         "actual_tcp_world": actual.tolist(), "floor_z_m": floor,
+        "actual_object_reference_world_xy_m": (actual[:3, :3] @ visible_reference_tool_m(holding)
+                                                + actual[:3, 3])[:2].tolist(),
         "source": ("calibrated_finger_front_attachment_gripper_and_actual_tcp" if front_target else
                    "measured_object_reference_attachment_gripper_and_actual_tcp")}

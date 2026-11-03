@@ -135,6 +135,10 @@
 .object-list h3 { font-size: 22px; margin: 0 0 12px; }
 .object-list ol { list-style: none; padding: 0; margin: 0; }
 .object-list li { margin: 10px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.object-list pre { font-size: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.object-list .policy-tree { max-height: 620px; overflow: auto; margin-top: 12px; }
+.object-list .policy-node { padding: 12px; border: 1px solid var(--border, #ddd); border-radius: 6px; }
+.object-list .policy-branch { margin-top: 12px; padding-left: 12px; border-left: 2px solid #76699b; }
 .camera-images figure { position: relative; }
 .camera-image-surface { position: relative; }
 .camera-image-surface img { aspect-ratio: auto; }
@@ -142,3 +146,5 @@
 .object-camera-label { position: absolute; max-width: 65%; background: #132739e8; color: #fff; border: 1px solid #f7cb56; border-radius: 4px; padding: 2px 4px; font-size: clamp(9px, .7vw, 13px); line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
 .object-camera-obstacle, .object-camera-container, .object-camera-destination { border-color: #91ccff; }
 .placement-camera-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+.failure-evidence{margin-top:10px;font-size:20px;overflow-wrap:anywhere}.failure-evidence section{margin:12px 0;padding:10px;border:1px solid #76524f;border-radius:6px}.failure-evidence pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:20px;max-height:420px;overflow:auto}.failure-evidence h3{font-size:24px;margin:12px 0 6px}

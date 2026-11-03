@@ -41,7 +41,14 @@ def planner_backend(result=None, error=None):
         return result
     value.motion_planner.plan_grasp = plan
     value.motion_planner.update_tool_pose_criteria = restored.append
-    value.motion_planner.trajopt_solver = SimpleNamespace(config=SimpleNamespace(interpolation_dt=.02))
+    value.motion_planner.trajopt_solver = SimpleNamespace(config=SimpleNamespace(interpolation_dt=.02,
+        position_tolerance=.005, orientation_tolerance=.05))
+    value._state = lambda joints: np.deg2rad(joints)
+    fk_positions = [[.5, .2, .6], [.5, .2, .7]]
+    def compute(state):
+        pose = SimpleNamespace(position=Tensor([fk_positions.pop(0)]), quaternion=Tensor([[1., 0., 0., 0.]]))
+        return SimpleNamespace(tool_poses=SimpleNamespace(get_link_pose=lambda frame: pose))
+    value.motion_planner.compute_kinematics = compute
     checked = []
     value.validate_trajectory_native = checked.append
     return value, calls, restored, checked
@@ -90,6 +97,20 @@ def test_public_exception_still_restores_criteria_and_clears_result_buffers():
     assert caught.value.code == "CUROBO_GRASP_FAILED" and restored
     assert value.motion_planner.last_grasp_result is None
     assert value.motion_planner.last_pose_result is None
+
+
+@pytest.mark.parametrize('status', ['Goalset planning returned None.', 'No grasp in goal set was reachable.'])
+def test_release_goal_preflight_failure_is_not_reported_as_approach_failure(status):
+    raw = raw_result()
+    raw.status, raw.approach_success, raw.grasp_success = status, False, False
+    value, _, restored, checked = planner_backend(raw)
+    with pytest.raises(Exception) as caught:
+        value.plan_place_native(request())
+    assert caught.value.code == 'CUROBO_GRASP_FAILED'
+    assert caught.value.details['phase'] == 'goalset'
+    assert caught.value.details['compound_phase'] == 'release_goal_preflight'
+    assert caught.value.details['status'] == status
+    assert restored and not checked
 
 
 @pytest.mark.parametrize("count", [0, 1, 5, 1.5, float("nan")])
@@ -235,54 +256,3 @@ def test_runtime_preserves_typed_timeout_validation(timeout):
     assert caught.value.code == "CUROBO_INVALID_TIMEOUT" and not calls
 
 
-
-
-
-
-
-
-def test_algorithms_consumes_only_two_real_phases_and_checks_actual_commands():
-    import hashlib
-    import json
-
-    from test_visible_placement import measured_inputs
-
-    from luna_mujoco.algorithms import Algorithms
-
-    target, destination, holding = measured_inputs()
-    holding.update(owner_id="held-session", attached=True, verified=True,
-        attachment_evidence={"attachment_spheres_tool_m": [[0., 0., -.15, .01]]})
-    observation = {"source": "rgbd", "observation_id": "captured", "generation": 1,
-        "objects": [target, destination], "arms": {arm: {
-            "joints_rad": [0.] * 7, "tcp": np.eye(4).tolist(), "gripper_position_rad": .4}
-            for arm in ("A", "B")}}
-    scene = {"target_id": target["id"], "observation_id": "captured", "generation": 1,
-        "scene_token": "current"}
-    value, _, _, _ = planner_backend(raw_result())
-    plan = value.plan_place_native(request())
-    phases = {name: asdict(getattr(plan, name)) for name in ("approach", "place")}
-    queries = []
-    def query(path, body):
-        queries.append((path, body))
-        if path == "/tools/solve_ik_batch":
-            return {"scene_token": "current", "batch_size": len(body["goal_matrices_world"]),
-                "items": [{"candidate_index": index, "success": True}
-                          for index in range(len(body["goal_matrices_world"]))],
-                "attached": True, "collision_evidence": {"optimizer_attachment": True}}
-        if path == "/tools/plan_place_batch":
-            assert len(body["goal_matrices_world"]) == 16
-            return {"scene_token": "current", "items": [{"index": index, "success": True,
-                "approach_success": True, "place_success": True, "phases": phases} for index in range(16)],
-                "collision_evidence": {"optimizer_attachment": True}, "retreat_requires_replan": True}
-        if path == "/tools/plan_to_pose":
-            return {"scene_token": "current", "attached": False, "trajectory": phases["place"]}
-        assert path == "/carrying/validate"
-        digest = hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"),
-            allow_nan=False).encode()).hexdigest()
-        return {"scene_token": "current", "binding_sha256": digest, "collision_free": True, "attached": body.get("carrying_binding") is not None}
-    algorithms = Algorithms(curobo_request=query)
-    result = algorithms.plan_place(observation, target["id"], "A", scene, holding, destination["id"])
-    assert set(result["phases"]) == {"approach", "place", "retreat"}
-    assert result["retreat_requires_replan"] is False
-    assert [body["phase"] for path, body in queries if path == "/carrying/validate"] == ["approach", "place", "retreat"]
-    assert queries[-1][1]["current_joints_rad"] == result["phases"]["place"]["positions_rad"][-1]

@@ -291,7 +291,7 @@ def encode_videos(directory):
     if sys.platform.startswith("linux"):
         environment["MUJOCO_GL"] = "osmesa"
         environment["PYOPENGL_PLATFORM"] = "osmesa"
-        environment["LP_NUM_THREADS"] = "2"
+        environment["LP_NUM_THREADS"] = "1"
     # -m must also work when the app was started with an in-process sys.path entry.
     environment["PYTHONPATH"] = os.pathsep.join([str(Path(__file__).resolve().parents[1]),
                                                environment.get("PYTHONPATH", "")])
@@ -477,6 +477,7 @@ if __name__ == "__main__":
     if len(sys.argv) != 4 or sys.argv[1] != "--encode":
         raise SystemExit("usage: python -m luna_mujoco.experiment_video --encode DIRECTORY FFMPEG")
     if sys.platform.startswith("linux"):
-        os.nice(5)
+        # Offline replay must yield CPU to a new live task in this container.
+        os.nice(19)
     destination = Path(sys.argv[2])
     _write_json(destination / "videos" / "result.json", _encode_recording(destination, sys.argv[3]))

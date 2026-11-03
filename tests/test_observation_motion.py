@@ -40,7 +40,7 @@ class ObservationAlgorithms(FakeAlgorithms):
 
 
 class DualSim(Sim):
-    def execute_dual_trajectory(self, paths, dt, generation):
+    def execute_dual_trajectory(self, paths, dt, generation, *, execution_settings=None):
         for arm in ('A', 'B'):
             self.state['arms'][arm]['joints_rad'] = paths[arm][-1]
         return {'synchronized': True}
@@ -48,7 +48,7 @@ class DualSim(Sim):
 
 def context(tmp_path, algorithms):
     sim = DualSim()
-    runner = Runner(sim, algorithms, lambda record: None, tmp_path)
+    runner = Runner(sim, algorithms, None, tmp_path)
     settings = PlanningSettings().model_dump()
     observation = algorithms.observe(sim.capture_rgbd())
     runner.run_id = 'observe-test'

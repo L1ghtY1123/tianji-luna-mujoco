@@ -138,3 +138,15 @@ def observation_poses(settings=None):
                 raise ValueError(f"observation_joint_out_of_range:{arm}:{index}")
         result[arm] = list(joints)
     return result
+
+
+def observation_viewpoint_poses(settings, viewpoint='configured'):
+    """Expose distinct camera-motion proposals; cuRobo still validates the whole path."""
+    offsets = {'configured': 0., 'wrist_tilt_positive': 12., 'wrist_tilt_negative': -12.}
+    if viewpoint not in offsets:
+        raise ValueError('unknown_observation_viewpoint')
+    poses = observation_poses(settings)
+    for joints in poses.values():
+        joints[5] += math.radians(offsets[viewpoint])
+    # Do not silently clip a proposed endpoint at a joint limit.
+    return observation_poses({'observation': poses})

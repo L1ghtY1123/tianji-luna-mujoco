@@ -17,11 +17,11 @@ def sufficiency_question(criteria=()):
         'depth from RGB. Request another observation only for a missing or ambiguous required visual fact.')
 
 
-def assessment(judgments, expected, observation_id):
+def assessment(judgments, expected, observation_id, *, require_sufficiency=True):
     missing = [name for name in expected if judgments.get(name, 'unknown') == 'unknown']
     failed = [name for name, value in expected.items()
               if judgments.get(name) not in (value, 'unknown', None)]
-    if judgments.get('observation_sufficient') != 'yes':
+    if require_sufficiency and judgments.get('observation_sufficient') != 'yes':
         missing.append('observation_sufficient')
     needs_observation = bool(missing)
     return {'observation_id': observation_id, 'required_criteria': dict(expected),

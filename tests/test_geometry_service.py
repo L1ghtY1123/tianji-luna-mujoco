@@ -8,6 +8,30 @@ from luna_mujoco import geometry_service
 from luna_mujoco.planning_settings import PlanningSettings
 
 
+def test_reset_releases_mapping_policy_for_fresh_geometry_mode():
+    runtime = geometry_service.GeometryRuntime()
+    reset_calls = []
+    runtime.perception_mapper = SimpleNamespace(reset=lambda: reset_calls.append(True))
+    runtime.clear_carrying()
+    assert reset_calls == [True]
+    assert runtime.perception_mapper is None
+
+
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_cuda_out_of_memory_preserves_bounded_allocator_message(wrapped):
+    oom_type = type('OutOfMemoryError', (RuntimeError,), {'__module__': 'torch'})
+    message = 'Tried to allocate 626.00 MiB; 334.25 MiB is free. ' + 'x' * 4000
+    error = oom_type(message)
+    if wrapped:
+        outer = RuntimeError('planner failed')
+        outer.__cause__ = error
+        error = outer
+    status, result = geometry_service.operation_error_response(error)
+    assert status == 503 and result['error']['code'] == 'CUROBO_CUDA_OUT_OF_MEMORY'
+    assert result['error']['details']['allocator_message'] == message[:2000]
+    assert result['error']['details']['planning_result'] == 'unavailable'
+
+
 def test_profile_change_destroys_cached_solvers_but_time_scale_does_not():
     runtime = geometry_service.GeometryRuntime()
     calls = []
@@ -98,9 +122,10 @@ def test_small_batches_reuse_one_backend_without_exposing_padding(monkeypatch, a
     from test_backend_builder import native_batch
 
     runtime = geometry_service.GeometryRuntime()
-    runtime.geometry_scene = {"scene_token": "scene", "target_id": "target"}
+    runtime.geometry_scene = {"scene_token": "scene", "target_id": "target", "exclusion_state": "selected"}
     runtime.geometry_grids = []
-    runtime.geometry_model = {"cuboid": {}}
+    runtime.geometry_model = {"voxel": {"semantic_instance::target": {
+        "pose": [0, 0, 0, 1, 0, 0, 0], "dims": [.02, .02, .02], "voxel_size": .02}}}
     runtime.geometry_solver_profile = runtime.planning_settings.solver_payload()
     runtime.effective_config = {arm: {"plan": {"ik_num_seeds": 16}}}
     created_capacities = []
@@ -126,7 +151,7 @@ def test_small_batches_reuse_one_backend_without_exposing_padding(monkeypatch, a
         )
 
     monkeypatch.setattr(runtime, "_create_real_backend_unlocked", create_backend)
-    for count in (1, 3, 4, 5, 9, 16, 17):
+    for count in (1, 2, 3, 4, 5, 8, 9, 16, 17):
         payload = request_payload(PlanningSettings())
         payload["arm"] = arm
         goals = []
@@ -137,13 +162,13 @@ def test_small_batches_reuse_one_backend_without_exposing_padding(monkeypatch, a
         payload["goal_matrices_world"] = goals
         result = geometry_service.run_operation(runtime, "/tools/plan_grasp_batch", payload)
         assert result["batch_size"] == count
-        assert result["batch_capacity"] == (4 if count <= 4 else 16 if count <= 16 else 50)
+        assert result["batch_capacity"] == (2 if count <= 2 else 4 if count <= 4 else 8 if count <= 8 else 16 if count <= 16 else 50)
         assert [item["candidate_index"] for item in result["items"]] == list(range(count))
         assert [item["success"] for item in result["items"]] == [index != 1 for index in range(count)]
         assert len(submitted_goals[-1]) == result["batch_capacity"]
         assert [list(map(list, goal)) for goal in submitted_goals[-1][:count]] == goals
         assert all(goal == submitted_goals[-1][count - 1] for goal in submitted_goals[-1][count:])
-    assert created_capacities == [4, 16, 50]
+    assert created_capacities == [2, 4, 8, 16, 50]
 
 
 def request_payload(settings):
@@ -211,30 +236,11 @@ def test_batch_service_preserves_flags_and_nested_phase_payload():
     assert len(result["items"][0]["phases"]["grasp"]["positions_rad"]) == 2
 
 
-def test_large_collision_profile_expands_esdf_grid_padding(monkeypatch):
-    from test_algorithms import snapshot
-
-    from luna_mujoco.geometry import geometry_payload
-
-    calls = []
-
-    def grid(name, kind, size, pose, *, padding_m=.3):
-        calls.append(padding_m)
-        return name, {"dims": size, "voxel_size": .01}
-
-    monkeypatch.setattr(geometry_service, "make_grid", grid)
-    monkeypatch.setattr(geometry_service, "maximum_world_sphere_radius", lambda _: .2)
-    settings = PlanningSettings(trajectory_collision_clearance_m=.08, place_release_height_m=.09,
-                                optimizer_collision_activation_distance_m=.5)
-    state = snapshot()
-    # This offline primitive utility requires explicit shapes; RGBD fixtures do not expose them.
-    state["objects"][0].update(size=[.05] * 3, quaternion=[1., 0., 0., 0.])
-    payload = geometry_payload(state, "red") | {"planning_settings": settings.model_dump()}
+def test_legacy_shape_mapping_cannot_reenter_online_scene():
     runtime = geometry_service.GeometryRuntime()
-    result = runtime.build_geometry(payload)
-    assert calls == pytest.approx([.72, .72])
-    assert result["esdf_padding_m"] == pytest.approx(.72)
-    assert runtime.geometry_solver_profile == settings.solver_payload()
+    with pytest.raises(ValueError, match='simulation_geometry_mapping_unsupported'):
+        runtime.build_geometry({'objects': [{'id': 'shape', 'kind': 'box', 'size': [.05] * 3}]})
+    assert runtime.geometry_scene is None
 
 
 def set_geometry_layers(runtime, count, *, size=(1.0, 1.0, 1.0)):
@@ -246,13 +252,13 @@ def set_geometry_layers(runtime, count, *, size=(1.0, 1.0, 1.0)):
     }
 
 
-def test_geometry_cache_reserves_eight_layers_without_adding_obstacles():
+def test_geometry_cache_reserves_sixteen_layers_without_adding_obstacles():
     runtime = geometry_service.GeometryRuntime()
     set_geometry_layers(runtime, 4)
 
     snapshot = runtime._prepare_scene_cache_unlocked()
 
-    assert runtime._collision_cache["voxel"]["layers"] == 8
+    assert runtime._collision_cache["voxel"]["layers"] == 16
     assert snapshot == {"scene_token": "scene-4", "target_id": "0"}
     assert list(runtime._scene_model["voxel"]) == [
         "geometry_table", "semantic_instance::0", "semantic_instance::1", "semantic_instance::2",
@@ -271,10 +277,10 @@ def test_geometry_cache_grows_once_and_reuses_planners_after_scene_shrinks():
     runtime._peer_collision_snapshot_by_arm["A"] = (backend, "peer")
     runtime.effective_config["A"] = {"plan": {"max_batch_size": 16}}
 
-    set_geometry_layers(runtime, 9)
+    set_geometry_layers(runtime, 17)
     runtime._prepare_scene_cache_unlocked()
 
-    assert runtime._collision_cache["voxel"]["layers"] == 16
+    assert runtime._collision_cache["voxel"]["layers"] == 32
     assert destroyed == ["old"]
     assert not runtime._batch_backends and not runtime._ik_batch_backends
     assert not runtime._scene_snapshot_key_by_arm and not runtime._peer_collision_snapshot_by_arm
@@ -282,10 +288,10 @@ def test_geometry_cache_grows_once_and_reuses_planners_after_scene_shrinks():
 
     retained = SimpleNamespace(destroy=lambda: destroyed.append("retained"))
     runtime._batch_backends["A"] = retained
-    for count in (16, 8, 4, 2, 4):
+    for count in (32, 16, 8, 4, 2, 4):
         set_geometry_layers(runtime, count)
         runtime._prepare_scene_cache_unlocked()
-        assert runtime._collision_cache["voxel"]["layers"] == 16
+        assert runtime._collision_cache["voxel"]["layers"] == 32
         assert runtime._batch_backends["A"] is retained
         assert len(runtime._scene_model["voxel"]) == count
     assert destroyed == ["old"]
@@ -302,7 +308,7 @@ def test_geometry_cache_expands_for_larger_grids_and_retains_that_capacity():
     runtime._prepare_scene_cache_unlocked()
 
     assert destroyed == ["old"]
-    assert runtime._collision_cache["voxel"]["layers"] == 8
+    assert runtime._collision_cache["voxel"]["layers"] == 16
     dimensions = runtime._collision_cache["voxel"]["dims"].copy()
     assert dimensions[0] * dimensions[1] * dimensions[2] >= 64
     retained = SimpleNamespace(destroy=lambda: destroyed.append("retained"))
@@ -329,7 +335,7 @@ def test_geometry_cache_cleanup_failure_drops_all_stale_planners_and_reports_err
     runtime._ik_batch_backends["B"] = SimpleNamespace(destroy=lambda: destroyed.append("other"))
     runtime._scene_snapshot_key_by_arm["A"] = "old"
     runtime.effective_config["A"] = {"plan": {"max_batch_size": 16}}
-    set_geometry_layers(runtime, 9)
+    set_geometry_layers(runtime, 17)
 
     with pytest.raises(CuroboToolError, match="cleanup") as caught:
         runtime._prepare_scene_cache_unlocked()
@@ -342,11 +348,11 @@ def test_geometry_cache_cleanup_failure_drops_all_stale_planners_and_reports_err
 
 def test_extra_observed_layer_reuses_reserved_planner_capacity():
     runtime = geometry_service.GeometryRuntime()
-    set_geometry_layers(runtime, 4)
-    runtime._prepare_scene_cache_unlocked()
-    backend = SimpleNamespace(destroy=lambda: pytest.fail("common 4-to-5 layer growth must reuse solver"))
-    runtime._backends['A'] = backend
     set_geometry_layers(runtime, 5)
     runtime._prepare_scene_cache_unlocked()
+    backend = SimpleNamespace(destroy=lambda: pytest.fail("5-to-6 layer growth fits the same capacity bucket"))
+    runtime._backends['A'] = backend
+    set_geometry_layers(runtime, 6)
+    runtime._prepare_scene_cache_unlocked()
     assert runtime._backends['A'] is backend
-    assert len(runtime._scene_model['voxel']) == 5
+    assert len(runtime._scene_model['voxel']) == 6

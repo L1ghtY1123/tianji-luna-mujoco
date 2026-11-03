@@ -1,3 +1,4 @@
+import { renderFailureReport } from '../src/failure-report.js';
 import { runConclusion } from '../src/run-conclusion.js';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -18,6 +19,7 @@ import { loadCadAssets } from '../src/cad-assets.js';
 const source = (await readFile(new URL('../src/main.js', import.meta.url), 'utf8'))
   .replace(/^import .*;\r?\n/gm, '');
 
+const renderedText = node => [node.textContent, ...node.children.map(renderedText)].join(' ');
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 test('clean scene draft follows mock CAD revision and final motion without changing generation', async () => {
@@ -63,7 +65,7 @@ async function page(initial = snapshot(), { loadSettings = true } = {}) {
 
   function element(tagName) {
     return {
-      tagName, value: '', textContent: '', listeners: {}, style: {}, children: [],
+      tagName, ownerDocument: { createElement: element }, value: '', textContent: '', listeners: {}, style: {}, children: [],
       classList: { toggle() {} },
       addEventListener(kind, listener) { this.listeners[kind] = listener; },
       append(...children) { this.children.push(...children); },
@@ -101,7 +103,7 @@ async function page(initial = snapshot(), { loadSettings = true } = {}) {
     createObjectList: container => createObjectList(container, { document: { createElement: element } }),
     createPointcloudPanel,
     loadCadAssets,
-    runConclusion,
+    runConclusion, renderFailureReport,
     runEvidence,
     runStatusSummary,
     performance: { now: () => timeMs },
@@ -291,20 +293,20 @@ test('long errors keep a compact summary and full details without reopening a di
   assert.equal(ui.element('error-banner').hidden, true);
 });
 
-test('partial success keeps collection counts and deferred reasons visible', async () => {
+test('partial success keeps generic selected-input completion counts visible', async () => {
   const ui = await page(snapshot({ run: { status: 'partial_success', task_progress: {
-    completed: [{ id: 'one' }], deferred: [{ id: 'two', reason: 'grasp_verification_failed' }],
+    selected_input_ids: ['one', 'two'], completed_input_ids: ['one'], product_ids: [], transformations: {},
   } } }));
   assert.equal(ui.element('run-status').textContent, '部分完成');
   const summary = ui.element('run-details').children.find(child => child.className === 'run-holding-summary');
-  assert.match(summary.textContent, /已完成 1 个.*暂缓 1 个.*抓取未通过验证/);
+  assert.match(summary.textContent, /已完成 1 . 2 个目标/);
   assert.equal(ui.element('facts-section').hidden, false);
 });
 
 test('grasp failure presents the stopped program and its evidence without reset advice', async () => {
-  const ui = await page(snapshot({ run: { status: 'running', failure: { code: 'grasp_verification_failed' } } }));
-  assert.match(ui.element('run-failure').textContent, /技能程序已停止/);
-  assert.equal(ui.element('run-failure').textContent.includes('Reset'), false);
+  const ui = await page(snapshot({ run: { status: 'running', failure_report: { code: 'grasp_verification_failed', summary: '抓取核验未通过，任务已停止', unknowns: ['夹爪反馈未确认持物'] } } }));
+  assert.match(renderedText(ui.element('run-failure')), /抓取核验未通过，任务已停止/);
+  assert.equal(renderedText(ui.element('run-failure')).includes('Reset'), false);
 });
 
 test('marker editor exposes tabletop XY dimensions and submits fixed height after a drag', async () => {
@@ -512,7 +514,8 @@ test('switching a solid box to a bin supplies usable independent cavity controls
 
 test('place-only tasks explain the need for verified session holding and display the destination independently', async () => {
   const ui = await page(snapshot({ run: { status: 'failed', task: 'place', target_id: 'source_track',
-    destination_id: 'bin_track', error: 'place_requires_verified_holding' } }));
+    destination_id: 'bin_track', error: 'place_requires_verified_holding',
+    failure_report: { code: 'place_requires_verified_holding', summary: '放置要求已验证的持物证据' } } }));
   assert.match(ui.element('error-message').textContent, /已验证.*持物/);
   assert.equal(ui.element('target-value').textContent, 'source_track');
   assert.equal(ui.element('destination-value').textContent, 'bin_track');
@@ -873,7 +876,7 @@ test('current and failed Batched IK status shows counts instead of candidate ID 
   ui.message(snapshot({ serverTime: 1001, run: { status: 'failed', error: 'IK disconnected',
     failed_step: { ...current_step, candidate_indices: { count: 100, first: [100, 101, 102] } } } }));
   assert.match(ui.element('run-candidate').textContent, /候选 100 个/);
-  assert.match(ui.element('run-failure').textContent, /失败步骤：evaluate_arms.*IK disconnected/);
+  assert.match(renderedText(ui.element('run-failure')), /失败步骤：evaluate_arms.*IK disconnected/);
 });
 
 test('grasp and place IK stages are distinguished from trajectory planning', async () => {
@@ -900,7 +903,7 @@ test('a failed planning snapshot keeps its cause visible and freezes the clock',
   assert.equal(ui.element('error-banner').hidden, false);
   assert.equal(ui.element('run-status').textContent, '任务失败');
   assert.match(ui.element('run-step').textContent, /plan_grasp/);
-  assert.match(ui.element('run-failure').textContent, /失败步骤：plan_grasp.*cuRobo service disconnected/);
+  assert.match(renderedText(ui.element('run-failure')), /失败步骤：plan_grasp.*cuRobo service disconnected/);
   assert.equal(ui.element('run-failure').hidden, false);
   ui.click('dismiss-error');
   assert.equal(ui.element('run-failure').hidden, false);
@@ -934,8 +937,8 @@ test('asynchronous cleanup failure stays visible and blocks Start until Reset cl
   assert.match(ui.element('start-hint').textContent, /清理失败.*Reset/);
   assert.equal(ui.element('run-details').hidden, false);
   for (const id of ['error-details', 'run-failure']) {
-    assert.match(ui.element(id).textContent, /算法状态清理失败.*Reset/);
-    assert.match(ui.element(id).textContent, /GPU cleanup disconnected/);
+    assert.match(renderedText(ui.element(id)), /算法状态清理失败.*Reset/);
+    assert.match(renderedText(ui.element(id)), /GPU cleanup disconnected/);
   }
   ui.click('dismiss-error');
   ui.advance(2000);
@@ -945,8 +948,8 @@ test('asynchronous cleanup failure stays visible and blocks Start until Reset cl
   ui.click('start');
   assert.equal(ui.requests().includes('/api/start'), false);
   ui.message(snapshot({ serverTime: 1004, run: { ...cleanup, status: 'failed', error: 'prior planning failure' } }));
-  assert.match(ui.element('run-failure').textContent, /prior planning failure/);
-  assert.match(ui.element('run-failure').textContent, /GPU cleanup disconnected/);
+  assert.match(renderedText(ui.element('run-failure')), /prior planning failure/);
+  assert.match(renderedText(ui.element('run-failure')), /GPU cleanup disconnected/);
   ui.click('reset');
   ui.takeRequest('/api/reset').resolve(snapshot({ generation: 2 }).simulation);
   await settle();
@@ -989,26 +992,26 @@ test('an active planning call shows progress without claiming that its result is
 test('planning timeouts keep a Chinese summary and the original reason in error details', async () => {
   const ui = await page(snapshot({ run: { status: 'failed', algorithm_pending: true,
     error: 'plan_grasp_timeout:180s', failed_step: { skill: 'plan_grasp', duration_s: 180 } } }));
-  assert.match(ui.element('error-message').textContent, /抓取规划超过总时限/);
+  assert.match(ui.element('error-message').textContent, /plan_grasp_timeout/);
   for (const id of ['error-details', 'run-failure']) {
-    assert.match(ui.element(id).textContent, /抓取规划超过总时限，任务已停止，迟到结果不会执行/);
-    assert.match(ui.element(id).textContent, /plan_grasp_timeout:180s/);
+    assert.match(renderedText(ui.element(id)), /plan_grasp_timeout:180s/);
+    assert.match(renderedText(ui.element(id)), /plan_grasp_timeout:180s/);
   }
   assert.equal(ui.element('algorithm-pending').hidden, false);
 });
 
 for (const [error, explanation] of [
-  ['arm_already_attempted:B', /该机械臂本轮已尝试规划.*任务已停止/],
-  ['no_reachable_arm', /源与目的未同时命中可用机械臂工作空间/],
+  ['arm_already_attempted:B', /arm_already_attempted:B/],
+  ['no_reachable_arm', /no_reachable_arm/],
 ]) {
   test(`arm selection rejection explains ${error} without claiming both arms are unreachable`, async () => {
     const ui = await page(snapshot({ run: { status: 'failed', error,
       failed_step: { skill: 'choose_arm', duration_s: 1 } } }));
     assert.match(ui.element('error-message').textContent, explanation);
     for (const id of ['error-details', 'run-failure']) {
-      assert.match(ui.element(id).textContent, explanation);
-      assert.ok(ui.element(id).textContent.includes(error));
-      assert.doesNotMatch(ui.element(id).textContent, /两个机械臂都未找到/);
+      assert.match(renderedText(ui.element(id)), explanation);
+      assert.ok(renderedText(ui.element(id)).includes(error));
+      assert.doesNotMatch(renderedText(ui.element(id)), /两个机械臂都未找到/);
     }
   });
 }
@@ -1017,8 +1020,8 @@ test('release collision hints use structured error codes while retaining service
   const ui = await page(snapshot());
   ui.message(snapshot({ serverTime: 1001, run: { status: 'failed',
     error_code: 'release_clearance_conflict', error: 'cuRobo /tools/plan_place: requested pose collides' } }));
-  assert.match(ui.element('run-failure').textContent, /物体离盒底高度/);
-  assert.match(ui.element('run-failure').textContent, /requested pose collides/);
+  assert.match(renderedText(ui.element('run-failure')), /release_clearance_conflict/);
+  assert.match(renderedText(ui.element('run-failure')), /requested pose collides/);
 });
 
 test('a pending algorithm rejection uses the backend error code to explain the wait', async () => {

@@ -1,7 +1,20 @@
 import { modelCallInfo, modelResult } from './replay-story.js';
+import { renderPolicyGraph } from './replay-policy.js';
+import { renderTaskBindings } from './task-inventory.js';
 
 const STAGE_NAMES = { raw_graspgen: '① GraspGen 全部生成位姿', before_ik: '② 方向与执行臂预筛选', after_ik: '③ Batched IK 筛选', after_plan_grasp_batch: '④ plan_grasp_batch 筛选' };
 const STATUS_NAMES = { passed: '通过', failed: '未通过', unknown: '未记录判定' };
+
+function imageSource(role) {
+  if (role === 'initial_reference_annotations') return '程序绘制 Responses 提议的初始参考框，供模型定位永久 ID；框不是分割结果。';
+  if (role === 'release_target_region_reference') return '当前 RGB 上的目标区域参考投影；不是落定物体测量，也不证明区域未遮挡。';
+  if (role === 'current_annotations') return '程序绘制当前 SAM3 候选掩码的外接矩形，供 Decisions 关联 ID；框本身不证明身份。';
+  if (role === 'current_candidate_sam_subject') return '当前 SAM 主体图保留原 RGB 的 silhouette 轮廓内像素，轮廓外置灰；无损 PNG 随实际模型请求发送，图像本身不证明身份或隐藏几何。';
+  if (role === 'current_rgb' || role === 'reference_rgb') return '相机实际采集 RGB 经模型请求编码，无框；此文件是实际发送的图片。';
+  if (role === 'verified_product_reference') return '处理结果核验时保存的产物参考 RGB，供模型识别独立产物 ID。';
+  if (role?.includes('zoom')) return '程序从已归档 RGB 裁剪的定位图片，实际随请求发送；范围以原请求为准。';
+  return '实际模型请求中的图片；旧记录未明确标注框来源，请结合原请求核对。';
+}
 
 export function safeArchivePath(path) {
   return typeof path === 'string' && path.length > 0 && !/[\\:\0]/.test(path)
@@ -18,16 +31,36 @@ export function extractReplayEvidence(value) {
       if (item.endpoint && item.response) result.models.push(item);
       let label = item.endpoint ?? '模型输入';
       let frame = 'other';
-      for (const message of item.request.input) {
+      let imageRole = null;
+      let sourceObservationId = null;
+      let cameraId = null;
+      let annotationItems = [];
+      const messages = [...item.request.input, ...(item.request.questions ?? [])
+        .filter(question => Array.isArray(question.instructions))
+        .map(question => ({ content: question.instructions, questionName: question.name }))];
+      for (const message of messages) {
+        if (message.questionName) {
+          label = message.questionName;
+          frame = 'other';
+          imageRole = null;
+          sourceObservationId = null;
+          cameraId = null;
+          annotationItems = [];
+        }
         for (const part of message.content ?? []) {
           if (part.type === 'input_text') {
             try {
               const text = JSON.parse(part.text);
               if (text.image_role) {
+                imageRole = text.image_role;
+                sourceObservationId = text.observation_id ?? text.source_observation_id ?? null;
                 const camera = text.camera_id ?? text.source_camera_id ?? text.camera;
+                cameraId = camera == null ? null : String(camera);
+                annotationItems = text.items ?? text.original_candidates ?? [];
                 frame = text.frame_role === 'CURRENT' || text.image_role.startsWith('current_') ? 'current'
-                  : text.frame_role === 'BEFORE' || text.image_role.startsWith('initial_') ? 'reference' : 'other';
+                  : text.frame_role === 'BEFORE' || text.image_role.startsWith('initial_') || text.image_role === 'verified_product_reference' ? 'reference' : 'other';
                 const roles = { initial_reference_annotations: '初始参考 · 身份标注', current_work_area_zoom: '当前 · 工作区放大',
+                  current_candidate_sam_subject: `当前 · SAM 主体 ${text.candidate ?? ''}`,
                   drop_bin_region_zoom: `${frame === 'current' ? '当前' : '投放前'} · 盒内放大` };
                 label = [camera && `相机 ${camera}`, roles[text.image_role] ?? text.image_role].filter(Boolean).join(' · ');
               }
@@ -35,14 +68,29 @@ export function extractReplayEvidence(value) {
               // Camera labels in older archives are plain text, not JSON.
               if (part.text.length < 240 && /camera\s+\d/i.test(part.text)) {
                 const camera = /camera\s+(\d)/i.exec(part.text)?.[1];
+                cameraId = camera ?? null;
+                annotationItems = [];
                 frame = /CURRENT/i.test(part.text) ? 'current' : /INITIAL|BEFORE/i.test(part.text) ? 'reference' : 'other';
+                imageRole = /cyan (region|polygon)/i.test(part.text) ? 'region_annotations' : frame === 'current' ? 'current_rgb' : 'reference_rgb';
+                sourceObservationId = null;
                 const when = frame === 'current' ? '当前' : /INITIAL/i.test(part.text) ? '初始参考' : frame === 'reference' ? '动作前' : '观测';
-                label = `相机 ${camera} · ${when} · ${/cyan region/i.test(part.text) ? '区域标注' : '原始 RGB'}`;
+                label = `相机 ${camera} · ${when} · ${/cyan (region|polygon)/i.test(part.text) ? '区域标注' : '原始 RGB'}`;
+              } else if (/^REFERENCE (identity only|target appearance)/.test(part.text)) {
+                frame = 'reference';
+                imageRole = 'reference_rgb';
+                sourceObservationId = null;
+                cameraId = null;
+                annotationItems = [];
+                label = '历史目标外观参考';
               }
             }
           }
           if (part.type === 'input_image' && safeArchivePath(part.image_url?.path)) {
-            result.images.push({ ...part.image_url, label, frame, endpoint: item.endpoint, observationId: item.observation_id });
+            result.images.push({ ...part.image_url, label: message.questionName ? `${message.questionName} · ${label}` : label,
+              frame, imageRole, source: imageSource(imageRole),
+              cameraId, annotationItems, questionName: message.questionName ?? null,
+              endpoint: item.endpoint, observationId: item.observation_id,
+              sourceObservationId: sourceObservationId ?? (frame === 'current' ? item.observation_id : null) });
           }
         }
       }
@@ -262,12 +310,18 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
       if (info.failed) model.append(element('p', `调用失败：${archive.error ?? `HTTP ${archive.http_status}`}`, 'inline-error'));
       if (result.inventory) {
         const inventory = result.inventory;
-        model.append(element('p', inventory.task?.reason ?? '模型已返回结构化场景与程序。'));
+        if (inventory.task_inventory) renderTaskBindings(model, inventory.task_inventory);
+        model.append(element('p', inventory.task_spec?.reason ?? inventory.task?.reason ?? '模型已返回结构化场景与程序。'));
         const entities = element('details');
         entities.append(element('summary', `Responses 提议的实体 · ${inventory.entities?.length ?? 0} 项`));
-        for (const entity of inventory.entities ?? []) entities.append(element('p', `${entity.ref} · ${entity.description ?? entity.kind}`));
+        for (const entity of inventory.entities ?? []) entities.append(element('p', `${entity.id ?? entity.ref} · ${entity.description ?? entity.kind}`));
         const program = element('details');
-        program.append(element('summary', '查看编排程序（包含循环与条件）'), element('pre', JSON.stringify(inventory.program, null, 2), 'candidate-detail'));
+        program.append(element('summary', '查看 Responses 编排（包含尚未执行的步骤）'));
+        const tree = element('div', '', 'policy-tree');
+        const graph = inventory.policy_graph;
+        if (graph) renderPolicyGraph(tree, graph);
+        else tree.append(element('p', '未归档 policy_graph；以下为原始模型输出，不重建历史编排。', 'muted'));
+        program.append(tree, element('pre', JSON.stringify(graph ?? inventory, null, 2), 'candidate-detail'));
         model.append(entities, program);
       }
       if (result.answers.length) {
@@ -306,8 +360,9 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
       const img = element('img'); img.src = link.href; img.alt = `${image.label} · 输入 ${index + 1}`; img.loading = 'lazy';
       link.append(img);
       const metadata = element('details');
-      metadata.append(element('summary', '图片来源与校验值'), element('p', `SHA-256 ${image.sha256 ?? '未归档'} · ${image.observationId ?? '观测 ID 未归档'}`, 'evidence-hash'));
-      figure.append(element('figcaption', `${index + 1}. ${image.label}`), link, metadata);
+      metadata.append(element('summary', '图片来源与校验值'), element('p', `SHA-256 ${image.sha256 ?? '未归档'} · 请求绑定观测 ${image.observationId ?? '未归档'} · 图片源采集 ${image.sourceObservationId ?? '未独立记录，请核对参考类型与原请求'}`, 'evidence-hash'));
+      figure.append(element('figcaption', `${index + 1}. ${image.label}`),
+        element('p', `${modelCallInfo(image).type} 实际输入 · ${image.source}`, 'muted'), link, metadata);
       figure.hidden = filter.value !== 'all' && image.frame !== filter.value;
       figures.push({ figure, frame: image.frame });
       grid.append(figure);
@@ -315,6 +370,7 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
     filter.addEventListener('change', () => { for (const item of figures) item.figure.hidden = filter.value !== 'all' && item.frame !== filter.value; });
     images.append(element('p', 'C 编号是 SAM3 临时分割候选，多个描述可以指向同一物体；不是永久 ID。R 标签定位清单实体。确认后的清单按永久 ID 合并，同一物体不会因提示词增加而重复建档。', 'muted'), filter, grid);
     const sam = evidence.segmentation.length ? section(`SAM3 提示与掩码 · ${evidence.segmentation.length} 次`) : element('div');
+    sam.append(element('p', 'SAM3 score 是分割模型输出的候选分数，不是身份正确率。掩码 IoU = 两掩码交集像素数 / 并集像素数；它衡量轮廓重合，不证明是同一物体。Decisions 的分类置信度与谓词概率是另一组指标。阈值须用已标注的成功和失败样本校准，不能按一次失败临时降低。', 'muted'));
     for (const query of evidence.segmentation) {
       const item = element('details', '', 'sam-query');
       const proposals = query.proposals;

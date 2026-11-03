@@ -3,6 +3,7 @@ import json
 import threading
 
 import httpx
+import numpy as np
 import pytest
 from test_planning_batch import batch_response, evaluated
 
@@ -86,13 +87,15 @@ def test_candidate_failures_reported_as_batch_results_without_serial_retry():
     validation_calls = [body for path, body in calls if path == "/carrying/validate"]
     assert len(planning_calls) == 1
     assert len(planning_calls[0]["goal_matrices_world"]) == 2
-    assert [body["phase"] for body in validation_calls] == ["approach_grasp", "grasp"]
+    assert [body["phase"] for body in validation_calls] == ["approach_grasp", "grasp", "grasp_closure"]
     assert all(body["gripper_geometry_mode"] == "fixed_open" for body in validation_calls)
     assert result["candidate_index"] == 100
     assert list(result["phases"]) == ["approach", "grasp", "lift"]
     assert result["excluded_object_ids"] == ["red"]
     assert result["phases"]["grasp"]["dt"] == .025
-    assert len(result["phases"]["grasp"]["positions_rad"]) == 4
+    # Time scaling inserts the midpoint without duplicating either endpoint.
+    np.testing.assert_allclose(result["phases"]["grasp"]["positions_rad"],
+        np.array([1., 1.5, 2.])[:, None] * np.arange(1, 8)[None, :] * .01)
     assert result["prior_failures"][0]["candidate_index"] == 101
     assert result["prior_failures"][0]["status"] == "IK_FAIL"
     first = events[0][2]

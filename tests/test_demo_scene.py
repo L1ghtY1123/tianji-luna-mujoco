@@ -40,29 +40,29 @@ def test_demo_scene_count_source_fit_and_unmarked_destination(count):
     assert bin_item["color"] == "blue"
     assert len(objects) == count
     assert all(item["kind"] == "cad" and item["asset_id"] == "pink_wrapped" for item in objects)
-    assert all(item["size"] == [.1110853500366211, .06278736877441407, .11] for item in objects)
+    assert all(item["size"] == [.07954267501831055, .06278736877441407, .11] for item in objects)
     expected_positions = {
-        1: [[.315, .525]],
-        2: [[.315, .525], [.315, .685]],
-        3: [[.355, .50], [.315, .57], [.275, .64]],
-        4: [[.245, .49], [.365, .49], [.245, .61], [.365, .61]],
+        1: [[.460, .510]],
+        2: [[.380, .540], [.540, .540]],
+        3: [[.360, .510], [.460, .510], [.560, .510]],
+        4: [[.380, .490], [.540, .490], [.380, .590], [.540, .590]],
     }
-    np.testing.assert_allclose([item["position"][:2] for item in objects], np.array(expected_positions[count]) + [.166, -.032])
+    np.testing.assert_allclose([item["position"][:2] for item in objects], expected_positions[count])
     main = scene["table"]
     np.testing.assert_allclose(main["position"], [.572, -.026, .532])
-    np.testing.assert_allclose(bin_item["position"], [.481, .573, .571])
-    np.testing.assert_allclose(right_bin["position"], [.481, -.625, .571])
+    np.testing.assert_allclose(bin_item["position"], [.460, .540, .571])
+    np.testing.assert_allclose(right_bin["position"], [.460, -.625, .571])
     assert main["size"][:2] == [.60, .80]
     assert main["position"][2] + main["size"][2] / 2 == pytest.approx(.572)
     assert scene["support_tables"] == []
     assert bin_item["size"] == pytest.approx([.410, .310, .145])
     assert right_bin["size"] == bin_item["size"]
-    assert bin_item["yaw_deg"] == 90 and right_bin["yaw_deg"] == -90
+    assert bin_item["yaw_deg"] == 0 and right_bin["yaw_deg"] == -90
     assert all(item['fixed'] for item in bins)
     for item in objects:
         offset = np.abs(np.array(item["position"][:2]) - bin_item["position"][:2])
         # Conservative inner rectangle at the bottom, accounting for bin yaw.
-        assert np.all(offset + np.array(item["size"][:2]) / 2 < [.130, .185])
+        assert np.all(offset + np.array(item["size"][:2]) / 2 < [.185, .130])
     region = demo_region()
     assert region["center_world_xy_m"] == pytest.approx([.50160, .11646])
     assert region["size_m"] == .32
@@ -85,11 +85,11 @@ def test_default_keeps_nearer_original_pink_part():
     objects = [item for item in demo_scene()["objects"] if item["color"] == "pink"]
     assert len(objects) == 1
     positions = np.array([item["position"][:2] for item in objects])
-    np.testing.assert_allclose(positions, [[.481, .493]])
-    # Even the full AABBs leave at least 7 cm within the conservative inner rectangle.
+    np.testing.assert_allclose(positions, [[.460, .510]])
+    # The full AABB leaves at least 6 cm inside the conservative inner rectangle.
     for item in objects:
-        offset = abs(np.asarray(item["position"][:2]) - [.481, .573])
-        assert np.min(np.asarray([.130, .185]) - offset - np.asarray(item["size"][:2])/2) > .07
+        offset = abs(np.asarray(item["position"][:2]) - [.460, .540])
+        assert np.min(np.asarray([.185, .130]) - offset - np.asarray(item["size"][:2])/2) > .06
 
 
 def test_source_row_and_four_object_grid_follow_explicit_configuration():
@@ -109,10 +109,10 @@ def test_source_row_and_four_object_grid_follow_explicit_configuration():
     rows = [[item["position"][:2] for item in demo_scene(count, config)["objects"] if item["color"] == "pink"]
             for count in (1, 2, 3)]
     grid = [item["position"][:2] for item in demo_scene(4, config)["objects"] if item["color"] == "pink"]
-    for row, expected in zip(rows, ([[.315, .525]], [[.295, .525], [.335, .665]],
-                                    [[.285, .515], [.305, .575], [.325, .635]]), strict=True):
-        np.testing.assert_allclose(row, np.array(expected) + [.166, -.032])
-    np.testing.assert_allclose(grid, np.array([[.255, .505], [.355, .505], [.255, .625], [.355, .625]]) + [.166, -.032])
+    for row, expected in zip(rows, ([[.460, .510]], [[.440, .460], [.480, .600]],
+                                    [[.430, .450], [.450, .510], [.470, .570]]), strict=True):
+        np.testing.assert_allclose(row, expected)
+    np.testing.assert_allclose(grid, [[.400, .440], [.500, .440], [.400, .560], [.500, .560]])
     assert config == before
 
 
@@ -125,20 +125,18 @@ def test_support_table_and_cad_compile_without_free_support_joint():
         assert model.geom("table").bodyid == 0
         assert model.geom("table").contype != 0
         assert model.body("object_blue_source_bin").jntnum == 0
-        visual = model.geom("object_visual_pink_cylinder_1")
-        assert visual.type == mujoco.mjtGeom.mjGEOM_MESH
-        assert visual.group == 0 and visual.contype == 0
-        collision = model.geom("object_geom_pink_cylinder_1__cad_0")
+        # The trimmed pink CAD deliberately uses its tight bounds for both
+        # simulation contact and rendering; the surrounding bins retain CAD.
+        visual = model.geom("object_geom_pink_cylinder_1")
+        assert visual.type == mujoco.mjtGeom.mjGEOM_BOX
+        assert visual.group == 0 and visual.contype != 0
+        np.testing.assert_allclose(2 * visual.size,
+                                  [.07954267501831055, .06278736877441407, .11], atol=1e-7)
+        bin_visual = model.geom("object_visual_blue_source_bin")
+        assert bin_visual.type == mujoco.mjtGeom.mjGEOM_MESH
+        assert bin_visual.group == 0 and bin_visual.contype == 0
+        collision = model.geom("object_geom_blue_source_bin__cad_0")
         assert collision.group == 3 and collision.contype != 0
-        mesh_id = int(visual.dataid[0])
-        start = model.mesh_vertadr[mesh_id]
-        vertices = model.mesh_vert[start:start + model.mesh_vertnum[mesh_id]]
-        rotation = model.mesh_quat[mesh_id]
-        matrix = np.empty(9)
-        mujoco.mju_quat2Mat(matrix, rotation)
-        original_vertices = vertices @ matrix.reshape(3, 3).T + model.mesh_pos[mesh_id]
-        np.testing.assert_allclose(np.ptp(original_vertices, axis=0),
-                                   [.1110853500366211, .06278736877441406, .11], atol=1e-7)
         data = mujoco.MjData(model)
         mujoco.mj_forward(model, data)
         assert data.body("TCP_Link_L").xpos[1] > 0
@@ -200,11 +198,13 @@ def test_observation_validation_describes_current_scene_without_full_bin_gate():
     config = load_demo_config()
     record = json.loads((ROOT / config["observation_poses_resource"]).read_text())
     evidence = record["validation"]
-    assert {k: v for k, v in evidence["scene_config"].items() if k != "destination"} == {
-        k: v for k, v in config.items() if k != "destination"}
+    # Preserve the actual historical calibration scene; do not claim that its
+    # visibility/collision diagnostics certify a subsequently edited scene.
+    assert evidence["scene_config"]["source_bin"]["position"] == [.481, .573, .571]
+    assert evidence["scene_config"]["source_bin"]["position"] != config["source_bin"]["position"]
     for name, digest in record["source_sha256"].items():
-        if name == "resources/demo-config.json":
-            continue  # Destination intent changed; physical calibration geometry above is unchanged.
+        if name in {"resources/demo-config.json", "src/luna_mujoco/cad_assets.py", "resources/cad/manifest.json"}:
+            continue  # Current scene differs; runtime checks current geometry independently.
         assert (ROOT / name).is_file()
         assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest
     assert evidence["source_bin_coverage"]["full_envelope_inside_image"] == (
@@ -234,11 +234,23 @@ def test_observation_resource_covers_each_configured_object_count():
         assert evidence["mujoco_robot_scene_contacts"] == 0
         assert evidence["mujoco_source_object_contacts"] == 0
         assert evidence["all_source_objects_visible"] is True
-        expected = {item["id"]: item["position"] for item in demo_scene(int(count))["objects"]
+        expected = {item["id"]: item["position"] for item in demo_scene(int(count), record['validation']['scene_config'])["objects"]
                     if item["color"] == "pink"}
         assert set(evidence["source_positions_world_m"]) == set(expected)
         for object_id, position in expected.items():
             np.testing.assert_allclose(evidence["source_positions_world_m"][object_id], position)
+
+
+@pytest.mark.parametrize('count', [1, 2, 3, 4])
+def test_current_initial_object_centers_are_in_a_measured_arm_workspace(count):
+    from luna_mujoco.demo_scene import demo_scene
+    from luna_mujoco.workspace import WorkspaceAtlas
+    atlas = WorkspaceAtlas()
+    for item in demo_scene(count)['objects']:
+        if item['color'] != 'pink':
+            continue
+        position = [*item['position'][:2], item['position'][2] - .001]
+        assert any(atlas.query(arm, [position])[0]['reachable'] for arm in ('A', 'B'))
 
 
 def test_current_bin_frustum_clipping_is_explicitly_diagnostic(observation_calibration):

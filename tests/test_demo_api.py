@@ -3,15 +3,15 @@ from fastapi.testclient import TestClient
 from test_api import Algorithms, Simulation
 
 from luna_mujoco.app import create_app
-from luna_mujoco.demo_runner import DemoRunner
 from luna_mujoco.planning_settings import PlanningSettings, save_settings
+from luna_mujoco.robot_skills.operations import RobotOperations
 
 
 def test_demo_composition_does_not_require_typesafe_key(tmp_path, monkeypatch):
     monkeypatch.delenv('TYPESAFE_API_KEY', raising=False)
     monkeypatch.setattr('luna_mujoco.demo_scene.demo_observation_poses', lambda: {'A': [0.] * 7, 'B': [0.] * 7})
-    app = create_app(Simulation(), Algorithms(), data_dir=tmp_path, demo_mode=True)
-    assert isinstance(app.state.runner, DemoRunner)
+    app = create_app(Simulation(), Algorithms(), data_dir=tmp_path)
+    assert isinstance(app.state.runner, RobotOperations)
     with TestClient(app) as client:
         health = client.get('/api/health').json()
         assert 'jev' not in health
@@ -29,19 +29,20 @@ def test_standalone_demo_uses_its_own_experiment_store(tmp_path, monkeypatch):
     monkeypatch.setattr('luna_mujoco.app.ROOT', root)
     monkeypatch.delenv('LUNA_EXPERIMENT_DIR', raising=False)
     monkeypatch.setattr('luna_mujoco.demo_scene.demo_observation_poses', lambda: {'A': [0.] * 7, 'B': [0.] * 7})
-    app = create_app(Simulation(), Algorithms(), demo_mode=True)
+    app = create_app(Simulation(), Algorithms())
     assert app.state.runner.experiments.root == root / 'data' / 'experiments'
+    assert app.state.runner.environment_assumptions == {}
     assert not (tmp_path / 'tianji-experiments').exists()
 
 
 @pytest.mark.parametrize("saved_budget", [1, 16, 24, 31])
 def test_demo_defaults_to_24_spheres_and_honors_legal_saved_settings(tmp_path, monkeypatch, saved_budget):
     monkeypatch.setattr('luna_mujoco.demo_scene.demo_observation_poses', lambda: {'A': [0.] * 7, 'B': [0.] * 7})
-    app = create_app(Simulation(), Algorithms(), data_dir=tmp_path / 'runs', demo_mode=True)
+    app = create_app(Simulation(), Algorithms(), data_dir=tmp_path / 'runs')
     assert app.state.runner.planning_settings.attachment.sphere_budget == 24
     saved = PlanningSettings(attachment={"sphere_budget": saved_budget})
     save_settings(tmp_path / 'planning-settings.json', saved)
-    app = create_app(Simulation(), Algorithms(), data_dir=tmp_path / 'runs', demo_mode=True)
+    app = create_app(Simulation(), Algorithms(), data_dir=tmp_path / 'runs')
     assert app.state.runner.planning_settings.attachment.sphere_budget == saved_budget
     assert list(app.state.runner.planning_settings.observation.A) == [0.] * 7
 

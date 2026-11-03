@@ -1,11 +1,12 @@
-import { runConclusion } from './run-conclusion.js';
+import { renderFailureReport, loadArchivedFailureReport } from './failure-report.js';
 import { request } from './api.js';
 import { createTraceList } from './trace.js';
-import { buildExecutionGraph, createExecutionGraph, graphSvg } from './execution-graph.js';
+import { buildExecutionGraph } from './execution-graph.js';
 import { taskProgressSummary } from './run-evidence.js';
 import { createObjectList } from './object-list.js';
-import { createReplayEvidence } from './replay-evidence.js';
-import { groupObservationFrames, modelCallInfo, inventorySnapshots, renderReplayStages, renderInventorySnapshot } from './replay-story.js';
+import { createReplayEvidence, extractReplayEvidence } from './replay-evidence.js';
+import { createReplayPolicy } from './replay-policy.js';
+import { groupObservationFrames, modelCallInfo, inventorySnapshots, renderReplayStages, renderInventorySnapshot, observationImageSource, observationImageSections } from './replay-story.js';
 
 export function clampReplayTime(value, duration = Infinity) {
   const time = Number(value);
@@ -50,16 +51,14 @@ export function artifactReferences(value) {
 }
 
 const CAMERA_NAMES = { 2: '左腕 A · 相机 2', 3: '头部 · 相机 3', 1: '右腕 B · 相机 1' };
-const CHECKPOINT_NAMES = { initial: '观测位姿观察', fine: '抓前观察 / 建图', post_place: '放后观察', post_unpack: 'VLA 拆包后观察', result: '结果观察' };
-const ANALYSIS_NAMES = { analyzed: '已分析', unprocessed: '未分析：尚无本帧掩码与 ID 关联', unknown: '分析状态未记录' };
-const REPLAY_VIEWS = ['graph', 'inventory', 'video', 'observations', 'data'];
-const SKILL_LABELS = { observe_scene: '三视角观测与识别', bind_inventory: '登记初始清单',
+const ANALYSIS_NAMES = { analyzed: '识别结果版本', responses_proposal: 'Responses 初始参考框（未核验提议）', unprocessed: '原始 RGB（无身份叠加）', unknown: '标注状态未记录' };
+const REPLAY_VIEWS = ['graph', 'inventory', 'video', 'observations', 'collision', 'data'];
+const SKILL_LABELS = { observe_scene: '三视角观测与识别',
   identify_target: '选择当前物体', identify_destination: '确定目标区域', choose_arm: '确定执行臂',
-  build_scene: '建立 TSDF / ESDF', generate_grasps: 'GraspGen 候选与预处理', plan_grasp: 'Batched IK 与抓取规划',
-  execute_grasp: '执行三段抓取', verify_grasp: '夹爪反馈核验', plan_place: '规划桌面放置',
-  execute_place: '放置、松爪与撤离', verify_place: '确认桌面放置', prepare_unpack: '移动到 VLA 位姿',
-  mock_unpack: '仿真拆包：生成黑件', verify_unpack: '确认拆包结果', move_to_observe: '双臂返回观测位姿',
-  plan_transport: '持物 plan_pose 规划', execute_transport: '运输到右盒上方', drop: '松爪投放', verify_drop: '确认右盒新增产物' };
+  build_scene: '建立碰撞场景', generate_grasps: 'GraspGen 候选与预处理', plan_grasp: 'Batched IK 与抓取规划',
+  execute_grasp: '执行三段抓取', verify_grasp: '夹爪反馈核验', plan_place: '规划放置',
+  execute_place: '放置、松爪与撤离', verify_place: '确认放置', prepare_unpack: '移动到 VLA 位姿',
+  vla_unpack: 'VLA 拆包（仿真）', verify_unpack: '确认拆包结果', move_to_observe: '双臂返回观测位姿' };
 
 export function archivedObservations(events = []) {
   const records = new Map(events.filter(event => event.kind === 'observation_recorded' && event.data?.observation_id)
@@ -118,23 +117,32 @@ export function mountReplayPage(document) {
   const initialRun = initialUrl.searchParams.get('run');
   const initialTime = clampReplayTime(initialUrl.searchParams.get('t'));
   const state = {
-    experiments: [], manifest: null, events: [], graph: null, runId: null,
+    experiments: [], selectedRunIds: new Set(), deletionProgress: null, manifest: null, events: [], graph: null, runId: null,
     view: REPLAY_VIEWS.includes(initialUrl.searchParams.get('view')) ? initialUrl.searchParams.get('view') : 'graph',
     time: 0, duration: 0, playing: false, master: null, selectedNode: null,
     operation: 0, fileOperation: 0, listOperation: 0, poll: null, mutating: false,
     observations: [], observationFrames: [], observationId: null, imageOperation: 0, image: null, imageZoom: 1,
-    inventory: [], inventoryId: null,
+    inventory: [], inventoryId: null, rawImages: new Map(), modelInputArchives: new Map(),
   };
   const tracks = [
     { name: 'scene', path: 'videos/scene.mp4', label: '主场景' },
     { name: 'cameras', path: 'videos/cameras.mp4', label: '三相机' },
   ].map(track => ({ ...track, video: byId(`${track.name}-video`), available: false }));
   let trace = createTraceList(byId('node-trace'), byId('detail-event-count'));
-  const graphView = createExecutionGraph(byId('execution-graph'), { onSelect: showNode });
   const evidence = createReplayEvidence(byId('node-evidence'), {
     document, request, fileUrl, onFile: path => { setView('data'); previewFile(path).catch(showError); },
   });
   const fileEvidence = createReplayEvidence(byId('file-evidence'), { document, request, fileUrl });
+  const policy = createReplayPolicy(byId('policy-plan'), { request, fileUrl });
+  let collisionReplay = null, collisionOperation = 0;
+  async function showCollision() {
+    const operation = ++collisionOperation, runId = state.runId;
+    const {createCollisionReplay} = await import('./replay-collision.js');
+    if (operation !== collisionOperation || runId !== state.runId || state.view !== 'collision') return;
+    collisionReplay?.dispose();
+    collisionReplay = createCollisionReplay(document, {load: path => request(fileUrl(runId, path))});
+    await collisionReplay.update(state.events);
+  }
   document.body.classList.toggle('graph-only', initialUrl.searchParams.get('standalone') === '1');
 
   function showError(error) {
@@ -174,17 +182,61 @@ export function mountReplayPage(document) {
       byId(`view-${name}`).hidden = name !== view;
     }
     updateUrl();
+    if (view === 'collision') showCollision().catch(showError);
+    else { collisionOperation++; collisionReplay?.dispose(); }
+  }
+
+  function filteredExperiments() {
+    const query = byId('experiment-search').value.trim().toLocaleLowerCase();
+    return state.experiments.filter(item => `${item.name ?? ''} ${item.instruction ?? ''} ${item.id}`.toLocaleLowerCase().includes(query));
+  }
+
+  function canDelete(item) {
+    return !item.busy && item.finalized !== false && item.status !== 'running'
+      && !['recording', 'encoding'].includes(item.video_status);
+  }
+
+  function renderSelectionControls() {
+    const available = filteredExperiments().filter(canDelete);
+    const count = available.filter(item => state.selectedRunIds.has(item.id)).length;
+    const all = byId('select-all-experiments');
+    all.checked = available.length > 0 && count === available.length;
+    all.indeterminate = count > 0 && count < available.length;
+    all.disabled = state.mutating || available.length === 0;
+    byId('selected-count').textContent = `已选 ${state.selectedRunIds.size} 条`;
+    byId('delete-selected').disabled = state.mutating || state.selectedRunIds.size === 0;
+    byId('delete-selected').textContent = state.deletionProgress ? `删除中 ${state.deletionProgress}` : '删除所选';
+    byId('clear-selection').disabled = state.mutating || state.selectedRunIds.size === 0;
+    byId('experiment-search').disabled = state.mutating;
+    byId('refresh-list').disabled = state.mutating;
   }
 
   function renderList() {
-    const query = byId('experiment-search').value.trim().toLocaleLowerCase();
-    const filtered = state.experiments.filter(item => `${item.name ?? ''} ${item.instruction ?? ''} ${item.id}`.toLocaleLowerCase().includes(query));
+    const query = byId('experiment-search').value.trim();
+    const filtered = filteredExperiments();
+    const eligible = new Set(filtered.filter(canDelete).map(item => item.id));
+    for (const id of state.selectedRunIds) if (!eligible.has(id)) state.selectedRunIds.delete(id);
     byId('experiment-count').textContent = `${filtered.length} 条记录${query ? ` / 共 ${state.experiments.length} 条` : ''}`;
     const list = byId('experiment-list');
     list.replaceChildren();
     for (const item of filtered) {
+      const row = element('div', 'experiment-row');
+      const checkbox = element('input');
+      checkbox.type = 'checkbox';
+      checkbox.setAttribute('data-select-run', item.id);
+      checkbox.setAttribute('aria-label', `选择实验 ${conciseName(item)} · ${item.id}`);
+      checkbox.checked = state.selectedRunIds.has(item.id);
+      checkbox.disabled = state.mutating || !canDelete(item);
+      if (!canDelete(item)) checkbox.title = '实验正在录制或编码，完成后可删除';
+      checkbox.addEventListener('change', () => {
+        if (state.mutating || !canDelete(item)) return;
+        if (checkbox.checked) state.selectedRunIds.add(item.id);
+        else state.selectedRunIds.delete(item.id);
+        renderSelectionControls();
+      });
       const button = element('button', 'experiment-item');
       button.type = 'button';
+      button.disabled = state.mutating;
       button.setAttribute('aria-current', String(state.runId === item.id));
       button.append(element('strong', '', conciseName(item)));
       button.append(element('span', 'muted', formatDate(item.created_at)));
@@ -192,9 +244,11 @@ export function mountReplayPage(document) {
       button.append(element('span', `result ${item.status ?? ''}`, status));
       button.append(element('span', 'muted', `${Number.isFinite(item.duration_s) ? `${item.duration_s.toFixed(2)} s` : '用时未提供'} · ${formatSize(item.size_bytes)}`));
       button.addEventListener('click', () => { if (item.id !== state.runId) selectRun(item.id).catch(showError); });
-      list.append(button);
+      row.append(checkbox, button);
+      list.append(row);
     }
     if (!filtered.length) list.append(element('p', 'muted', query ? '没有匹配的实验。' : '暂无实验记录。请在工作台开始一次启用保存的任务。'));
+    renderSelectionControls();
   }
 
   function stopPlayback() {
@@ -319,10 +373,7 @@ export function mountReplayPage(document) {
     byId('experiment-name').disabled = state.mutating;
     const errors = (manifest.errors ?? []).map(error => typeof error === 'string' ? error : JSON.stringify(error));
     const end = state.events.findLast(event => event.kind === 'run_end')?.data;
-    const conclusion = runConclusion(end ?? manifest, state.events);
-    if (conclusion) errors.unshift(conclusion);
-    byId('experiment-errors').textContent = errors.join('\n');
-    byId('experiment-errors').hidden = errors.length === 0;
+    renderFailureReport(byId('experiment-errors'), end ?? manifest, state.events, { additionalErrors: errors });
     for (const mode of ['review', 'full']) {
       const link = byId(`${mode}-export`);
       link.href = `/api/experiments/${encodeURIComponent(state.runId)}/export?mode=${mode}`;
@@ -333,7 +384,7 @@ export function mountReplayPage(document) {
 
   function conciseName(manifest) {
     const name = manifest.name || '未命名实验';
-    return name.length > 42 && name === manifest.instruction ? '拆包与搬运实验' : name;
+    return name.length > 42 && name === manifest.instruction ? '机器人任务实验' : name;
   }
 
   function renderInventory() {
@@ -380,20 +431,24 @@ export function mountReplayPage(document) {
   }
 
   function observationDescription(observation) {
-    return `${observation.observationId} · ${CHECKPOINT_NAMES[observation.checkpoint] ?? observation.checkpoint ?? '观测时机未记录'} · ${ANALYSIS_NAMES[observation.status] ?? observation.status}`;
+    const frame = state.observationFrames.find(item => item.id === observation.observationId);
+    return `${frame?.title ?? '观测'} · ${observation.observationId} · ${ANALYSIS_NAMES[observation.status] ?? observation.status}`;
   }
 
   function renderObservations() {
+    const reference = state.events.find(event => event.data?.object_labels?.analysis_status === 'responses_proposal');
+    byId('responses-reference').disabled = !reference;
+    byId('responses-reference').title = reference ? '查看初始 Responses 输出的框，独立于 SAM3 结果' : '该实验没有独立归档 Responses 初始框图';
     state.observations = archivedObservations(state.events);
     state.observationFrames = groupObservationFrames(state.observations, state.events);
     const select = byId('observation-select');
     select.replaceChildren();
     const frames = new Set(state.observations.map(item => item.observationId)).size;
-    byId('observation-count').textContent = `${frames} 帧 · ${state.observations.length} 次标注记录`;
+    byId('observation-count').textContent = `${frames} 次采集 · ${state.observations.length} 个图像版本`;
     select.disabled = !state.observations.length;
     byId('observation-seek').disabled = true;
     for (const [index, frame] of state.observationFrames.entries()) {
-      const option = element('option', '', `${index + 1}. ${frame.title} · ${Number.isFinite(frame.captureTime) ? formatReplayTime(frame.captureTime) : '拍摄时间未归档'}`);
+      const option = element('option', '', `第 ${index + 1} 次采集 · ${frame.title} · ${Number.isFinite(frame.captureTime) ? formatReplayTime(frame.captureTime) : '拍摄时间未归档'}`);
       option.value = frame.id;
       select.append(option);
     }
@@ -410,6 +465,8 @@ export function mountReplayPage(document) {
     byId('observation-artifacts').replaceChildren();
     byId('observation-revision').replaceChildren();
     byId('observation-reuse-note').hidden = true;
+    byId('observation-source').textContent = '';
+    byId('observation-analysis').textContent = '';
     if (!observation) {
       byId('observation-meta').textContent = '本次实验未保存观测标注图。旧记录的 RGBD 数组可在数据页下载。';
       return;
@@ -424,10 +481,12 @@ export function mountReplayPage(document) {
       byId('observation-revision').append(option);
     }
     byId('observation-revision').value = id;
-    byId('observation-meta').textContent = `${frame.title} · 拍摄于 ${Number.isFinite(frame.captureTime) ? formatReplayTime(frame.captureTime) : '时间未归档'} · ${frame.revisions.length} 个标注版本`;
+    byId('observation-meta').textContent = `${frame.title} · 拍摄于 ${Number.isFinite(frame.captureTime) ? formatReplayTime(frame.captureTime) : '时间未归档'} · ${frame.revisions.length} 个图像版本`;
+    byId('observation-source').textContent = frame.source;
+    byId('observation-analysis').textContent = frame.analysisSummary;
     byId('observation-reuse-note').hidden = !revision.reusesCapture;
     byId('observation-reuse-note').textContent = `这是旧拍摄帧上的状态更新（事件 #${observation.event.id}，${formatReplayTime(observation.time)}），没有重新拍照。${revision.revisionTitle.includes('夹爪') ? '“夹持中”来自夹爪反馈，不是这张图的视觉判断。' : '像素沿用同次观测，仅目标标注变化。'}`;
-    byId('observation-seek').disabled = !Number.isFinite(observation.time);
+    byId('observation-seek').disabled = !Number.isFinite(frame.captureTime);
     for (const camera of observation.cameras) {
       const card = element('figure', 'observation-card');
       card.append(element('figcaption', '', camera.label));
@@ -435,16 +494,35 @@ export function mountReplayPage(document) {
       open.type = 'button';
       open.setAttribute('aria-label', `放大 ${camera.label} · ${observation.observationId}`);
       const image = element('img');
-      image.src = fileUrl(state.runId, camera.path);
+      const url = fileUrl(state.runId, camera.path);
       image.alt = `${camera.label} · ${observationDescription(observation)}`;
       image.loading = 'lazy';
-      const status = element('p', 'muted', '点击图片放大，可切换原始 RGB');
+      image.src = url;
+      const rows = (observation.event.data?.object_labels?.items ?? []).filter(item => item.camera_id === camera.id);
+      const proposal = observation.status === 'responses_proposal';
+      const status = element('p', 'muted', rows.length
+        ? `${proposal ? 'Responses 初始提议（未核验）' : '当前版本的识别结果'} · ${rows.length} 个框与 ID · 点击放大，可切换原始 RGB`
+        : proposal ? 'Responses 未在此视角给出参考框；保留原始画面。'
+          : '本版本在此相机没有身份框 · 原始画面保留；候选框请查看下方模型输入');
       image.addEventListener('error', () => { status.textContent = '图片读取失败：归档可能尚未写入或文件缺失。'; });
       open.append(image);
       open.addEventListener('click', () => openObservationImage(observation, camera));
       card.append(open, status);
-      addDownload(card, camera.path, '下载标注图');
+      const provenance = element('details', 'camera-provenance');
+      provenance.append(element('summary', '', '图像来源与去向'));
+      for (const paragraph of observationImageSections(observation, frame, camera.id)) {
+        provenance.append(element('p', 'muted', paragraph));
+      }
+      card.append(provenance);
+      if (rows.length) {
+        const details = element('details');
+        details.append(element('summary', '', '逐框来源与身份依据'));
+        for (const item of rows) details.append(element('p', 'muted', `${item.name ?? '实体'} · ID ${item.id} · 框：${item.box_source ?? '旧归档未记录'} · 身份：${item.identity_source ?? '旧归档未记录'} · 名称：${item.name_source ?? '旧归档未记录'} · 几何：${item.geometry_status ?? '旧归档未记录'}${Number.isFinite(item.point_count) ? ` · ${item.point_count} 个可见表面点` : ''}。碰撞发布状态请查看 build_scene 事件。`));
+        card.append(details);
+      }
+      addDownload(card, camera.path, '下载程序叠加图（不是模型输入）');
       byId('observation-cameras').append(card);
+      addCameraModelInputs(card, observation, camera);
     }
     const artifacts = byId('observation-artifacts');
     if (validFilePath(observation.artifact)) {
@@ -453,13 +531,113 @@ export function mountReplayPage(document) {
       artifacts.append(button);
       addDownload(artifacts, observation.artifact, '下载 RGBD 引用 JSON');
     }
+    addObservationModelLinks(artifacts, observation);
+  }
+
+  async function addCameraModelInputs(card, observation, camera) {
+    const runId = state.runId;
+    const panel = element('details', 'camera-model-inputs');
+    panel.append(element('summary', '', '实际模型输入：Responses 参考框 / SAM3 候选框'));
+    const note = element('p', 'muted', '正在读取实际请求归档…');
+    panel.append(note);
+    card.append(panel);
+    const matchingCalls = state.events.filter(event => event.kind === 'visual_decisions_call'
+      && event.id <= observation.event.id && event.data?.observation_id === observation.observationId
+      && validFilePath(event.data.artifact));
+    const associations = matchingCalls.filter(event => ['associate_inventory', 'verify_transfer'].includes(event.data.purpose));
+    const calls = (associations.length ? associations : matchingCalls).slice(-1);
+    const selected = [];
+    const failures = [];
+    for (const event of calls) {
+      try {
+        const archiveUrl = fileUrl(runId, event.data.artifact);
+        if (!state.modelInputArchives.has(archiveUrl)) {
+          state.modelInputArchives.set(archiveUrl, request(archiveUrl).catch(error => {
+            state.modelInputArchives.delete(archiveUrl); throw error;
+          }));
+        }
+        const archive = await state.modelInputArchives.get(archiveUrl);
+        if (state.runId !== runId || !card.isConnected) return;
+        const images = extractReplayEvidence(archive).images.filter(item => item.cameraId === camera.id
+          && ['initial_reference_annotations', 'current_annotations'].includes(item.imageRole));
+        for (const image of images) {
+          const existing = selected.find(item => item.image.path === image.path && item.image.imageRole === image.imageRole);
+          if (existing) existing.events.push(event);
+          else selected.push({ image, events: [event], archive });
+        }
+      } catch (error) { failures.push(`#${event.id}：${error.message}`); }
+    }
+    if (state.runId !== runId || !card.isConnected) return;
+    note.textContent = selected.length
+      ? '最近一次身份判断的实际输入。Responses 参考框表示初始身份提议；SAM3 候选框来自当前掩码，尚不等于确认的 ID。'
+      : '此相机没有归档到这两类带框模型输入；不能据此认定物体不可见或分割失败。';
+    for (const { image, events, archive } of selected) {
+      const figure = element('figure');
+      figure.style.margin = '12px 0';
+      const reference = image.imageRole === 'initial_reference_annotations';
+      figure.append(element('figcaption', '', `${reference ? 'R：Responses 参考提议' : 'C：SAM3 分割候选'} · ${image.annotationItems.length} 个框`));
+      const link = element('a');
+      link.href = fileUrl(runId, image.path);
+      link.target = '_blank';
+      link.rel = 'noopener';
+      const thumbnail = element('img');
+      thumbnail.src = link.href;
+      thumbnail.alt = `${camera.label} · ${reference ? 'Responses 参考框' : 'SAM3 候选框'} · 实际模型输入`;
+      thumbnail.style.width = '100%';
+      thumbnail.style.aspectRatio = '4 / 3';
+      thumbnail.style.objectFit = 'contain';
+      link.append(thumbnail);
+      figure.append(link, element('p', 'muted', `来源：${image.source}`));
+      if (!reference) {
+        const answers = archive.response?.answers ?? [];
+        for (const item of image.annotationItems) {
+          const number = item.id?.replace(/^candidate-/, '');
+          const matching = Array.isArray(answers) ? answers.filter(answer =>
+            answer.name === `identity_${number}` || answer.name?.startsWith(`match_${number}_`)) : [];
+          for (const answer of matching) {
+            const description = answer.type === 'predicate'
+              ? `${answer.name}：同一物体判断概率 ${answer.probability}`
+              : `${answer.name}：候选选择 ${answer.choice}，置信度 ${answer.confidence}`;
+            figure.append(element('p', 'muted', `${item.display_label ?? item.id} · ${description}。原始模型回答；是否接受以身份结果为准。`));
+          }
+        }
+      }
+      for (const event of events) {
+        const info = modelCallInfo(event);
+        const button = element('button', 'button', `去向：${info.type} · #${event.id} · 查看问题与判断`);
+        button.addEventListener('click', () => openModelEvent(event));
+        figure.append(button);
+      }
+      panel.append(figure);
+    }
+    if (failures.length) panel.append(element('p', 'muted', `部分请求读取失败：${failures.join('；')}`));
+  }
+
+  function addObservationModelLinks(container, observation, closeImage = false) {
     for (const event of state.events.filter(item => item.kind === 'visual_decisions_call' && item.data?.observation_id === observation.observationId)) {
       if (!validFilePath(event.data.artifact)) continue;
       const info = modelCallInfo(event);
-      const button = element('button', 'button', `${info.type} · ${info.purpose} · 事件 #${event.id}`);
-      button.addEventListener('click', () => openModelEvent(event));
-      artifacts.append(button);
+      const button = element('button', 'button', `模型输入 · ${info.type} · ${info.purpose} · 事件 #${event.id}`);
+      button.addEventListener('click', () => {
+        if (closeImage) byId('observation-dialog').close();
+        openModelEvent(event);
+      });
+      container.append(button);
     }
+  }
+
+  function originalRgb(url, path) {
+    if (!path.endsWith('.svg')) return Promise.resolve(url);
+    if (!state.rawImages.has(url)) {
+      const pending = fetch(url).then(async response => {
+        if (!response.ok) throw new Error('归档图片读取失败');
+        const raw = embeddedRawRgb(await response.text());
+        if (!raw) throw new Error('此归档没有内嵌原始 RGB，可下载 RGBD 数组查看');
+        return raw;
+      }).catch(error => { state.rawImages.delete(url); throw error; });
+      state.rawImages.set(url, pending);
+    }
+    return state.rawImages.get(url);
   }
 
   function imageZoom(factor = 1, reset = false) {
@@ -472,7 +650,7 @@ export function mountReplayPage(document) {
     state.imageOperation += 1;
     if (!state.image) return;
     byId('observation-image').src = state.image.url;
-    byId('observation-image-status').textContent = '归档标注图 · 标注状态以本次记录为准';
+    byId('observation-image-status').textContent = '程序身份结果叠加／旧版状态叠加 · 不是实际模型输入；请核对上方拍摄与标注时间。';
     byId('observation-annotated').setAttribute('aria-pressed', 'true');
     byId('observation-raw').setAttribute('aria-pressed', 'false');
     byId('observation-raw').disabled = !state.image.camera.path.endsWith('.svg');
@@ -482,10 +660,14 @@ export function mountReplayPage(document) {
     const url = fileUrl(state.runId, camera.path);
     state.image = { url, camera, raw: null };
     byId('observation-image-title').textContent = `${camera.label} · ${observation.observationId}`;
-    byId('observation-image-meta').textContent = observationDescription(observation);
+    const frame = state.observationFrames.find(item => item.id === observation.observationId);
+    byId('observation-image-meta').textContent = observationImageSource(observation, frame, camera.id);
+    byId('observation-image-models').replaceChildren();
+    addObservationModelLinks(byId('observation-image-models'), observation, true);
     byId('observation-image').alt = `${camera.label} · ${observation.observationId}`;
     byId('observation-open-file').href = url;
     imageZoom(1, true);
+    byId('observation-image').removeAttribute('src');
     showAnnotatedImage();
     byId('observation-dialog').showModal();
   }
@@ -498,14 +680,12 @@ export function mountReplayPage(document) {
     byId('observation-raw').disabled = true;
     try {
       if (!image.raw) {
-        const response = await fetch(image.url);
-        if (!response.ok) throw new Error('归档图片读取失败');
-        image.raw = embeddedRawRgb(await response.text());
+        image.raw = await originalRgb(image.url, image.camera.path);
       }
       if (operation !== state.imageOperation) return;
       if (!image.raw) throw new Error('此归档没有内嵌原始 RGB，可下载 RGBD 数组查看');
       byId('observation-image').src = image.raw;
-      byId('observation-image-status').textContent = '原始 RGB · 来自同一归档帧，不含标注';
+      byId('observation-image-status').textContent = image.camera.path.endsWith('.svg') ? '原始 RGB · 来自同一归档采集，不含标注；不是重新渲染。' : '旧归档图片 · 未单独记录原始 RGB，可能含标注';
       byId('observation-annotated').setAttribute('aria-pressed', 'false');
       byId('observation-raw').setAttribute('aria-pressed', 'true');
     } catch (error) {
@@ -539,6 +719,12 @@ export function mountReplayPage(document) {
       void evidence.show(state.runId, [event]).catch(showError);
     }
     const calls = node.nodes ?? [];
+    for (const call of node.calls ?? []) {
+      const button = element('button', 'stage-button', call.title);
+      button.setAttribute('data-algorithm-id', call.id);
+      button.addEventListener('click', () => showNode(call));
+      byId('node-artifacts').append(button);
+    }
     if (!event && calls.length) {
       byId('node-meta').textContent = `${Number.isFinite(node.duration) ? `阶段用时 ${node.duration.toFixed(2)} 秒 · ` : ''}下列为实际发生的技能调用`;
       const list = element('div', 'skill-sequence');
@@ -587,7 +773,8 @@ export function mountReplayPage(document) {
       }
       const observation = state.observations.find(record => record.event === item);
       if (observation && !events.some(previous => previous !== item && previous.id < item.id && previous.kind === 'observation_annotated' && previous.data?.observation_id === observation.observationId)) {
-        const button = element('button', 'button', `查看观测与标注版本 · ${CHECKPOINT_NAMES[observation.checkpoint] ?? '归档图'}`);
+        const frame = state.observationFrames.find(item => item.id === observation.observationId);
+        const button = element('button', 'button', `查看观测图像版本 · ${frame?.title ?? '归档图'}`);
         button.addEventListener('click', () => { showObservation(observation.id); setView('observations'); });
         byId('node-artifacts').append(button);
       }
@@ -603,7 +790,7 @@ export function mountReplayPage(document) {
     byId('file-list').replaceChildren();
     for (const file of files) {
       const row = element('div', 'file-row');
-      if (file.path.endsWith('.json')) {
+      if (/\.(json|png|jpe?g|webp|gif|svg|mp4|webm)$/i.test(file.path)) {
         const button = element('button', '', file.path);
         button.type = 'button';
         button.addEventListener('click', () => previewFile(file.path).catch(showError));
@@ -628,6 +815,17 @@ export function mountReplayPage(document) {
     byId('file-download').hidden = false;
     byId('array-references').replaceChildren();
     byId('file-content').textContent = '正在读取数据…';
+    if (/\.(png|jpe?g|webp|gif|svg|mp4|webm)$/i.test(path)) {
+      const isVideo = /\.(mp4|webm)$/i.test(path);
+      const preview = element(isVideo ? 'video' : 'img', 'archive-media-preview');
+      preview.src = url;
+      if (isVideo) { preview.controls = true; preview.preload = 'auto'; preview.muted = true; }
+      else preview.alt = path;
+      preview.addEventListener('error', () => { byId('file-content').textContent = '媒体无法预览，可下载原文件。'; });
+      byId('file-evidence').replaceChildren(preview);
+      byId('file-content').textContent = '';
+      return;
+    }
     const file = state.manifest.files.find(item => item.path === path);
     if (file?.size_bytes > 5 * 1024 ** 2) {
       byId('file-content').textContent = '此 JSON 超过 5 MB，请下载原文件查看。';
@@ -658,9 +856,10 @@ export function mountReplayPage(document) {
     const operation = state.operation;
     const base = `/api/experiments/${encodeURIComponent(state.runId)}`;
     const [manifest, payload] = await Promise.all([request(base), request(`${base}/events`)]);
+    const events = await loadArchivedFailureReport(payload.events ?? [], path => request(fileUrl(manifest.id, path)));
     if (operation !== state.operation) return;
     state.manifest = manifest;
-    state.events = payload.events ?? [];
+    state.events = events;
     state.graph = buildExecutionGraph(state.events);
     state.experiments = state.experiments.map(item => item.id === manifest.id ? manifest : item);
     renderSummary();
@@ -674,27 +873,26 @@ export function mountReplayPage(document) {
   }
 
   function renderGraph() {
-    graphView.render(state.graph);
+    policy.show(state.runId, state.events).catch(showError);
     const stages = renderReplayStages(byId('object-timeline'), state.graph, (node, event) => {
       showNode(node, event);
       if (window.matchMedia?.('(max-width: 1250px)').matches) byId('node-title').scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     });
     if (!state.selectedNode && stages.length) showNode(stages[0]);
-    byId('graph-warning').textContent = state.graph.warnings.join(' ');
-    byId('graph-warning').hidden = state.graph.warnings.length === 0;
-    byId('export-svg').disabled = state.graph.nodes.length === 0;
-    byId('export-png').disabled = state.graph.nodes.length === 0;
   }
 
-  async function selectRun(runId, time = 0) {
-    clearMessages();
+  async function selectRun(runId, time = 0, { preserveMessages = false } = {}) {
+    if (state.mutating) return;
+    if (!preserveMessages) clearMessages();
     stopPlayback();
     window.clearTimeout(state.poll);
     const operation = ++state.operation;
     state.fileOperation += 1;
     evidence.clear();
     fileEvidence.clear();
+    policy.clear();
     state.runId = runId;
+    state.rawImages.clear();
     state.manifest = null;
     state.selectedNode = null;
     state.observationId = null;
@@ -710,14 +908,15 @@ export function mountReplayPage(document) {
     const base = `/api/experiments/${encodeURIComponent(runId)}`;
     try {
       const [manifest, payload] = await Promise.all([request(base), request(`${base}/events`)]);
+      const events = await loadArchivedFailureReport(payload.events ?? [], path => request(fileUrl(runId, path)));
       if (operation !== state.operation) return;
       state.manifest = manifest;
-      state.events = payload.events ?? [];
+      state.events = events;
       state.graph = buildExecutionGraph(state.events);
       byId('empty-selection').hidden = true;
       byId('experiment-content').hidden = false;
       byId('node-title').textContent = '节点详情';
-      byId('node-meta').textContent = '选择上方阶段或完整调用图节点查看记录。';
+      byId('node-meta').textContent = '展开执行证据，选择步骤或模型调用查看归档。';
       byId('seek-node').hidden = true;
       byId('node-artifacts').replaceChildren();
       byId('node-files').replaceChildren();
@@ -728,8 +927,6 @@ export function mountReplayPage(document) {
       byId('file-content').textContent = '选择一个 JSON 文件查看。';
       byId('file-download').hidden = true;
       byId('array-references').replaceChildren();
-      graphView.expanded.clear();
-      graphView.reset();
       renderSummary({ replaceName: true });
       renderGraph();
       renderFiles();
@@ -766,54 +963,95 @@ export function mountReplayPage(document) {
     state.operation += 1;
     window.clearTimeout(state.poll);
     renderSummary();
+    renderList();
     try {
       const manifest = await request(`/api/experiments/${encodeURIComponent(runId)}/save`, { name: byId('experiment-name').value.trim() });
       if (runId === state.runId) { state.manifest = manifest; renderSummary({ replaceName: true }); }
       await loadList();
       notify(wasPending ? '实验已保存。' : '实验名称已保存。');
     } catch (error) { showError(error); }
-    finally { state.mutating = false; renderSummary(); scheduleRefresh(); }
+    finally { state.mutating = false; renderList(); renderSummary(); scheduleRefresh(); }
   }
 
   async function discardExperiment() {
     if (!state.manifest || byId('discard-experiment').disabled || state.mutating) return;
-    const runId = state.runId;
+    await deleteExperiments([state.manifest]);
+  }
+
+  function clearDeletedReplay() {
     stopPlayback();
-    // Release video range requests before asking the archive store to move its files.
-    for (const track of tracks) { track.video.removeAttribute('src'); track.video.load(); }
-    state.mutating = true;
+    window.clearTimeout(state.poll);
     state.operation += 1;
+    state.fileOperation += 1;
+    state.runId = null;
+    state.manifest = null;
+    state.events = [];
+    state.graph = null;
+    state.selectedNode = null;
+    evidence.clear();
+    fileEvidence.clear();
+    policy.clear();
+    clearObservationImage();
+    if (byId('observation-dialog').open) byId('observation-dialog').close();
+    byId('experiment-content').hidden = true;
+    byId('empty-selection').hidden = false;
+    byId('empty-selection').replaceChildren(element('h2', '', '选择一条实验记录'));
+    updateUrl();
+  }
+
+  async function deleteExperiments(records) {
+    if (state.mutating || records.length === 0) return;
+    clearMessages();
+    const activeRunId = state.runId;
+    const releasingActive = records.some(item => item.id === activeRunId);
+    if (releasingActive) {
+      stopPlayback();
+      // Release video range requests before the store moves the archive.
+      for (const track of tracks) { track.video.removeAttribute('src'); track.video.load(); }
+    }
+    state.mutating = true;
+    state.deletionProgress = `0/${records.length}`;
+    if (releasingActive) state.operation += 1;
+    state.listOperation += 1;
     window.clearTimeout(state.poll);
     renderSummary();
-    clearMessages();
+    renderList();
+    let deleted = 0;
+    const failures = [];
     try {
-      const response = await fetch(`/api/experiments/${encodeURIComponent(runId)}`, { method: 'DELETE' });
-      const payload = await response.json();
-      if (!response.ok || payload.deleted !== true) {
-        const reasons = { experiment_busy: '实验仍在录制或编码，请完成后再删除。', experiment_in_use: '实验文件正在下载或导出，请结束后再删除。' };
-        throw new Error(reasons[payload.detail] ?? payload.detail ?? '实验删除失败');
+      for (const [index, item] of records.entries()) {
+        try {
+          const response = await fetch(`/api/experiments/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+          const payload = await response.json();
+          if (!response.ok || payload.deleted !== true) {
+            const reasons = { experiment_busy: '实验仍在录制或编码，请完成后再删除。', experiment_in_use: '实验文件正在下载或导出，请结束后再删除。' };
+            throw new Error(reasons[payload.detail] ?? payload.detail ?? '实验删除失败');
+          }
+          deleted += 1;
+          state.selectedRunIds.delete(item.id);
+          state.experiments = state.experiments.filter(record => record.id !== item.id);
+          if (item.id === state.runId) clearDeletedReplay();
+        } catch (error) {
+          failures.push(`${conciseName(item)}（${item.id}）：${error.message}`);
+        }
+        state.deletionProgress = `${index + 1}/${records.length}`;
+        renderSelectionControls();
       }
-      if (runId === state.runId) {
-        stopPlayback();
-        window.clearTimeout(state.poll);
-        state.operation += 1;
-        state.fileOperation += 1;
-        state.runId = null;
-        state.manifest = null;
-        state.events = [];
-        state.graph = null;
-        state.selectedNode = null;
-        evidence.clear();
-        fileEvidence.clear();
-        byId('experiment-content').hidden = true;
-        byId('empty-selection').hidden = false;
-        byId('empty-selection').replaceChildren(element('h2', '', '选择一条实验记录'));
-        updateUrl();
-      }
-      await loadList();
-      notify('实验已移入本地回收区，原始视频与数据仍保留。');
-    } catch (error) { showError(error); if (runId === state.runId && state.manifest) loadVideos(); }
-    finally { state.mutating = false; renderSummary(); scheduleRefresh(); }
+      notify(`已删除 ${deleted}/${records.length} 条实验，移入本地回收区，原始视频与数据仍保留。`);
+      if (failures.length) showError(new Error(`有 ${failures.length} 条未删除：${failures.join('；')}`));
+      try { await loadList(); }
+      catch (error) { showError(new Error(`${failures.join('；')} 刷新列表失败：${error.message}`)); }
+    } finally {
+      state.mutating = false;
+      state.deletionProgress = null;
+      if (releasingActive && state.runId === activeRunId && state.manifest) loadVideos();
+      renderList();
+      renderSummary();
+      scheduleRefresh();
+    }
+    if (releasingActive && state.runId === activeRunId && !state.manifest) {
+      await selectRun(activeRunId, state.time, { preserveMessages: true });
+    }
   }
 
   function downloadBlob(blob, filename) {
@@ -827,9 +1065,9 @@ export function mountReplayPage(document) {
 
   async function exportGraph(format) {
     if (!state.graph || !state.manifest) return;
-    const svg = graphSvg(state.graph, { title: state.manifest.name || '实验执行图', expanded: graphView.expanded });
+    const svg = policy.svg();
     const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-    const filename = `execution-${state.runId}`;
+    const filename = `graph-${state.runId}`;
     if (format === 'svg') { downloadBlob(blob, `${filename}.svg`); return; }
     const url = URL.createObjectURL(blob);
     try {
@@ -880,14 +1118,48 @@ export function mountReplayPage(document) {
   byId('playback-seek').addEventListener('input', event => { stopPlayback(); seek(event.target.value); });
   byId('playback-speed').addEventListener('change', event => { for (const track of tracks) track.video.playbackRate = Number(event.target.value); });
   byId('seek-node').addEventListener('click', () => { const selection = state.selectedNode; if (selection) { setView('video'); seek(selection.event?.t_s ?? selection.node.startTime); } });
-  byId('experiment-search').addEventListener('input', renderList);
+  byId('experiment-search').addEventListener('input', () => {
+    if (state.mutating) return;
+    state.selectedRunIds.clear();
+    renderList();
+  });
+  byId('select-all-experiments').addEventListener('change', () => {
+    if (state.mutating) return;
+    for (const item of filteredExperiments().filter(canDelete)) {
+      if (byId('select-all-experiments').checked) state.selectedRunIds.add(item.id);
+      else state.selectedRunIds.delete(item.id);
+    }
+    renderList();
+  });
+  byId('clear-selection').addEventListener('click', () => {
+    if (state.mutating) return;
+    state.selectedRunIds.clear();
+    renderList();
+  });
+  let batchDiscardRecords = [];
+  byId('delete-selected').addEventListener('click', () => {
+    if (state.mutating) return;
+    batchDiscardRecords = filteredExperiments().filter(item => canDelete(item) && state.selectedRunIds.has(item.id));
+    if (batchDiscardRecords.length === 0) return;
+    byId('batch-discard-count').textContent = `将删除 ${batchDiscardRecords.length} 条实验：`;
+    byId('batch-discard-names').replaceChildren(...batchDiscardRecords.map(item =>
+      element('li', '', `${conciseName(item)} · ID ${item.id}`)));
+    byId('batch-discard-dialog').returnValue = '';
+    byId('batch-discard-dialog').showModal();
+  });
+  byId('batch-discard-dialog').addEventListener('close', () => {
+    const records = batchDiscardRecords;
+    batchDiscardRecords = [];
+    if (byId('batch-discard-dialog').returnValue === 'discard') deleteExperiments(records).catch(showError);
+  });
   byId('file-search').addEventListener('input', renderFiles);
   byId('refresh-list').addEventListener('click', async () => {
+    if (state.mutating) return;
     clearMessages();
     byId('refresh-list').disabled = true;
     try { await loadList(); if (state.runId) await refreshSelected(); }
     catch (error) { showError(error); }
-    finally { byId('refresh-list').disabled = false; }
+    finally { byId('refresh-list').disabled = state.mutating; }
   });
   byId('rename-form').addEventListener('submit', saveExperiment);
   let discardRunId = null;
@@ -898,19 +1170,26 @@ export function mountReplayPage(document) {
     byId('discard-dialog').returnValue = '';
     byId('discard-dialog').showModal();
   });
-  byId('discard-dialog').addEventListener('close', () => { if (byId('discard-dialog').returnValue === 'discard' && discardRunId === state.runId) discardExperiment(); });
+  byId('discard-dialog').addEventListener('close', () => { if (byId('discard-dialog').returnValue === 'discard' && discardRunId === state.runId) discardExperiment().catch(showError); });
   byId('export-svg').addEventListener('click', () => exportGraph('svg').catch(showError));
   byId('export-png').addEventListener('click', () => exportGraph('png').catch(showError));
-  byId('graph-zoom-in').addEventListener('click', () => graphView.zoom(1.25));
-  byId('graph-zoom-out').addEventListener('click', () => graphView.zoom(0.8));
-  byId('graph-fit').addEventListener('click', () => graphView.fit());
-  byId('graph-reset').addEventListener('click', () => graphView.reset());
+  byId('export-json').addEventListener('click', () => {
+    if (policy.graph()) downloadBlob(new Blob([JSON.stringify(policy.graph(), null, 2)], { type: 'application/json' }), `graph-${state.runId}.json`);
+  });
+  byId('graph-zoom-in').addEventListener('click', () => policy.zoom(1.25));
+  byId('graph-zoom-out').addEventListener('click', () => policy.zoom(0.8));
+  byId('graph-fit').addEventListener('click', () => policy.fit());
+  byId('graph-reset').addEventListener('click', () => policy.reset());
   byId('inventory-snapshot').addEventListener('change', () => { state.inventoryId = byId('inventory-snapshot').value; showInventory(); });
   byId('observation-select').addEventListener('change', () => {
     const frame = state.observationFrames.find(item => item.id === byId('observation-select').value);
     if (frame) showObservation(frame.preferredId);
   });
   byId('observation-revision').addEventListener('change', () => showObservation(byId('observation-revision').value));
+  byId('responses-reference').addEventListener('click', () => {
+    const reference = state.observations.find(item => item.status === 'responses_proposal');
+    if (reference) showObservation(reference.id);
+  });
   byId('observation-seek').addEventListener('click', () => {
     const frame = state.observationFrames.find(item => item.revisions.some(revision => revision.id === state.observationId));
     if (frame && Number.isFinite(frame.captureTime)) { stopPlayback(); setView('video'); seek(frame.captureTime); }

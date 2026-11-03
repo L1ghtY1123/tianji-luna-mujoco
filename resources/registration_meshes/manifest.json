@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "models": {
+    "blue_box": {
+      "path": "blue_box.ply",
+      "source_sha256": "212b3373d70dc040983e1409cf09b8b8cb93ee0c67da8619f563e091e47ef30e",
+      "original_mesh_sha256": "dd1d02ff89e14a5aa7e51242c05e3900eff3946ce19b0015cb426f3bb148304e",
+      "mesh_sha256": "21923de28c65c0bb7662802064201fddb2446fbab04cf3abec6d66290ab27e65",
+      "units": "mm",
+      "frame": "original_registry_canonical",
+      "frame_transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "face_count": 1000,
+      "source": "published_lowpoly_surface"
+    },
+    "black_core": {
+      "path": "black_core.ply",
+      "source_sha256": "35597406bc1fa94cde8ece1c56f425c5da8e0eb623e4559e38314c7c4880445c",
+      "original_mesh_sha256": "2b124d12b3c57106661663aeed9ea2b004b984dd67ea8c35748128ce450db22d",
+      "mesh_sha256": "7dddd20bcb95d8c309858f4265683bc840d7c746452aa5ba4a1e192809eb9e81",
+      "units": "mm",
+      "frame": "original_registry_canonical",
+      "frame_transform": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "face_count": 999,
+      "source": "published_lowpoly_surface"
+    }
+  }
+}

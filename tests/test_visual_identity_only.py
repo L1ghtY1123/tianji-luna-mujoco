@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
-from test_rgbd_workflow import Choices, SensorRobot, VisionAlgorithms
+from rgbd_workflow_fixture import SensorRobot, VisionAlgorithms
 
 from luna_mujoco.perception import PerceptionError
 from luna_mujoco.runner import Runner
@@ -20,7 +20,7 @@ async def test_missing_visual_identity_result_cannot_enter_inventory(tmp_path):
 
     algorithms = MissingIdentity()
     algorithms.perception = SimpleNamespace(visual_inventory=SimpleNamespace(audit=None))
-    runner = Runner(SensorRobot(), algorithms, lambda record: Choices(), tmp_path)
+    runner = Runner(SensorRobot(), algorithms, None, tmp_path)
     runner.state.update(task='grasp_place', generation=1, instruction='move red')
     runner.task_progress = TaskProgress('move red')
     with pytest.raises(PerceptionError, match='visual_inventory_required'):

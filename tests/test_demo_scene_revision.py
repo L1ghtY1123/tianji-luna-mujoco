@@ -12,9 +12,9 @@ def test_revised_world_coordinates_and_pink_yaw():
     np.testing.assert_allclose(scene['table']['position'], [.572, -.026, .532])
     assert scene.get('support_tables', []) == []
     left, right = scene['objects'][:2]
-    np.testing.assert_allclose(left['position'], [.481, .573, .571])
-    np.testing.assert_allclose(right['position'], [.481, -.625, .571])
-    assert (left['position'][1] + right['position'][1]) / 2 == pytest.approx(scene['table']['position'][1])
+    np.testing.assert_allclose(left['position'], [.460, .540, .571])
+    np.testing.assert_allclose(right['position'], [.460, -.625, .571])
+    assert left['yaw_deg'] == 0 and right['yaw_deg'] == -90
     assert all(item['yaw_deg'] == 180 for item in scene['objects'][2:])
 
 
@@ -51,7 +51,7 @@ def test_mock_black_is_horizontal_supported_and_remains_dynamic():
     sim.start()
     sim._condition.acquire()
     try:
-        receipt = sim.mock_unpack({'center_world_xy_m': [.46, -.026], 'size_m': .32,
+        receipt = sim.unpack_at_pose({'center_world_xy_m': [.46, -.026], 'size_m': .32,
             'floor_z_m': top}, generation=sim._generation)
         body = sim._model.body('object_' + receipt['physical_object_id'])
         assert sim._model.body_jntnum[body.id] == 1 and sim._model.body_gravcomp[body.id] == 0

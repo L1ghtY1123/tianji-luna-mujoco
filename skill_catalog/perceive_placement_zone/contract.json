@@ -1,0 +1,43 @@
+{
+  "id": "perceive_placement_zone",
+  "description": "Obtain the current destination support region and interpret only this transfer location clause. Use an accepted CAD interior-floor/surface definition or a measured support plane; do not demand visible depth for a registered CAD floor. Reuse an already confirmed destination relation when its binding is valid. Decide whether the language authorizes the entire region or adds a relative position/subregion/orientation constraint. Selecting a container on the left/right does not itself constrain a point within that container. CAD selection, grasp method, later processing, return posture and task completion are outside these questions. Unknown geometry or language returns an explicit reason; the graph chooses any legal recovery movement, observation and retry.",
+  "capability": "Obtain the current destination support region and interpret only this transfer location clause",
+  "inputs": [
+    "original_instruction",
+    "active_object_task",
+    "current_rgb",
+    "current_observation",
+    "permanent_inventory_ids",
+    "destination_id"
+  ],
+  "requires": {
+    "target_selected": true,
+    "destination_selected": true,
+    "observed": true,
+    "recovery_needed": false
+  },
+  "provides": [
+    "placement_zone_ready"
+  ],
+  "outputs": [
+    "placement_zone_ready",
+    "placement_zone",
+    "intent",
+    "semantic_scope",
+    "evidence"
+  ],
+  "planning_effects": {
+    "placement_resolved": false,
+    "place_plan_ready": false
+  },
+  "errors": [
+    "placement_support_geometry_missing",
+    "placement_support_geometry_stale",
+    "placement_horizontal_surface_unobserved",
+    "fresh_observation_required_before_judgment",
+    "placement_region_semantics_unknown",
+    "cad_support_not_horizontal"
+  ],
+  "invalidates_observation": false,
+  "recovery_retry_safe": true
+}

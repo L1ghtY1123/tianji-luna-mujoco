@@ -18,13 +18,16 @@ def test_small_budget_preserves_both_frozen_surfaces_and_original_padding(name, 
         points = fixture["points_tool_m"]
         measured_count = int(fixture["measured_point_count"])
         padding = float(fixture["uncertainty_m"] + fixture["margin_m"])
+    all_points = points.copy()
+    points = points[:measured_count].copy()
     original = points.copy()
-    provenance = {"source": "registered_rgbd_surface_with_explicit_height_completion",
-        "point_count": len(points), "measured_point_count": measured_count,
-        "synthetic_point_count": len(points) - measured_count,
-        "measured_reference_tool_m": points[:measured_count].mean(axis=0).tolist(),
-        "geometry_completion": {"source": "measured_surface_and_user_height_prior",
-                                "synthetic_points_are_measured": False}}
+    old_provenance = {"source": "registered_rgbd_surface_with_explicit_height_completion",
+        "point_count": len(all_points), "synthetic_point_count": len(all_points) - measured_count}
+    with pytest.raises(ValueError, match="synthetic_scene_geometry_unsupported"):
+        measured_binding(all_points, measurement_provenance=old_provenance)
+    provenance = {"source": "registered_rgbd_visible_surface", "point_count": len(points),
+        "measured_point_count": measured_count,
+        "measured_reference_tool_m": points.mean(axis=0).tolist()}
     result = carrying_geometry(measured_binding(points, sphere_budget=budget, measurement_provenance=provenance))
     spheres = np.asarray(result["spheres"])
     assert 0 < result["sphere_count"] <= result["sphere_budget"] == budget < 32
@@ -35,4 +38,4 @@ def test_small_budget_preserves_both_frozen_surfaces_and_original_padding(name, 
     assert_covered(points, spheres, padding)
     np.testing.assert_array_equal(points, original)
     assert sum(row["measured"] for row in result["source_counts_by_sphere"]) == measured_count
-    assert sum(row["height_completion"] for row in result["source_counts_by_sphere"]) == len(points) - measured_count
+    assert sum(row["height_completion"] for row in result["source_counts_by_sphere"]) == 0

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "calibration_kind": "user_extrinsics_with_frozen_registered_rgb_intrinsics",
+  "calibration_kind": "measured_rgb_intrinsics_and_extrinsics_ideal_pinhole",
   "translation_units": "meters",
   "extrinsics_source": "resources/cameras/user-extrinsics/",
   "cameras": {
@@ -9,10 +9,10 @@
       "role": "right_wrist",
       "parent_body": "TCP_Link_R",
       "intrinsics": {
-        "cx": 317.9415584415584,
-        "cy": 235.86363636363635,
-        "fx": 374.025974025974,
-        "fy": 374.025974025974,
+        "cx": 318.0513610839844,
+        "cy": 229.73512268066406,
+        "fx": 394.2907409667969,
+        "fy": 393.8032531738281,
         "width": 640,
         "height": 480
       },
@@ -49,14 +49,14 @@
           1.0
         ]
       ],
-      "source_path": "/home/guangyu/.cache/tianji-codex/stereo-20260910/configured-live/1-calibration.json",
-      "source_sha256": "e8cd47a5d902ade17d045fbaad7e008a7a173fb4695208b7f8d0bae07604ce8d",
+      "source_path": "resources/cameras/user-extrinsics/camera_right_wrist_extrinsic.json",
+      "source_sha256": "e4a33a2fcb96b1edcd9aea40957e991dfc902a29a6173ee90908b87c19267dee",
       "device_identity": {
         "camera_id": "1",
-        "channel": 8,
-        "calibration_version": "4.32.0000.01",
         "role": "right_wrist",
-        "identity_basis": "historical_capture_camera_id"
+        "model": "RealSense D405",
+        "serial_number": "260522273287",
+        "identity_basis": "measured_extrinsic_samples_and_reference_camera_binding"
       },
       "historical_calibration": {
         "available": true,
@@ -444,6 +444,51 @@
         "camera_serial_number": "260522273287",
         "intrinsic_revision_from_source": "0221644e4262f50edb1ae006ba133040f84004f2",
         "frame_interpretation": "flange-local optical frame"
+      },
+      "historical_intrinsic_provenance": {
+        "source_path": "/home/guangyu/.cache/tianji-codex/stereo-20260910/configured-live/1-calibration.json",
+        "source_sha256": "e8cd47a5d902ade17d045fbaad7e008a7a173fb4695208b7f8d0bae07604ce8d",
+        "device_identity": {
+          "camera_id": "1",
+          "channel": 8,
+          "calibration_version": "4.32.0000.01",
+          "role": "right_wrist",
+          "identity_basis": "historical_capture_camera_id"
+        }
+      },
+      "projection_model": "ideal_pinhole",
+      "intrinsic_provenance": {
+        "source_path": "resources/cameras/user-extrinsics/camera_right_wrist_extrinsic.json",
+        "source_sha256": "e4a33a2fcb96b1edcd9aea40957e991dfc902a29a6173ee90908b87c19267dee",
+        "json_pointer": "/samples/0/camera_calibration",
+        "consistent_sample_count": 60,
+        "native_calibration": {
+          "coordinate_frame": "color",
+          "distortion_coefficients": [
+            -0.054128143936395645,
+            0.058362096548080444,
+            0.0006429100758396089,
+            -0.0005235625430941582,
+            -0.019600115716457367
+          ],
+          "distortion_model": "distortion.inverse_brown_conrady",
+          "fps": 60,
+          "model": "RealSense D405",
+          "rectified": false,
+          "rgb_intrinsics": {
+            "cx": 318.0513610839844,
+            "cy": 229.73512268066406,
+            "fx": 394.2907409667969,
+            "fy": 393.8032531738281
+          },
+          "rgb_resolution": [
+            640,
+            480
+          ],
+          "serial_number": "260522273287",
+          "session_generation": 3
+        },
+        "projection_interpretation": "Ideal pinhole rendering with the measured native RGB K and resolution; source lens distortion is retained as evidence, not applied to simulated pixels. This is not the raw physical preview."
       }
     },
     "2": {
@@ -451,10 +496,10 @@
       "role": "left_wrist",
       "parent_body": "TCP_Link_L",
       "intrinsics": {
-        "cx": 318.9871794871795,
-        "cy": 243.08974358974362,
-        "fx": 369.2307692307693,
-        "fy": 369.2307692307693,
+        "cx": 320.0536193847656,
+        "cy": 237.30731201171875,
+        "fx": 393.44769287109375,
+        "fy": 392.82000732421875,
         "width": 640,
         "height": 480
       },
@@ -491,14 +536,14 @@
           1.0
         ]
       ],
-      "source_path": "/home/guangyu/.cache/tianji-codex/stereo-20260910/configured-live/2-calibration.json",
-      "source_sha256": "f1601894fccea7368eb01ae8ad18ca9a8c925fd0941af329d23ee8a596e747d1",
+      "source_path": "resources/cameras/user-extrinsics/camera_left_wrist_extrinsic.json",
+      "source_sha256": "ca9c562b15e4fd96ffaafaf31fdd40ad6b0c5c7f7a7843f9cb136c725cfa9cdc",
       "device_identity": {
         "camera_id": "2",
-        "channel": 8,
-        "calibration_version": "4.32.0000.01",
         "role": "left_wrist",
-        "identity_basis": "historical_capture_camera_id"
+        "model": "RealSense D405",
+        "serial_number": "260422273023",
+        "identity_basis": "measured_extrinsic_samples_and_reference_camera_binding"
       },
       "historical_calibration": {
         "available": true,
@@ -886,6 +931,51 @@
         "camera_serial_number": "260422273023",
         "intrinsic_revision_from_source": "0221644e4262f50edb1ae006ba133040f84004f2",
         "frame_interpretation": "flange-local optical frame"
+      },
+      "historical_intrinsic_provenance": {
+        "source_path": "/home/guangyu/.cache/tianji-codex/stereo-20260910/configured-live/2-calibration.json",
+        "source_sha256": "f1601894fccea7368eb01ae8ad18ca9a8c925fd0941af329d23ee8a596e747d1",
+        "device_identity": {
+          "camera_id": "2",
+          "channel": 8,
+          "calibration_version": "4.32.0000.01",
+          "role": "left_wrist",
+          "identity_basis": "historical_capture_camera_id"
+        }
+      },
+      "projection_model": "ideal_pinhole",
+      "intrinsic_provenance": {
+        "source_path": "resources/cameras/user-extrinsics/camera_left_wrist_extrinsic.json",
+        "source_sha256": "ca9c562b15e4fd96ffaafaf31fdd40ad6b0c5c7f7a7843f9cb136c725cfa9cdc",
+        "json_pointer": "/samples/0/camera_calibration",
+        "consistent_sample_count": 45,
+        "native_calibration": {
+          "coordinate_frame": "color",
+          "distortion_coefficients": [
+            -0.05260225012898445,
+            0.05552077665925026,
+            -3.561543780961074e-05,
+            0.0007970051956363022,
+            -0.01841071806848049
+          ],
+          "distortion_model": "distortion.inverse_brown_conrady",
+          "fps": 60,
+          "model": "RealSense D405",
+          "rectified": false,
+          "rgb_intrinsics": {
+            "cx": 320.0536193847656,
+            "cy": 237.30731201171875,
+            "fx": 393.44769287109375,
+            "fy": 392.82000732421875
+          },
+          "rgb_resolution": [
+            640,
+            480
+          ],
+          "serial_number": "260422273023",
+          "session_generation": 3
+        },
+        "projection_interpretation": "Ideal pinhole rendering with the measured native RGB K and resolution; source lens distortion is retained as evidence, not applied to simulated pixels. This is not the raw physical preview."
       }
     },
     "3": {
@@ -893,12 +983,12 @@
       "role": "head",
       "parent_body": "world",
       "intrinsics": {
-        "cx": 320.0405405405405,
-        "cy": 194.6351351351351,
-        "fx": 291.8918918918919,
-        "fy": 291.8918918918919,
+        "cx": 321.00567626953125,
+        "cy": 241.04464721679688,
+        "fx": 370.1304931640625,
+        "fy": 370.15179443359375,
         "width": 640,
-        "height": 360
+        "height": 480
       },
       "distortion": [
         0.0,
@@ -933,14 +1023,14 @@
           1.0
         ]
       ],
-      "source_path": "/home/guangyu/.cache/tianji-codex/grasp-repair-20260906/multiview-depth/3/camera-calibration.json",
-      "source_sha256": "60c06696e0f6925bd0566a6998fa87c7ee607cd95179f552c3ec29b997f84780",
+      "source_path": "resources/cameras/user-extrinsics/camera_head_extrinsic.json",
+      "source_sha256": "5df5565d1093ff6310ab599531b0f90621686d5e6addbacc99850b4c8ef54d91",
       "device_identity": {
         "camera_id": "3",
-        "channel": 8,
-        "calibration_version": "4.31.0001.07",
         "role": "head",
-        "identity_basis": "historical_capture_camera_id"
+        "model": "Orbbec Gemini 335Lg",
+        "serial_number": "CPB94630009P",
+        "identity_basis": "measured_extrinsic_samples_and_reference_camera_binding"
       },
       "historical_calibration": {
         "available": true,
@@ -1336,13 +1426,66 @@
         "camera_serial_number": "CPB94630009P",
         "intrinsic_revision_from_source": "0221644e4262f50edb1ae006ba133040f84004f2",
         "frame_interpretation": "T_base_cam is already in robot world/base_link"
+      },
+      "historical_intrinsic_provenance": {
+        "source_path": "/home/guangyu/.cache/tianji-codex/grasp-repair-20260906/multiview-depth/3/camera-calibration.json",
+        "source_sha256": "60c06696e0f6925bd0566a6998fa87c7ee607cd95179f552c3ec29b997f84780",
+        "device_identity": {
+          "camera_id": "3",
+          "channel": 8,
+          "calibration_version": "4.31.0001.07",
+          "role": "head",
+          "identity_basis": "historical_capture_camera_id"
+        }
+      },
+      "projection_model": "ideal_pinhole",
+      "intrinsic_provenance": {
+        "source_path": "resources/cameras/user-extrinsics/camera_head_extrinsic.json",
+        "source_sha256": "5df5565d1093ff6310ab599531b0f90621686d5e6addbacc99850b4c8ef54d91",
+        "json_pointer": "/samples/0/camera_calibration",
+        "consistent_sample_count": 18,
+        "native_calibration": {
+          "coordinate_frame": "color",
+          "distortion_coefficients": [
+            -0.030863894149661064,
+            0.03343589976429939,
+            -0.0006303273257799447,
+            0.00017274329729843885,
+            -0.01151623111218214,
+            0,
+            0,
+            0
+          ],
+          "distortion_model": "OBCameraDistortionModel.BROWN_CONRADY_K6",
+          "fps": 60,
+          "model": "Orbbec Gemini 335Lg",
+          "rectified": false,
+          "rgb_intrinsics": {
+            "cx": 321.00567626953125,
+            "cy": 241.04464721679688,
+            "fx": 370.1304931640625,
+            "fy": 370.15179443359375
+          },
+          "rgb_resolution": [
+            640,
+            480
+          ],
+          "serial_number": "CPB94630009P",
+          "session_generation": 1
+        },
+        "projection_interpretation": "Ideal pinhole rendering with the measured native RGB K and resolution; source lens distortion is retained as evidence, not applied to simulated pixels. This is not the raw physical preview."
       }
     }
   },
-  "calibration_id": "user-extrinsics-5a390ce34b936bd8",
+  "calibration_id": "measured-rgb-pinhole-a85e3d8b0d1f2cc1",
   "extrinsics_source_sha256": {
     "right_wrist": "e4a33a2fcb96b1edcd9aea40957e991dfc902a29a6173ee90908b87c19267dee",
     "left_wrist": "ca9c562b15e4fd96ffaafaf31fdd40ad6b0c5c7f7a7843f9cb136c725cfa9cdc",
     "head": "5df5565d1093ff6310ab599531b0f90621686d5e6addbacc99850b4c8ef54d91"
+  },
+  "reference_extrinsics": {
+    "source_path": "C:\\project\\main\\tianji_base\\extensions\\cameras\\camera-extrinsics\\defaults\\camera_extrinsics.json",
+    "source_sha256": "f98154fad435fd7c11fea907fb411d5682da73e3a8a5d592dec084104eea35a8",
+    "matrix_comparison": "All three rotations and mm-to-m translations match exactly; runtime instance overrides are not used."
   }
 }

@@ -5,7 +5,7 @@
 ## 自动检查
 
 - 使用 skill-creator 的 `quick_validate.py` 检查项目源文件及 Codex 已安装副本，均返回 `Skill is valid!`。
-- 已安装到 `C:/Users/l1ght/.codex/skills/jev-skill-standard`；四个文件的 SHA-256 均与项目规范源目录相同。
+- 历史安装记录：当时安装于 `C:/Users/l1ght/.codex/skills/jev-skill-standard`，四个文件与项目副本一致。2026-10-30 已按用户要求删除两处 skill 文件，不再加载。
 - 新增文档的本地 Markdown 链接全部解析成功，未发现编码替换字符。
 - 用实际 `Registry()` 加载运行时目录，仍为 19 项；observe_scene、observe_geometry、observe_result 未注册，定义目录没有 contract.json。
 - 单腕基线探针明确返回 both_wrists / views_ready=false；当前限制尚未修改，见 [现状核对](current-skill-audit.md)。

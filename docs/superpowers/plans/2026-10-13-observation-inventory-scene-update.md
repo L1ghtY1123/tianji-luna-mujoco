@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12、Pydantic AI/JEV、NumPy/SciPy、SAM3、GraspGen、cuRobo、MuJoCo 3.10.0、现有 OpenAI 视觉适配器、原生 JavaScript/Three.js/Vite。
 
-**Spec:** [累计讨论与最新约束](../../skill-specs/2026-10-13-observation/README.md)、[观测共用约定](../../skill-specs/2026-10-13-observation/common.md)、[JEV skill 规范](../../skill-standards/jev-skill-standard/SKILL.md)。讨论记录的“后续用户明确修订”与“后续补充”优先于更早建议；本文把它们收敛成拟实施行为。
+**Spec:** [累计讨论与最新约束](../../skill-specs/2026-10-13-observation/README.md)、[观测共用约定](../../skill-specs/2026-10-13-observation/common.md)、历史 JEV skill 规范（已于 2026-10-30 按用户要求删除；当前遵循 AGENTS.md 与 Luna skill 手册）。讨论记录的“后续用户明确修订”与“后续补充”优先于更早建议；本文把它们收敛成拟实施行为。
 
 ## 实施状态（2026-10-13）
 

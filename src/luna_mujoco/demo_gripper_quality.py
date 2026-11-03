@@ -5,15 +5,17 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
+from threading import local
 
 import mujoco
 import numpy as np
 import trimesh
 import yaml
+from scipy.spatial import ConvexHull
 from scipy.spatial.transform import Rotation
 
 from .carrying import carrying_touch_links
-from .geometry import rigid_matrix
+from .geometry import mount_tcp_pose
 from .kinematics import robot_model
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -75,6 +77,7 @@ class GripperWidthModel:
         kin = yaml.safe_load(CONFIG.read_bytes())["robot_cfg"]["kinematics"]
         self.locks = dict(kin["lock_joints"])
         self.model = robot_model()
+        self._scratch = local()
         limit = self.joints[self.driver].find("limit")
         self.lower, self.upper = float(limit.get("lower")), float(limit.get("upper"))
         if not np.isfinite([self.lower, self.upper]).all() or not self.lower < self.upper:
@@ -113,6 +116,7 @@ class GripperWidthModel:
             raise ValueError("opposing pad direction is undefined")
         axis /= np.linalg.norm(axis)
         self.planes = {}
+        self.contact_regions = {}
         for link, direction in zip(self.pads, (axis, -axis)):
             mesh, transform = meshes[link], opened[link]
             faces = np.flatnonzero((mesh.face_normals @ transform[:3, :3].T) @ direction > .99)
@@ -130,6 +134,10 @@ class GripperWidthModel:
             if np.max(np.abs((mesh.triangles[ids].reshape(-1, 3) - center) @ normal)) > 1e-5:
                 raise ValueError("opposing pad surface is not planar")
             self.planes[link] = (center, normal, float(areas.sum()))
+            _, _, axes = np.linalg.svd(normal[None, :], full_matrices=True)
+            basis = axes[1:].T
+            outline = (mesh.triangles[ids].reshape(-1, 3) - center) @ basis
+            self.contact_regions[link] = (basis, ConvexHull(outline).equations)
         self.normal = opened[self.pads[0]][:3, :3] @ self.planes[self.pads[0]][1]
         self.normal /= np.linalg.norm(self.normal)
         self.angles = np.linspace(self.lower, self.upper, int(np.ceil((self.upper - self.lower) / MAX_Q_STEP_RAD)) + 1)
@@ -138,7 +146,13 @@ class GripperWidthModel:
             raise ValueError("authored pad gap is not strictly decreasing")
 
     def transforms(self, q):
-        data = mujoco.MjData(self.model)
+        if getattr(self._scratch, "model", None) is not self.model:
+            self._scratch.data = mujoco.MjData(self.model)
+            self._scratch.model = self.model
+        data = self._scratch.data
+        # Match a fresh MjData's joint defaults, without reallocating its full
+        # dynamics workspace. This scratch is private to this model and thread.
+        data.qpos[:] = self.model.qpos0
         values = {**self.locks, self.driver: float(q)}
 
         def value(name, visiting=()):
@@ -152,7 +166,9 @@ class GripperWidthModel:
         for name, joint in self.joints.items():
             if joint.get("type") != "fixed" and (name in values or joint.find("mimic") is not None):
                 data.qpos[int(self.model.joint(name).qposadr[0])] = value(name)
-        mujoco.mj_fwdPosition(self.model, data)
+        # Only xpos/xmat are consumed below. Public kinematics computes these
+        # directly; inertia, contacts and constraints from fwdPosition are unused.
+        mujoco.mj_kinematics(self.model, data)
         tool = self.model.body(self.tool).id
         rotation = data.xmat[tool].reshape(3, 3)
         result = {}
@@ -173,6 +189,21 @@ class GripperWidthModel:
                 raise ValueError("authored pad normals are not parallel throughout closure")
             offsets.append(float((pose[:3, :3] @ center + pose[:3, 3]) @ self.normal))
         return offsets[1] - offsets[0]
+
+    def contact_patch_gaps(self, points_tool_m, q):
+        """Signed gaps only for measured points projected inside finite pad faces."""
+        poses, result = self.transforms(q), []
+        for link in self.pads:
+            center, normal, _ = self.planes[link]
+            basis, equations = self.contact_regions[link]
+            pose = poses[link]
+            points = (points_tool_m - pose[:3, 3]) @ pose[:3, :3] - center
+            projected = points @ basis
+            inside = (projected @ equations[:, :2].T + equations[:, 2] <= 1e-9).all(axis=1)
+            gaps = points[inside] @ normal
+            result.append({'link': link, 'observed_patch_point_count': int(inside.sum()),
+                'minimum_signed_gap_m': float(gaps.min()) if len(gaps) else None})
+        return result
 
     def width_angle(self, width):
         if width > self.gaps[0] or width < self.gaps[-1] or width <= 0:
@@ -205,7 +236,7 @@ def predict_gripper_compatibility(points_world_m, T_world_tcp, *, arm, uncertain
         raise ValueError("gripper width prediction requires finite full Nx3 geometry")
     if not np.isfinite([uncertainty_m, margin_m]).all() or min(uncertainty_m, margin_m) < 0:
         raise ValueError("gripper width prediction requires original nonnegative padding")
-    pose = rigid_matrix(T_world_tcp)
+    pose = mount_tcp_pose(T_world_tcp, arm)
     model = gripper_width_model(arm)
     local = (points - pose[:3, 3]) @ pose[:3, :3]
     projection = local @ model.normal

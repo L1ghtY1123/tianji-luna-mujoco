@@ -22,7 +22,7 @@ trap 'exit 143' TERM
 trap 'exit 130' INT
 
 python -m uvicorn luna_mujoco.demo_app:create_app --factory --host 127.0.0.1 --port 8351 \
-  --reload --reload-dir "$PROJECT_DIR/src" --reload-dir "$PROJECT_DIR/demo_skills" \
+  --reload --reload-dir "$PROJECT_DIR/src" --reload-dir "$PROJECT_DIR/skill_catalog" \
   --reload-include '*.py' --reload-include '*.md' --reload-include '*.json' \
   --timeout-graceful-shutdown 10 &
 BACKEND_PID=$!

@@ -1,5 +1,4 @@
 """RGB discovery owns the ledger; SAM3 owns only current geometry."""
-import importlib.util
 import json
 from copy import deepcopy
 
@@ -20,34 +19,33 @@ def entities():
 
 
 def test_discovery_uses_responses_rgb_only_and_allocates_stable_ids():
-    assert importlib.util.find_spec('luna_mujoco.visual_discovery') is not None, 'RGB discovery is missing'
-    from luna_mujoco.visual_discovery import VisualDiscovery
+    from test_agent_model_layer import CATALOG, plan_data
+
+    from luna_mujoco.agent.responses import ResponsesCompiler
     capture, _ = fixture()
+    capture['views'].update({camera: deepcopy(capture['views']['3']) for camera in ('1', '2')})
     calls, audits = [], []
-    discovered = {'entities': [
-        {'ref': 'table', 'kind': 'table', 'color': 'brown', 'description': 'working table',
-         'bbox': [0., 0., 1., 1.], 'membership': 'excluded', 'segmentation_prompt': '', 'parent_ref': None},
-        {'ref': 'a', 'kind': 'cube', 'color': 'red', 'description': 'red cube on left',
-         'bbox': [.1, .1, .4, .6], 'membership': 'required', 'segmentation_prompt': 'red cube', 'parent_ref': 'table'},
-        {'ref': 'b', 'kind': 'cube', 'color': 'red', 'description': 'red cube on right',
-         'bbox': [.6, .1, .9, .6], 'membership': 'required', 'segmentation_prompt': 'red cube', 'parent_ref': 'table'}]}
+    discovered = plan_data()
+    discovered['task']['instruction'] = 'move both red cubes'
+    discovered['task']['target_refs'].append('second')
+    discovered['entities'].append({**discovered['entities'][-1], 'ref': 'second'})
     def respond(request):
         calls.append(json.loads(request.content))
         assert str(request.url) == 'https://api.openai.com/v1/responses'
         return httpx.Response(200, json={'status': 'completed', 'model': 'gpt-6-luna', 'output': [
             {'type': 'message', 'content': [{'type': 'output_text', 'text': json.dumps(discovered)}]}]})
-    discovery = VisualDiscovery(api_key='test', client=httpx.Client(transport=httpx.MockTransport(respond)), audit=audits.append)
+    discovery = ResponsesCompiler(registry=CATALOG, api_key='test', client=httpx.Client(transport=httpx.MockTransport(respond)), audit=audits.append)
     first = discovery.discover(capture, instruction='move both red cubes')
-    # Geometry changes must not affect a request built solely from the same head RGB.
+    # Geometry changes must not affect a request built solely from the same RGB images.
     capture['views']['3']['depth_m'] *= 7
     capture['views']['3']['valid_depth'][:] = False
     capture['views']['3']['instance_masks'] = {'unused': np.ones((24, 32), bool)}
     second = discovery.discover(capture, instruction='move both red cubes')
     assert first['entities'] == second['entities']
-    assert len(first['entities']) == 3 and len(calls) == len(audits) == 1
+    assert len(first['entities']) == 4 and len(calls) == len(audits) == 1
     assert sum(e['visual_membership'] == 'required' for e in first['entities'].values()) == 2
     assert calls[0]['text']['format']['type'] == 'json_schema'
-    assert [part['type'] for part in calls[0]['input'][0]['content']] == ['input_text', 'input_image']
+    assert sum(part['type'] == 'input_image' for part in calls[0]['input'][0]['content']) == len(capture['views'])
     request_text = json.dumps(calls[0])
     assert 'depth_m' not in request_text and 'points_world' not in request_text
     assert audits[0]['endpoint'] == '/v1/responses'
@@ -134,9 +132,11 @@ def test_real_perception_flow_discovers_before_sam_and_retains_missing_geometry(
     calls = []
     inventory = VisualInventory(api_key='test', client=client_with_answers(
         {'visibility_first': 'visible', 'visibility_second': 'visible'}, calls))
-    result = Perception(Detector(), visual_discovery=Discovery(), visual_inventory=inventory).observe(
-        capture, source_hint={'camera_ids': ['3'], 'visual_decision': {'source': 'jev', 'purpose': 'initialize_inventory'}})
-    assert order == ['responses', ('sam3', 'cube')]
+    manifest = Discovery().discover(capture, instruction='move both')
+    result = Perception(Detector(), visual_inventory=inventory).observe(
+        capture, source_hint={'scene_entities': manifest['entities'], 'visual_reference': manifest['reference'],
+            'camera_ids': ['3'], 'visual_decision': {'source': 'responses_program', 'purpose': 'initialize_inventory'}})
+    assert order == ['responses', ('sam3', 'cube'), ('sam3', 'red object'), ('sam3', 'red shape')]
     assert set(result['scene_entities']) == {'first', 'second'}
     assert set(result['visual_inventory']['missing_geometry_ids']) == {'first', 'second'}
     assert len(result['mapping_unresolved']) == 2 and result['objects'] == []
@@ -172,20 +172,21 @@ def test_discovered_inventory_survives_a_later_failure_and_is_not_rediscovered(s
                 raise VisualInventoryError('visual_decisions_http_429')
             return {'groups': [], 'membership': {}, 'evidence': {}}
     discovery, detector, inventory = Discovery(), Detector(), Inventory()
-    engine = Perception(detector, visual_discovery=discovery, visual_inventory=inventory)
+    preserved = discovery.discover(capture, instruction='move both')
+    engine = Perception(detector, visual_inventory=inventory)
     with pytest.raises(PerceptionError) as failure:
-        engine.observe(capture, source_hint={'camera_ids': ['3'],
-            'visual_decision': {'source': 'jev', 'purpose': 'initialize_inventory'}})
-    preserved = getattr(failure.value, 'initial_inventory', {})
+        engine.observe(capture, source_hint={'camera_ids': ['3'], 'scene_entities': preserved['entities'],
+            'visual_reference': preserved['reference'],
+            'visual_decision': {'source': 'responses_program', 'purpose': 'initialize_inventory'}})
+    assert not hasattr(failure.value, 'initial_inventory')
     assert set(preserved.get('entities', {})) == {'first', 'second'}
-    assert preserved['observation_id'] == capture['observation_id']
     detector.fail = inventory.fail = False
     capture['observation_id'] = 'new-capture'
     for view in capture['views'].values():
         view['frame_id'] = 'new-capture'
     result = engine.observe(capture, source_hint={'scene_entities': preserved['entities'],
         'visual_reference': preserved['reference'], 'camera_ids': ['1', '2', '3'],
-        'visual_decision': {'source': 'jev', 'purpose': 'associate_inventory'}})
+        'visual_decision': {'source': 'responses_program', 'purpose': 'associate_inventory'}})
     assert discovery.calls == 1 and set(result['scene_entities']) == {'first', 'second'}
 
 

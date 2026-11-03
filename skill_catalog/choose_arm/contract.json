@@ -1,0 +1,38 @@
+{
+  "id": "choose_arm",
+  "description": "Choose among arms permitted by current geometry, measured robot state and offline workspace. Use the sole admissible arm directly; when several remain, Decisions proposes one. This proposal is not proof of grasp IK or trajectory feasibility. Known CAD grasps must come from the selected arm offline library. Do not impose a later processing capability arm on an earlier transfer.",
+  "inputs": [
+    "arm",
+    "target_id",
+    "destination_id",
+    "current_observation",
+    "workspace_evaluations"
+  ],
+  "requires": {
+    "target_selected": true,
+    "destination_selected": true,
+    "grasp_completed": false
+  },
+  "provides": [
+    "arm_selected",
+    "arms_evaluated"
+  ],
+  "capability": "Choose among arms permitted by current geometry, measured robot state and offline workspace",
+  "outputs": [
+    "arm_selected",
+    "arms_evaluated",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure"
+  ],
+  "invalidates_observation": false,
+  "planning_effects": {
+    "placement_resolved": false,
+    "place_plan_ready": false
+  }
+}

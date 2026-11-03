@@ -1,0 +1,576 @@
+{
+  "context": {
+    "task": {
+      "instruction": "用左臂把桌面上的黑色工件放入左侧蓝色盒子里的空位。不要拆包。完成后双臂回观测位姿并观测；任务结束回开始时的双臂位姿。",
+      "supported": true,
+      "reason": "按用户要求只搬运一个桌面黑色工件，不进行拆包；目的地绑定到确认后的左侧蓝色盒子，使用左臂。完成投放后还需双臂回观测位姿并观测，最后回到任务开始时记录的双臂位姿。",
+      "scope": "ids",
+      "target_selector": "桌面上的黑色工件",
+      "target_refs": [
+        "instance-9bb3baa553f14064"
+      ],
+      "quantity": 1,
+      "source_ref": "instance-9bc138ad909d4580",
+      "destination_ref": "instance-b11580391e3948e9",
+      "work_area_ref": null,
+      "selection_order": "explicit",
+      "processing": [],
+      "completion_conditions": [
+        "黑色工件已放入左侧蓝色盒子的空位，并经放置核验确认工件在盒内且未被夹持。",
+        "完成投放后双臂已到观测位姿，并在该位姿完成清单观测。",
+        "任务结束时双臂回到任务开始时测得的位姿，且整项任务通过完成核验。"
+      ],
+      "completion_pose": "initial",
+      "constraints": [
+        "使用左臂",
+        "不要拆包"
+      ],
+      "source_inventory_complete": "unknown"
+    },
+    "object_task": {
+      "instruction": "用左臂把桌面上的黑色工件放入左侧蓝色盒子里的空位。不要拆包。",
+      "supported": true,
+      "reason": "该对象子任务只搬运已确认的黑色工件并放入用户指定的左侧蓝色盒子；不进行任何加工或拆包。",
+      "scope": "ids",
+      "target_selector": "桌面上的黑色工件",
+      "target_refs": [
+        "instance-9bb3baa553f14064"
+      ],
+      "quantity": 1,
+      "source_ref": "instance-9bc138ad909d4580",
+      "destination_ref": "instance-b11580391e3948e9",
+      "work_area_ref": null,
+      "selection_order": "explicit",
+      "processing": [],
+      "completion_conditions": [
+        "黑色工件已放入左侧蓝色盒子的空位，并经放置核验确认工件在盒内且未被夹持。",
+        "完成投放后双臂已到观测位姿，并完成清单观测。"
+      ],
+      "completion_pose": null,
+      "constraints": [
+        "使用左臂",
+        "不要拆包"
+      ],
+      "source_inventory_complete": "unknown"
+    },
+    "environment_assumptions": {
+      "source": "user_declared_experiment_conditions_2026-10-26",
+      "work_area": "Robot tasks take place around the table.",
+      "surroundings": "There are no other obstacles on either side of or behind the robot.",
+      "collision_map_scope": "Only currently or previously observed, confirmed entities in the Responses inventory, including the task support surfaces.",
+      "evidence_type": "operator_supplied_environment_conditions_not_camera_measurements",
+      "completion_requirements": {
+        "robot_pose": "initial",
+        "source": "explicit_user_request_2026-10-27",
+        "description": "After completing the whole task, return both empty arms to their joint configuration measured at this task's start. Responses owns the graph actions; completion must verify actual feedback.",
+        "after_each_object": {
+          "source": "explicit_user_request_2026-10-29",
+          "robot_pose": "observation",
+          "observe_inventory": true,
+          "description": "After each object's verified delivery, including the last, return both empty arms to the configured observation posture and observe the inventory there. Responses must author explicit nodes and edges using skill contracts, including any necessary map refresh; runtime never inserts movement. Temporary occlusion must preserve all other inventory IDs."
+        }
+      },
+      "limits": "These conditions do not specify object identities or poses, task order, execution arm, or skill choices. Partial observations within the task area remain partial. Retain valid previously observed entities and explicitly update moved geometry."
+    },
+    "target_id": null,
+    "destination_id": null,
+    "candidate_ids": [
+      "instance-9bb3baa553f14064"
+    ],
+    "configured_regions": {
+      "demo-destination": {
+        "description": "configured unmarked work area on the measured main table",
+        "region": {
+          "region_id": "demo_destination",
+          "center_world_xy_m": [
+            0.5015999999999999,
+            0.11646000000000001
+          ],
+          "size_m": 0.32,
+          "region_polygon_world_xy_m": [
+            [
+              0.3415999999999999,
+              -0.043539999999999995
+            ],
+            [
+              0.6616,
+              -0.043539999999999995
+            ],
+            [
+              0.6616,
+              0.27646000000000004
+            ],
+            [
+              0.3415999999999999,
+              0.27646000000000004
+            ]
+          ],
+          "physical_marker": false,
+          "source": "configured_destination_intent"
+        }
+      },
+      "vla-unpack-input": {
+        "description": "unmarked square VLA input region centered on configured XY on the measured table; choose any feasible point inside",
+        "capability": "vla_unpack",
+        "region": {
+          "region_id": "vla-unpack-input",
+          "center_world_xy_m": [
+            0.5015999999999999,
+            0.11646000000000001
+          ],
+          "size_m": 0.32,
+          "region_polygon_world_xy_m": [
+            [
+              0.3415999999999999,
+              -0.043539999999999995
+            ],
+            [
+              0.6616,
+              -0.043539999999999995
+            ],
+            [
+              0.6616,
+              0.27646000000000004
+            ],
+            [
+              0.3415999999999999,
+              0.27646000000000004
+            ]
+          ],
+          "physical_marker": false,
+          "source": "configured_vla_input_intent",
+          "precise_xy": false,
+          "required_robot_configurations": [
+            {
+              "id": "vla_unpack_preparation",
+              "scope": "specified_arms",
+              "joints_deg": {
+                "A": [
+                  -86,
+                  76,
+                  88,
+                  -90,
+                  2,
+                  14,
+                  -24
+                ],
+                "B": [
+                  106,
+                  61,
+                  -113,
+                  -78,
+                  27,
+                  36,
+                  37
+                ]
+              },
+              "gripper_positions_rad": {
+                "A": 0.0,
+                "B": 0.0
+              }
+            }
+          ]
+        }
+      }
+    },
+    "proposed_task_binding": {
+      "status": "proposed_not_yet_confirmed",
+      "original_instruction": "用左臂把桌面上的黑色工件放入左侧蓝色盒子里的空位。不要拆包。完成后双臂回观测位姿并观测；任务结束回开始时的双臂位姿。",
+      "target_ids": [
+        "instance-9bb3baa553f14064"
+      ],
+      "destination_id": "instance-b11580391e3948e9",
+      "destination_type": "observed_entity"
+    },
+    "measured_location_rule": "Positions are metres in robot world: +X is forward, +Y is robot LEFT, -Y is robot RIGHT, +Z is up. Camera image left/right depends on viewpoint and is not generally robot left/right; respect any perspective explicitly named in the original instruction. visible_centroid_world is the measured visible surface centroid, not the full object centre or a free placement. Use observation_provenance to distinguish current and historical measurements. Configured region positions are supplied coordinates, not observed physical markers. Locations help interpret the requested side; they do not alone prove identity or safety.",
+    "configured_bindings": {},
+    "current_entities": [
+      {
+        "id": "instance-56eea8586d484edd",
+        "kind": "bin",
+        "color": "blue",
+        "description": "相机3画面中桌面右侧的蓝色盒子",
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3",
+            "1"
+          ],
+          "sam3_camera_ids": [
+            "3",
+            "1"
+          ],
+          "point_count": 105089,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        },
+        "position": [
+          0.4634394055489286,
+          -0.6243725053829993,
+          0.5466554596260516
+        ],
+        "visible_centroid_world": [
+          0.4634394055489286,
+          -0.6243725053829993,
+          0.5466554596260516
+        ],
+        "source": "sam3_rgb_mask_and_registered_depth",
+        "observation_provenance": {
+          "observation_id": "rgbd-2-5486faf9503c4d12ad74f5d76514e80f",
+          "generation": 2,
+          "capture_time": 659.9739999913056,
+          "checkpoint": "initial"
+        },
+        "entity_type": "observed_entity"
+      },
+      {
+        "id": "instance-b11580391e3948e9",
+        "kind": "bin",
+        "color": "blue",
+        "description": "相机3画面中桌面左侧的蓝色盒子；任务指定的目的地候选",
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3"
+          ],
+          "sam3_camera_ids": [
+            "3"
+          ],
+          "point_count": 26588,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        },
+        "position": [
+          0.48598725348374744,
+          0.5202412583562724,
+          0.5542406256492647
+        ],
+        "visible_centroid_world": [
+          0.48598725348374744,
+          0.5202412583562724,
+          0.5542406256492647
+        ],
+        "source": "sam3_rgb_mask_and_registered_depth",
+        "observation_provenance": {
+          "observation_id": "rgbd-2-5486faf9503c4d12ad74f5d76514e80f",
+          "generation": 2,
+          "capture_time": 659.9739999913056,
+          "checkpoint": "initial"
+        },
+        "entity_type": "observed_entity"
+      },
+      {
+        "id": "instance-9bb3baa553f14064",
+        "kind": "object",
+        "color": "black",
+        "description": "桌面上的黑色小型工件",
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3"
+          ],
+          "sam3_camera_ids": [
+            "3"
+          ],
+          "point_count": 1068,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        },
+        "position": [
+          0.45018962645128874,
+          0.14701657880390628,
+          0.611396357919393
+        ],
+        "visible_centroid_world": [
+          0.45018962645128874,
+          0.14701657880390628,
+          0.611396357919393
+        ],
+        "source": "sam3_rgb_mask_and_registered_depth",
+        "observation_provenance": {
+          "observation_id": "rgbd-2-5486faf9503c4d12ad74f5d76514e80f",
+          "generation": 2,
+          "capture_time": 659.9739999913056,
+          "checkpoint": "initial"
+        },
+        "entity_type": "observed_entity"
+      },
+      {
+        "id": "demo-destination",
+        "kind": "marker",
+        "color": "unmarked",
+        "coverage": {
+          "camera_ids": [],
+          "configured_region": true
+        },
+        "position": [
+          0.5015999999999999,
+          0.11646000000000001,
+          0.5719999670982361
+        ],
+        "visible_centroid_world": [
+          0.5015999999999999,
+          0.11646000000000001,
+          0.5719999670982361
+        ],
+        "source": "configured_demo_region",
+        "position_source": "configured_xy_measured_support",
+        "entity_type": "configured_region"
+      },
+      {
+        "id": "vla-unpack-input",
+        "kind": "marker",
+        "color": "unmarked",
+        "coverage": {
+          "camera_ids": [],
+          "configured_region": true
+        },
+        "position": [
+          0.5015999999999999,
+          0.11646000000000001,
+          0.5719999670982361
+        ],
+        "visible_centroid_world": [
+          0.5015999999999999,
+          0.11646000000000001,
+          0.5719999670982361
+        ],
+        "source": "configured_demo_region",
+        "position_source": "configured_xy_measured_support",
+        "entity_type": "configured_region"
+      }
+    ]
+  },
+  "observation": {
+    "observation_id": "rgbd-2-5486faf9503c4d12ad74f5d76514e80f",
+    "generation": 2,
+    "objects": [
+      {
+        "id": "instance-56eea8586d484edd",
+        "kind": "bin",
+        "color": "blue",
+        "description": "相机3画面中桌面右侧的蓝色盒子",
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3",
+            "1"
+          ],
+          "sam3_camera_ids": [
+            "3",
+            "1"
+          ],
+          "point_count": 105089,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        },
+        "position": [
+          0.4634394055489286,
+          -0.6243725053829993,
+          0.5466554596260516
+        ],
+        "visible_centroid_world": [
+          0.4634394055489286,
+          -0.6243725053829993,
+          0.5466554596260516
+        ],
+        "source": "sam3_rgb_mask_and_registered_depth",
+        "observation_provenance": {
+          "observation_id": "rgbd-2-5486faf9503c4d12ad74f5d76514e80f",
+          "generation": 2,
+          "capture_time": 659.9739999913056,
+          "checkpoint": "initial"
+        },
+        "entity_type": "observed_entity"
+      },
+      {
+        "id": "instance-b11580391e3948e9",
+        "kind": "bin",
+        "color": "blue",
+        "description": "相机3画面中桌面左侧的蓝色盒子；任务指定的目的地候选",
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3"
+          ],
+          "sam3_camera_ids": [
+            "3"
+          ],
+          "point_count": 26588,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        },
+        "position": [
+          0.48598725348374744,
+          0.5202412583562724,
+          0.5542406256492647
+        ],
+        "visible_centroid_world": [
+          0.48598725348374744,
+          0.5202412583562724,
+          0.5542406256492647
+        ],
+        "source": "sam3_rgb_mask_and_registered_depth",
+        "observation_provenance": {
+          "observation_id": "rgbd-2-5486faf9503c4d12ad74f5d76514e80f",
+          "generation": 2,
+          "capture_time": 659.9739999913056,
+          "checkpoint": "initial"
+        },
+        "entity_type": "observed_entity"
+      },
+      {
+        "id": "instance-9bb3baa553f14064",
+        "kind": "object",
+        "color": "black",
+        "description": "桌面上的黑色小型工件",
+        "coverage": {
+          "observed_surface_only": true,
+          "camera_ids": [
+            "3"
+          ],
+          "sam3_camera_ids": [
+            "3"
+          ],
+          "point_count": 1068,
+          "limitations": [
+            "visible_surface_only"
+          ]
+        },
+        "position": [
+          0.45018962645128874,
+          0.14701657880390628,
+          0.611396357919393
+        ],
+        "visible_centroid_world": [
+          0.45018962645128874,
+          0.14701657880390628,
+          0.611396357919393
+        ],
+        "source": "sam3_rgb_mask_and_registered_depth",
+        "observation_provenance": {
+          "observation_id": "rgbd-2-5486faf9503c4d12ad74f5d76514e80f",
+          "generation": 2,
+          "capture_time": 659.9739999913056,
+          "checkpoint": "initial"
+        },
+        "entity_type": "observed_entity"
+      },
+      {
+        "id": "demo-destination",
+        "kind": "marker",
+        "color": "unmarked",
+        "coverage": {
+          "camera_ids": [],
+          "configured_region": true
+        },
+        "position": [
+          0.5015999999999999,
+          0.11646000000000001,
+          0.5719999670982361
+        ],
+        "visible_centroid_world": [
+          0.5015999999999999,
+          0.11646000000000001,
+          0.5719999670982361
+        ],
+        "source": "configured_demo_region",
+        "position_source": "configured_xy_measured_support",
+        "entity_type": "configured_region"
+      },
+      {
+        "id": "vla-unpack-input",
+        "kind": "marker",
+        "color": "unmarked",
+        "coverage": {
+          "camera_ids": [],
+          "configured_region": true
+        },
+        "position": [
+          0.5015999999999999,
+          0.11646000000000001,
+          0.5719999670982361
+        ],
+        "visible_centroid_world": [
+          0.5015999999999999,
+          0.11646000000000001,
+          0.5719999670982361
+        ],
+        "source": "configured_demo_region",
+        "position_source": "configured_xy_measured_support",
+        "entity_type": "configured_region"
+      }
+    ],
+    "scene_entities": {
+      "instance-9bb3baa553f14064": {
+        "id": "instance-9bb3baa553f14064",
+        "kind": "object",
+        "color": "black",
+        "description": "桌面上的黑色小型工件",
+        "appearance_keywords": [
+          "black",
+          "small",
+          "rectangular"
+        ],
+        "initial_parent_id": "instance-9bc138ad909d4580",
+        "display_id": 1
+      },
+      "instance-9bc138ad909d4580": {
+        "id": "instance-9bc138ad909d4580",
+        "kind": "table",
+        "color": "white",
+        "description": "黑色工件所在的白色桌面",
+        "appearance_keywords": [
+          "white",
+          "flat",
+          "rectangular"
+        ],
+        "initial_parent_id": null
+      },
+      "instance-b11580391e3948e9": {
+        "id": "instance-b11580391e3948e9",
+        "kind": "bin",
+        "color": "blue",
+        "description": "相机3画面中桌面左侧的蓝色盒子；任务指定的目的地候选",
+        "appearance_keywords": [
+          "blue",
+          "rectangular",
+          "open-top"
+        ],
+        "initial_parent_id": null
+      },
+      "instance-56eea8586d484edd": {
+        "id": "instance-56eea8586d484edd",
+        "kind": "bin",
+        "color": "blue",
+        "description": "相机3画面中桌面右侧的蓝色盒子",
+        "appearance_keywords": [
+          "blue",
+          "rectangular",
+          "open-top"
+        ],
+        "initial_parent_id": null
+      },
+      "demo-destination": {
+        "id": "demo-destination",
+        "kind": "marker",
+        "color": "unmarked"
+      },
+      "vla-unpack-input": {
+        "id": "vla-unpack-input",
+        "kind": "marker",
+        "color": "unmarked"
+      }
+    }
+  },
+  "frozen_question": {
+    "type": "predicate",
+    "name": "destination_requirement_matches",
+    "instructions": "Original user instruction: \"用左臂把桌面上的黑色工件放入左侧蓝色盒子里的空位。不要拆包。完成后双臂回观测位姿并观测；任务结束回开始时的双臂位姿。\". For object IDs [\"instance-9bb3baa553f14064\"], does the destination named in that instruction refer to CURRENT visible entity instance-b11580391e3948e9 ({\"kind\": \"bin\", \"color\": \"blue\", \"description\": \"相机3画面中桌面左侧的蓝色盒子；任务指定的目的地候选\"})? Identify the requested support or container using CURRENT RGB, its permanent-ID reference and current_entities with measured_location_rule. Check the original requested side or viewpoint. Descriptions and proposed object_task bindings are hypotheses, not proof. This question binds the destination entity only; an empty landing position within it and motion feasibility are checked by placement skills. Do not judge whether the object is already placed."
+  }
+}

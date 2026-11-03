@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from copy import deepcopy
 from functools import lru_cache
 
 import numpy as np
@@ -14,6 +15,22 @@ TOOL_PROFILE = {
     "gripper_config_id": "robotiq_2f_140",
 }
 
+TCP_FRAMES = {'A': 'gripper_front_A', 'B': 'gripper_front_B'}
+
+
+def front_tool_robot_config(robot, arms):
+    """Public cuRobo fixed-tool configuration; physical URDF links stay unchanged."""
+    result = deepcopy(robot)
+    kin = result['robot_cfg']['kinematics']
+    for arm in arms:
+        name = TCP_FRAMES[arm]
+        kin.setdefault('extra_links', {})[name] = {
+            'fixed_transform': [*front_tcp_offset(arm).tolist(), 1., 0., 0., 0.],
+            'joint_name': name + '_joint', 'joint_type': 'FIXED', 'link_name': name,
+            'parent_link_name': 'TCP_Link_' + ('L' if arm == 'A' else 'R')}
+    kin['tool_frames'] = [TCP_FRAMES[arm] for arm in arms]
+    return result
+
 
 def front_tcp_offset(arm):
     """Calibrated finger-front center in the SDK's TCP_Link mount frame (metres)."""
@@ -25,6 +42,13 @@ def front_tcp_offset(arm):
 def front_tcp_pose(mount_pose, arm):
     result = rigid_matrix(mount_pose).copy()
     result[:3, 3] += result[:3, :3] @ front_tcp_offset(arm)
+    return result
+
+
+def mount_tcp_pose(front_pose, arm):
+    """Explicit adapter for URDF-local gripper/camera geometry only."""
+    result = rigid_matrix(front_pose).copy()
+    result[:3, 3] -= result[:3, :3] @ front_tcp_offset(arm)
     return result
 
 
@@ -120,7 +144,7 @@ class GeometryCache:
 
 
 def grasp_targets(world_grasps, arm):
-    """world_grasp @ grasp_ee @ inverse(tcp_ee), with arm-local 180 flip."""
+    """GraspGen model frame to calibrated finger front, with arm-local 180 flip."""
     result = np.asarray(world_grasps, dtype=float).copy()
     if arm not in {"A", "B"}:
         raise ValueError("arm must be A or B")
@@ -128,9 +152,7 @@ def grasp_targets(world_grasps, arm):
         result[:, :3, :2] *= -1
     grasp_ee = np.eye(4)
     grasp_ee[2, 3] = TOOL_PROFILE["grasp_ee_z_m"]
-    tcp_ee = np.eye(4)
-    tcp_ee[2, 3] = TOOL_PROFILE[arm]["tcp_ee_z_m"]
-    return result @ grasp_ee @ np.linalg.inv(tcp_ee)
+    return result @ grasp_ee
 
 
 def geometry_payload(snapshot, target_id):

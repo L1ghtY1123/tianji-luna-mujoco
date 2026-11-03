@@ -7,7 +7,7 @@ import httpx
 import numpy as np
 import pytest
 
-from luna_mujoco.demo_perception import DemoVisualInventory
+from legacy_identity import ArchivedTwoStageInventory as DemoVisualInventory
 from luna_mujoco.visual_api import VisualInventoryError
 
 
@@ -30,7 +30,7 @@ def case():
                          'visual_membership': 'required'}}
     reference = {'observation_id': 'initial', 'entities': deepcopy(entities),
                  'views': {camera: {'rgb': v['rgb']} for camera, v in capture['views'].items()},
-                 'demo_task': {'right_bin_id': 'right', 'source_object_ids': ['pink']}}
+                 'task_spec': {'destination_ref': 'right', 'target_refs': ['pink']}}
     observation = deepcopy(capture)
     for camera, v in observation['views'].items():
         v['instance_masks'] = {'right': mask.copy()} if camera == '1' else {}
@@ -108,7 +108,7 @@ def test_ambiguous_two_initial_boxes_never_choose_one_by_order():
     observation, initial, current, detections, entities = case()
     entities['left'] = deepcopy(entities['right']) | {'id': 'left'}
     observation['visual_reference']['entities'] = deepcopy(entities)
-    observation['visual_reference']['demo_task']['source_bin_id'] = 'left'
+    observation['visual_reference']['task_spec']['source_ref'] = 'left'
     observation['views']['1']['instance_masks']['left'] = detections[0]['mask'].copy()
     observation['visual_inventory']['evidence']['answers'].append(
         {'name': 'identity_1', 'type': 'choice', 'choice': 'left', 'confidence': .99})
@@ -122,6 +122,49 @@ def test_unconfirmed_initial_bin_cannot_become_track():
     observation['visual_inventory']['evidence']['answers'][0]['confidence'] = .79
     reference = module().reference_with_container_tracks(observation, initial)
     assert module().container_correspondence(current, detections, reference, entities)['candidate_mapping'] == {}
+
+
+@pytest.mark.parametrize('invalid_depth', [False, True])
+def test_current_foreground_occlusion_needs_registered_depth_before_mask_comparison(invalid_depth):
+    _, _, current, detections, entities, reference = tracked_case()
+    # The old upper box surface is behind a nearer foreground object now.
+    detections[0]['silhouette_mask'][:24] = False
+    detections[0]['mask'][:24] = False
+    current['views']['1']['depth_m'][:24] = .8
+    if invalid_depth:
+        current['views']['1']['valid_depth'][:24] = False
+    proof = module().container_correspondence(current, detections, reference, entities)
+    assert proof['candidate_mapping'] == ({} if invalid_depth else {'0': 'right'})
+    if not invalid_depth:
+        match = proof['matches']['0']
+        assert match['raw_mask_iou'] == .5
+        assert match['mask_iou'] == 1.
+        assert match['current_occluded_pixels'] == 1120
+        assert match['depth_residual_p95_m'] == 0.
+
+
+def test_newly_revealed_box_surface_does_not_replace_the_required_common_identity_witness():
+    observation, initial, current, detections, entities = case()
+    observation['views']['1']['instance_masks']['right'][:24] = False
+    initial['views']['1']['depth_m'][:24] = .8
+    reference = module().reference_with_container_tracks(observation, initial)
+    proof = module().container_correspondence(current, detections, reference, entities)
+    assert proof['candidate_mapping'] == {'0': 'right'}
+    assert proof['matches']['0']['newly_revealed_pixels'] == 1120
+    assert proof['matches']['0']['common_valid_pixels'] == 1120
+    # A completely hidden old surface has no current identity witness.
+    current['views']['1']['depth_m'][24:] = .7
+    assert module().container_correspondence(current, detections, reference, entities)['candidate_mapping'] == {}
+
+
+@pytest.mark.parametrize('closure', ['unknown', 'unlisted'])
+def test_confirmed_container_track_is_independent_of_source_inventory_completeness(closure):
+    observation, initial, current, detections, entities = case()
+    observation['demo_inventory_check'] = {'status': closure, 'confidence': .79}
+    reference = module().reference_with_container_tracks(observation, initial)
+    assert module().container_correspondence(current, detections, reference, entities)['candidate_mapping'] == {'0': 'right'}
+    # Tracking this known box neither certifies all source objects nor changes that verdict.
+    assert observation['demo_inventory_check'] == {'status': closure, 'confidence': .79}
 
 
 def test_mixed_current_groups_keep_all_choices_and_do_not_forge_answers():
@@ -138,7 +181,7 @@ def test_mixed_current_groups_keep_all_choices_and_do_not_forge_answers():
         calls.append(payload)
         answers = []
         for question in payload['questions']:
-            value = {'identity_1': 'pink', 'identity_2': 'right', 'demo_unlisted_pink': 'none'}.get(
+            value = {'identity_1': 'pink', 'identity_2': 'right', 'scene_inventory_closure': 'none'}.get(
                 question['name'], 'visible')
             answers.append({'name': question['name'], 'type': 'choice', 'choice': value, 'confidence': .95})
         return httpx.Response(200, json={'answers': answers})
@@ -201,14 +244,21 @@ def test_changed_container_falls_back_to_original_question_and_unknown_still_blo
     def respond(request):
         payload = json.loads(request.content)
         calls.append(payload)
-        answers = [{'name': q['name'], 'type': 'choice', 'choice': {
-            'identity_0': 'unknown', 'identity_1': 'pink', 'demo_unlisted_pink': 'none'}.get(q['name'], 'visible'),
+        answers = [{'name': q['name'], 'type': 'predicate', 'probability': .5}
+            if q['type'] == 'predicate' else {'name': q['name'], 'type': 'choice', 'choice': {
+            'identity_0': 'unknown', 'identity_1': 'pink', 'scene_inventory_closure': 'none'}.get(q['name'], 'visible'),
             'confidence': .99} for q in payload['questions']]
         return httpx.Response(200, json={'answers': answers})
     visual = DemoVisualInventory(api_key='test', client=httpx.Client(transport=httpx.MockTransport(respond)))
-    with pytest.raises(VisualInventoryError, match='visual_identity_unknown'):
+    with pytest.raises(VisualInventoryError, match='visual_identity_unknown') as caught:
         visual.resolve(capture, detections + [pink], entities=entities, reference=reference,
                        instruction='move pink', purpose='associate_inventory')
+    assert len(calls) == 2
+    assert caught.value.evidence['missing_geometry_ids'] == ['right']
+    assert caught.value.evidence['answers'][0]['choice'] == 'unknown'
+    assert caught.value.evidence['retained_identity_answers'][0]['answer']['choice'] == 'pink'
+    assert all(answer['type'] == 'predicate' for answer in caught.value.evidence['original_decisions_answers']
+               if answer['name'].startswith('match_'))
     assert 'identity_0' in {q['name'] for q in calls[0]['questions']}
     assert 'container_correspondence' not in json.loads(calls[0]['input'][0]['content'][0]['text'])
 
@@ -240,10 +290,8 @@ def test_demo_observation_adds_tracks_after_current_mask_processing(monkeypatch)
     from luna_mujoco.perception import Perception
 
     observation, capture, _, _, _ = case()
-    observation.update(objects=[], demo_program={'version': 1, 'steps': []})
+    observation.update(objects=[])
     observation['visual_inventory']['demo_inventory_check'] = observation['demo_inventory_check']
-    observation['visual_reference']['demo_program'] = observation['demo_program']
-    observation['visual_reference']['demo_task']['source_bin_id'] = 'right'
     monkeypatch.setattr(Perception, 'observe', lambda *args, **kwargs: deepcopy(observation))
     engine = DemoPerception()
     engine.demo_tables = {}
@@ -251,3 +299,76 @@ def test_demo_observation_adds_tracks_after_current_mask_processing(monkeypatch)
     assert result['visual_reference']['container_identity_tracks']['containers']['right']['views']['1']['mask_source'] == (
         'initial_confirmed_instance_mask_after_robot_and_surface_filter')
     assert 'container_identity_tracks' not in observation['visual_reference']
+
+
+def test_policy_initial_association_creates_tracks_from_confirmed_rgbd():
+    observation, initial, current, detections, entities = case()
+    observation['visual_inventory']['identity_coverage']['purpose'] = 'associate_inventory'
+    reference = module().reference_with_container_tracks(observation, initial)
+    assert 'container_identity_tracks' in reference
+    assert module().container_correspondence(current, detections, reference, entities)['candidate_mapping'] == {'0': 'right'}
+
+
+def test_first_complete_later_association_creates_separately_bound_container_tracks():
+    observation, initial, current, detections, entities = case()
+    incomplete = deepcopy(observation)
+    incomplete['visual_inventory']['missing_geometry_ids'] = ['right']
+    assert 'container_identity_tracks' not in module().reference_with_container_tracks(incomplete, initial)
+    observation['visual_inventory']['identity_coverage']['purpose'] = 'associate_inventory'
+    observation['observation_id'] = current['observation_id']
+    observation['visual_inventory']['evidence']['observation_id'] = current['observation_id']
+    reference = module().reference_with_container_tracks(observation, current)
+    track = reference['container_identity_tracks']
+    assert reference['observation_id'] == track['reference_observation_id'] == 'initial'
+    assert track['anchor_observation_id'] == 'later'
+    assert track['initial_capture_time'] == 2.
+    assert module().container_correspondence(current, detections, reference, entities)['candidate_mapping'] == {}
+    fresh = deepcopy(current) | {'observation_id': 'fresh', 'time': 3.}
+    proof = module().container_correspondence(fresh, detections, reference, entities)
+    assert proof['candidate_mapping'] == {'0': 'right'}
+    assert proof['anchor_observation_id'] == 'later'
+    observation['visual_reference'] = reference
+    assert module().reference_with_container_tracks(observation, current) is reference
+
+
+@pytest.mark.parametrize('bad', ['evidence_id', 'observation_id', 'generation', 'incomplete', 'missing_geometry',
+                                 'unconfirmed'])
+def test_later_anchor_still_requires_current_confirmed_complete_evidence(bad):
+    observation, _, current, _, _ = case()
+    observation['observation_id'] = current['observation_id']
+    visual = observation['visual_inventory']
+    visual['evidence']['observation_id'] = current['observation_id']
+    if bad == 'evidence_id': visual['evidence']['observation_id'] = 'initial'
+    elif bad == 'observation_id': observation['observation_id'] = 'initial'
+    elif bad == 'generation': observation['generation'] += 1
+    elif bad == 'incomplete': visual['identity_coverage']['accepted_entity_ids'] = ['pink']
+    elif bad == 'missing_geometry': visual['missing_geometry_ids'] = ['right']
+    elif bad == 'unconfirmed': visual['evidence']['answers'][0]['confidence'] = .79
+    assert 'container_identity_tracks' not in module().reference_with_container_tracks(observation, current)
+
+
+@pytest.mark.parametrize('bad', ['anchor_id', 'reference_id', 'generation', 'owner', 'request_hash'])
+def test_later_anchor_proof_rejects_altered_scope(bad):
+    observation, _, current, detections, entities = case()
+    observation['observation_id'] = current['observation_id']
+    observation['visual_inventory']['evidence']['observation_id'] = current['observation_id']
+    observation['visual_reference']['owner_id'] = 'run-a'
+    reference = module().reference_with_container_tracks(observation, current)
+    tracks = reference['container_identity_tracks']
+    fresh = deepcopy(current) | {'observation_id': 'fresh', 'time': 3.}
+    if bad == 'anchor_id': tracks['anchor_observation_id'] = 'other'
+    elif bad == 'reference_id': reference['observation_id'] = 'other'
+    elif bad == 'generation': fresh['generation'] += 1
+    elif bad == 'owner': reference['owner_id'] = 'run-b'
+    elif bad == 'request_hash': tracks['initial_request_hash'] = 'different'
+    assert module().container_correspondence(fresh, detections, reference, entities)['candidate_mapping'] == {}
+
+
+def test_container_identity_scope_survives_unrelated_inventory_and_measurement_updates():
+    _, _, current, detections, entities, reference = tracked_case()
+    reference['entities']['right'].update(position=[1, 2, 3], geometry_status='measured',
+                                         observation_id='later-inventory')
+    reference['entities'].pop('pink')
+    reference['entities']['product'] = {'id': 'product', 'kind': 'object', 'color': 'black'}
+    proof = module().container_correspondence(current, detections, reference, entities)
+    assert proof['candidate_mapping'] == {'0': 'right'}

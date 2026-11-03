@@ -26,7 +26,9 @@ def sdk_voxel_grid(grid):
     result.dims = dimensions.astype(float).tolist()
     return result
 
-PRIMITIVE_AUDIT_FIELDS = frozenset({"position_source", "settling_envelope_floor_z_m", "action_id", "observation_id"})
+PRIMITIVE_AUDIT_FIELDS = frozenset({"position_source", "settling_envelope_floor_z_m", "action_id", "observation_id",
+    "geometry_source", "generation", "instance_id", "asset_id", "source_sha256", "mesh_sha256",
+    "geometry_observation_ids"})
 
 
 def sdk_scene_model(model, *, include_voxel_metadata=False):

@@ -1,5 +1,4 @@
 """Model-owned sensing/contact decisions, with evidence checks before execution."""
-from copy import deepcopy
 
 import pytest
 from test_runner import Algorithms, Sim
@@ -16,27 +15,13 @@ async def test_unverified_hold_cannot_build_scene_regardless_of_legacy_policy_ar
     async def forbidden(*args):
         pytest.fail('unsubstantiated collision policy reached mapper')
     runner.build_scene = forbidden
-    with pytest.raises(ValueError, match='grasp_scene_requires_empty_hands'):
+    with pytest.raises(ValueError, match='unknown_skill:build_scene'):
         await runner.execute('build_scene', {'observation': {}, 'holding': {'verified': False}}, {'collision_policy': policy})
 
 
-def test_jev_sees_capture_freshness_visual_reuse_and_coverage_limit(tmp_path):
+def test_stepwise_decision_snapshot_entrypoint_is_removed(tmp_path):
     runner = Runner(Sim(), Algorithms(), None, tmp_path)
-    runner.state['facts']['observed'] = True
-    # Minimal real public-observation shape, no hidden environment geometry.
-    context = {'observation': {'observation_id': 'fresh', 'source': 'rgbd', 'objects': []},
-               'scene': {'observation_id': 'old', 'scene_token': 'map'},
-               'observation_checkpoint': 'fine', 'scene_refresh_required': True,
-               'visual_scene': {'observation_id': 'fresh', 'status': 'unknown'}}
-    original = deepcopy(context)
-    evidence = runner.snapshot_for_decision(context)['perception_state']
-    assert evidence['observation_id'] == 'fresh'
-    assert evidence['scene_observation_id'] == 'old'
-    assert evidence['scene_matches_observation'] is False
-    assert evidence['scene_refresh_required'] is True
-    assert evidence['visual_scene_matches_observation'] is True
-    assert evidence['unobserved_space_collision_checked'] is False
-    assert context == original
+    assert not hasattr(runner, 'snapshot_for_decision')
 
 
 @pytest.mark.parametrize('skill,facts,pending', [

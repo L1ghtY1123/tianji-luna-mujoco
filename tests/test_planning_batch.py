@@ -156,6 +156,26 @@ def test_failed_batch_continues_and_preserves_selected_raw_derivatives():
     assert result["phases"]["approach"]["positions_rad"][1][0] == pytest.approx(.0065625)
 
 
+def test_task_batches_continue_after_two_failures_without_discarding_candidates():
+    from luna_mujoco.demo_algorithms import DemoAlgorithms
+
+    algorithms, state, scene, evaluations, _ = evaluated(5)
+    algorithms.grasp_trajectory_batch_capacity = DemoAlgorithms.grasp_trajectory_batch_capacity
+    sizes = []
+
+    def request(path, body):
+        sizes.append(len(body['goal_matrices_world']))
+        return batch_response(body, successful=[] if len(sizes) < 3 else [0])
+
+    algorithms.request = request
+    result = algorithms.plan_grasp(state, 'red', 'A', evaluations, scene)
+    assert sizes == [2, 2, 1]
+    assert result['candidate_index'] == 100
+    assert result['planned_candidate_count'] == 5
+    assert result['unplanned_candidate_indices'] == []
+    assert [failure['candidate_index'] for failure in result['prior_failures']] == [104, 103, 102, 101]
+
+
 def test_plan_submits_only_ik_survivors_with_identical_frozen_joints_and_poses():
     state, scene, grasps = inputs(3)
     for i, candidate in enumerate(grasps["candidates"]):

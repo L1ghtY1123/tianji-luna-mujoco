@@ -1,3 +1,5 @@
+import { isTaskInventory, inventoryEntities, inventoryTransformations } from './task-inventory.js';
+
 // Display only summary fields; measured point arrays remain in their dedicated preview.
 function pick(value, keys) {
   return Object.fromEntries(keys.filter(key => value?.[key] !== undefined).map(key => [key, value[key]]));
@@ -15,28 +17,14 @@ function verification(value) {
     checks: scalars(value.checks), measurements: scalars(value.measurements) };
 }
 
-function progressItems(value) {
-  return Array.isArray(value) ? value : value?.first ?? [];
-}
-
 function progressCount(value) {
   return Array.isArray(value) ? value.length : Number.isInteger(value?.count) ? value.count : 0;
 }
 
 export function taskProgressSummary(progress) {
   if (!progress) return '';
-  if (progress.process_records) return `已完成 ${progressCount(progress.completed_process_ids)} 道工序 · 待拆包 ${progressCount(progress.pending_unpack_ids)} 件 · 处理中 ${progressCount(progress.processing_ids)} 件`;
-  const reasons = {
-    grasp_verification_failed: '抓取未通过验证', grasp_verification_unknown: '抓取结果待确认',
-    place_verification_failed: '放置未通过验证', place_verification_unknown: '放置结果待确认',
-    no_reachable_arm: '当前机械臂不可达', plan_grasp_failed: '暂无可行抓取路径',
-    plan_place_failed: '暂无可行放置路径', plan_grasp_timeout: '抓取规划超时',
-    plan_place_timeout: '放置规划超时', task_progress_unknown: '剩余目标待确认',
-  };
-  const deferred = progressItems(progress.deferred);
-  const labels = [...new Set(deferred.map(item => reasons[String(item.reason ?? '').split(':')[0]] ?? '需要重新评估'))];
-  const reason = labels.length ? `（${labels.slice(0, 3).join('、')}${labels.length > 3 ? '等' : ''}）` : '';
-  return `已完成 ${progressCount(progress.completed)} 个 · 暂缓 ${progressCount(progress.deferred)} 个${reason}`;
+  if (isTaskInventory(progress)) return `已完成 ${progressCount(progress.completed_input_ids)} / ${progressCount(progress.selected_input_ids)} 个目标 · 已登记产物 ${progressCount(progress.product_ids)} 个`;
+  return '历史清单：请查看归档原始记录';
 }
 
 export function runEvidence(run) {
@@ -63,21 +51,18 @@ export function runEvidence(run) {
       'lift_carried_collision_checked', 'prepare_wall_ms']) : null,
     verification: verification(run.verification),
     metrics: run.metrics ?? null,
-    task_progress: run.task_progress ? {
-      ...pick(run.task_progress, ['scope', 'requested_arm', 'current_id', 'observation_id', 'stage_index',
-        'stage_arms', 'inventory_revision', 'inventory_finalized', 'scene_entities']),
-      placement_regions: (run.task_progress.placement_regions ?? []).map(region => ({
-        ...pick(region, ['region_id', 'destination_id', 'layout_revision', 'stage_index', 'target_count']),
-        ...pick(region.layout, ['source', 'observation_id', 'floor_z_m', 'section_count', 'measurement_time'])})),
-      completed_count: progressCount(run.task_progress.process_records ? run.task_progress.completed_process_ids : run.task_progress.completed),
-      ...(run.task_progress.process_records ? {
-        process_records: Object.fromEntries(Object.entries(run.task_progress.process_records).map(([id, value]) => [id,
-          pick(value, ['process_id', 'display_id', 'input_entity_id', 'output_entity_id', 'status', 'phase', 'to_table_arm', 'to_right_bin_arm'])])),
-        ...pick(run.task_progress, ['pending_unpack_ids', 'processing_ids', 'completed_process_ids', 'product_ids']),
-      } : {}),
-      deferred_count: progressCount(run.task_progress.deferred),
-      completed: progressItems(run.task_progress.completed).map(item => pick(item, ['id', 'kind', 'color', 'destination_id'])),
-      deferred: progressItems(run.task_progress.deferred).map(item => pick(item, ['id', 'kind', 'color', 'reason'])),
+    task_inventory: run.task_inventory ?? null,
+    task_progress: isTaskInventory(run.task_progress) ? {
+      ...pick(run.task_progress, ['selected_input_ids', 'completed_input_ids', 'product_ids', 'retired_entity_ids']),
+      completed_count: progressCount(run.task_progress.completed_input_ids),
+      entities: inventoryEntities(run.task_progress).map(item => pick(item, ['id', 'display_id', 'kind', 'description', 'status', 'current_region', 'processing_history'])),
+      objects: (run.task_progress.objects ?? []).map(item => ({
+        ...pick(item, ['id', 'status', 'current_region', 'processing_history']),
+        transfers: (item.transfers ?? []).map(transfer => ({ ...scalars(transfer), evidence: scalars(transfer.evidence) })),
+      })),
+      transformations: inventoryTransformations(run.task_progress).map(item => ({
+        ...pick(item, ['id', 'skill', 'input_entity_id', 'output_entity_id']), evidence: scalars(item.evidence),
+      })),
     } : null,
   };
 }

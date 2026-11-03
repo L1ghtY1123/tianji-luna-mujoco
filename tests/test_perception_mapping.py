@@ -29,6 +29,32 @@ def test_registered_transport_preserves_pixels_and_release_enables_all_layers():
     assert identity["disabled_obstacle_names"] == ()
 
 
+def test_local_scope_filters_mapper_entities_without_filtering_visibility_depth():
+    from luna_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.semantic_transport import (
+        decode_project_semantic_request,
+        encode_project_semantic_request,
+    )
+    original = wire()
+    semantic = decode_project_semantic_request({k: v for k, v in original.items()
+                                               if k != 'gripper_joint_positions_rad'})
+    for view in semantic['views'].values():
+        view['instance_masks']['obstacle'] = np.ones((2, 3), dtype=np.uint8)
+    encoded = encode_project_semantic_request(semantic)
+    payload = encoded | {'gripper_joint_positions_rad': {'A': 0., 'B': 0.},
+        'coverage_rgbd': encoded,
+        'mapping_lifecycle': {'requested_scope': 'local', 'mapping_entity_ids': ['obstacle'],
+            'strategy_source': 'decisions', 'scope_reason': 'Obstacle changed'}}
+    decoded, identity = decode_mapping_payload(payload)
+    assert all(set(view['instance_masks']) == {'obstacle'} for view in decoded['views'].values())
+    assert all(set(view['instance_masks']) == {'source', 'obstacle'}
+               for view in decoded['coverage_views'].values())
+    assert decoded['confirmed_instance_id'] == ''
+    assert decoded['exclusion_state'] == 'observation'
+    assert identity['target_id'] == 'source'
+    assert identity['exclusion_state'] == 'selected'
+
+
 def test_empty_head_sidecar_decodes_original_capture_and_exact_filter_identity():
     from luna_mujoco.perception_mapping import decode_mapping_payload
     from luna_mujoco.semantic_transport import (
@@ -160,6 +186,36 @@ def test_mapping_binds_token_to_finite_actual_gripper_feedback():
     for feedback in (None, {"A": .55}, {"A": float("nan"), "B": 0.}):
         with pytest.raises(ValueError, match="gripper"):
             decode_mapping_payload(payload | {"gripper_joint_positions_rad": feedback})
+
+
+def test_visibility_sidecar_is_distinct_from_inventory_collision_depth_and_capture_bound():
+    from copy import deepcopy
+
+    from test_demo_mapping import table_evidence
+
+    from luna_mujoco.perception_mapping import decode_mapping_payload
+    from luna_mujoco.semantic_transport import (
+        decode_project_semantic_request,
+        encode_project_semantic_request,
+    )
+
+    payload = wire()
+    registered = decode_project_semantic_request({key: value for key, value in payload.items()
+                                                  if key != 'gripper_joint_positions_rad'})
+    raw = encode_project_semantic_request(deepcopy(registered), exclusion_state='selected')
+    for view in registered['views'].values():
+        view['instance_masks']['source'][:] = False
+        view['instance_masks']['source'][0, 0] = True
+    request = encode_project_semantic_request(registered, exclusion_state='selected') | {
+        'gripper_joint_positions_rad': {'A': 0., 'B': 0.}, 'demo_mapping': True,
+        'demo_tables': table_evidence(), 'coverage_rgbd': raw}
+    decoded, _ = decode_mapping_payload(request)
+    assert np.count_nonzero(decoded['views']['1']['depth_left_m']) == 1
+    assert np.count_nonzero(decoded['coverage_views']['1']['depth_left_m']) == 6
+    changed = deepcopy(request)
+    changed['coverage_rgbd']['observation_set_id'] = 'other-capture'
+    with pytest.raises(ValueError, match='coverage_capture_identity'):
+        decode_mapping_payload(changed)
 
 
 def test_segmenter_factory_constructs_one_articulated_boundary(monkeypatch):

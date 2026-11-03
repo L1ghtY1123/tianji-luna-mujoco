@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { addCollisionLayers } from './pointcloud-panel.js';
 
 const COLORS = { passed: '#73dfb2', failed: '#ef8d88', unknown: '#ecc77d' };
 
@@ -47,7 +48,7 @@ export function replayBounds(cloud, lines) {
   return new THREE.Box3().setFromObject(cloud).union(new THREE.Box3().setFromObject(lines));
 }
 
-export function createReplayCloud(container, { points, candidates = [] }) {
+export function createReplayCloud(container, { points = [], candidates = [], collisionScene = null }) {
   if (!Array.isArray(points) || points.some(point => !Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite))) {
     throw new Error('归档点云必须是有限的世界坐标 Nx3 数组');
   }
@@ -69,6 +70,9 @@ export function createReplayCloud(container, { points, candidates = [] }) {
   const lines = new THREE.LineSegments(candidateLineGeometry(candidates),
     new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: .85 }));
   scene.add(lines);
+  const collision = new THREE.Group();
+  if (collisionScene) addCollisionLayers(collision, collisionScene);
+  scene.add(collision);
   let disposed = false;
   function render() { if (!disposed) renderer.render(scene, camera); }
   function resize() {
@@ -79,7 +83,7 @@ export function createReplayCloud(container, { points, candidates = [] }) {
     render();
   }
   function fit() {
-    const box = replayBounds(cloud, lines);
+    const box = replayBounds(cloud, lines).union(new THREE.Box3().setFromObject(collision));
     const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
     const radius = box.isEmpty() ? .1 : Math.max(.04, box.getSize(new THREE.Vector3()).length() / 2);
     controls.target.copy(center);
@@ -107,6 +111,7 @@ export function createReplayCloud(container, { points, candidates = [] }) {
       observer.disconnect(); controls.dispose();
       cloud.geometry.dispose(); cloud.material.dispose();
       lines.geometry.dispose(); lines.material.dispose();
+      collision.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
       renderer.dispose(); renderer.domElement.remove();
     },
   };

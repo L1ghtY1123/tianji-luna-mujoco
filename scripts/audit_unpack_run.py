@@ -79,29 +79,60 @@ def primitive_objects(state, config):
     return objects
 
 
-def completed_processes(ledger):
-    processes = ledger['process_records']
-    identifiers = ledger.get('completed_process_ids', [])
+def verified_transfers(record):
+    transfers = record.get('transfers', [])
+    observations = [item.get('observation_id') for item in transfers]
+    return bool(transfers and len(set(observations)) == len(observations)
+        and all(item.get('observation_id') and item.get('destination_id') and item.get('arm') in {'A', 'B'}
+                and item.get('transfer_index') == index for index, item in enumerate(transfers)))
+
+
+def completed_inputs(ledger, destination_id):
+    """Check observed input/output chains without prescribing a motion sequence."""
+    identifiers = ledger.get('completed_input_ids', [])
     records = {row['id']: row for row in ledger.get('objects', [])}
-    inputs, outputs = set(), set()
-    valid = bool(identifiers) and len(set(identifiers)) == len(identifiers)
+    transformations = ledger.get('transformations', {})
+    transformations = list(transformations.values()) if isinstance(transformations, dict) else transformations
+    by_input, outputs = {}, set()
+    valid = bool(identifiers and destination_id and len(set(identifiers)) == len(identifiers)
+        and len(records) == len(ledger.get('objects', []))
+        and set(identifiers).issubset(ledger.get('selected_input_ids', [])))
+    for transformation in transformations:
+        source, output = transformation.get('input_entity_id'), transformation.get('output_entity_id')
+        if not source or not output or source in by_input or output in outputs or source == output:
+            valid = False
+        by_input[source] = transformation
+        outputs.add(output)
+    terminal_ids = set()
     for identifier in identifiers:
-        process = processes.get(identifier, {})
-        input_id, output_id = process.get('input_entity_id'), process.get('output_entity_id')
-        source, product = records.get(input_id, {}), records.get(output_id, {})
-        creation = process.get('creation_evidence', {})
-        valid = valid and bool(input_id and output_id and input_id != output_id
-            and input_id not in inputs and output_id not in outputs
-            and process.get('status') == 'completed' and process.get('phase') == 'completed'
-            and source.get('status') == 'consumed' and product.get('status') == 'completed'
-            and creation.get('observation_id') and creation.get('request_hash'))
-        for record, stage_index in ((source, 0), (product, 1)):
-            stages = record.get('completed_stages', [])
-            valid = valid and len(stages) == 1 and stages[0].get('stage_index') == stage_index
-            valid = valid and bool(stages[0].get('observation_id'))
-        inputs.add(input_id)
-        outputs.add(output_id)
-    return len(identifiers), bool(valid and not inputs.intersection(outputs))
+        current, visited, skills = identifier, set(), []
+        valid = valid and verified_transfers(records.get(identifier, {}))
+        while current in by_input:
+            if current in visited:
+                valid = False
+                break
+            visited.add(current)
+            transformation = by_input[current]
+            output = transformation.get('output_entity_id')
+            product = records.get(output, {})
+            creation, evidence = product.get('creation_evidence', {}), transformation.get('evidence', {})
+            source = records.get(current, {})
+            valid = valid and bool(source.get('status') == 'consumed' and source.get('output_entity_id') == output
+                and product.get('input_entity_id') == current and transformation.get('skill')
+                and product.get('processing_skill') == transformation['skill']
+                and all(creation.get(key) and creation[key] == evidence.get(key)
+                        for key in ('observation_id', 'request_hash', 'action_id')))
+            skills.append(transformation.get('skill'))
+            current = output
+        product = records.get(current, {})
+        transfers = product.get('transfers', [])
+        last = transfers[-1] if transfers else {}
+        valid = valid and bool(current != identifier and current not in terminal_ids
+            and 'vla_unpack' in skills and product.get('status') == 'completed'
+            and verified_transfers(product) and product.get('current_region') == destination_id
+            and last.get('destination_ref', last.get('destination_id')) == destination_id)
+        terminal_ids.add(current)
+    return len(identifiers), bool(valid)
 
 
 def audit(state, expected, config):
@@ -109,23 +140,19 @@ def audit(state, expected, config):
     objects = cad_objects(state, config) if is_cad else primitive_objects(state, config)
     run = state['run']
     ledger = run.get('task_progress', {})
-    completed = ledger.get('completed', [])
-    ordered = all([stage['stage_index'] for stage in item.get('completed_stages', [])] == [0, 1]
-                  and item.get('lifecycle', {}).get('phase') == 'completed' for item in completed)
-    completed_count = len(completed)
-    if 'process_records' in ledger:
-        completed_count, ordered = completed_processes(ledger)
+    destination = run.get('task_spec', {}).get('destination_ref') or run.get('task_inventory', {}).get('destination_id')
+    completed_count, verified_lineage = completed_inputs(ledger, destination)
     events = state.get('events', [])
     mapping = [event for event in events if event['kind'] == 'skill_start' and event['title'] == 'build_scene']
     result = {'run_id': run.get('run_id'), 'runtime_status': run['status'],
         'evidence_source': 'independent MuJoCo end-state, not provided to model or runtime control',
         'expected_completed': expected, 'physical_black_inside_right_bin': sum(item['inside_right_bin'] for item in objects),
-        'ledger_completed': completed_count, 'both_stages_confirmed_in_order': ordered,
+        'ledger_completed': completed_count, 'verified_entity_lineage': verified_lineage,
         'responses_calls': run.get('metrics', {}).get('responses_call_count'),
         'build_scene_calls': len(mapping), 'holding': bool(run.get('holding')), 'objects': objects}
     result['passed'] = (run['status'] == 'succeeded' and not result['holding']
-        and result['physical_black_inside_right_bin'] == completed_count == expected and ordered
-        and result['responses_calls'] == 1 and len(mapping) == expected * 2)
+        and result['physical_black_inside_right_bin'] == completed_count == expected and verified_lineage
+        and result['responses_calls'] == 1)
     return result
 
 

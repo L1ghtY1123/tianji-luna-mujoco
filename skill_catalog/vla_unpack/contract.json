@@ -1,0 +1,38 @@
+{
+  "id": "vla_unpack",
+  "processing_effect": true,
+  "description": "Invoke the configured processing capability for its bound input at the workbench input region and required starting posture. Its MuJoCo implementation replaces the package with a separate product; simulator truth stays inside the effect implementation. The action receipt does not prove the product exists visually. verify_unpack separately confirms the effect and creates the product ID. Preserve partial effects; do not blindly repeat processing.",
+  "capability": "Invoke the configured processing capability for its bound input at the workbench input region and required starting posture",
+  "inputs": [
+    "verified_table_release",
+    "configured_square_input_region",
+    "current_preparation_joint_feedback",
+    "current_generation"
+  ],
+  "requires": {
+    "vla_pose_ready": true,
+    "table_release_verified": true,
+    "grasp_held": false
+  },
+  "provides": [
+    "unpack_pending"
+  ],
+  "outputs": [
+    "unpack_pending",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "processing_requires_post_delivery_observation",
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure"
+  ],
+  "invalidates_observation": true,
+  "planning_effects": {
+    "scene_available": false,
+    "observed": false,
+    "at_initial_pose": false
+  }
+}

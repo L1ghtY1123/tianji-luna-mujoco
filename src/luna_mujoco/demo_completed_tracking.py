@@ -6,8 +6,7 @@ from copy import deepcopy
 
 import numpy as np
 
-from .demo_transfer_verification import _overlap
-from .observation_labels import project_placement_regions, raster_visual_annotations
+from .observation_labels import raster_visual_annotations
 from .visual_api import VisualAPI, VisualInventoryError
 from .visual_inventory import VisualInventory, choice, image_part, mask_box, valid_assigned_slot
 
@@ -21,18 +20,36 @@ def _finite_time(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
+def confirmed_capture_record(capture):
+    """Bind a release photograph to its original RGBD/calibration, not just its ID."""
+    digest = hashlib.sha256()
+    for camera, view in sorted(capture.get('views', {}).items()):
+        digest.update(json.dumps([camera, view.get('calibration_id'), view.get('intrinsics')],
+                                 sort_keys=True).encode())
+        for key in ('rgb', 'depth_m', 'valid_depth', 'T_world_camera'):
+            digest.update(key.encode())
+            if key not in view:
+                digest.update(b'missing')
+                continue
+            array = np.asarray(view[key])
+            digest.update(json.dumps([array.shape, str(array.dtype)]).encode())
+            digest.update(array.tobytes())
+    return {**{key: capture[key] for key in
+               ('observation_id', 'generation', 'time', 'captured_perf_counter_ns') if key in capture},
+            'sensor_fingerprint': digest.hexdigest()}
+
+
 def completed_identity_tracks(capture, reference, progress, entities):
-    """Validate saved evidence; neither completion status nor a slot alone is a track."""
-    if (reference or {}).get('demo_task', {}).get('item_lifecycle'):
-        # Lifecycle items finish in a shared bin, not mutually exclusive pink
-        # table slots. They still enter the current inventory/geometry checks.
-        return {}
+    """Validate a confirmed transfer, independently of the final task goal."""
     tracks = {}
     for identifier, record in (progress or {}).items():
         track = record.get("completed_identity_track")
         if track is None:
             continue  # Historical callers retain their original identity questions.
-        _require(record.get("status") == "completed" and identifier in entities, "record_invalid")
+        # A verified intermediate placement remains observed in the policy ledger.
+        # Its bound release/visual proof below is as valid as a final delivery.
+        _require(record.get("status") in {"observed", "completed"}
+                 and identifier in entities, "record_invalid")
         binding, visual, prior = track.get("binding", {}), track.get("visual_evidence", {}), track.get("capture", {})
         unsigned = {key: value for key, value in binding.items() if key != "binding_id"}
         digest = hashlib.sha256(json.dumps(unsigned, sort_keys=True).encode()).hexdigest()
@@ -48,7 +65,7 @@ def completed_identity_tracks(capture, reference, progress, entities):
                  and binding["assigned_slot"] == record["assigned_slot"]
                  and binding.get("layout_revision") == record["assigned_slot"]["layout_revision"]
                  and all(binding.get(key) == record.get(key) for key in
-                         ("destination_id", "region_id", "slot_id", "stage_index", "release_feedback_id")),
+                         ("destination_id", "region_id", "slot_id", "transfer_index", "release_feedback_id")),
                  "slot_binding_changed")
         _require(visual.get("source") == "openai_decisions"
                  and visual.get("identity_source") == "execution_chain"
@@ -59,24 +76,20 @@ def completed_identity_tracks(capture, reference, progress, entities):
                  and all(visual.get(key) == binding.get(key) for key in
                          ("binding_id", "target_id", "destination_id", "region_id", "slot_id",
                           "layout_revision", "release_feedback_id")), "visual_binding_invalid")
+        same_capture = capture.get('observation_id') == prior.get('observation_id')
         _require(capture.get("observation_id") and prior.get("observation_id")
-                 and capture["observation_id"] != prior["observation_id"]
                  and _finite_time(prior.get("time")) and _finite_time(capture.get("time"))
                  and _finite_time(binding.get("release_feedback_time"))
                  and binding["release_feedback_time"] <= prior["time"] <= capture["time"],
                  "capture_not_after_completion")
+        if same_capture:
+            _require(prior.get('sensor_fingerprint') and prior == confirmed_capture_record(capture),
+                     'confirmed_capture_changed')
         for key in ("captured_perf_counter_ns",):
             if key in prior:
                 _require(type(prior[key]) is int and type(capture.get(key)) is int
-                         and capture[key] > prior[key], "capture_not_after_completion")
-        for other in tracks.values():
-            previous = other["binding"]
-            _require(binding["slot_id"] != previous["slot_id"]
-                     and binding["region_id"] == previous["region_id"]
-                     and binding["layout_revision"] == previous["layout_revision"]
-                     and not _overlap(binding["assigned_slot"]["polygon_world_xy_m"],
-                                      previous["assigned_slot"]["polygon_world_xy_m"]),
-                     "completed_slots_overlap")
+                         and (capture[key] == prior[key] if same_capture else capture[key] > prior[key]),
+                         "capture_not_after_completion")
         tracks[identifier] = deepcopy(track)
     return tracks
 
@@ -87,11 +100,14 @@ def _inside_slot(points, slot):
     offsets = points[:, None, :2] - polygon[None, :, :]
     cross = edges[None, :, 0] * offsets[:, :, 1] - edges[None, :, 1] * offsets[:, :, 0]
     xy_inside = np.all(cross >= -1e-9, axis=1) | np.all(cross <= 1e-9, axis=1)
-    # Reuse the user-declared 100 mm height and existing height-completion tolerance.
-    # This is only a locating envelope; it neither adds geometry nor proves identity.
-    floor, height, tolerance = slot["floor_z_m"], .10, .015
-    return bool(np.all(xy_inside) and np.all(points[:, 2] >= floor - tolerance)
-                and np.all(points[:, 2] <= floor + height + tolerance))
+    # This locating envelope neither adds geometry nor proves identity. An
+    # undeclared object height cannot limit generic object correspondence.
+    floor, tolerance = slot["floor_z_m"], .015
+    inside = np.all(xy_inside) and np.all(points[:, 2] >= floor - tolerance)
+    height = slot.get('height_prior_m')
+    if height is not None:
+        inside = inside and np.all(points[:, 2] <= floor + height + tolerance)
+    return bool(inside)
 
 
 def completed_candidate_scopes(capture, detections, tracks):
@@ -123,7 +139,7 @@ def completed_candidate_scopes(capture, detections, tracks):
             "raw_measured_bounds_world_m": [points.min(axis=0).tolist(), points.max(axis=0).tolist()],
             "measured_bounds_world_m": [matching.min(axis=0).tolist(), matching.max(axis=0).tolist()],
             "location_rule": "all_current_non_support_points_in_unique_completed_slot_prism",
-            "height_prior_m": .10, "height_tolerance_m": .015,
+            "height_prior_m": binding["assigned_slot"].get("height_prior_m"), "height_tolerance_m": .015,
             "identity_source": "execution_chain_and_fresh_visual_correspondence",
             "location_is_identity_proof": False}
     return scopes
@@ -132,24 +148,16 @@ def completed_candidate_scopes(capture, detections, tracks):
 def completed_correspondence_payload(capture, detections, tracks, scopes):
     """Ask current visual correspondence only; keep execution identities local."""
     _require(bool(scopes), "current_geometry_missing")
-    regions = []
-    for identifier, track in tracks.items():
-        if identifier not in {scope["owner_id"] for scope in scopes.values()}:
-            continue
-        binding = track["binding"]
-        slot = binding["assigned_slot"]
-        regions.append({"region_id": "COMPLETED", "layout": {
-            "cells": [slot], "floor_z_m": slot["floor_z_m"]}})
-    projections = project_placement_regions(capture, regions, require_visible_support=False)
     content = [{"type": "input_text", "text": json.dumps({
         "observation_id": capture["observation_id"], "generation": capture["generation"],
         "purpose": "associate_completed_objects",
         "binding_ids": sorted(track["binding"]["binding_id"] for track in tracks.values()),
-        "instructions": "Use CURRENT images only. Each question concerns its named camera and candidate C label. "
-            "Confirm an independent pink workpiece in its outlined completed slot, not robot parts or background. "
-            "Do not identify it from an earlier source-box appearance or prove contact again. "
-            "Outlines locate the question; they do not supply an answer. If unclear, choose unknown. "
-            "Several proposals may show one workpiece. Metadata IDs are audit bindings, not visual evidence."})}]
+        "instructions": "Use all CURRENT images together. Classify the physical subject marked by each candidate label. "
+            "A separate movable object can have a plain solid-color surface with little visible texture; "
+            "it need not show industrial machining. Robot parts, the supporting container/surface itself, "
+            "empty openings and image background are not separate objects. Registered-depth location checks "
+            "have already scoped a prior released object, but location alone does not prove identity. "
+            "Answer unknown when the visible subject cannot be distinguished. Multiple views can show the same object."})}]
     for camera, view in capture["views"].items():
         content.extend([{"type": "input_text", "text": "CURRENT RGB camera " + camera}, image_part(view["rgb"])])
         camera_scopes = [(index, scope) for index, scope in scopes.items() if scope["camera_id"] == camera]
@@ -159,21 +167,18 @@ def completed_correspondence_payload(capture, detections, tracks, scopes):
         boxes = {}
         for index, scope in camera_scopes:
             boxes.setdefault(tuple(mask_box(detections[index]["silhouette_mask"])), []).append(index)
-        items = [{"id": "/".join("C" + str(index) for index in indices), "box": list(box)}
+        items = [{"id": "/".join("Candidate " + str(index) for index in indices), "box": list(box)}
                  for box, indices in boxes.items()]
-        slots = {scope["slot_id"] for _, scope in camera_scopes}
-        projected = [region for region in projections
-                     if region["camera_id"] == camera and region["slot_id"] in slots]
-        _require(slots <= {region["slot_id"] for region in projected}, "slot_projection_missing")
         content.extend([{"type": "input_text", "text": json.dumps({
             "image_role": "current_completed_annotations", "camera": camera, "items": items,
-            "slots": sorted(slots), "coordinates": "normalized to original full RGB"})},
-            image_part(raster_visual_annotations(view["rgb"], items, regions=projected,
+            "coordinates": "normalized to original full RGB"})},
+            image_part(raster_visual_annotations(view["rgb"], items,
                                                   frame_color=(235, 235, 235)))])
     questions = [choice("tracked_" + str(index),
-        f"Using all CURRENT views together, does C{index} (located in camera {scope['camera_id']}) show an independent pink workpiece "
-        f"in outlined COMPLETED slot {scope['slot_id']}? Ignore robot parts; unknown if unclear.",
-        ["yes", "no", "unknown"]) for index, scope in scopes.items()]
+        f"Using all CURRENT views together, does the physical subject marked Candidate {index} show a separate movable object? "
+        "Plain solid color or lack of visible machining does not exclude an object. "
+        "Answer no for robot parts, the supporting container/surface itself, an empty opening or background; unknown if unclear.",
+        ["yes", "no", "unknown"]) for index in scopes]
     _require(len(questions) <= 200, "input_limit")
     return {"model": "gpt-6-luna", "input": [{"role": "user", "content": content}], "questions": questions}
 
@@ -210,7 +215,8 @@ def verify_completed_correspondence(inventory, capture, detections, tracks, scop
         raise
 
 
-def merge_completed_correspondence(inventory, capture, detections, entities, tracking, result):
+def merge_completed_correspondence(inventory, capture, detections, entities, tracking, result, *,
+                                   partial_completed_ids=()):
     """Merge only new accepted visual correspondence and current measured pixels."""
     evidence = result["evidence"]
     _require(tracking["observation_id"] == evidence["observation_id"] == capture["observation_id"]
@@ -239,14 +245,21 @@ def merge_completed_correspondence(inventory, capture, detections, entities, tra
     missing = sorted(required - observed)
     result["completed_tracking"] = tracking
     coverage.update(required_entity_ids=sorted(required), accepted_entity_ids=sorted(observed),
+        complete=not missing,
         request_hashes={"completed_correspondence": tracking["request_hash"],
                         "remaining_inventory": evidence["request_hash"]})
-    if missing or not set(coverage["remaining_source_ids"]) <= set(coverage["accepted_left_entity_ids"]):
+    scoped = {scope['owner_id'] for scope in tracking['candidate_scopes']}
+    unresolved = scoped - observed
+    if unresolved - set(partial_completed_ids):
+        # Keep an unresolved scoped view unknown. Another independently accepted
+        # current view may still establish the entity; never erase its evidence.
         raise VisualInventoryError("visual_identity_unknown", evidence={
             **evidence, "completed_tracking": tracking, "identity_coverage": coverage,
             "missing_required_ids": missing})
-    if result["demo_inventory_check"]["status"] != "none":
-        raise VisualInventoryError("source_inventory_unknown", evidence={
-            **evidence, "completed_tracking": tracking, "identity_coverage": coverage})
-    result["missing_geometry_ids"] = []
+    # A verified final delivery may be occluded in a later frozen-inventory
+    # observation. Keep it missing, without discarding other current measurements
+    # or treating its historical pose/identity as current evidence.
+    if unresolved:
+        result['unobserved_completed_ids'] = sorted(unresolved)
+    result["missing_geometry_ids"] = missing
     return result

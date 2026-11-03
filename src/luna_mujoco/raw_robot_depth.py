@@ -31,8 +31,8 @@ class RawRobotDepthBoundary:
         self.robot_config = deepcopy(configured)
         self.urdf_path = urdf_path
         self.device_cfg = DeviceCfg()
-        self.update_feedback(feedback)
-        config = articulated_segmentation_config(configured, urdf_path=urdf_path, asset_root_path=asset_root_path)
+        normalized = self.update_feedback(feedback)
+        config = articulated_segmentation_config(normalized, urdf_path=urdf_path, asset_root_path=asset_root_path)
         self.kinematics = Kinematics(KinematicsCfg.from_data_dict(config, device_cfg=self.device_cfg))
         self.robot_segmenters = {}
 
@@ -53,6 +53,9 @@ class RawRobotDepthBoundary:
         configured = configure_gripper_feedback(self.robot_config, feedback, self.urdf_path)
         locks = configured["robot_cfg"]["kinematics"]["lock_joints"]
         self.gripper_feedback = {"A": locks["gripL_finger_joint"], "B": locks["gripR_finger_joint"]}
+        # Initial capture FK and command checking must use exactly the same
+        # normalized collision radii, including the gripper numerical envelope.
+        return configured
 
     def joint_state(self, joint_positions_deg):
         from curobo.types import JointState

@@ -1,0 +1,69 @@
+{
+  "id": "move_to_observe",
+  "description": "Plan and execute an explicit empty-hand dual-arm camera movement against a current observation map or an authorized retained scene. viewpoint=configured returns to the operator observation posture. wrist_tilt_positive/negative offset both sixth joints by +12/-12 degrees to propose distinct wrist-camera views; these require joint-limit, collision and execution checks and do not certify visibility. Alternative viewpoints do not satisfy a required return to the configured posture. Capture at the reached viewpoint, then return for the graph to choose analysis. Do not repeat an unchanged alternative viewpoint. The skill does not insert observe_scene, verify_place or a retry. If no current/authorized collision scene exists, motion is unavailable; a branch cannot waive that requirement.",
+  "inputs": [
+    "current_robot_feedback",
+    "latest_collision_scene",
+    "configured_observation_poses",
+    "planning_settings"
+  ],
+  "requires": {
+    "scene_available": true,
+    "observation_motion_scene_ready": true,
+    "grasp_held": false
+  },
+  "provides": [
+    "observation_pose_ready",
+    "grasp_view_ready"
+  ],
+  "capability": "Plan and execute an explicit empty-hand dual-arm camera movement against a current observation map or an authorized retained scene. Recovery viewpoints require a current Decisions diagnosis of not_visible, cropped or occluded evidence; CAD/identity ambiguity, timeouts and planning failures alone cannot authorize movement.",
+  "outputs": [
+    "observation_pose_ready",
+    "grasp_view_ready",
+    "execution_or_evidence_record"
+  ],
+  "errors": [
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure",
+    "viewpoint_requires_visual_limitation"
+  ],
+  "invalidates_observation": true,
+  "recovery_retry_safe": true,
+  "planning_effects": {
+    "observation_motion_scene_ready": false,
+    "observed": false,
+    "at_initial_pose": false
+  },
+  "argument_rules": [
+    {
+      "when_arguments": {
+        "viewpoint": "configured"
+      },
+      "requires": {},
+      "effects": {
+        "observation_pose_ready": true
+      }
+    },
+    {
+      "when_arguments": {
+        "viewpoint": "wrist_tilt_positive"
+      },
+      "requires": {},
+      "effects": {
+        "observation_pose_ready": false
+      }
+    },
+    {
+      "when_arguments": {
+        "viewpoint": "wrist_tilt_negative"
+      },
+      "requires": {},
+      "effects": {
+        "observation_pose_ready": false
+      }
+    }
+  ]
+}

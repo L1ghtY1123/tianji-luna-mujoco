@@ -56,7 +56,18 @@ def _measured_joint_values(arms):
     return values
 
 
-def first_surface_matches(model, data, view, pixels_rc, *, visual_indices=None):
+def _near_visual_bounds(model, data, points, visual_indices):
+    """Conservative rejection only; ownership still requires native mesh rays."""
+    near = np.zeros(len(points), dtype=bool)
+    for index in visual_indices:
+        rotation = data.geom_xmat[index].reshape(3, 3)
+        local = (points - data.geom_xpos[index]) @ rotation
+        center, halfsize = model.geom_aabb[index, :3], model.geom_aabb[index, 3:]
+        near |= np.all(np.abs(local - center) <= halfsize + SURFACE_TOLERANCE_M + 1e-12, axis=1)
+    return near
+
+
+def first_surface_matches(model, data, view, pixels_rc, *, visual_indices=None, mask_only=False):
     """Match unchanged actual points to first mesh hits within their pixel footprint."""
     pixels = np.asarray(pixels_rc, dtype=int).reshape(-1, 2)
     rows, columns = pixels.T
@@ -81,7 +92,15 @@ def first_surface_matches(model, data, view, pixels_rc, *, visual_indices=None):
     offsets = np.zeros((len(pixels), 2))
     contact = np.zeros(len(pixels), dtype=bool)
     contact_geometry = np.array([model.body(int(body)).name in CONTACT_LINKS for body in model.geom_bodyid])
-    selected = np.flatnonzero(candidate)
+    # A matching hit is at most SURFACE_TOLERANCE_M from the measured point,
+    # so that point must lie inside a mesh bound padded by the same distance.
+    # Keep the original spherical candidate mask for unresolved evidence.
+    ray_candidate = candidate.copy()
+    if visual_indices is not None:
+        indices = np.flatnonzero(candidate)
+        ray_candidate[:] = False
+        ray_candidate[indices] = _near_visual_bounds(model, data, measured[indices], visual_indices)
+    selected = np.flatnonzero(ray_candidate)
     for row_offset, column_offset in PIXEL_OFFSETS_RC:
         if not len(selected):
             break
@@ -105,13 +124,18 @@ def first_surface_matches(model, data, view, pixels_rc, *, visual_indices=None):
         best[indices] = error[update]
         links[indices] = geometry_ids[update]
         offsets[indices] = [row_offset, column_offset]
+        if mask_only:
+            # Table filtering needs only the OR of five matching-ray predicates.
+            # Once true, later rays cannot change this mask. Object/contact
+            # classification retains all rays and the original minimum residual.
+            selected = selected[best[selected] > SURFACE_TOLERANCE_M]
     return {"matched": best <= SURFACE_TOLERANCE_M, "distance_m": best,
             "unresolved_near_robot": candidate & (best > SURFACE_TOLERANCE_M),
             "geom_ids": links, "pixel_offsets_rc": offsets, "points_world_m": measured,
             "contact_surface_ambiguous": contact}
 
 
-def own_robot_surface_pixels(capture, masks):
+def own_robot_surface_pixels(capture, masks, *, mask_only=False):
     """Return candidate ownership only; callers preserve independent object evidence."""
     result = {"status": "measured", "masks": {}, "matches": {}, "unresolved_near_robot_masks": {},
               "source": "own_urdf_visual_first_return_and_measured_joint_feedback",
@@ -132,7 +156,8 @@ def own_robot_surface_pixels(capture, masks):
         view = capture["views"][camera]
         valid = mask & view["valid_depth"] & np.isfinite(view["depth_m"]) & (view["depth_m"] > 0)
         pixels = np.column_stack(np.nonzero(valid))
-        evidence = first_surface_matches(model, data, view, pixels, visual_indices=visual_indices)
+        options = {'mask_only': True} if mask_only else {}
+        evidence = first_surface_matches(model, data, view, pixels, visual_indices=visual_indices, **options)
         accepted = np.flatnonzero(evidence["matched"])
         result["masks"][camera] = np.zeros(mask.shape, dtype=bool)
         result["masks"][camera][tuple(pixels[accepted].T)] = True
@@ -144,5 +169,7 @@ def own_robot_surface_pixels(capture, masks):
             "robot_link": model.body(int(model.geom_bodyid[evidence["geom_ids"][index]])).name,
             "pixel_offset_rc": evidence["pixel_offsets_rc"][index].tolist(),
             "contact_surface_ambiguous": bool(evidence["contact_surface_ambiguous"][index])}
-            for index in accepted]
+            for index in ([] if mask_only else accepted)]
+    if mask_only:
+        result['detail_scope'] = 'exact_boolean_mask_only_no_contact_or_minimum_residual_details'
     return result

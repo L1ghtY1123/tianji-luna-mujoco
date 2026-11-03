@@ -8,7 +8,7 @@ from test_demo_partial_identity import inputs
 from test_visual_inventory import client_with_answers
 
 from luna_mujoco.demo_identity_presentation import improve_identity_presentation
-from luna_mujoco.demo_perception import DemoVisualInventory
+from legacy_identity import ArchivedTwoStageInventory as DemoVisualInventory
 from luna_mujoco.visual_inventory import choice
 
 FIXTURE = Path(__file__).parent / "fixtures/demo_postplace_30dd_request.json"
@@ -33,7 +33,7 @@ def test_actual_30dd_options_have_one_label_and_presentation_is_idempotent():
     for question in result["questions"]:
         for item in question["choices"]:
             if item["value"] == TARGET:
-                assert item["description"] == "R4 · Leftmost visible pink oval-shaped object in the source box"
+                assert item["description"] == "Reference 4 · Leftmost visible pink oval-shaped object in the source box"
     assert improve_identity_presentation(result) == result
     assert payload == before
     assert [q["name"] for q in result["questions"]] == [q["name"] for q in payload["questions"]]
@@ -60,11 +60,12 @@ def test_actual_recorded_release_context_is_in_request_without_claiming_visual_s
     frozen = json.loads(FIXTURE.read_text(encoding="utf-8"))
     capture, detections, entities, reference = inputs(("2",))
     entities = {TARGET: dict(entities["pink"], id=TARGET)}
-    reference["demo_task"]["source_object_ids"] = [TARGET]
+    reference["task_spec"]["target_refs"] = [TARGET]
+    reference["task_inventory"] = {"source_object_ids": [TARGET]}
     reference["entities"] = entities
     calls = []
     answers = {"identity_0": TARGET, "visibility_" + TARGET: "visible",
-               "progress_" + TARGET: "unknown", "demo_unlisted_pink": "none"}
+               "progress_" + TARGET: "unknown", "scene_inventory_closure": "none"}
     progress = {TARGET: frozen["controller_progress"][TARGET]}
     original = deepcopy(progress)
     result = DemoVisualInventory(api_key="test", client=client_with_answers(answers, calls)).resolve(

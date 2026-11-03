@@ -1,5 +1,8 @@
+from types import SimpleNamespace
+
 import pytest
 
+from luna_mujoco.runtime.inventory import PolicyTaskProgress
 from luna_mujoco.task_progress import TaskProgress, original_source_bin
 
 
@@ -25,14 +28,6 @@ def test_box_source_uses_fifty_percent_visible_xy_overlap(fraction, accepted):
     obj = source()
     obj['measured_relationships'][0]['visible_xy_fraction'] = fraction
     assert original_source_bin({'initial_source': obj}) == ('source-box' if accepted else None)
-    progress = TaskProgress('盒子中物体放到桌面', route='box_table')
-    progress.observe([obj], 'head')
-    if accepted:
-        progress.assess_membership({'red': 'required'})
-        progress.select(obj)
-    else:
-        with pytest.raises(ValueError, match='task_source_region_unconfirmed'):
-            progress.assess_membership({'red': 'required'})
 
 
 def test_two_half_overlap_bins_remain_ambiguous():
@@ -43,15 +38,18 @@ def test_two_half_overlap_bins_remain_ambiguous():
     assert original_source_bin({'initial_source': obj}) is None
 
 
-@pytest.mark.parametrize('route', ['box_table', 'box_table_box'])
-def test_box_source_membership_rejects_unsupported_required_atomically(route):
-    progress = TaskProgress('把盒子中物体拿到桌面黄色区域', 'collection', route=route)
+def test_explicit_source_membership_rejects_unknown_required_atomically():
+    progress = TaskProgress('move the entities from the selected source', 'collection')
     outside = {**source('table-object'), 'measured_relationships': []}
     progress.observe([source('inside'), outside], 'initial')
+    for identifier, status in [('inside', 'yes'), ('table-object', 'unknown')]:
+        progress.records[identifier]['initial_source']['task_source_evidence'] = {
+            'source': 'openai_decisions', 'status': status, 'target_id': identifier,
+            'source_id': 'source-box', 'source_kind': 'bin', 'observation_id': 'initial', 'request_hash': 'hash'}
     with pytest.raises(ValueError, match='task_source_region_unconfirmed'):
         progress.assess_membership({'inside': 'required', 'table-object': 'required'})
     assert progress.membership == {'inside': 'unknown', 'table-object': 'unknown'}
-    # Missing evidence stays unknown until JEV resolves membership; it is not exclusion.
+    # Unknown evidence does not prove exclusion.
     progress.assess_membership({'inside': 'required', 'table-object': 'unknown'})
     assert progress.snapshot()['membership_pending_ids'] == ['table-object']
     progress.membership['table-object'] = 'required'  # Backstop even with a stale/bad ledger.
@@ -60,17 +58,20 @@ def test_box_source_membership_rejects_unsupported_required_atomically(route):
     assert progress.current_id is None
 
 
-def test_box_route_keeps_original_source_after_intermediate_place():
-    progress = TaskProgress('盒子到桌面再到另一盒子', route='box_table_box')
+def test_explicit_transfer_keeps_original_source_after_intermediate_place():
+    progress = PolicyTaskProgress('move the entity through a work area')
+    progress.observe([source()], 'initial')
+    progress.assess_membership({'red': 'required'})
+    progress.configure_task(SimpleNamespace(destination_ref='other-box', processing=[]), ['red'])
     progress.select(source(), 'marker-yellow')
     progress.complete('red', observation_id='at-table')
     progress.select({**source(), 'measured_relationships': []}, 'other-box')
     assert original_source_bin(progress.records['red']) == 'source-box'
 
 
-def test_route_inventory_does_not_add_new_wrist_detections_after_initial_list():
+def test_frozen_inventory_does_not_add_new_wrist_detections_after_initial_list():
     from test_task_progress import inventory_observation
-    progress = TaskProgress('所有方块放进盒子', 'collection', route='table_box')
+    progress = TaskProgress('所有方块放进盒子', 'collection')
     progress.observe([source('one'), source('two')], 'head-initial')
     progress.assess_membership({'one': 'required', 'two': 'required'})
     progress.freeze_inventory(inventory_observation([source('one'), source('two')]))
@@ -86,46 +87,53 @@ def test_route_inventory_does_not_add_new_wrist_detections_after_initial_list():
     assert 'replacement' not in progress.records and 'unrelated' not in progress.records
 
 
-def test_intermediate_place_preserves_id_and_does_not_complete_route():
-    progress = TaskProgress('盒子经桌面到另一盒子', route='box_table_box')
+def test_intermediate_place_preserves_id_without_completing_final_goal():
+    progress = PolicyTaskProgress('move the entity through a work area')
+    progress.observe([source()], 'initial')
+    progress.assess_membership({'red': 'required'})
+    progress.configure_task(SimpleNamespace(destination_ref='box-right', processing=[]), ['red'])
     progress.select(source(), 'marker-yellow')
     progress.bind_arm('A')
     progress.complete('red', observation_id='at-table')
     assert progress.completed_ids == []
-    assert progress.snapshot()['pending_route_id'] == 'red'
-    assert progress.stage_index('red') == 1
+    assert progress.records['red']['status'] == 'observed'
+    assert progress.transfer_index('red') == 0
     assert progress.terminal_status('complete') == 'needs_attention'
     progress.complete('red', observation_id='at-table')
-    assert progress.stage_index('red') == 1  # Re-verifying one release is not another transfer.
+    assert len(progress.records['red']['transfers']) == 1
     progress.select(source(), 'box-right')
     progress.bind_arm('B')
     progress.complete('red', observation_id='at-box')
     assert progress.completed_ids == ['red']
-    assert [step['destination_id'] for step in progress.records['red']['completed_stages']] == ['marker-yellow', 'box-right']
-    assert progress.snapshot()['stage_arms'] == {'0': 'A', '1': 'B'}
+    assert [step['destination_id'] for step in progress.records['red']['transfers']] == ['marker-yellow', 'box-right']
+    assert [step['arm'] for step in progress.records['red']['transfers']] == ['A', 'B']
 
 
-def test_arm_binding_applies_to_entire_leg_including_other_objects():
-    progress = TaskProgress('全部放进盒子', 'collection', route='table_box')
+def test_arm_binding_belongs_to_the_current_entity():
+    progress = TaskProgress('全部放进盒子', 'collection')
     progress.select(source(), 'box')
     progress.bind_arm('A')
     progress.complete('red', observation_id='done')
     progress.select(source('second'), 'box')
-    assert progress.bound_arm() == 'A'
-    with pytest.raises(ValueError, match='stage_arm_is_fixed'):
-        progress.bind_arm('B')
+    assert progress.bound_arm() is None
+    progress.bind_arm('B')
+    assert progress.bound_arm() == 'B'
 
 
-def test_same_object_must_finish_second_leg_before_starting_another():
-    progress = TaskProgress('全部从盒子经桌面到另一盒子', 'collection', route='box_table_box')
+def test_pending_transfer_does_not_select_a_fixed_next_entity():
+    progress = PolicyTaskProgress('move the entities through selected regions', 'collection')
+    progress.observe([source(), source('second')], 'initial')
+    progress.assess_membership({'red': 'required', 'second': 'required'})
+    progress.configure_task(SimpleNamespace(destination_ref='final', processing=[]), ['red', 'second'])
     progress.select(source(), 'marker-yellow')
     progress.complete('red', observation_id='first')
-    with pytest.raises(ValueError, match='pending_route_requires_same_object'):
-        progress.select(source('second'), 'marker-yellow')
+    progress.select(source('second'), 'marker-yellow')
+    assert progress.current_id == 'second'
+    assert progress.completed_ids == []
 
 
-def test_explicit_arm_cannot_change_between_legs():
-    progress = TaskProgress('用左臂中转', requested_arm='A', route='box_table_box')
+def test_explicit_arm_constraint_applies_to_selected_transfer():
+    progress = TaskProgress('用左臂中转', requested_arm='A')
     progress.select(source(), 'marker-yellow')
     with pytest.raises(ValueError, match='requested_arm'):
         progress.bind_arm('B')

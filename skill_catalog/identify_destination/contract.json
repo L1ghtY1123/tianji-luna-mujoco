@@ -1,0 +1,72 @@
+{
+  "id": "identify_destination",
+  "description": "Bind an observed support/container or an operator-configured work area for the current transfer. Preserve the original location requirement. A designated/set/configured area means the workbench setting and uses its exact XY; do not search for or visually invent a marker. A normal table/container permits region-based placement. Intermediate destinations need explicit semantic permission. This does not choose a collision-free XYZ or plan a path.",
+  "inputs": [
+    "destination_id",
+    "target_id",
+    "current_observation",
+    "destination_kind",
+    "placement_preference",
+    "orientation_mode"
+  ],
+  "requires": {
+    "target_selected": true,
+    "observed": true
+  },
+  "provides": [
+    "destination_selected",
+    "destination_ready"
+  ],
+  "capability": "Bind an observed support/container or an operator-configured work area for the current transfer",
+  "outputs": [
+    "destination_selected",
+    "destination_ready",
+    "execution_or_evidence_record",
+    "destination_id",
+    "placement_preference",
+    "selection_scope"
+  ],
+  "errors": [
+    "intermediate_destination_rejected",
+    "unknown_or_unbound_entity",
+    "stale_generation_or_observation",
+    "precondition_not_satisfied",
+    "missing_measurement_or_evidence",
+    "service_or_execution_failure",
+    "destination_kind_mismatch"
+  ],
+  "invalidates_observation": false,
+  "planning_effects": {
+    "grasps_ready": false,
+    "plan_ready": false,
+    "place_plan_ready": false,
+    "transport_plan_ready": false,
+    "transport_execution_completed": false,
+    "arm_selected": false,
+    "arms_evaluated": false,
+    "destination_is_container": null,
+    "placement_zone_ready": false,
+    "placement_resolved": false
+  },
+  "argument_rules": [
+    {
+      "when_arguments": {
+        "destination_kind": "support_region"
+      },
+      "requires": {},
+      "effects": {
+        "destination_is_container": false
+      }
+    },
+    {
+      "when_arguments": {
+        "destination_kind": "container"
+      },
+      "requires": {},
+      "effects": {
+        "destination_is_container": true
+      }
+    }
+  ],
+  "recovery_retry_safe": true
+}

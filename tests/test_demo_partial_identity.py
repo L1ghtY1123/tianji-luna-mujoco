@@ -13,17 +13,24 @@ from luna_mujoco.visual_api import VisualInventoryError
 from luna_mujoco.visual_inventory import VisualInventory
 
 
-def clients(identities, *, extra="unknown"):
+def clients(identities, *, extra="unknown", visibility=None):
     def respond(request):
         payload = json.loads(request.content)
         answers = []
         for question in payload["questions"]:
             name = question["name"]
+            if question['type'] == 'predicate' and name.startswith('match_'):
+                value, confidence = identities[int(name.split('_')[1])]
+                answers.append({'name': name, 'type': 'predicate', 'probability': confidence
+                                if question['instructions'].partition(' Reference subject: ')[0].endswith(f'permanent reference ID {value}.')
+                                else 1 - confidence})
+                continue
             if name.startswith("identity_"):
                 value, confidence = identities[int(name.split("_")[1])]
             else:
-                value = extra if name == "demo_unlisted_pink" else (
+                value = extra if name == "scene_inventory_closure" else (
                     "at_destination" if name.startswith("progress_") else "visible")
+                value = (visibility or {}).get(name, value)
                 confidence = .99
             answers.append({"name": name, "type": "choice", "choice": value, "confidence": confidence})
         return httpx.Response(200, json={"model": "gpt-6-luna", "answers": answers})
@@ -37,7 +44,7 @@ def inputs(cameras=("2", "1")):
                    "requested_color": "pink"} for camera in cameras]
     entities = {"pink": {"id": "pink", "kind": "object", "color": "pink", "roles": ["collision"],
                          "visual_membership": "required"}}
-    reference = {"demo_task": {"source_object_ids": ["pink"]}, "views": {}, "entities": entities}
+    reference = {"task_spec": {"target_refs": ["pink"]}, "views": {}, "entities": entities}
     return capture, detections, entities, reference
 
 
@@ -58,16 +65,68 @@ def test_primary_identity_survives_uncertain_supplement_without_lowering_thresho
     assert result["evidence"]["answers"][1]["confidence"] == .64
 
 
-@pytest.mark.parametrize("case", ["only_unknown", "missing_bin", "unknown_primary", "no_left_source"])
+def test_frozen_inventory_can_return_measured_subset_for_recovery_mapping():
+    capture, detections, entities, reference = inputs()
+    entities['green'] = {'id': 'green', 'kind': 'object', 'color': 'green',
+                         'roles': ['collision'], 'visual_membership': 'required'}
+    reference['task_spec']['target_refs'] = ['pink', 'green']
+    reference['inventory_state'] = {'inventory_finalized': True}
+    inventory = DemoVisualInventory(api_key='test',
+        client=clients([('pink', .99), ('green', .77)], visibility={'visibility_green': 'visible'}))
+    result = inventory.resolve(capture, detections, instruction='move both', entities=entities,
+        reference=reference, purpose='associate_inventory')
+    assert result['missing_geometry_ids'] == ['green']
+    assert result['identity_coverage']['accepted_entity_ids'] == ['pink']
+    assert {entry['entity_id'] for group in result['groups'] for entry in group} == {'pink'}
+    assert result['unassociated_candidates'][0]['confidence'] < .8
+    assert result['identity_coverage']['complete'] is False
+    assert result['evidence']['identity_correspondence']
+    assert 'clarifies_request_hash' not in result['evidence']
+
+
+@pytest.mark.parametrize('green_match,other_match,expected_missing', [
+    (.99, .0, []), (.65, .0, ['green']), (.99, .99, ['green'])])
+def test_partial_identity_uses_one_pairwise_request(green_match, other_match, expected_missing):
+    capture, detections, entities, reference = inputs()
+    entities['green'] = {'id': 'green', 'kind': 'object', 'color': 'green',
+                         'roles': ['collision'], 'visual_membership': 'required'}
+    reference['task_spec']['target_refs'] = ['pink', 'green']
+    reference['inventory_state'] = {'inventory_finalized': True}
+    requests = []
+    def respond(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        answers = []
+        for question in payload['questions']:
+            name = question['name']
+            if question['type'] == 'predicate':
+                matching_green = question['instructions'].partition(' Reference subject: ')[0].endswith('permanent reference ID green.')
+                probability = ((green_match if matching_green else other_match) if name.startswith('match_1_')
+                               else (0. if matching_green else .99))
+                answers.append({'name': name, 'type': 'predicate', 'probability': probability})
+            else:
+                value = 'pink' if name == 'identity_0' else 'green' if name == 'identity_1' else (
+                    'none' if name == 'scene_inventory_closure' else 'visible')
+                answers.append({'name': name, 'type': 'choice', 'choice': value,
+                                'confidence': .59 if name == 'identity_1' else .99})
+        return httpx.Response(200, json={'answers': answers})
+    inventory = DemoVisualInventory(api_key='test', client=httpx.Client(transport=httpx.MockTransport(respond)))
+    result = inventory.resolve(capture, detections, instruction='move both', entities=entities,
+                               reference=reference, purpose='associate_inventory')
+    assert result['missing_geometry_ids'] == expected_missing
+    assert len(requests) == 1
+    assert any(question['name'].startswith('match_0_') for question in requests[0]['questions'])
+    assert any(question['name'].startswith('match_1_') for question in requests[0]['questions'])
+    assert 'clarifies_request_hash' not in result['evidence']
+    assert result['evidence']['identity_correspondence'][1]['probabilities']['green'] == green_match
+
+
+@pytest.mark.parametrize("case", ["only_unknown", "missing_bin"])
 def test_incomplete_or_primary_uncertainty_remains_a_failure(case):
     cameras = ("2", "1")
     identities = [("pink", .99), ("pink", .64)]
     if case == "only_unknown":
         cameras, identities = ("1",), [("pink", .64)]
-    elif case == "unknown_primary":
-        cameras, identities = ("1", "2"), [("pink", .99), ("pink", .64)]
-    elif case == "no_left_source":
-        cameras = ("3", "1")
     capture, detections, entities, reference = inputs(cameras)
     if case == "missing_bin":
         entities["bin"] = {"id": "bin", "kind": "bin", "color": "blue", "roles": ["collision"]}
@@ -77,16 +136,46 @@ def test_incomplete_or_primary_uncertainty_remains_a_failure(case):
             reference=reference, purpose="initialize_inventory")
 
 
-def test_unknown_primary_error_keeps_its_own_answer_after_skipping_supplement():
-    capture, detections, entities, reference = inputs(("1", "2", "2"))
+@pytest.mark.parametrize('target_confidence', [.99, .64])
+@pytest.mark.parametrize('bin_visibility', ['visible', 'unseen', 'unknown'])
+def test_later_partial_observation_keeps_confirmed_source_and_reports_missing_bin(
+        target_confidence, bin_visibility):
+    capture, detections, entities, reference = inputs()
+    entities['bin'] = {'id': 'bin', 'kind': 'bin', 'color': 'blue', 'roles': ['collision']}
+    inventory = DemoVisualInventory(api_key='test',
+        client=clients([('pink', target_confidence), ('bin', .64)],
+                       visibility={'visibility_bin': bin_visibility}))
+    if target_confidence < .8 or bin_visibility == 'visible':
+        with pytest.raises(VisualInventoryError, match='visual_identity_unknown'):
+            inventory.resolve(capture, detections, instruction='move one', entities=entities,
+                              reference=reference, purpose='associate_inventory')
+        return
+    result = inventory.resolve(capture, detections, instruction='move one', entities=entities,
+                               reference=reference, purpose='associate_inventory')
+    assert result['missing_geometry_ids'] == ['bin']
+    assert result['identity_coverage']['accepted_entity_ids'] == ['pink']
+    assert result['identity_coverage']['required_entity_ids'] == ['bin', 'pink']
+    assert {entry['entity_id'] for group in result['groups'] for entry in group} == {'pink'}
+    assert result['unassociated_candidates'][0]['confidence'] < .8
+    assert result['evidence']['identity_correspondence']
+    assert 'clarifies_request_hash' not in result['evidence']
+    assert result['unassociated_candidates'][0]['geometry_policy'] == 'discard_from_inventory_map'
+
+
+@pytest.mark.parametrize("camera", ["1", "2", "3"])
+def test_any_camera_can_supply_identity_while_unknown_candidates_keep_their_evidence(camera):
+    capture, detections, entities, reference = inputs(("1", camera, "2"))
     inventory = DemoVisualInventory(api_key="test",
         client=clients([("pink", .64), ("pink", .99), ("pink", .61)]))
-    with pytest.raises(VisualInventoryError, match="visual_identity_unknown") as caught:
-        inventory.resolve(capture, detections, instruction="move all", entities=entities,
-            reference=reference, purpose="associate_inventory")
-    assert caught.value.evidence["candidate"] == "candidate-2"
-    assert caught.value.evidence["camera_id"] == "2"
-    assert caught.value.evidence["confidence"] == .61
+    result = inventory.resolve(capture, detections, instruction="move all", entities=entities,
+        reference=reference, purpose="associate_inventory")
+    assert result["groups"][0][0]["camera_id"] == camera
+    assert [(row["candidate"], row["camera_id"], row["confidence"])
+            for row in result["unassociated_candidates"]] == [
+                ("candidate-0", "1", 0.), ("candidate-2", "2", 0.)]
+    checks = result['evidence']['identity_correspondence']
+    assert checks[0]['probabilities']['pink'] == .64
+    assert checks[2]['probabilities']['pink'] == .61
 
 
 def test_visible_right_bin_without_confident_identity_still_blocks_complete_union():
@@ -155,8 +244,8 @@ def test_perception_discards_uncertain_secondary_depth_from_inventory_map():
         "visual_membership": "required", "segmentation_query": {"kind": "cube", "color": "pink", "prompt": "pink cup"}}}
     entities["table"] = {"kind": "table", "bbox": [0, 0, 1, 1], "reference_camera_id": "3"}
     reference = {"observation_id": capture["observation_id"], "entities": entities, "views": {},
-        "demo_task": {"source_bin_id": "bin", "source_object_ids": ["pink"], "destination_table_id": "table"},
-        "demo_program": {"version": 1, "steps": [{"type": "stop", "reason": "fixture"}]}}
+        "task_spec": {"source_ref": "bin", "target_refs": ["pink"], "destination_ref": "table"},
+        "policy_graph": {"version": 1, "steps": [{"type": "stop", "reason": "fixture"}]}}
     class Detector:
         def segment(self, rgb, text, timestamp_us):
             return [] if rgb[0, 0, 0] == 3 else [{"mask": masks[0], "score": .98}]
