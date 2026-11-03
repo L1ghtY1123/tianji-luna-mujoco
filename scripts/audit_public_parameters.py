@@ -1,5 +1,6 @@
 """Check adapter keyword names against the installed, pinned public cuRobo API."""
 import ast
+import tianji_curobo
 import inspect
 import json
 from pathlib import Path
@@ -35,7 +36,7 @@ def audit():
     create_solver_configs(PlanningSettings(), robot={}, scene_model={}, collision_cache={}, batch_size=4,
         ik_config_type=SimpleNamespace(create=ik_config), motion_config_type=SimpleNamespace(create=motion_config))
     # Explicit grasp keywords in project and the frozen transport adapter.
-    for file in [ROOT / 'src/luna_mujoco/backend_builder.py', *sorted((ROOT / 'vendor/tianji_curobo').glob('*.py'))]:
+    for file in [ROOT / 'src/luna_mujoco/backend_builder.py', *sorted((Path(tianji_curobo.__file__).resolve().parent).glob('*.py'))]:
         tree = ast.parse(file.read_text(encoding='utf8'))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):

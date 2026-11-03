@@ -50,7 +50,7 @@ def checker_parity():
 
     device = DeviceCfg()
     urdf = ROOT / 'assets/marvin_urdf/marvin_with_grippers.urdf'
-    original = yaml.safe_load((ROOT / 'resources/curobo/marvin_gui_dual.yml').read_text())
+    original = yaml.safe_load((ROOT / 'resources/robot/marvin_gui_dual.yml').read_text())
     base = create_dual_arm_robot_config(original, urdf_path=urdf, asset_root_path=ROOT / 'assets')
     world = RobotCollisionChecker(RobotCollisionCheckerCfg.load_from_config(
         robot_config=base, device_cfg=device, collision_activation_distance=.01,

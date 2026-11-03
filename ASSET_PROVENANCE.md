@@ -124,10 +124,10 @@ The retained files have distinct simulation or algorithm roles:
 | Files | Role and dependency |
 |---|---|
 | `assets/marvin_urdf/` | Robot geometry, joint limits, inertias and gripper model used by MuJoCo and cuRobo. The Marvin name identifies the robot model. |
-| `resources/curobo/marvin_gui_dual.yml` | Project collision configuration derived from the original 38-link model. Its `tianji_base` path records provenance. Sphere arrays follow the reviewed project fit; kinematics, buffers, collision-pair exclusions and open-gripper locks are preserved. |
-| `vendor/tianji_curobo/` (26 Python files) | Copied algorithm adapters, configuration, contracts and GPU service support. `geometry_service.py` imports `CuroboRuntime`; `backend_builder.py` imports planner and robot-configuration helpers. |
-| `vendor/tianji_graspgen/` (7 Python files) | Copied inference client, service and data contracts. `algorithms.py` imports `GraspGenClient`; Compose starts the copied GraspGen service. |
-| `resources/curobo/sdk-source-manifest.json` | Integrity manifest for the NVIDIA cuRobo algorithm SDK installed in the GPU image. It contains source hashes, not a robot driver. |
+| `resources/robot/marvin_gui_dual.yml` | Project collision configuration derived from the original 38-link model. Its `tianji_base` path records provenance. Sphere arrays follow the reviewed project fit; kinematics, buffers, collision-pair exclusions and open-gripper locks are preserved. |
+| `../tianji-algorithms/services/tianji_curobo/` (26 Python files) | Copied algorithm adapters, configuration, contracts and GPU service support. `geometry_service.py` imports `CuroboRuntime`; `backend_builder.py` imports planner and robot-configuration helpers. |
+| `../tianji-algorithms/services/tianji_graspgen/` (7 Python files) | Copied inference client, service and data contracts. `algorithms.py` imports `GraspGenClient`; Compose starts the copied GraspGen service. |
+| `../tianji-algorithms/manifests/curobo-sdk-files.json` | Integrity manifest for the NVIDIA cuRobo algorithm SDK installed in the GPU image. It contains source hashes, not a robot driver. |
 
 At the 2026-09-29 copy audit, all 33 adapter files and the original collision
 YAML matched `docs/algorithm-provenance.json`. This records the original copy;

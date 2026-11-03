@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Responses skill programs and Decisions verification with MuJoCo physics"
 requires-python = ">=3.12"
 dependencies = [
+  "tianji-algorithm-services==0.2.2",
   "pydantic>=2.10,<3",
   "jsonschema>=4.23,<5",
   "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-dotenv>=1.1,<2",

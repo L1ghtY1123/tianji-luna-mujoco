@@ -9,7 +9,7 @@ import numpy as np
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = "resources/curobo/marvin_gui_dual.yml"
+SOURCE = "resources/robot/marvin_gui_dual.yml"
 
 
 @lru_cache(maxsize=1)

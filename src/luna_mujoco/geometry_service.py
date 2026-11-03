@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import subprocess
-import sys
 import threading
 import time
 from collections import OrderedDict
@@ -31,7 +30,6 @@ from .sdk_scene import sdk_scene_model, sdk_voxel_grid
 from .trajectory_postprocessing import PreReleasePlacePlan
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "vendor"))
 from tianji_curobo._curobo_impl import CuroboRuntime, _busy_error, _validated_timeout
 from tianji_curobo.contracts import (
     CuroboToolError,
@@ -170,7 +168,7 @@ def measured_target_collision_scope(runtime, planner, phase):
 
 class GeometryRuntime(CuroboRuntime):
     def __init__(self, **kwargs):
-        kwargs.setdefault("robot_config_path", ROOT / "resources/curobo/marvin_gui_dual.yml")
+        kwargs.setdefault("robot_config_path", ROOT / "resources/robot/marvin_gui_dual.yml")
         kwargs.setdefault("urdf_path", ROOT / "assets/marvin_urdf/marvin_with_grippers.urdf")
         kwargs.setdefault("asset_root_path", ROOT / "assets")
         super().__init__(scene="none", warmup=False, **kwargs)
@@ -1357,7 +1355,7 @@ def sdk_identity():
             return result.stdout.strip(), str(path)
     # Wheels built from a local checkout can omit Git metadata. Verify every
     # packaged Python source byte against the pinned official Git tree instead.
-    manifest_path = ROOT / "resources/curobo/sdk-source-manifest.json"
+    manifest_path = Path(os.environ.get("TIANJI_ALGORITHMS_ROOT", ROOT.parent / "tianji-algorithms")) / "manifests/curobo-sdk-files.json"
     if manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text())
         mismatches = []
@@ -1386,7 +1384,7 @@ def main():
     urdf = materialize_urdf(urdf_path,
         marvin_meshes=Path(os.environ["LUNA_MARVIN_MESHES"]),
         rag_meshes=Path(os.environ["LUNA_RAG_MESHES"]))
-    runtime = GeometryRuntime(robot_config_path=ROOT / "resources/curobo/marvin_gui_dual.yml",
+    runtime = GeometryRuntime(robot_config_path=ROOT / "resources/robot/marvin_gui_dual.yml",
                               urdf_path=urdf, asset_root_path=urdf.parent)
     runtime.warm_start(load_settings(ROOT / 'data/planning-settings.json'))
     operation_lock = threading.Lock()
@@ -1407,7 +1405,7 @@ def main():
                 "warmup": runtime.warmup_status,
                 "gpu_available": torch.cuda.is_available(), "curobo_source": source,
                 "module_path": module_path, "scene_token": (runtime.geometry_scene or {}).get("scene_token"),
-                "robot_config_sha256": hashlib.sha256((ROOT / "resources/curobo/marvin_gui_dual.yml").read_bytes()).hexdigest()})
+                "robot_config_sha256": hashlib.sha256((ROOT / "resources/robot/marvin_gui_dual.yml").read_bytes()).hexdigest()})
 
         def do_POST(self):
             timings = {}

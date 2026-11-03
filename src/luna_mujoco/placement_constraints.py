@@ -39,7 +39,7 @@ def configuration_spheres(configuration):
 def _configuration_spheres(joints_deg, grippers_rad, required_arms):
     root = Path(__file__).resolve().parents[2]
     urdf = root / 'assets/marvin_urdf/marvin_with_grippers.urdf'
-    config = yaml.safe_load((root / 'resources/curobo/marvin_gui_dual.yml').read_text(encoding='utf-8'))
+    config = yaml.safe_load((root / 'resources/robot/marvin_gui_dual.yml').read_text(encoding='utf-8'))
     config = configure_gripper_feedback(config, dict(zip(('A', 'B'), grippers_rad)), urdf)
     kin = config['robot_cfg']['kinematics']
     model = robot_model()

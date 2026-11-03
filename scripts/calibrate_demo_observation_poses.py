@@ -27,7 +27,7 @@ POSE_PATH = ROOT / "resources/demo_observation_poses.json"
 
 def source_fingerprints():
     paths = ["assets/marvin_urdf/marvin_with_grippers.urdf", "resources/cameras/calibration.json",
-             "resources/curobo/marvin_gui_dual.yml", "resources/demo-config.json",
+             "resources/robot/marvin_gui_dual.yml", "resources/demo-config.json",
              "src/luna_mujoco/model_builder.py", "src/luna_mujoco/cameras.py", "src/luna_mujoco/demo_scene.py",
              "src/luna_mujoco/cad_assets.py", "src/luna_mujoco/geometry.py", "resources/cad/manifest.json", "scripts/build_cad_assets.py",
              "scripts/calibrate_demo_observation_poses.py"]

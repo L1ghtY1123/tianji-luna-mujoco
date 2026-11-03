@@ -37,7 +37,7 @@ def set_joints(model, data, poses):
 
 @lru_cache(maxsize=1)
 def sphere_config():
-    return yaml.safe_load((ROOT / "resources/curobo/marvin_gui_dual.yml").read_text())["robot_cfg"]["kinematics"]
+    return yaml.safe_load((ROOT / "resources/robot/marvin_gui_dual.yml").read_text())["robot_cfg"]["kinematics"]
 
 
 def clearance(model, data):
@@ -188,7 +188,7 @@ def main():
         poses = json.loads(path.read_text())["joints_rad"] if args.verify else search(model, data)
         evidence = validate(model, data, poses, ROOT / "data/visible-cloud-work/observation-poses")
         paths = ["assets/marvin_urdf/marvin_with_grippers.urdf", "resources/cameras/calibration.json",
-                 "resources/curobo/marvin_gui_dual.yml", "src/luna_mujoco/model_builder.py",
+                 "resources/robot/marvin_gui_dual.yml", "src/luna_mujoco/model_builder.py",
                  "src/luna_mujoco/cameras.py", "scripts/calibrate_observation_poses.py"]
         hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in paths}
         record = {"schema_version": 1, "model_validated": True, "joints_rad": poses,

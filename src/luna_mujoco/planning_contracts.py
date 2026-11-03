@@ -5,11 +5,8 @@ cuRobo configurations and hard world checker accept a distance in metres.
 Keep all copied structural validation, but validate clearance with this
 project's configurable nonnegative distance. No solver or vendor module is patched.
 """
-import sys
 from dataclasses import replace
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "vendor"))
 from tianji_curobo import contracts, dual_contracts
 
 from .planning_settings import PlanningSettings

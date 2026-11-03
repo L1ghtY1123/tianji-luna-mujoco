@@ -73,7 +73,7 @@ def build_candidate(source, urdf):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=ROOT / "resources/curobo/marvin_gui_dual.yml")
+    parser.add_argument("--source", type=Path, default=ROOT / "resources/robot/marvin_gui_dual.yml")
     parser.add_argument("--urdf", type=Path, default=ROOT / "assets/marvin_urdf/marvin_with_grippers.urdf")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--certificate", required=True, type=Path)

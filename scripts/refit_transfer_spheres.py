@@ -7,6 +7,7 @@ directory with final arrays and provenance. Runtime assets are never written.
 import argparse
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 
@@ -57,7 +58,7 @@ def main():
     project, output = args.project.resolve(), args.output.resolve()
     sdk = Path(curobo.__file__).resolve().parent
     validate_output_path(project, args.plan.resolve(), output, sdk)
-    manifest = json.loads((project / "resources/curobo/sdk-source-manifest.json").read_text())
+    manifest = json.loads((Path(os.environ.get("TIANJI_ALGORITHMS_ROOT", project.parent / "tianji-algorithms")) / "manifests/curobo-sdk-files.json").read_text())
     for name, expected in manifest["files"].items():
         if hashlib.sha256((sdk / name).read_bytes()).hexdigest() != expected:
             raise ValueError(f"Pinned SDK source differs: {name}")

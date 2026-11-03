@@ -234,7 +234,7 @@ def main(argv=None):
         raise FileExistsError("Use a fresh offline output directory")
     if output.is_relative_to(project / "resources") or output.is_relative_to(project / "assets"):
         raise ValueError("Offline output must not overwrite runtime assets")
-    source = args.source or project / "resources/curobo/marvin_gui_dual.yml"
+    source = args.source or project / "resources/robot/marvin_gui_dual.yml"
     config = yaml.safe_load(source.read_text())
     recipe_path = project / "data/collision-correction-2026-09-30/recipe.json"
     recipe = json.loads(recipe_path.read_text())

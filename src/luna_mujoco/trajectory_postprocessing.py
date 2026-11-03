@@ -1,13 +1,9 @@
 """Preserve raw cuRobo derivatives and prepare candidate execution trajectories."""
 
-import sys
 from dataclasses import asdict, dataclass, field, replace
-from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "vendor"))
 from tianji_curobo.contracts import NativeTrajectory
 from tianji_curobo.trajectory_interpolation import quintic_hermite_points
 

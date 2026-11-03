@@ -18,7 +18,7 @@ from scipy.optimize import minimize
 from scipy.spatial import ConvexHull, QhullError
 
 ROOT = Path(__file__).resolve().parents[1]
-RECORD = ROOT / "resources/curobo/link4-refit-20261016.json"
+RECORD = ROOT / "resources/robot/link4-refit-20261016.json"
 
 
 def enclosing_sphere(points, attachment, generation):
@@ -152,7 +152,7 @@ def build_candidate(source, record, project=ROOT):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=ROOT / "resources/curobo/marvin_gui_dual.yml")
+    parser.add_argument("--source", type=Path, default=ROOT / "resources/robot/marvin_gui_dual.yml")
     parser.add_argument("--record", type=Path, default=RECORD)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

@@ -18,50 +18,35 @@
 
 ## 目录与职责
 
-| 目录 | 职责 |
+算法代码只有一个维护仓库：`../tianji-algorithms`。Luna 不再保留 `vendor/`、`services/`、`src/tianji_foundationpose/` 或算法注册库副本。
+
+| 位置 | 职责 |
 | --- | --- |
-| `src/luna_mujoco/agent/` | Responses/Decisions 协议、问题和初始编排 |
-| `src/luna_mujoco/core/` | graph、任务等数据模型 |
-| `src/luna_mujoco/runtime/` | edge 执行、清单/账本、Decisions 恢复 |
-| `src/luna_mujoco/robot_skills/` | 注册技能实现 |
-| `skill_catalog/` | 技能说明、参数及前提/效果契约 |
-| `src/luna_mujoco/backend_builder.py`、`geometry_service.py` | 官方 cuRobo 适配和服务 |
-| `src/tianji_foundationpose/` | 主程序使用的 FoundationPose HTTP 客户端和数据契约，不含推理后端 |
-| `services/luna_foundationpose/` | FoundationPose 容器侧的项目适配：模型缓存、请求服务及固定版本 SDK 接线 |
-| `vendor/` | 固定版本的 cuRobo/GraspGen 依赖适配包副本；来源见 `ASSET_PROVENANCE.md`，不作为项目算法的新增位置 |
-| `resources/` | CAD、相机标定、工作空间、碰撞配置与来源清单；只放静态资源，不放 Python 算法代码 |
-| `assets/` | MuJoCo 与规划使用的机器人 URDF 和网格 |
-| `scripts/` | 可复用的离线构建、资源准备和审计工具 |
-| `web/` | 工作台和实验回放 |
-| `data/` | 实验与运行日志、注册库、回放网格、规划参数 |
+| `src/luna_mujoco/` | 应用编排、MuJoCo 仿真、场景与机器人技能；专用 `geometry_service` 保留应用接口 |
+| `skill_catalog/` | 技能契约、参数和前提/效果 |
+| `resources/robot/` | 本机器人碰撞配置与几何审计，不含算法代码或 SDK 清单 |
+| `resources/`、`assets/` | CAD、标定、工作空间、URDF 和网格 |
+| `scripts/`、`web/` | 应用维护工具、工作台与回放 |
+| `data/` | 实验、运行日志、回放网格和应用规划参数 |
+| `../tianji-algorithms/services/` | 唯一的算法客户端、协议与服务适配源码，统一包 `tianji-algorithm-services` |
+| `../tianji-algorithms/manifests/` | 官方 SDK 版本及源码校验清单 |
+| `../tianji-algorithms/data/luna/foundationpose-registry/` | Luna 使用的 FoundationPose 注册数据，独立于源码 |
 
-算法官方源码、权重和通用服务的维护仓库为 `/home/guangyu/projects/tianji-algorithms`。Luna 当前承担应用编排、MuJoCo 仿真、场景/碰撞/持物逻辑、专用 `geometry_service` 以及 FoundationPose 缓存适配，并非所有路径都只是 HTTP 转发。算法仓库的通用 cuRobo 服务不替代 Luna 专用接口。
+SAM3、GraspGen 和 FoundationPose 的服务定义统一位于算法仓库的 `deploy/luna-algorithms.compose.yaml`；本项目 Compose 通过 `include` 使用它。应用及 cuRobo 容器只读挂载同一份算法服务源码，代码中不再临时插入 `vendor` 路径。FoundationPose 客户端和服务共享同一个 `tianji_foundationpose` 包；Luna 所需缓存/跟踪适配在算法仓库的 `services/luna_foundationpose/`。
 
-`vendor/tianji_curobo/` 的 26 个 Python 文件和 `vendor/tianji_graspgen/` 的 7 个文件在 2026-11-03 与算法仓库逐字节一致，是仍被当前导入与镜像构建引用的依赖副本；它们不是另一份官方 SDK。`services/` 是 Luna 的容器专属适配，使用镜像内完整 FoundationPose 服务包；`src/tianji_foundationpose/` 是应用客户端子集，不能直接覆盖服务包的 Python 搜索路径。`resources/` 和 `assets/` 只提供配置、标定和模型输入。
+算法仓库的通用 cuRobo HTTP 服务不替代 Luna 的场景/持物接口；Luna 的 `geometry_service` 从统一包导入算法边界。官方 SDK 与权重仍在算法仓库维护，端口、镜像版本及现有协议保持。
 
-正式入口不得加载 `data/` 中的脚本。可复用维护工具放在 `scripts/`；临时调试代码、候选实现和部署传输包在使用后删除。
-
-独立 CAD 库位于 `/home/guangyu/projects/CAD`。生产通过 `LUNA_CAD_ROOT=/opt/cad` 的只读挂载使用它；`resources/cad/` 是同步维护的项目副本。蓝盒 1000 面、黑色工件 999 面，配准和碰撞使用同一表面，左右臂离线抓姿数值保持不变。
+独立 CAD 库位于 `/home/guangyu/projects/CAD`，通过 `LUNA_CAD_ROOT=/opt/cad` 只读挂载；`resources/cad/` 是应用静态副本。
 
 ## Git 上传与本地数据
 
-源码、技能契约、部署配置、`assets/` 和 `resources/` 随 Git 保存。`.env`、`data/`、依赖目录及构建输出由 `.gitignore` 排除，仅提交不含密钥的 `.env.example`。
+源码、契约、部署配置及静态资源随 Git 保存。`.env`、运行数据、依赖和构建输出不上传；仅提交 `.env.example`。
 
-`data/` 当前只保留以下五项，均有明确消费者：
+Luna 的 `data/` 只保留 `experiments/`（实验回放）、`runs/`（运行日志）、`render_meshes/`（回放网格）和 `planning-settings.json`（应用规划参数）。旧调试脚本、离线候选实现、部署包、`tests/` 和 `web/tests/` 已按用户要求删除。FoundationPose 注册库已经逐文件校验并迁至算法仓库，Luna 不保留副本。
 
-| 路径 | 用途 |
-| --- | --- |
-| `experiments/` | 完整实验、相机图像、模型调用、轨迹与回放记录；`.trash/` 是可恢复删除区。 |
-| `runs/` | 任务运行日志。 |
-| `foundationpose-registry/` | FoundationPose 服务正在挂载的模型注册库。 |
-| `render_meshes/` | 网页与历史实验回放引用的网格缓存。 |
-| `planning-settings.json` | 网页保存的规划参数，应用和 cuRobo 服务启动时读取。 |
+新机器需要同时准备本项目、相邻的 `tianji-algorithms` 与 `CAD`，以及本地镜像、`.env` 和 OpenAI 配置。注册库的准备工具为算法仓库中的 `scripts/provision_luna_registry.py`，显式传入 `--project` 指向 Luna；详细命令见 [注册库准备](docs/cad-catalog-provisioning.md)。历史文档中的旧测试、离线产物和迁移前路径仅记录当时状态。
 
-2026-11-03 按用户要求删除未被当前运行依赖的旧离线抓姿生成目录、性能排查材料、临时补丁、调试代码及测试目录。`data/` 从最初约 139.96 GiB 经两轮清理降至约 41.58 GiB；现有实验、运行日志和上述运行依赖保留。`tests/`、`web/tests/` 及测试专属配置不再保留，历史版本仍可从 Git 查询。
-
-带日期的历史文档记录当时的验证结果；其中旧测试、夹具和离线审计路径可能已经移除，不代表当前可用文件。实验回放记录仍以 `data/experiments/` 为准，GitHub 克隆不会包含本地运行数据。
-
-在新机器部署时，还需单独准备 `.env`、OpenAI 配置、Compose 指定的本地镜像、独立 CAD 库及 FoundationPose 注册库。注册库可迁移，或通过 `scripts/provision_foundationpose_registry.py` 配合匹配版本的服务包、CAD 库和 seed registry 准备。
+2026-11-03 统一维护验收：算法仓库提交 `09c7330be8f3d441d580211e456ddaa48da35a53`；CPU 检查 41 项中 39 项通过、2 项跳过；现有镜像完成完整拆包交付仿真，实验 `63f27d77d9d24152bfe25a5137a6a380`，耗时约 264 秒。官方 SDK、机器人配置内容与已有实验记录保留。算法仓库目前只保存在本机，未配置 Git 远端。
 
 ## 启动
 
@@ -89,7 +74,9 @@ ssh -N -L 8350:127.0.0.1:8350 guangyu@192.168.3.4
 
 ## 开发与验证
 
-安装项目及开发依赖后运行 `python -m ruff check src services --select F`；前端在 `web/` 中执行 `pnpm build`。测试目录已按用户要求删除，语法/构建检查、只读接口检查与完整仿真必须分别报告。普通任务可通过 `scripts/validate_demo_run.py --instruction "自然语言任务" --output data/acceptance.json` 验收。
+重新构建应用镜像时，构建上下文必须来自统一仓：`docker build --build-context algorithm-services=../tianji-algorithms/services -f deploy/Dockerfile.web -t tianji-luna-mujoco:unified-guangyu .`。现有部署使用原镜像及只读源码挂载，本次迁移无需新建镜像。宿主维护命令可通过 `TIANJI_ALGORITHMS_ROOT` 指定非默认算法仓库位置。
+
+开发环境先运行 `python -m pip install -e ../tianji-algorithms/services -e ".[dev]"`，随后运行 `python -m ruff check src --select F`；前端在 `web/` 中执行 `pnpm build`。测试目录已按用户要求删除，语法/构建检查、只读接口检查与完整仿真必须分别报告。普通任务可通过 `scripts/validate_demo_run.py --instruction "自然语言任务" --output data/acceptance.json` 验收。
 
 新增技能需要契约、参数 schema 和 handler；不得在 controller 中添加固定任务流程。执行前检查观测/场景版本、身份、机器人反馈、工作空间与碰撞，不能用模型判断替代数值检查。未通过的判断沿 graph 失败或恢复分支处理，不伪造成功。
 

@@ -4,7 +4,6 @@ import hashlib
 import json
 import logging
 import os
-import sys
 import threading
 import time
 from copy import deepcopy
@@ -20,9 +19,6 @@ from .planning_batches import trajectory_batches
 from .planning_settings import PlanningSettings
 from .trajectory_postprocessing import build_execution_phases
 
-VENDOR = Path(__file__).resolve().parents[2] / "vendor"
-if str(VENDOR) not in sys.path:
-    sys.path.insert(0, str(VENDOR))
 
 
 class AlgorithmError(RuntimeError):

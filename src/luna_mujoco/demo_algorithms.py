@@ -542,7 +542,7 @@ class DemoAlgorithms(Algorithms):
 
         root = Path(__file__).resolve().parents[2]
         urdf_path = root / "assets/marvin_urdf/marvin_with_grippers.urdf"
-        config = yaml.safe_load((root / "resources/curobo/marvin_gui_dual.yml").read_text(encoding="utf-8"))
+        config = yaml.safe_load((root / "resources/robot/marvin_gui_dual.yml").read_text(encoding="utf-8"))
         feedback = {name: float(value["gripper_position_rad"]) for name, value in observation["arms"].items()}
         config = configure_gripper_feedback(config, feedback, urdf_path)
         kin = config["robot_cfg"]["kinematics"]

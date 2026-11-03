@@ -14,7 +14,7 @@ MODEL_POLICY = 'single_arm_open_gripper_and_fixed_body_v1'
 
 def model_fingerprint(root=ROOT):
     digest = hashlib.sha256(MODEL_POLICY.encode())
-    for name in ('resources/curobo/marvin_gui_dual.yml', 'assets/marvin_urdf/marvin_with_grippers.urdf'):
+    for name in ('resources/robot/marvin_gui_dual.yml', 'assets/marvin_urdf/marvin_with_grippers.urdf'):
         digest.update((root / name).read_bytes())
     digest.update(json.dumps(TOOL_PROFILE, sort_keys=True).encode())
     return digest.hexdigest()

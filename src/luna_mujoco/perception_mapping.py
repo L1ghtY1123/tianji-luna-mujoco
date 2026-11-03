@@ -2,14 +2,12 @@
 
 import hashlib
 import json
-import sys
 import time
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "vendor"))
 
 MAX_CAPTURE_SURFACE_POINTS = 3 * 640 * 480
 

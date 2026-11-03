@@ -31,9 +31,9 @@ records the current identity binding. Unknown matches and failed initial pose fi
 are not cached; a generation or source-hash change invalidates reuse. Two instances
 of the same box model have independent cache entries.
 
-## Project-owned registry
+## Registry maintained in tianji-algorithms
 
-`scripts/provision_foundationpose_registry.py` uses the unchanged public
+`../tianji-algorithms/scripts/provision_luna_registry.py` uses the unchanged public
 `tianji_foundationpose.registry.Registry` API bundled in
 `jodell-foundationpose:0.2.2-guangyu`, pinned to FoundationPose commit
 `a1b694b83e633c2cb6115b9063d940a687759392`.
@@ -55,17 +55,18 @@ On Ubuntu, from `/home/guangyu/projects/tianji-luna-mujoco`, after making room w
 the project's combined four-core quota, the coordinator can run:
 
 ```bash
-mkdir -p data/foundationpose-registry
+mkdir -p ../tianji-algorithms/data/luna/foundationpose-registry
 docker run --rm --network none --cpus 0.25 --memory 2g \
   --user "$(id -u):$(id -g)" --read-only --tmpfs /tmp:rw,size=256m \
   -e OMP_NUM_THREADS=1 -e OPENBLAS_NUM_THREADS=1 -e MKL_NUM_THREADS=1 \
   -v /home/guangyu/projects/tianji-luna-mujoco:/project:ro \
-  -v /home/guangyu/projects/tianji-luna-mujoco/data/foundationpose-registry:/data/registry:rw \
+  -v /home/guangyu/projects/tianji-algorithms/scripts:/algorithm-scripts:ro \
+  -v /home/guangyu/projects/tianji-algorithms/data/luna/foundationpose-registry:/data/registry:rw \
   -v /home/guangyu/projects/tianji-algorithms/data/foundationpose-registry:/seed-registry:ro \
   -v /home/guangyu/projects/CAD:/cad:ro \
   jodell-foundationpose:0.2.2-guangyu \
-  /project/scripts/provision_foundationpose_registry.py \
-  --registry /data/registry --seed-registry /seed-registry --cad-root /cad
+  /algorithm-scripts/provision_luna_registry.py \
+  --project /project --registry /data/registry --seed-registry /seed-registry --cad-root /cad
 ```
 
 The image entrypoint is already `python3`, and its `PYTHONPATH` is

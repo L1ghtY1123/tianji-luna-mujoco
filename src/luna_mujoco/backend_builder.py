@@ -6,7 +6,6 @@ IK and the grasp planner receive the same IK configuration before construction.
 
 import hashlib
 import logging
-import sys
 import time
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
@@ -35,7 +34,6 @@ from .trajectory_postprocessing import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "vendor"))
 from tianji_curobo._curobo_impl import (
     _create_world_clearance_checker,
     _graph_planner_rollout_config,

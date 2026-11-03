@@ -1,9 +1,7 @@
 """Offline-only public cuRobo IK sweep; production selection only reads its atlas."""
 import json
-import sys
 import time
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -11,7 +9,6 @@ from scipy.spatial.transform import Rotation
 from .geometry import TOOL_PROFILE
 from .workspace import MODEL_POLICY, model_fingerprint
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'vendor'))
 
 
 def workspace_robot(root, arm, *, urdf_path=None):
@@ -19,7 +16,7 @@ def workspace_robot(root, arm, *, urdf_path=None):
     from tianji_curobo.curobo_robot_config import create_single_arm_robot_config
 
     robot = create_single_arm_robot_config(
-        yaml.safe_load((root / 'resources/curobo/marvin_gui_dual.yml').read_text(encoding='utf8')), arm,
+        yaml.safe_load((root / 'resources/robot/marvin_gui_dual.yml').read_text(encoding='utf8')), arm,
         urdf_path=urdf_path or root / 'assets/marvin_urdf/marvin_with_grippers.urdf',
         asset_root_path=root / 'assets/marvin_urdf')
     kin = robot['robot_cfg']['kinematics']

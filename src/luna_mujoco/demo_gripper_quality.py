@@ -20,7 +20,7 @@ from .kinematics import robot_model
 
 ROOT = Path(__file__).resolve().parents[2]
 URDF = ROOT / "assets/marvin_urdf/marvin_with_grippers.urdf"
-CONFIG = ROOT / "resources/curobo/marvin_gui_dual.yml"
+CONFIG = ROOT / "resources/robot/marvin_gui_dual.yml"
 MAX_Q_STEP_RAD = .01
 WIDTH_RESIDUAL_M = 1e-8
 

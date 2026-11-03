@@ -54,7 +54,7 @@ def reference(output):
 
     from luna_mujoco.kinematics import robot_model
 
-    config = yaml.safe_load((ROOT / 'resources/curobo/marvin_gui_dual.yml').read_text())
+    config = yaml.safe_load((ROOT / 'resources/robot/marvin_gui_dual.yml').read_text())
     urdf = ROOT / 'assets/marvin_urdf/marvin_with_grippers.urdf'
     mimics = [(j.get('name'), j.find('mimic')) for j in ET.parse(urdf).getroot().findall('joint')
               if j.find('mimic') is not None]
@@ -103,7 +103,7 @@ def gpu(reference_path, output):
 
     urdf = materialize_urdf(Path(os.environ['LUNA_ROBOT_URDF']),
         marvin_meshes=Path(os.environ['LUNA_MARVIN_MESHES']), rag_meshes=Path(os.environ['LUNA_RAG_MESHES']))
-    runtime = GeometryRuntime(robot_config_path=ROOT / 'resources/curobo/marvin_gui_dual.yml',
+    runtime = GeometryRuntime(robot_config_path=ROOT / 'resources/robot/marvin_gui_dual.yml',
                               urdf_path=urdf, asset_root_path=urdf.parent)
     rows = json.loads(reference_path.read_text())
     report = []

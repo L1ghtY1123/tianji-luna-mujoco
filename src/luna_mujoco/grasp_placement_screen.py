@@ -25,7 +25,7 @@ def fixed_gripper_spheres(arm):
     if arm not in ('A', 'B'):
         raise ValueError('grasp_placement_requires_selected_arm')
     root = Path(__file__).resolve().parents[2]
-    config = yaml.safe_load((root / 'resources/curobo/marvin_gui_dual.yml').read_text(encoding='utf-8'))
+    config = yaml.safe_load((root / 'resources/robot/marvin_gui_dual.yml').read_text(encoding='utf-8'))
     kin = config['robot_cfg']['kinematics']
     prefix, tool = ('gripL_', 'TCP_Link_L') if arm == 'A' else ('gripR_', 'TCP_Link_R')
     mount = ET.parse(root / 'assets/marvin_urdf/marvin_with_grippers.urdf').getroot().find(
