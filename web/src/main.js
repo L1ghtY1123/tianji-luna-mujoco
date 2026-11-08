@@ -472,7 +472,7 @@ function applyState(payload) {
   renderTaskClock();
   if (state.events !== previousEvents) renderTrace(state.events);
   const facts = state.run.facts;
-  objectList.render(state.run.task_progress, state.run.task_inventory, state.run.policy_graph, state.events);
+  objectList.render(state.run.task_progress, state.run.task_inventory, state.run.policy_graph, state.events, state.run.run_id);
   const metrics = state.run.metrics;
   byId('performance-summary').hidden = !metrics;
   if (metrics) {

@@ -6,6 +6,7 @@ from copy import deepcopy
 import numpy as np
 
 from .inventory_reference import current_inventory_entities
+from .decision_conditions import accepted_identity
 from .visual_inventory import VisualInventory
 
 SOURCE = 'measured_container_correspondence'
@@ -24,11 +25,11 @@ def _array_digest(value):
                           + np.ascontiguousarray(array).tobytes()).hexdigest()
 
 
-def _scope(reference, generation, request_hash, anchor_observation_id=None):
+def _scope(reference, generation, request_hash, anchor_observation_id, container_ids):
     # Live inventory adds positions, work regions and processing outputs. These
     # do not change a container's reference identity. Its own identity fields do.
     containers = {identifier: {key: entity[key] for key in ('id', 'kind', 'color', 'description') if key in entity}
-                  for identifier, entity in reference['entities'].items() if entity.get('kind') == 'bin'}
+                  for identifier, entity in reference['entities'].items() if identifier in container_ids}
     scope = {'reference_observation_id': reference['observation_id'], 'generation': generation,
             'initial_request_hash': request_hash, 'container_identities_sha256': _digest(containers)}
     if anchor_observation_id is not None:
@@ -44,11 +45,11 @@ def _anchors_digest(containers):
 
 
 def reference_with_container_tracks(observation, capture, minimum_confidence=.8):
-    """Freeze the first complete, current Decisions-confirmed identity result.
+    """Freeze current Decisions-confirmed container identities independently.
 
     Its capture may follow the initial Responses images. Keep those two capture
-    identities separate; an incomplete first observation must not disable tracking
-    for the rest of a run. Existing anchors are never overwritten here.
+    identities separate. Other unseen or unconfirmed objects do not invalidate
+    a confirmed container. Existing anchors are never overwritten here.
     """
     reference = observation.get('visual_reference', {})
     visual = observation.get('visual_inventory', {})
@@ -62,14 +63,12 @@ def reference_with_container_tracks(observation, capture, minimum_confidence=.8)
             or coverage.get('purpose') not in {'initialize_inventory', 'associate_inventory'}
             or evidence.get('source') != 'openai_decisions'
             or evidence.get('observation_id') != capture.get('observation_id')
-            or not evidence.get('request_hash') or visual.get('missing_geometry_ids')
-            or not set(coverage.get('required_entity_ids', [])) <= set(coverage.get('accepted_entity_ids', []))):
+            or not evidence.get('request_hash')):
         return reference
     containers = {}
     for identifier, entity in current_inventory_entities(reference).items():
         answers = [deepcopy(a) for a in evidence.get('answers', []) if a.get('name', '').startswith('identity_')
-                   and a.get('type') == 'choice' and a.get('choice') == identifier
-                   and type(a.get('confidence')) in (int, float) and minimum_confidence <= a['confidence'] <= 1.]
+                   and accepted_identity(a, minimum_confidence) == identifier]
         if entity.get('kind') != 'bin' or not answers:
             continue
         views = {}
@@ -103,7 +102,7 @@ def reference_with_container_tracks(observation, capture, minimum_confidence=.8)
                     'observation_id', 'region_measurement', 'observed_floor_hull_world_xy_m') if key in region}
     if not containers:
         return reference
-    scope = _scope(reference, capture['generation'], evidence['request_hash'], capture['observation_id'])
+    scope = _scope(reference, capture['generation'], evidence['request_hash'], capture['observation_id'], containers)
     track = {**scope, 'scope_id': _digest(scope), 'initial_capture_time': capture['time'],
              'source': 'first_verified_decisions_registered_rgbd', 'containers': containers,
              'anchors_sha256': _anchors_digest(containers)}
@@ -125,7 +124,7 @@ def retain_container_placement_regions(observation):
         return
     try:
         scope = _scope(reference, observation['generation'], tracks['initial_request_hash'],
-                       tracks.get('anchor_observation_id'))
+                       tracks.get('anchor_observation_id'), tracks['containers'])
         if (tracks['scope_id'] != _digest(scope) or proof.get('scope_id') != tracks['scope_id']
                 or any(tracks.get(key) != value for key, value in scope.items())
                 or tracks['anchors_sha256'] != _anchors_digest(tracks['containers'])
@@ -139,11 +138,7 @@ def retain_container_placement_regions(observation):
         for obj in observation.get('objects', []):
             identifier = obj['id']
             anchor = tracks['containers'].get(identifier, {}).get('placement_reference', {})
-            witnesses = [row for key, row in proof['matches'].items()
-                if row.get('entity_id') == identifier and proof['candidate_mapping'].get(key) == identifier
-                and row['mask_iou'] >= THRESHOLDS['mask_iou'] and row['depth_residual_p95_m'] <= .005
-                and row.get('stationary_depth', {}).get('valid_pixels', 0) >= THRESHOLDS['minimum_pixels']
-                and row.get('stationary_depth', {}).get('within_5mm_fraction', 0) >= .95]
+            witnesses = stationary_container_matches(proof, identifier)
             if obj.get('kind') != 'bin' or not anchor or not witnesses:
                 continue
             if not any(row.get('source') == SOURCE and row.get('binding_hash') == proof['binding_hash']
@@ -204,7 +199,7 @@ def container_correspondence(capture, detections, reference, entities):
         return result
     try:
         scope = _scope(reference, capture['generation'], tracks['initial_request_hash'],
-                       tracks.get('anchor_observation_id'))
+                       tracks.get('anchor_observation_id'), tracks['containers'])
         if (tracks.get('source') not in {'initial_decisions_registered_rgbd', 'first_verified_decisions_registered_rgbd'}
                 or tracks.get('source') == 'first_verified_decisions_registered_rgbd' and not tracks.get('anchor_observation_id')
                 or tracks['scope_id'] != _digest(scope)
@@ -228,8 +223,7 @@ def container_correspondence(capture, detections, reference, entities):
             for identifier, container in tracks['containers'].items():
                 if (identifier not in allowed or entities.get(identifier, {}).get('kind') != 'bin'
                         or container.get('kind') != 'bin' or camera not in container['views']
-                        or not any(a.get('choice') == identifier and a.get('type') == 'choice'
-                                   and type(a.get('confidence')) in (int, float) and .8 <= a['confidence'] <= 1.
+                        or not any(accepted_identity(a, .8) == identifier
                                    for a in container.get('initial_identity_answers', []))):
                     continue
                 anchor = container['views'][camera]
@@ -325,3 +319,12 @@ def merge_container_correspondence(inventory, detections, entities, tracking, re
         if entity.get('kind') not in {'table', 'marker'} and identifier not in observed]
     result['container_correspondence'] = tracking
     return result
+
+
+def stationary_container_matches(proof, identifier):
+    """Current registered depth supporting reuse of the measured container position."""
+    return [row for key, row in proof.get('matches', {}).items()
+            if row.get('entity_id') == identifier and proof['candidate_mapping'].get(key) == identifier
+            and row['mask_iou'] >= THRESHOLDS['mask_iou'] and row['depth_residual_p95_m'] <= .005
+            and row.get('stationary_depth', {}).get('valid_pixels', 0) >= THRESHOLDS['minimum_pixels']
+            and row.get('stationary_depth', {}).get('within_5mm_fraction', 0) >= .95]

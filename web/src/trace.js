@@ -127,19 +127,7 @@ export function createTraceList(container, counter) {
       if (event.kind === 'planning_attempt_failed') {
         text.append(element('p', 'trace-event-note', `Arm ${event.data?.arm ?? '—'} 本次规划无解，尚未执行运动；后续行为以实际事件为准。`));
       }
-      if (event.kind === 'placement_layout') {
-        const layout = event.data;
-        text.append(element('p', 'trace-event-note', `${layout.target_count} 个目标 · ${layout.section_count} 个分区 · 每处 ${layout.yaw_count_per_position} 个 yaw`));
-      }
-      if (event.kind === 'placement_position_checked') {
-        const position = event.data;
-        const xyz = position.position_world_m.map(value => value.toFixed(3)).join(', ');
-        text.append(element('p', 'trace-event-note', `位置 ${position.position_index + 1} (${xyz}) m · 候选 ${position.accepted_yaw_count} · 后续检查 IK 和三维碰撞`));
-      }
-      if (event.kind === 'placement_candidate_selected') {
-        const selected = event.data;
-        text.append(element('p', 'trace-event-note', `位置 ${selected.position_index + 1} · yaw ${selected.yaw_delta_deg.toFixed(0)}° · 候选 ${selected.candidate_index}。放置与撤离检查均通过，停止后续候选。`));
-      }
+
       if (event.data?.error) {
         text.append(element('p', 'trace-event-error', `${event.data.skill ? `${event.data.skill}：` : ''}${event.data.error}`));
       }

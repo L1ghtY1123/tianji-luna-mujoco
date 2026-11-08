@@ -121,16 +121,7 @@ def arm_wrist_reach(arm):
             "geometry_source": "authored_urdf_two_segment_axis_bound_and_own_robot_fk"}
 
 
-def transport_tcp_height(rotation, lowest_held_z, occupied_top_z, arm):
-    """Use loose drop Z to shorten shoulder-to-wrist reach above the bin."""
-    geometry = arm_wrist_reach(arm)
-    minimum = float(occupied_top_z + .10 - lowest_held_z)
-    wrist_offset_z = float((np.asarray(rotation) @ geometry['tcp_to_wrist_tool_m'])[2])
-    shoulder_level = geometry['shoulder_world_m'][2] - wrist_offset_z
-    return max(minimum, shoulder_level)
-
-
-def filter_transport_reach(candidates, object_points, arm, request):
+def filter_transport_reach(candidates, object_points, arm, request, settings):
     """Screen the retained grasp attitude at the eventual above-bin TCP goal."""
     if request.get('orientation_mode') == 'free':
         return candidates, {'applied': False, 'orientation_mode': 'free',
@@ -149,7 +140,14 @@ def filter_transport_reach(candidates, object_points, arm, request):
     accepted, evidence = [], []
     for candidate in candidates:
         pose = rigid_matrix(candidate['T_world_tcp'])
-        height = transport_tcp_height(pose[:3, :3], points[:, 2].min() - pose[2, 3], top, arm)
+        from .container_release import release_mode
+
+        if release_mode(request) == 'container_release':
+            plane, gap = top, settings['container_release_gap_m']
+        else:
+            plane = float(region['floor_z_m'])
+            gap = max(settings['trajectory_collision_clearance_m'], settings['place_release_height_m'])
+        height = plane + gap - (points[:, 2].min() - pose[2, 3])
         front_offset = np.zeros(2)
         centers = np.asarray([center])
         if request.get('free_placement') or region.get('free_placement'):
@@ -182,14 +180,12 @@ def filter_transport_reach(candidates, object_points, arm, request):
         'candidate_evidence': evidence}
 
 
-def fixed_slot_reach_context(snapshot, target_id, arm, placement_request, settings):
+def placement_reach_context(snapshot, target_id, arm, placement_request, settings):
     request = placement_request or {}
     layout = request.get("layout", {})
-    cells = [cell for cell in layout.get("cells", [])
-             if cell.get("slot_id", cell.get("index", -1) + 1) == request.get("slot_id")]
-    if request.get("object_id") != target_id or len(cells) != 1:
+    if request.get("object_id") != target_id or not layout:
         raise ValueError("grasp_requires_bound_placement")
-    raw_floor = cells[0].get("floor_z_m", layout.get("floor_z_m"))
+    raw_floor = layout.get("floor_z_m")
     try:
         floor = float(raw_floor)
     except (TypeError, ValueError):
@@ -198,14 +194,14 @@ def fixed_slot_reach_context(snapshot, target_id, arm, placement_request, settin
         raise ValueError("grasp_requires_finite_bound_floor")
     precise = request.get('precise_xy') is True or request.get('fixed_xy') is True
     center = np.asarray(request.get('selected_reference_world_xy_m') if precise else
-                        cells[0]["center_world_xy_m"], dtype=float)
+                        layout["center_world_xy_m"], dtype=float)
     points = np.asarray(observed_object(snapshot, target_id)["points_world_m"], dtype=float)
     if (center.shape != (2,) or not np.isfinite(center).all() or points.ndim != 2
             or points.shape[1] != 3 or len(points) == 0 or not np.isfinite(points).all()):
         raise ValueError("grasp_requires_finite_measured_reference")
     region_candidates = {}
     if request.get('free_placement') and not precise:
-        polygon = cells[0]['polygon_world_xy_m']
+        polygon = layout['region_polygon_world_xy_m']
         positions = support_xy_candidates(polygon)
         if not len(positions):
             raise ValueError('placement_no_support_candidate')
@@ -213,7 +209,7 @@ def fixed_slot_reach_context(snapshot, target_id, arm, placement_request, settin
                              'region_polygon_world_xy_m': polygon}
     return {**region_candidates, **arm_wrist_reach(arm), "arm": arm, "object_id": target_id,
             "precise_xy": precise,
-            "slot_id": request["slot_id"], "layout_revision": request.get("layout_revision"),
+            "layout_revision": request.get("layout_revision"),
             "target_reference_world_xy_m": center.tolist(),
             "measured_reference_world_m": points.mean(axis=0).tolist(),
             "measured_cloud_min_world_z_m": float(points[:, 2].min()),
@@ -229,7 +225,7 @@ def fixed_slot_reach_context(snapshot, target_id, arm, placement_request, settin
             "reference_source": "current_measured_points_world_centroid"}
 
 
-def filter_fixed_slot_reach(candidates, context):
+def filter_placement_reach(candidates, context):
     accepted, evidence = [], []
     centers = np.asarray(context.get("candidate_world_xy_m", [context["target_reference_world_xy_m"]]))
     shoulder = np.asarray(context["shoulder_world_m"])

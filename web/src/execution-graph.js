@@ -1,5 +1,5 @@
 import { createEventTitleResolver } from './model.js';
-import { inventoryEntities, inventoryTransformations } from './task-inventory.js';
+import { inventoryTransformations } from './task-inventory.js';
 
 const SKILL_EVENTS = new Set(['skill_start', 'skill_complete', 'skill_error']);
 const CATEGORY_NAMES = { jev: '历史模型记录', skill: '技能程序', algorithm: '算法调用', system: '系统记录', subgraph: '技能阶段' };
@@ -139,16 +139,12 @@ export function buildObjectTimeline(graph) {
   const groups = new Map();
   const progress = graph.events?.findLast(event => event.data?.task_progress)?.data.task_progress;
   const transformations = inventoryTransformations(progress);
-  const inventory = inventoryEntities(progress);
-  const displayIds = new Map(inventory.filter(object => Number.isInteger(object.display_id) && object.display_id > 0)
-    .map(object => [object.id, object.display_id]));
   for (const node of graph.nodes) {
     const targets = [...new Set(node.events.map(event => event.target_id ?? event.data?.target_id
       ?? event.data?.result?.target_id).filter(value => typeof value === 'string' && value))];
     const targetId = targets.length === 1 ? targets[0] : null;
     const key = targetId ?? '__shared__';
     if (!groups.has(key)) groups.set(key, { targetId,
-      displayId: displayIds.get(targetId) ?? null,
       transformations: transformations.filter(item => [item.input_entity_id, item.output_entity_id].includes(targetId)), stages: [] });
     const source = node.events.find(event => SKILL_EVENTS.has(event.kind)) ?? node.events[0];
     const skill = source.data?.skill ?? source.title;
@@ -190,9 +186,8 @@ export function renderObjectTimeline(container, graph, onSelect) {
   for (const group of buildObjectTimeline(graph)) {
     const section = element('section', '', 'object-route');
     section.append(element('h3', group.targetId
-      ? group.displayId ? `物体 #${group.displayId}` : `物体 ${group.targetId}`
+      ? `物体 ${group.targetId}`
       : '共享观测 / 未记录目标 ID'));
-    if (group.displayId) section.append(element('p', `永久 ID：${group.targetId}`, 'muted'));
     for (const transformation of group.transformations) section.append(element('p',
       `${transformation.input_entity_id} → ${transformation.output_entity_id} · ${transformation.skill}`, 'muted'));
     const route = element('div', '', 'object-route-stages');

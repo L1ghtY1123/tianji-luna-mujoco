@@ -332,7 +332,22 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
           const row = element('article', '', 'model-answer');
           row.append(element('strong', answer.title));
           if (answer.type === 'predicate') row.append(element('p', `该命题成立的概率：${Number.isFinite(answer.probability) ? `${(answer.probability * 100).toFixed(1)}%` : '未归档'}`, 'answer-value'));
+          else if (answer.type === 'refusal') row.append(element('p', '模型拒答：未提供概率，不作为否定或成功。', 'answer-value'));
           else row.append(element('p', `选择：${answer.choiceLabel ?? '未归档'}${Number.isFinite(answer.confidence) ? ` · 返回 confidence ${answer.confidence}` : ''}`, 'answer-value'));
+          if (answer.check) {
+            const check = answer.check;
+            const reason = ({ predicate_probability_uncertain: '概率处于不确定区间',
+              choice_confidence_below_threshold: '所选答案未达到事实确认阈值',
+              model_selected_unknown: '模型明确选择 unknown', model_refusal: '模型拒答，无概率',
+              predicate_probability_gate: '命题概率通过肯定或否定阈值', confidence_gate: '事实选项通过阈值',
+              operation_proposal: '操作建议，由技能继续检查执行条件' })[check.reason] ?? check.reason ?? '按该技能的判定规则';
+            let rule = '';
+            if (Number.isFinite(check.threshold) && check.reason !== 'model_refusal') {
+              rule = Number.isFinite(check.negative_threshold)
+                ? `；yes ≥ ${check.threshold}，no ≤ ${check.negative_threshold}` : `；确认阈值 ≥ ${check.threshold}`;
+            }
+            row.append(element('p', `程序判定：${check.status} · ${reason}${rule}`, 'muted'));
+          }
           const question = element('details');
           question.append(element('summary', '完整问题与原始回答'), element('p', answer.instructions),
             element('pre', JSON.stringify(archive.response.answers.find(item => item.name === answer.name), null, 2), 'candidate-detail'));
@@ -368,7 +383,7 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
       grid.append(figure);
     }
     filter.addEventListener('change', () => { for (const item of figures) item.figure.hidden = filter.value !== 'all' && item.frame !== filter.value; });
-    images.append(element('p', 'C 编号是 SAM3 临时分割候选，多个描述可以指向同一物体；不是永久 ID。R 标签定位清单实体。确认后的清单按永久 ID 合并，同一物体不会因提示词增加而重复建档。', 'muted'), filter, grid);
+    images.append(element('p', 'C 编号是 SAM3 临时分割候选，多个描述可以指向同一物体；不是永久 ID。R 标签定位时间记忆中的实例。已确认记录按永久 ID 合并，同一物体不会因提示词增加而重复建档。', 'muted'), filter, grid);
     const sam = evidence.segmentation.length ? section(`SAM3 提示与掩码 · ${evidence.segmentation.length} 次`) : element('div');
     sam.append(element('p', 'SAM3 score 是分割模型输出的候选分数，不是身份正确率。掩码 IoU = 两掩码交集像素数 / 并集像素数；它衡量轮廓重合，不证明是同一物体。Decisions 的分类置信度与谓词概率是另一组指标。阈值须用已标注的成功和失败样本校准，不能按一次失败临时降低。', 'muted'));
     for (const query of evidence.segmentation) {

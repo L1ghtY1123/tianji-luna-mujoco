@@ -1,0 +1,284 @@
+"""Permanent instance identities and dated memory, independent of task control."""
+import json
+import sqlite3
+from contextlib import closing, contextmanager
+from io import BytesIO
+from pathlib import Path
+
+import numpy as np
+
+from .memory_contracts import ObjectRecord
+from .object_memory import ObjectMemory, restored_object_record
+
+
+class WorldInventory:
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._transaction(write=True) as connection:
+            connection.execute('''CREATE TABLE IF NOT EXISTS entities (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                creation_key TEXT NOT NULL UNIQUE,
+                initial_json TEXT NOT NULL,
+                state_json TEXT NOT NULL
+            )''')
+            connection.execute('''CREATE TABLE IF NOT EXISTS history (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_id INTEGER NOT NULL REFERENCES entities(id),
+                event_key TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(entity_id, event_key)
+            )''')
+            connection.execute('''CREATE TABLE IF NOT EXISTS captures (
+                observation_id TEXT PRIMARY KEY,
+                metadata_json TEXT NOT NULL,
+                rgb_npz BLOB NOT NULL
+            )''')
+            connection.execute('''CREATE TABLE IF NOT EXISTS instance_masks (
+                observation_id TEXT NOT NULL REFERENCES captures(observation_id),
+                entity_id INTEGER NOT NULL REFERENCES entities(id),
+                masks_npz BLOB NOT NULL,
+                PRIMARY KEY (observation_id, entity_id)
+            )''')
+
+    def store_capture(self, capture):
+        """Store immutable RGBD and calibration, independently of task lifetime."""
+        metadata = {key: capture[key] for key in ('observation_id', 'generation', 'time') if key in capture}
+        arrays = {camera: view['rgb'] for camera, view in capture['views'].items()}
+        metadata['cameras'] = {}
+        for camera, view in capture['views'].items():
+            if not all(key in view for key in ('depth_m', 'valid_depth', 'intrinsics', 'T_world_camera')):
+                continue
+            arrays['depth__' + camera] = view['depth_m']
+            arrays['valid__' + camera] = view['valid_depth']
+            metadata['cameras'][camera] = {'intrinsics': view['intrinsics'],
+                'T_world_camera': np.asarray(view['T_world_camera']).tolist()}
+        encoded = BytesIO()
+        np.savez_compressed(encoded, **arrays)
+        with self._transaction(write=True) as connection:
+            connection.execute('INSERT OR IGNORE INTO captures VALUES (?, ?, ?)',
+                (capture['observation_id'], json.dumps(metadata), encoded.getvalue()))
+
+    def store_instance_masks(self, capture, observation):
+        """Persist accepted per-camera masks against their exact frozen RGBD capture."""
+        if any(observation.get(key) != capture.get(key) for key in ('observation_id', 'generation')):
+            raise ValueError('instance_mask_capture_mismatch')
+        masks = {}
+        for camera, view in observation.get('views', {}).items():
+            for identifier, mask in view.get('instance_masks', {}).items():
+                if not identifier.isascii() or not identifier.isdecimal():
+                    continue
+                mask = np.asarray(mask, dtype=bool)
+                if mask.shape != capture['views'][camera]['depth_m'].shape:
+                    raise ValueError('instance_mask_shape_mismatch')
+                if np.any(mask):
+                    masks.setdefault(identifier, {})[camera] = mask
+        with self._transaction(write=True) as connection:
+            for identifier, views in masks.items():
+                encoded = BytesIO()
+                np.savez_compressed(encoded, **views)
+                connection.execute('INSERT OR IGNORE INTO instance_masks VALUES (?, ?, ?)',
+                    (capture['observation_id'], identifier, encoded.getvalue()))
+
+    def reference(self, entities):
+        """Load each instance's dated image with the box measured on that image."""
+        captures, references = {}, {}
+        with self._transaction() as connection:
+            for identifier, entity in entities.items():
+                capture_id = entity.get('reference_observation_id')
+                camera = entity.get('reference_camera_id')
+                if not capture_id or not camera or not entity.get('bbox'):
+                    continue
+                if capture_id not in captures:
+                    stored = connection.execute('SELECT * FROM captures WHERE observation_id = ?',
+                                                (capture_id,)).fetchone()
+                    if stored is None:
+                        raise ValueError('inventory_reference_capture_missing:' + capture_id)
+                    with np.load(BytesIO(stored['rgb_npz']), allow_pickle=False) as archive:
+                        captures[capture_id] = (json.loads(stored['metadata_json']),
+                            {key: archive[key].copy() for key in archive.files})
+                metadata, images = captures[capture_id]
+                references[identifier] = {**metadata, 'camera_id': camera, 'rgb': images[camera],
+                    'bbox': list(entity['bbox']), 'source': entity.get('identity_source'),
+                    'request_hash': entity.get('identity_request_hash')}
+                stored_masks = connection.execute(
+                    'SELECT masks_npz FROM instance_masks WHERE observation_id=? AND entity_id=?',
+                    (capture_id, identifier)).fetchone()
+                views = {}
+                if stored_masks is not None:
+                    with np.load(BytesIO(stored_masks['masks_npz']), allow_pickle=False) as masks:
+                        for view_id in masks.files:
+                            calibration = metadata.get('cameras', {}).get(view_id)
+                            if calibration is None:
+                                continue  # Older RGB-only captures contain no geometric evidence.
+                            views[view_id] = {**calibration, 'rgb': images[view_id],
+                                'depth_m': images['depth__' + view_id],
+                                'valid_depth': images['valid__' + view_id], 'mask': masks[view_id].copy()}
+                references[identifier]['views'] = views
+        return {'entities': entities, 'identity_references': references}
+
+    @contextmanager
+    def _transaction(self, *, write=False):
+        with closing(sqlite3.connect(self.path, timeout=30)) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute('PRAGMA foreign_keys = ON')
+            with connection:
+                connection.execute('BEGIN IMMEDIATE' if write else 'BEGIN')
+                yield connection
+
+    def allocate(self, creation_key, entity):
+        """Allocate once for an independently identified instance creation event."""
+        if not isinstance(creation_key, str) or not creation_key.strip():
+            raise ValueError('inventory_creation_key_required')
+        if not isinstance(entity, dict) or 'id' in entity or 'history' in entity:
+            raise ValueError('inventory_entity_attributes_required')
+        ObjectRecord.model_validate({'id': '1', **entity})
+        encoded = json.dumps(entity, ensure_ascii=False, sort_keys=True, allow_nan=False)
+        with self._transaction(write=True) as connection:
+            existing = connection.execute(
+                'SELECT id, initial_json FROM entities WHERE creation_key = ?', (creation_key,)
+            ).fetchone()
+            if existing is not None:
+                if existing['initial_json'] != encoded:
+                    raise ValueError('inventory_creation_key_conflict')
+                return str(existing['id'])
+            inserted = connection.execute(
+                'INSERT INTO entities (creation_key, initial_json, state_json) VALUES (?, ?, ?)',
+                (creation_key, encoded, encoded),
+            )
+            return str(inserted.lastrowid)
+
+    def record(self, identifier, event_key, kind, state, evidence):
+        self.record_many([(identifier, event_key, kind, state, evidence)])
+
+    def register_product(self, creation_key, attributes, *, reference_masks=None):
+        """Atomically register the output, retire its input, and append both histories."""
+        if not isinstance(creation_key, str) or not creation_key.strip():
+            raise ValueError('inventory_creation_key_required')
+        if not isinstance(attributes, dict) or {'id', 'history'} & attributes.keys():
+            raise ValueError('inventory_entity_attributes_required')
+        ObjectRecord.model_validate({'id': '1', **attributes})
+        encoded = json.dumps(attributes, ensure_ascii=False, sort_keys=True, allow_nan=False)
+        if attributes.get('creation_evidence', {}).get('localization') and reference_masks is None:
+            raise ValueError('product_reference_mask_required')
+        with self._transaction(write=True) as connection:
+            encoded_masks = None
+            if reference_masks is not None:
+                capture_id = attributes.get('reference_observation_id')
+                capture = connection.execute('SELECT * FROM captures WHERE observation_id=?', (capture_id,)).fetchone()
+                if capture is None:
+                    raise ValueError('product_reference_capture_missing')
+                metadata = json.loads(capture['metadata_json'])
+                if (metadata.get('generation') != attributes['creation_evidence']['generation']
+                        or capture_id != attributes['creation_evidence']['observation_id']
+                        or set(reference_masks) != {attributes.get('reference_camera_id')}):
+                    raise ValueError('product_reference_measurement_mismatch')
+                from .visual_inventory import array_stamp
+
+                with np.load(BytesIO(capture['rgb_npz']), allow_pickle=False) as images:
+                    for camera, mask in reference_masks.items():
+                        if (camera not in metadata['cameras'] or camera not in images
+                                or mask.dtype != np.bool_ or mask.shape != images[camera].shape[:2]
+                                or array_stamp(mask) != attributes['creation_evidence']['localization']['mask']):
+                            raise ValueError('product_reference_mask_conflict')
+                stream = BytesIO()
+                np.savez_compressed(stream, **reference_masks)
+                encoded_masks = stream.getvalue()
+            source_id = attributes['input_entity_id']
+            source = self._entity(connection, source_id)
+            source_record = restored_object_record({**json.loads(source['state_json']), 'id': source_id})
+            if attributes.get('world_key') != source_record.world_key:
+                raise ValueError('product_scene_scope_mismatch')
+            existing = connection.execute('SELECT id,initial_json FROM entities WHERE creation_key=?',
+                                          (creation_key,)).fetchone()
+            if existing is not None:
+                if existing['initial_json'] != encoded or source_record.output_entity_id != str(existing['id']):
+                    raise ValueError('inventory_creation_key_conflict')
+                stored = self._entity(connection, str(existing['id']))
+                return {'id': str(existing['id']), **json.loads(stored['state_json'])}
+            inserted = connection.execute(
+                'INSERT INTO entities (creation_key,initial_json,state_json) VALUES (?,?,?)',
+                (creation_key, encoded, encoded))
+            identifier = str(inserted.lastrowid)
+            if encoded_masks is not None:
+                connection.execute('INSERT INTO instance_masks VALUES (?, ?, ?)',
+                    (attributes['reference_observation_id'], identifier, encoded_masks))
+            product = ObjectRecord.model_validate({'id': identifier, **attributes,
+                'creation_evidence': {**attributes['creation_evidence'], 'output_entity_id': identifier}})
+            memory = ObjectMemory()
+            memory.restore((source_record,))
+            memory.register_product(product)
+            events = []
+            for entity_id, entity in memory.entities().items():
+                state = ObjectRecord.model_validate(entity).model_dump(mode='json', exclude={'id'})
+                events.append((entity_id, creation_key, 'processing_result', state, product.creation_evidence))
+            self._record_events(connection, events)
+            return memory.entities()[identifier]
+
+    def record_many(self, events):
+        """Commit related instance histories together, including input/output transitions."""
+        with self._transaction(write=True) as connection:
+            self._record_events(connection, events)
+
+    def _record_events(self, connection, events):
+        for identifier, event_key, kind, state, evidence in events:
+            if not isinstance(event_key, str) or not event_key.strip() or not isinstance(kind, str) or not kind.strip():
+                raise ValueError('inventory_event_key_and_kind_required')
+            if not isinstance(state, dict) or {'id', 'history'} & state.keys() or not isinstance(evidence, dict):
+                raise ValueError('inventory_event_state_and_evidence_required')
+            if set(state) - ObjectRecord.model_fields.keys():
+                raise ValueError('inventory_state_contains_nonphysical_fields')
+            payload = json.dumps({'state': state, 'evidence': evidence},
+                                 ensure_ascii=False, sort_keys=True, allow_nan=False)
+            entity = self._entity(connection, identifier)
+            origin = json.loads(entity['initial_json'])
+            if origin.get('world_key') is not None and 'world_key' in state and state['world_key'] != origin['world_key']:
+                raise ValueError('inventory_instance_scene_scope_changed')
+            existing = connection.execute(
+                'SELECT kind, payload_json FROM history WHERE entity_id = ? AND event_key = ?',
+                (entity['id'], event_key),
+            ).fetchone()
+            if existing is not None:
+                if existing['kind'] != kind or existing['payload_json'] != payload:
+                    raise ValueError('inventory_event_conflict')
+                continue
+            previous = restored_object_record({**json.loads(entity['state_json']), 'id': str(entity['id'])})
+            merged = ObjectRecord.model_validate(previous.model_dump() | state).model_dump(
+                mode='json', exclude={'id'}, exclude_none=True)
+            connection.execute('UPDATE entities SET state_json = ? WHERE id = ?',
+                (json.dumps(merged, ensure_ascii=False, sort_keys=True, allow_nan=False), entity['id']))
+            connection.execute(
+                'INSERT INTO history (entity_id, event_key, kind, payload_json) VALUES (?, ?, ?, ?)',
+                (entity['id'], event_key, kind, payload),
+            )
+
+    def get(self, identifier):
+        """Read one instance and all recorded observations and operations."""
+        with self._transaction() as connection:
+            entity = self._entity(connection, identifier)
+            events = connection.execute('SELECT * FROM history WHERE entity_id = ? ORDER BY sequence',
+                                        (entity['id'],)).fetchall()
+            return {**json.loads(entity['state_json']), 'id': str(entity['id']),
+                'history': [{'event_key': event['event_key'], 'kind': event['kind'],
+                             'recorded_at': event['recorded_at'], **json.loads(event['payload_json'])}
+                            for event in events]}
+
+    def entities(self, *, world_key=None):
+        """Return current recorded state, including unseen and retired instances."""
+        with self._transaction() as connection:
+            rows = [{**json.loads(row['state_json']), 'id': str(row['id'])}
+                    for row in connection.execute('SELECT id, state_json FROM entities ORDER BY id')]
+            return [row for row in rows if world_key is None or row.get('world_key') == world_key]
+
+    @staticmethod
+    def _entity(connection, identifier):
+        if not isinstance(identifier, str) or not identifier.isascii() or not identifier.isdecimal():
+            raise ValueError('invalid_permanent_entity_id')
+        if identifier != str(int(identifier)) or int(identifier) < 1:
+            raise ValueError('invalid_permanent_entity_id')
+        entity = connection.execute('SELECT * FROM entities WHERE id = ?', (identifier,)).fetchone()
+        if entity is None:
+            raise ValueError('unknown_permanent_entity_id:' + identifier)
+        return entity

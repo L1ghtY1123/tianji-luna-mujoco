@@ -1,9 +1,9 @@
 import { buildObjectTimeline } from './execution-graph.js';
-import { isTaskInventory, inventoryEntities, renderTaskInventory } from './task-inventory.js';
+import { inventoryEntities, renderTaskInventory } from './task-inventory.js';
 
 const PURPOSES = {
   compile_task: '理解任务并生成总编排', revise_graph: '根据新事件修订总编排',
-  initialize_inventory: '建立初始清单与任务程序', associate_inventory: '核对场景清单与物体身份',
+  initialize_inventory: '登记初始实例与任务图', associate_inventory: '关联当前观测与时间记忆',
   associate_completed_objects: '核对已放置物体的身份',
   verify_release_result: '确认放置与松爪', verify_unpacking: '确认拆包产物',
   verify_right_bin_drop: '确认目的地投放',
@@ -18,7 +18,7 @@ const CAPTURE_SKILLS = { observe_scene: '场景识别', observe: '场景识别',
   move_to_observe: '移至观测位姿后采集', return_to_initial_pose: '返回任务起始位姿后采集' };
 const STATUS_NAMES = { complete: '完成', failed: '失败', warning: '需关注', incomplete: '未记录结束', recorded: '已记录', cancelled: '已取消' };
 const PHASES = {
-  observe: ['观察与清单', 'observe_scene', 'observe', 'bind_inventory'],
+  observe: ['观测与时间记忆', 'observe_scene', 'observe', 'bind_inventory'],
   grasp: ['抓取物体', 'identify_target', 'identify_destination', 'choose_arm', 'build_scene', 'generate_grasps', 'evaluate_arms', 'plan_grasp', 'plan_grasp_and_place', 'execute_approach', 'execute_grasp', 'close_gripper', 'execute_lift', 'verify_grasp'],
   place: ['物体放置', 'plan_place', 'execute_place', 'verify_place', 'observe_result'],
   unpack: ['VLA 拆包', 'prepare_unpack', 'vla_unpack', 'verify_unpack'],
@@ -31,7 +31,7 @@ export function modelCallInfo(event) {
   const type = data.endpoint?.endsWith('/responses') ? 'Responses'
     : data.endpoint?.endsWith('/decisions') ? 'Decisions' : '模型调用';
   let purpose = PURPOSES[data.purpose] ?? data.purpose ?? '用途未归档';
-  if (type === 'Decisions' && data.purpose === 'initialize_inventory') purpose = '核对分割提议与清单身份';
+  if (type === 'Decisions' && data.purpose === 'initialize_inventory') purpose = '核对分割提议与实例记忆';
   return { type, purpose, elapsed: data.elapsed_s,
     failed: Boolean(data.error) || (Number.isFinite(data.http_status) && data.http_status >= 400) };
 }
@@ -50,7 +50,7 @@ export function observationImageSections(observation, frame, cameraId) {
   return [
     `RGB 来源：相机 ${cameraId} 的归档采集，拍摄于 ${time(frame.captureTime)}。标注记录：事件 #${observation.event.id}，${time(observation.time)}。`,
     `框来源：${sources.join('；') || '本版本没有已确认身份的框；不表示没有检测候选'}。`,
-    `身份来源：${labels.analysis_status === 'responses_proposal' ? 'Responses 清单提议与编译后的永久 ID，尚未由 Decisions 确认，不代表实测几何。' : legacy ? '旧版叠加可能含后续任务状态，不代表拍摄时的物体状态。' : '逐框记录 Decisions 的身份判断或已验证的测量对应，程序据此绘制 ID；不含后续夹持或完成状态。'}`,
+    `身份来源：${labels.analysis_status === 'responses_proposal' ? 'Responses 实例提议与登记后的永久 ID，尚未由 Decisions 确认，不代表实测几何。' : legacy ? '旧版叠加可能含后续任务状态，不代表拍摄时的物体状态。' : '逐框记录 Decisions 的身份判断或已验证的测量对应，程序据此绘制 ID；不含后续夹持或完成状态。'}`,
     '去向：此叠加图供人检查，不是模型输入。程序使用底层 ID、掩码与实测几何。下面的“实际模型输入”直接展示已发送的参考框和候选框，点击可查看完整问题与回答。',
   ];
 }
@@ -99,7 +99,7 @@ export function groupObservationFrames(observations, events = []) {
         .flatMap(item => item.event.data?.object_labels?.items ?? [])
         .find(item => item.id === targetId);
       const name = label?.name && !label.name.includes('unknown') ? label.name : '物体';
-      title += ` · ${label ? `${label.display_id != null ? `#${label.display_id} ` : ''}${name}` : targetId}`;
+      title += ` · ${label ? `${label.id ? `ID ${label.id} ` : ''}${name}` : targetId}`;
     }
     const hasLabels = frame.revisions.some(item => item.event.data?.object_labels?.analysis_status === 'analyzed'
       && item.event.data.object_labels.items?.length);
@@ -171,14 +171,17 @@ export function buildReplayStages(graph) {
   return stages;
 }
 
-// Only explicit task snapshots are displayed; events never synthesize a ledger.
+// Read committed memory snapshots and the entity fields archived by earlier runs.
 export function inventorySnapshots(events = []) {
   const snapshots = [];
   for (const event of events) {
-    const progress = event.data?.task_progress;
-    if (!progress || typeof progress !== 'object') continue;
+    const source = event.data?.temporal_memory ?? event.data?.task_progress;
+    if (!source?.entities || typeof source.entities !== 'object') continue;
+    const progress = Object.fromEntries(['entities', 'object_history', 'retired_entity_ids',
+      'transformations', 'inventory_revision'].filter(key => key in source)
+      .map(key => [key, structuredClone(source[key])]));
     snapshots.push({ event, progress: structuredClone(progress), provenance: 'snapshot',
-      title: event.kind === 'run_end' ? '任务结束清单' : event.data?.checkpoint ?? '清单快照' });
+      title: event.kind === 'run_end' ? '任务结束时间记忆' : event.data?.checkpoint ?? '时间记忆快照' });
   }
   return snapshots;
 }
@@ -192,14 +195,15 @@ export function modelResult(archive) {
   const result = { answers: answers.map(answer => {
     const question = questions.find(item => item.name === answer.name);
     const choice = question?.choices?.find(item => item.value === answer.choice);
-    return { ...answer, title: QUESTION_NAMES[answer.name] ?? (/^identity_/.test(answer.name)
+    return { ...answer, check: archive.diagnostic_checks?.find(item => item.name === answer.name),
+    title: QUESTION_NAMES[answer.name] ?? (/^identity_/.test(answer.name)
       ? `分割提议 ${answer.name.slice(9)} · 身份判断` : answer.name),
     instructions: Array.isArray(question?.instructions)
       ? question.instructions.filter(part => part.type === 'input_text').map(part => part.text).join('\n')
       : question?.instructions ?? '完整问题未归档',
     choiceLabel: ({ reject: '排除此提议', unknown: '无法确认' })[answer.choice] ?? choice?.description ?? answer.choice };
-  }), inventory: null };
-  if (archive.endpoint?.endsWith('/responses')) {
+  }), inventory: archive.graph_proposal ?? null };
+  if (archive.endpoint?.endsWith('/responses') && !result.inventory) {
     for (const message of archive.response?.output ?? []) {
       if (message.type !== 'message') continue;
       for (const part of message.content ?? []) {
@@ -269,31 +273,31 @@ const COLOR_NAMES = { pink: '粉色', black: '黑色', blue: '蓝色', gray: '�
 const KIND_NAMES = { object: '物体', bin: '盒子', table: '桌子', marker: '目标区域', collection: '产物集合' };
 function entityLabel(entity) {
   if (!entity) return '实体信息未归档';
-  return `${entity.display_id ? `#${entity.display_id} ` : ''}${entity.name ?? `${COLOR_NAMES[entity.color] ?? ''}${KIND_NAMES[entity.kind] ?? entity.kind ?? '物体'}`}`;
+  return `${entity.id ? `ID ${entity.id} ` : ''}${entity.name ?? `${COLOR_NAMES[entity.color] ?? ''}${KIND_NAMES[entity.kind] ?? entity.kind ?? '物体'}`}`;
 }
 
 export function renderInventorySnapshot(container, snapshot, onEvidence) {
   const element = dom(container);
   container.replaceChildren();
-  if (!snapshot) { container.append(element('p', '这条记录没有归档清单，不能从当前场景补造。', 'muted')); return; }
+  if (!snapshot) { container.append(element('p', '该实验缺少已归档的时间记忆快照。', 'muted')); return; }
   const { progress, event } = snapshot;
   const provenance = element('div', '', 'inventory-provenance');
-  provenance.append(element('span', '已保存的清单快照', 'badge'),
+  provenance.append(element('span', '数据库历史快照', 'badge'),
     element('span', `事件 #${event.id ?? '—'}`, 'muted'));
   if (event.data?.model_event_ids?.length) provenance.append(element('span',
     `模型调用：${event.data.model_event_ids.map(id => `#${id}`).join('、')}`, 'muted'));
   if (event.data?.evidence_source === 'gripper_feedback') provenance.append(element('span',
     '夹爪反馈核验 · 本节点没有调用视觉模型', 'muted'));
-  const source = element('button', '查看清单来源', 'button');
+  const source = element('button', '查看记忆来源', 'button');
   source.addEventListener('click', () => onEvidence(event));
   provenance.append(source);
   container.append(provenance);
-  if (isTaskInventory(progress)) {
-    renderTaskInventory(container, progress, event.data?.task_inventory);
+  if (progress.entities) {
+    renderTaskInventory(container, progress);
     return;
   }
-  container.append(element('p', '历史清单仅保留原始记录，不重建执行流程。', 'muted'));
+  container.append(element('p', '查看归档中的原始时间记忆记录。', 'muted'));
   const raw = element('details');
-  raw.append(element('summary', '原始清单 JSON'), element('pre', JSON.stringify(progress, null, 2), 'candidate-detail'));
+  raw.append(element('summary', '原始记忆 JSON'), element('pre', JSON.stringify(progress, null, 2), 'candidate-detail'));
   container.append(raw);
 }

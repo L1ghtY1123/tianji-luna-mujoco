@@ -35,7 +35,7 @@ class OutcomeRule(BaseModel):
     """Possible returned outcomes under facts known before a skill invocation."""
     model_config = ConfigDict(extra='forbid')
     when: dict[str, StrictBool] = Field(min_length=1)
-    statuses: list[Literal['success', 'failure', 'unknown']] = Field(min_length=1)
+    statuses: list[Literal['success', 'failure', 'unknown', 'empty']] = Field(min_length=1)
 
 
 class ArgumentRule(BaseModel):
@@ -54,14 +54,6 @@ class ArgumentRule(BaseModel):
 
 def _same_argument(left, right):
     return (isinstance(left, bool) == isinstance(right, bool)) and left == right
-
-
-def same_result_arguments(original, recovered, ignored=()):
-    """Compare result semantics, excluding declared acquisition-only inputs."""
-    if not isinstance(original, dict) or not isinstance(recovered, dict):
-        return False
-    return ({key: value for key, value in original.items() if key not in ignored}
-            == {key: value for key, value in recovered.items() if key not in ignored})
 
 
 def validate_argument_rules(contract):
@@ -105,27 +97,24 @@ class Contract(BaseModel):
     description: str
     capability: str = ''
     invalidates_observation: bool = True
-    recovery_retry_safe: bool = False
-    recovery_result_reusable: bool = False
-    recovery_result_ignored_arguments: list[StrictStr] = Field(default_factory=list)
+    retry_safe: bool = False
     processing_effect: bool = False
     inputs: list[str] = Field(default_factory=list)
     requires: dict[str, bool]
     provides: list[str]
     outputs: list[str] = Field(default_factory=list)
+    outcomes: list[Literal['success', 'failure', 'unknown', 'empty']] = Field(
+        default_factory=lambda: ['success', 'failure', 'unknown'], min_length=1)
     result_bindings: dict[str, str] = Field(default_factory=dict)
     planning_effects: dict[str, StrictBool | None] = Field(default_factory=dict)
+    failure_preserves: list[str] = Field(default_factory=list, description=(
+        'Planning-effect facts whose previous values survive a non-success result.'))
+    failure_effects: dict[str, StrictBool | None] = Field(default_factory=dict, description=(
+        'Facts established or invalidated by failure/unknown, applied after failure_preserves. '
+        'These are execution facts, not a claim about object identity or location.'))
     argument_rules: list[ArgumentRule] = Field(default_factory=list)
     outcome_rules: list[OutcomeRule] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
-
-    @model_validator(mode='after')
-    def reusable_result_is_nonmutating(self):
-        if self.recovery_result_reusable and (self.invalidates_observation or not self.recovery_retry_safe):
-            raise ValueError('recovery_result_reuse_requires_repeatable_sensing')
-        if self.recovery_result_ignored_arguments and not self.recovery_result_reusable:
-            raise ValueError('result_argument_equivalence_requires_reusable_result')
-        return self
 
     @field_validator('result_bindings')
     @classmethod
@@ -160,10 +149,6 @@ class Registry:
         if not self.contracts:
             raise ValueError("no_skill_contracts")
 
-    def eligible(self, facts):
-        return {name: contract for name, contract in self.contracts.items()
-                if all(bool(facts.get(key, False)) == value for key, value in contract.requires.items())}
-
     def describe(self):
         """The model gets original contracts, without computed eligibility hints."""
         result = {}
@@ -174,6 +159,16 @@ class Registry:
             description['capability'] = contract.capability or contract.description
             description['outputs'] = contract.outputs or contract.provides
             description['arguments'] = self.argument_models.get(name, NoArguments).model_json_schema()
+            description['outcome_contract'] = {
+                'success': 'Declared outputs and postconditions established for the bound instance and versions.',
+                'failure': 'A negative fact, invalid precondition or failed numerical/execution check.',
+                'unknown': 'Required evidence is missing, ambiguous or declined.',
+                'failure_fields': ['status', 'success', 'skill', 'error_code', 'arguments',
+                                   'target_id', 'destination_id', 'arm', 'details'],
+                'routing': 'Use only the declared graph edge for this outcome.'}
+            if 'empty' in contract.outcomes:
+                description['outcome_contract']['empty'] = (
+                    'The current selection has no eligible result. Task completion requires its own evidence.')
             result[name] = description
         return result
 
@@ -187,9 +182,6 @@ class Registry:
             raise TypeError('skill_arguments_require_pydantic_model')
         if not callable(handler):
             raise TypeError('skill_handler_must_be_callable')
-        ignored = self.contracts[name].recovery_result_ignored_arguments
-        if len(ignored) != len(set(ignored)) or not set(ignored) <= set(argument_model.model_fields):
-            raise ValueError('invalid_recovery_result_ignored_arguments')
         validate_argument_rules(self.contracts[name].model_dump() | {'arguments': argument_model.model_json_schema()})
         self.argument_models[name] = argument_model
         self.handlers[name] = handler

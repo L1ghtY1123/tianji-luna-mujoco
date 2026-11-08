@@ -117,6 +117,7 @@ class GripperWidthModel:
         axis /= np.linalg.norm(axis)
         self.planes = {}
         self.contact_regions = {}
+        self.pad_hulls = {link: ConvexHull(mesh.vertices).equations for link, mesh in meshes.items()}
         for link, direction in zip(self.pads, (axis, -axis)):
             mesh, transform = meshes[link], opened[link]
             faces = np.flatnonzero((mesh.face_normals @ transform[:3, :3].T) @ direction > .99)
@@ -228,6 +229,16 @@ class GripperWidthModel:
         return np.concatenate([np.column_stack((rows[:, :3] @ poses[link][:3, :3].T + poses[link][:3, 3], rows[:, 3]))
                                for link, rows in self.spheres.items()])
 
+    def open_pad_clearance(self, points_tool_m, padding_m):
+        poses = self.transforms(self.lower)
+        result = []
+        for link, equations in self.pad_hulls.items():
+            pose = poses[link]
+            local = (points_tool_m - pose[:3, 3]) @ pose[:3, :3]
+            separation = np.max(local @ equations[:, :3].T + equations[:, 3], axis=1)
+            result.append({'link': link, 'minimum_padded_gap_m': float(separation.min() - padding_m)})
+        return result
+
 
 def predict_gripper_compatibility(points_world_m, T_world_tcp, *, arm, uncertainty_m, margin_m):
     """No cloud translation, point deletion, fitted envelope, GT or closed feedback."""
@@ -242,6 +253,8 @@ def predict_gripper_compatibility(points_world_m, T_world_tcp, *, arm, uncertain
     projection = local @ model.normal
     width = float(np.ptp(projection))
     padding = float(uncertainty_m + margin_m)
+    open_pads = model.open_pad_clearance(local, padding)
+    open_gap = min(row['minimum_padded_gap_m'] for row in open_pads)
     evidence = {"source": "predicted_centered_jaw_width_on_frozen_cloud", "is_measurement": False,
         "cloud_translated": False, "continuous_sweep_checked": False, "arm": arm, "tool_frame": model.tool,
         "model_fingerprint": model.fingerprint,
@@ -249,6 +262,8 @@ def predict_gripper_compatibility(points_world_m, T_world_tcp, *, arm, uncertain
         "point_count": len(points),
         "points_world_sha256": hashlib.sha256(points.tobytes()).hexdigest(),
         "uncertainty_m": float(uncertainty_m), "margin_m": float(margin_m), "padding_m": padding,
+        "open_pad_clearance": open_pads, "minimum_padded_open_pad_gap_m": open_gap,
+        "open_pad_geometry_source": "authored_collision_mesh_convex_halfspace_separation",
         "cloud_width_m": width, "closing_normal_tool": model.normal.tolist(),
         "cloud_axis_min_max_m": [float(projection.min()), float(projection.max())],
         "contact_policy": "owner_hand_assembly_v1",
@@ -278,5 +293,6 @@ def predict_gripper_compatibility(points_world_m, T_world_tcp, *, arm, uncertain
     return {**evidence, "q_width_rad": q if match is not None else None,
         "noncontact_check_q_rad": q, "width_residual_m": residual, "q_bracket_rad": bracket,
         "minimum_padded_noncontact_gap_m": minimum, "point_index": point_index,
-        "link": link, "sphere_index": link_index, "accepted": minimum >= 0,
-        "reason": "accepted" if minimum >= 0 else "predicted_noncontact_geometry_conflict"}
+        "link": link, "sphere_index": link_index, "accepted": minimum >= 0 and open_gap >= 0,
+        "reason": ("predicted_noncontact_geometry_conflict" if minimum < 0 else
+                   "predicted_open_pad_clearance_conflict" if open_gap < 0 else "accepted")}

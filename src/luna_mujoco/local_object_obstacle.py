@@ -37,7 +37,7 @@ def select_unpack_component(points, work_area):
                     labels[index] = component_count
                     queue.append(adjacent)
         component_count += 1
-    candidates, excluded = [], []
+    candidates, excluded, excluded_containers = [], [], []
     atlas = WorkspaceAtlas()
     for label in range(component_count):
         component = points[labels[inverse] == label]
@@ -49,7 +49,11 @@ def select_unpack_component(points, work_area):
             upper = np.asarray(previous['maximum_world_m']) + .01
             overlap = np.all((component >= lower) & (component <= upper), axis=1)
             if overlap.all():
-                excluded.append(previous['id'])
+                if previous.get('geometry_source') == 'container_occupancy':
+                    excluded_containers.append({key: previous[key] for key in
+                        ('container_id', 'scene_token', 'entry_receipt_id', 'layer_name')})
+                else:
+                    excluded.append(previous['id'])
                 known = True
                 break
             if overlap.any():
@@ -57,10 +61,11 @@ def select_unpack_component(points, work_area):
                                              'known_entity_id': previous['id']})
         if known:
             continue
-        if atlas.query('B', [component.mean(axis=0).tolist()])[0]['reachable']:
+        if any(atlas.query(arm, [component.mean(axis=0).tolist()])[0]['reachable'] for arm in ('A', 'B')):
             candidates.append(component)
     proof = {'component_count': component_count, 'new_candidate_count': len(candidates),
-             'excluded_known_entity_ids': excluded, 'workspace_arm': 'B',
+             'excluded_known_entity_ids': excluded,
+             'excluded_container_occupancies': excluded_containers, 'workspace_arms': ['A', 'B'],
              'workspace_scope': 'position_prefilter_not_grasp_or_path_certificate'}
     if len(candidates) != 1:
         reason = 'multiple_unbound_black_candidates' if candidates else 'new_black_candidate_missing'

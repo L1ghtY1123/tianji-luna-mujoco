@@ -24,8 +24,16 @@ def _valid_hybrid_geometry(group, name, geometry):
                 or any(not isinstance(item, str) or not item for item in history)
                 or len(set(history)) != len(history) or geometry['observation_id'] not in history):
             return False
-        if group == 'cuboid' and geometry.get('geometry_source') == 'observed_obb':
+        if group == 'cuboid' and geometry.get('geometry_source') in {'observed_obb', 'container_occupancy'}:
             dims = np.asarray(geometry.get('dims'), dtype=float)
+            if geometry['geometry_source'] == 'container_occupancy' and not (
+                    geometry.get('container_id') and geometry['container_id'] != instance
+                    and geometry.get('entry_receipt_id') and geometry.get('release_binding_id')
+                    and geometry.get('source') == 'operator_container_release_rule'
+                    and geometry.get('object_pose_measured') is False
+                    and geometry.get('container_geometry_source') in {'registered_cad', 'observed_obb'}
+                    and re.fullmatch(r'[0-9a-f]{64}', geometry.get('container_geometry_sha256', ''))):
+                return False
             return dims.shape == (3,) and np.isfinite(dims).all() and np.all(dims > 0)
         if group == 'mesh' and geometry.get('geometry_source') == 'registered_cad':
             return (isinstance(geometry.get('asset_id'), str) and bool(geometry['asset_id'])
@@ -45,7 +53,7 @@ def require_native_inventory_geometry(model):
         for name, geometry in layers.items():
             table = name == 'semantic_table_forbidden' or name.startswith('semantic_table::')
             hybrid = _valid_hybrid_geometry(group, name, geometry)
-            if (not hybrid and (group not in {'voxel', 'cuboid'} or group == 'cuboid' and not table)
+            if (not hybrid and (group != 'cuboid' or not table)
                     or any(marker in name for marker in ('::bin_shell::', '::height_completion'))
                     or name.startswith(('local_object::', 'action_envelope::'))):
                 forbidden.append(f'{group}/{name}')
@@ -186,6 +194,15 @@ def reconcile_inventory(previous, identity, grids, model, *, required_entity_ids
                 # Each permanent ID has one current measured OBB or validated CAD.
                 # Old measurements remain in the archive, not in the new geometry.
                 continue
+            if layer.get('geometry_source') == 'container_occupancy':
+                from .container_occupancy import occupancy_record, refresh_container_occupancy
+
+                container_id = layer['container_id']
+                if container_id in current_geometry:
+                    layer = refresh_container_occupancy(model, layer, identity)
+                    records[entity] = occupancy_record(layer, records.get(entity))
+                elif container_id in invalidated or container_id in retired:
+                    records[entity]['status'] = 'stale'
             # A newly validated rigid CAD pose supersedes the prior registration.
             # Retaining both poses creates a fictitious second copy of the object.
             if entity in observed and layer.get('geometry_source') == 'registered_cad':
@@ -315,7 +332,12 @@ def apply_inventory_update(identity, request, model):
     target = request['target_id']
     if target not in identity['inventory_map']['required_entity_ids']:
         identity['inventory_map']['required_entity_ids'].append(target)
-    invalidate_inventory(identity, [target], operation)
+    if operation == 'container_entry':
+        from .container_occupancy import occupancy_record
+
+        entities[target] = occupancy_record(model['cuboid']['semantic_instance::' + target], entities.get(target))
+    else:
+        invalidate_inventory(identity, [target], operation)
     coverage = identity['coverage']
     coverage['missing_entity_ids'] = sorted(set(identity['inventory_map']['required_entity_ids']) - set(entities))
     coverage['stale_entity_ids'] = sorted(entity for entity, row in entities.items() if row['status'] == 'stale')

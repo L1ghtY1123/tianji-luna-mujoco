@@ -6,16 +6,17 @@ from .planning_timing import measured
 
 
 class PublicPlanner:
-    def __init__(self, sdk, settings, *, batch=False):
+    def __init__(self, sdk, settings, *, batch=False, grasp_contact_links=()):
         self.sdk = sdk
         self.planning_settings = settings
         self.batch = batch
         self.last_grasp_result = None
         self.last_pose_result = None
         self.last_grasp_wall_s = None
-        self._grasp_contact_links = None
         self._planning_scene = None
         self.scene_restore_failed = False
+        self.grasp_contact_links = tuple(grasp_contact_links)
+        self.collision_restore_failed = False
 
     def set_planning_scene(self, original, reduced, original_disabled, reduced_disabled):
         """Called after the full collision world has been successfully uploaded."""
@@ -32,6 +33,8 @@ class PublicPlanner:
 
     @contextmanager
     def optimizer_scene(self):
+        if self.collision_restore_failed:
+            raise RuntimeError('grasp_collision_links_not_restored')
         if self.scene_restore_failed:
             raise RuntimeError('original_collision_scene_not_restored')
         if self._planning_scene is None:
@@ -45,20 +48,6 @@ class PublicPlanner:
             self.scene_restore_failed = True
             self._load_scene(original, original_disabled)
             self.scene_restore_failed = False
-
-    @contextmanager
-    def grasp_contacts(self, links):
-        """Public SDK contact links, scoped to grasp generation under the GPU lock.
-
-        SDK link disabling also affects other obstacles. The caller must still
-        validate pad/environment and pad/target nonpenetration before execution.
-        """
-        previous = self._grasp_contact_links
-        self._grasp_contact_links = sorted(links)
-        try:
-            yield
-        finally:
-            self._grasp_contact_links = previous
 
     def __getattr__(self, name):
         # Compatibility with the existing transport wrapper. No methods or
@@ -80,11 +69,20 @@ class PublicPlanner:
     def plan_grasp(self, *args, **kwargs):
         self.last_grasp_result = None
         started = time.perf_counter()
-        if self._grasp_contact_links is not None:
-            kwargs['disable_collision_links'] = list(self._grasp_contact_links)
-        # In particular, do not clear dt, clone phase buffers, skip the goalset
-        # stage, or override parameters of plan_pose inside plan_grasp.
+        # The pinned public SDK restores these links for approach, and masks
+        # them for goalset, grasp and lift. Exact command checks retain the
+        # environment and non-contact links before any trajectory is executed.
+        # Two-phase placement has its own collision policy and keeps its input.
+        contacts = list(self.grasp_contact_links) if kwargs.get('plan_grasp_to_lift', True) else []
+        if contacts:
+            kwargs['disable_collision_links'] = contacts
         with self.optimizer_scene():
-            self.last_grasp_result = self.sdk.plan_grasp(*args, **kwargs)
+            try:
+                self.last_grasp_result = self.sdk.plan_grasp(*args, **kwargs)
+            finally:
+                if contacts:
+                    self.collision_restore_failed = True
+                    self.sdk.enable_link_collision(contacts)
+                    self.collision_restore_failed = False
         self.last_grasp_wall_s = time.perf_counter() - started
         return self.last_grasp_result

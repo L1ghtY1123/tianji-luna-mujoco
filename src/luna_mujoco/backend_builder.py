@@ -256,13 +256,10 @@ class ValidatedBatchBackend(_NativeCuroboBackend):
             super().destroy()
 
     def plan_grasp_batch_native(self, request):
-        from .grasp_contact import gripping_pad_links
-
         started = time.perf_counter()
         self.motion_planner.last_grasp_result = None
         try:
-            with self.motion_planner.grasp_contacts(gripping_pad_links(self.arm)):
-                result = super().plan_grasp_batch_native(request)
+            result = super().plan_grasp_batch_native(request)
             result = add_trajectory_derivatives(result, self.motion_planner.last_grasp_result)
         finally:
             self.motion_planner.last_grasp_result = None
@@ -564,6 +561,7 @@ def build_geometry_backend(runtime, arm, *, batch_size, ik_only, batch_planner_t
     from curobo.types import GoalToolPose, JointState, Pose, ToolPoseCriteria
 
     from .public_planner import PublicPlanner
+    from .grasp_contact import grasp_contact_links
 
     if arm not in ("A", "B"):
         raise ValueError("geometry service requires an A/B solver")
@@ -610,7 +608,8 @@ def build_geometry_backend(runtime, arm, *, batch_size, ik_only, batch_planner_t
             sdk = (single_planner_type or (BatchMotionPlanner if compound_planner else MotionPlanner))(motion_config)
         else:
             sdk = (batch_planner_type or BatchMotionPlanner)(motion_config)
-        planner = PublicPlanner(sdk, settings, batch=batch_size is not None or compound_planner)
+        planner = PublicPlanner(sdk, settings, batch=batch_size is not None or compound_planner,
+                                grasp_contact_links=sorted(grasp_contact_links(arm)))
     # The hard checker shares the optimizer's measured gripper configuration
     # and original spheres, including the frozen peer.
     checker = _create_world_clearance_checker(

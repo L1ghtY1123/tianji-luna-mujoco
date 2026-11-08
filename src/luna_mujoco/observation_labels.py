@@ -4,7 +4,21 @@ from io import BytesIO
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+
+def outline_masks(rgb, masks):
+    """Draw measured candidate contours while retaining the original RGB appearance."""
+    image = np.array(rgb, dtype=np.uint8, copy=True)
+    height, width = image.shape[:2]
+    for mask in masks:
+        silhouette = Image.fromarray(np.asarray(mask, dtype=np.uint8) * 255)
+        silhouette = silhouette.resize((width, height), Image.Resampling.NEAREST)
+        boundary = (np.asarray(silhouette) > 0) & (np.asarray(silhouette.filter(ImageFilter.MinFilter(3))) == 0)
+        border = Image.fromarray(boundary.astype(np.uint8) * 255).filter(ImageFilter.MaxFilter(3))
+        image[np.asarray(border) > 0] = 0
+        image[boundary] = 255
+    return image
 
 COLORS = {'red': '红色', 'green': '绿色', 'blue': '蓝色', 'black': '黑色', 'white': '白色',
           'yellow': '黄色', 'gray': '灰色', 'orange': '橙色', 'pink': '粉色'}
@@ -20,7 +34,8 @@ def responses_reference_labels(capture, reference):
     items = []
     for identifier, entity in reference.get('entities', {}).items():
         camera, box = entity.get('reference_camera_id'), entity.get('bbox')
-        if camera not in capture['views'] or box is None:
+        if (camera not in capture['views'] or box is None
+                or entity.get('reference_observation_id', capture['observation_id']) != capture['observation_id']):
             continue
         left, top, right, bottom = box
         name = COLORS.get(entity.get('color'), '') + KINDS.get(entity.get('kind'), '物体')
@@ -48,7 +63,6 @@ def make_object_labels(observation, records, membership, *, holding=None, destin
                        if identifier not in measured_ids and entity.get('bbox'))
     for obj in objects:
         identifier = obj['id']
-        record = records.get(identifier, {})
         member = membership.get(identifier, 'excluded' if identifier not in records else 'unknown')
         role = 'target' if member == 'required' else 'obstacle' if member == 'excluded' else 'unknown'
         if obj.get('kind') in {'bin', 'marker'}:
@@ -57,16 +71,15 @@ def make_object_labels(observation, records, membership, *, holding=None, destin
             role = 'destination'
         identity_source = obj.get('identity_source', 'unrecorded')
         status = 'associated' if identity_source in IDENTITY_NAMES else 'unverified'
-        number = record.get('display_id', obj.get('display_id'))
         color = obj.get('color')
         name_source = 'measured_attributes'
         if color not in COLORS:
             color = observation.get('scene_entities', {}).get(identifier, {}).get('color')
             name_source = 'inventory_description' if color in COLORS else 'generic_kind'
         name = COLORS.get(color, '') + KINDS.get(obj.get('kind'), '物体')
-        title = (f'#{number} ' if number is not None else '') + name
+        title = 'ID ' + identifier + ' ' + name
         identity_text = IDENTITY_NAMES.get(identity_source, '身份依据未记录')
-        text = f'{title} · {identity_text}\nID {identifier}'
+        text = f'{title} · {identity_text}'
         provenance = {'name_source': name_source, 'identity_source': identity_source,
                       'measured_color': obj.get('color'),
                       'point_count': obj.get('coverage', {}).get('point_count'),
@@ -78,7 +91,7 @@ def make_object_labels(observation, records, membership, *, holding=None, destin
                         and camera == obj.get('reference_camera_id', '3')):
                     left, top, right, bottom = obj['bbox']
                     cached_table = identifier in observation.get('demo_tables', {}).get('tables', {})
-                    labels['items'].append({'id': identifier, 'display_id': number, 'camera_id': camera,
+                    labels['items'].append({'id': identifier, 'camera_id': camera,
                         'name': name, 'role': role, 'status': 'unverified', **provenance,
                         'box_source': 'responses_reference_proposal',
                         'geometry_status': 'cached_cuboid' if cached_table else 'missing',
@@ -88,7 +101,7 @@ def make_object_labels(observation, records, membership, *, holding=None, destin
                 continue
             rows, columns = np.nonzero(mask)
             height, width = mask.shape
-            labels['items'].append({'id': identifier, 'display_id': number, 'camera_id': camera,
+            labels['items'].append({'id': identifier, 'camera_id': camera,
                 'name': name, 'role': role, 'status': status, 'label': text, **provenance,
                 'box_source': 'associated_instance_mask',
                 'geometry_status': 'registered_depth' if obj.get('coverage', {}).get('point_count') else 'mask_only',
@@ -104,6 +117,8 @@ def project_placement_regions(observation, regions, *, require_visible_support=T
     result = []
     for region in regions:
         layout = region.get('layout', {})
+        if not layout:
+            continue
         support = layout.get('support_entity_id')
         for camera_id, view in observation.get('views', {}).items():
             mask = view.get('instance_masks', {}).get(support)
@@ -112,20 +127,19 @@ def project_placement_regions(observation, regions, *, require_visible_support=T
                 continue
             height, width = mask.shape if mask is not None else view['rgb'].shape[:2]
             transform, intrinsics = np.asarray(view['T_world_camera']), view['intrinsics']
-            for cell in layout.get('cells', []):
-                xy = np.asarray([cell['center_world_xy_m'], *cell['polygon_world_xy_m']])
-                world = np.column_stack((xy, np.full(len(xy), layout['floor_z_m'])))
-                camera = (world - transform[:3, 3]) @ transform[:3, :3]
-                if np.any(camera[:, 2] <= 0) or not np.isfinite(camera).all():
-                    continue
-                pixels = camera[:, :2] / camera[:, 2, None] * [intrinsics['fx'], intrinsics['fy']]
-                normalized = (pixels + [intrinsics['cx'], intrinsics['cy']]) / [width, height]
-                result.append({'region_id': region['region_id'], 'slot_id': cell['slot_id'],
-                    'camera_id': camera_id, 'support_entity_id': support,
-                    'source': layout.get('source'), 'source_observation_id': layout.get('observation_id'),
-                    'measurement_time': layout.get('measurement_time'),
-                    'layout_revision': region.get('layout_revision'),
-                    'center': normalized[0].tolist(), 'polygon': normalized[1:].tolist()})
+            xy = np.asarray([layout['center_world_xy_m'], *layout['region_polygon_world_xy_m']])
+            world = np.column_stack((xy, np.full(len(xy), layout['floor_z_m'])))
+            camera = (world - transform[:3, 3]) @ transform[:3, :3]
+            if np.any(camera[:, 2] <= 0) or not np.isfinite(camera).all():
+                continue
+            pixels = camera[:, :2] / camera[:, 2, None] * [intrinsics['fx'], intrinsics['fy']]
+            normalized = (pixels + [intrinsics['cx'], intrinsics['cy']]) / [width, height]
+            result.append({'region_id': region['region_id'],
+                'camera_id': camera_id, 'support_entity_id': support,
+                'source': layout.get('source'), 'source_observation_id': layout.get('observation_id'),
+                'measurement_time': layout.get('measurement_time'),
+                'layout_revision': region.get('layout_revision'),
+                'center': normalized[0].tolist(), 'polygon': normalized[1:].tolist()})
     return result
 
 
@@ -180,7 +194,13 @@ def _near_box_annotations(rgb, items, regions, table_polygon, frame_color):
         points = np.asarray(polygon)
         box = (*points.min(0), *points.max(0))
         boxes.append(box)
-        labels.append((f"{region['region_id']} slot {region['slot_id']}", box))
+        if 'label_anchor' in region:
+            if region['label_anchor'] is not None:
+                x, y = np.asarray(region['label_anchor']) * [width, height]
+                drawing.ellipse((x - 3, y - 3, x + 3, y + 3), fill='#69e2ff', outline='black')
+                labels.append((region['region_id'], (x, y, x, y)))
+        else:
+            labels.append((region['region_id'], box))
     if table_polygon:
         polygon = [(x * width, y * height) for x, y in table_polygon]
         drawing.line(polygon + polygon[:1], fill=color, width=2)
@@ -233,7 +253,7 @@ def raster_visual_annotations(rgb, items, *, regions=(), table_polygon=(), frame
     height, width = rgb.shape[:2]
     font = ImageFont.load_default(size=14)
     labels = [item.get('display_label', item['id']) for item in items]
-    labels += [f"{region['region_id']} slot {region['slot_id']}" for region in regions]
+    labels += [region['region_id'] for region in regions]
     if table_polygon:
         labels.append('TABLE SCOPE (measured)')
     margin = max(220, int(max((font.getlength(label) for label in labels), default=0)) + 24)
@@ -272,7 +292,7 @@ def raster_visual_annotations(rgb, items, *, regions=(), table_polygon=(), frame
         polygon = [(x * width, y * height) for x, y in region['polygon']]
         drawing.line(polygon + polygon[:1], fill='#69e2ff', width=2)
         center = tuple(np.asarray(region['center']) * [width, height])
-        anchors.append((f"{region['region_id']} slot {region['slot_id']}", '#69e2ff', center))
+        anchors.append((region['region_id'], '#69e2ff', center))
     if table_polygon:
         polygon = [(x * width, y * height) for x, y in table_polygon]
         drawing.line(polygon + polygon[:1], fill='#ffffff', width=2)
@@ -305,7 +325,7 @@ def annotated_rgb_svg(rgb, labels, camera_id):
         SubElement(root, 'polygon', points=points, fill='none', stroke='#69e2ff', **{'stroke-width': '2'})
         x, y = region['center']
         SubElement(root, 'text', x=str(x * width), y=str(y * height + 28), fill='#69e2ff',
-                   **{'font-size': '14'}).text = f"{region['region_id']} 区{region['slot_id']}"
+                   **{'font-size': '14'}).text = region['region_id']
         SubElement(root, 'desc').text = (f"测量来源 {region['source']} · 帧 {region['source_observation_id']}"
                                         f" · t={region.get('measurement_time')} · {region['layout_revision']}")
     placed = []

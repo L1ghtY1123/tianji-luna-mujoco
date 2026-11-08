@@ -1,6 +1,6 @@
 {
   "id": "verify_grasp",
-  "description": "Check the actual gripper and lift/holding evidence for the bound target and arm. Return success or an explicit failed/unknown condition. It does not move, recapture, plan, silently close again or install an attachment before lift.",
+  "description": "Check the bound grasp execution and current mechanical gripper feedback for the execution-layer carrying model. Do not call Decisions, capture images or write an object holding state to instance memory. This check does not establish object identity, location, processing status or task completion. Does not move, close again, plan or map.",
   "requires": {
     "lifted": true,
     "verified": false
@@ -14,7 +14,7 @@
     "grasp_execution",
     "fresh_gripper_feedback"
   ],
-  "capability": "Check the actual gripper and lift/holding evidence for the bound target and arm",
+  "capability": "Check grasp execution and mechanical feedback",
   "outputs": [
     "verified",
     "execution_or_evidence_record"

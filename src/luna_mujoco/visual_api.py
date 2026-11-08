@@ -18,6 +18,19 @@ class VisualInventoryError(ValueError):
         self.evidence = evidence or {}
 
 
+def merge_decision_evidence(records, capture, purpose):
+    questions = {question['name']: {'request_hash': record['request_hash'],
+                                  'observation_id': record['observation_id']}
+                 for record in records for question in record.get('questions', [])}
+    digest = hashlib.sha256(json.dumps(questions, sort_keys=True).encode()).hexdigest()
+    return {'source': 'openai_decisions', 'component': 'decisions', 'stage': purpose, 'purpose': purpose,
+        'observation_id': capture['observation_id'], 'generation': capture.get('generation'),
+        'camera_ids': list(capture.get('views', {})), 'request_hash': digest, 'question_requests': questions,
+        'input_contract': 'one_question_per_request',
+        **{key: [item for record in records for item in record.get(key, [])]
+           for key in ('questions', 'answers', 'diagnostic_checks')}}
+
+
 def decision_diagnostic_checks(questions, answers, minimum_confidence):
     """Describe the existing decision gate; never supply a missing model reason."""
     by_name = {answer.get('name'): answer for answer in answers if isinstance(answer, dict)}
@@ -36,10 +49,13 @@ def decision_diagnostic_checks(questions, answers, minimum_confidence):
             if predicate:
                 status = ('yes' if actual >= minimum_confidence else 'no'
                           if actual <= round(1 - minimum_confidence, 12) else 'unknown')
-                reason = 'predicate_probability_gate'
+                reason = 'predicate_probability_uncertain' if status == 'unknown' else 'predicate_probability_gate'
             else:
                 status = 'known' if actual >= minimum_confidence and answer.get('choice') != 'unknown' else 'unknown'
-                reason = 'explicit_unknown' if answer.get('choice') == 'unknown' else 'confidence_gate'
+                reason = ('model_selected_unknown' if answer.get('choice') == 'unknown' else
+                          'choice_confidence_below_threshold' if status == 'unknown' else 'confidence_gate')
+        if answer.get('type') == 'refusal':
+            status, reason, actual = 'unknown', 'model_refusal', None
         checks.append({'name': question['name'], 'component': 'decisions',
             'question': question.get('instructions'), 'answer': deepcopy(answer),
             'metric': 'predicate_probability' if predicate else 'decisions_confidence',
@@ -71,7 +87,7 @@ def audit_response(body, secret, *, bounded=True):
                                               'incomplete_details') if key in body}
         if isinstance(body.get('error'), dict):
             selected['error'] = {key: body['error'][key] for key in ('type', 'code') if key in body['error']}
-            if body['error'].get('code') == 'invalid_json_schema':
+            if body['error'].get('message'):
                 selected['error']['message'] = diagnostic_evidence(body['error'].get('message', ''), secret)
     else:
         selected = {'malformed_body': body}
@@ -89,6 +105,7 @@ class VisualAPI:
     endpoint = ''
     source = ''
     error_prefix = ''
+    maximum_timeout_s = 180.
 
     @classmethod
     def from_environment(cls, *, audit=None):
@@ -100,12 +117,26 @@ class VisualAPI:
         return cls(api_key=key, timeout_s=float(os.environ.get('LUNA_DECISIONS_TIMEOUT_S', '60')), audit=audit)
 
     def __init__(self, *, api_key='', client=None, timeout_s=60., audit=None):
-        if not math.isfinite(timeout_s) or not 1. <= timeout_s <= 180.:
+        if not math.isfinite(timeout_s) or not 1. <= timeout_s <= self.maximum_timeout_s:
             raise ValueError('visual_decisions_invalid_timeout')
         self.api_key, self.client, self.timeout_s, self.audit = api_key, client, timeout_s, audit
         self.cache = OrderedDict()
 
     def request(self, payload, capture, purpose, parse, *, model_call=None):
+        if self.endpoint == '/v1/decisions' and len(payload.get('questions', [])) > 1:
+            answers, records = [], []
+            for question in payload['questions']:
+                single = {**payload, 'questions': [question]}
+                try:
+                    body, evidence = VisualAPI.request(self, single, capture, purpose,
+                        lambda body, evidence: (body, evidence), model_call=model_call)
+                except VisualInventoryError as error:
+                    error.evidence['completed_questions'] = merge_decision_evidence(records, capture, purpose)
+                    raise
+                answers.extend(body.get('answers', []))
+                records.append({**evidence, 'answers': body.get('answers', [])})
+            return parse({'model': payload['model'], 'answers': answers},
+                         merge_decision_evidence(records, capture, purpose))
         # Transport retries repeat only a frozen, non-actuating Decisions request.
         # A valid unknown/no answer is final; this never retries a robot skill.
         attempts = 3 if self.endpoint == '/v1/decisions' else 1
@@ -125,17 +156,19 @@ class VisualAPI:
 
         image_selection = None
         if self.endpoint == '/v1/decisions':
-            from .identity_comparison_images import scope_comparison_questions
             from .visual_image_selection import compact_decision_images
 
-            payload = scope_comparison_questions(payload)
             payload, image_selection = compact_decision_images(payload)
+            if len(payload.get('questions', [])) != 1:
+                raise VisualInventoryError('decisions_requires_one_question')
+            from .core.decisions import WireDecisionQuestion
+            WireDecisionQuestion.model_validate(payload['questions'][0])
         key = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         if key in self.cache:
             result = self.cache[key]
             if isinstance(result, VisualInventoryError):
                 raise result
-            return deepcopy(result)
+            return parse(deepcopy(result['body']), deepcopy(result['evidence']))
         event = None
         evidence = {'source': self.source, 'observation_id': capture['observation_id'], 'request_hash': key,
                     'component': 'decisions' if self.endpoint == '/v1/decisions' else self.source,
@@ -156,15 +189,20 @@ class VisualAPI:
                 event['model_call'] = diagnostic_evidence(model_call, self.api_key)
             if image_selection is not None:
                 event['image_selection'] = image_selection
+                event['text_char_count'] = sum(len(part.get('text', ''))
+                    for message in payload['input'] for part in message['content']) + len(
+                        json.dumps(payload['questions'], ensure_ascii=False))
             response = (self.client or httpx).post('https://api.openai.com' + self.endpoint,
                 headers={'Authorization': 'Bearer ' + self.api_key}, json=payload,
                 timeout=self.timeout_s, follow_redirects=False)
             event['http_status'] = response.status_code
             event['elapsed_s'] = round(time.monotonic() - started, 3)
+            event['response_headers'] = {name: response.headers[name]
+                for name in ('openai-processing-ms', 'x-request-id') if name in response.headers}
             evidence.update(http_status=response.status_code, elapsed_s=event['elapsed_s'])
             try:
                 body = response.json()
-                event['response'] = audit_response(body, self.api_key)
+                event['response'] = audit_response(body, self.api_key, bounded=self.endpoint != '/v1/responses')
             except ValueError:
                 body = None
                 event['response'] = {'invalid_body': 'non_json', 'size_bytes': len(response.content),
@@ -180,15 +218,20 @@ class VisualAPI:
                     payload.get('questions', []), answers if isinstance(answers, list) else [],
                     getattr(self, 'minimum_confidence', None)), self.api_key)
             evidence = diagnostic_evidence(evidence, self.api_key)
-            result = parse(body, evidence)
+            result = parse(deepcopy(body), deepcopy(evidence))
             if isinstance(result, dict):
                 # Parsers attach raw answers after interpreting them. Sanitize only
                 # evidence fields, leaving judgments, geometry and model plans intact.
                 for field in ('evidence', 'visual_evidence', 'response'):
                     if field in result:
                         result[field] = diagnostic_evidence(result[field], self.api_key)
+            if self.endpoint == '/v1/decisions':
+                parsed_evidence = (result.get('evidence') or result.get('visual_evidence') or result
+                                   if isinstance(result, dict) else {})
+                event['diagnostic_checks'] = diagnostic_evidence(
+                    parsed_evidence.get('diagnostic_checks', evidence.get('diagnostic_checks', [])), self.api_key)
             event['response'] = audit_response(body, self.api_key, bounded=False)
-            self.cache[key] = deepcopy(result)
+            self.cache[key] = {'body': deepcopy(body), 'evidence': deepcopy(evidence)}
         except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError) as error:
             if isinstance(error, httpx.HTTPError):
                 evidence.update(transport_error_type=type(error).__name__, configured_timeout_s=self.timeout_s)
@@ -198,6 +241,8 @@ class VisualAPI:
                 self.error_prefix + ('_transport_error' if isinstance(error, httpx.HTTPError) else '_invalid_response'))
             error.evidence = diagnostic_evidence({**evidence, **error.evidence}, self.api_key)
             if event is not None:
+                if self.endpoint == '/v1/decisions':
+                    event['diagnostic_checks'] = deepcopy(error.evidence.get('diagnostic_checks', []))
                 event['error'] = str(error)
                 if 'validation_errors' in error.evidence:
                     event['validation_errors'] = error.evidence['validation_errors']
@@ -210,7 +255,7 @@ class VisualAPI:
                 self.cache[key] = error
             raise error from None
         finally:
-            while len(self.cache) > 8:
+            while len(self.cache) > 256:
                 self.cache.popitem(last=False)
             if event is not None and self.audit is not None:
                 try:

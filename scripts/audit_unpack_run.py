@@ -135,6 +135,32 @@ def completed_inputs(ledger, destination_id):
     return len(identifiers), bool(valid)
 
 
+def valid_responses_sequence(events, count):
+    calls = [(index, event['data']) for index, event in enumerate(events)
+             if event['kind'] == 'visual_decisions_call'
+             and event.get('data', {}).get('endpoint', '').endswith('/responses')
+             and event.get('data', {}).get('purpose') != 'update_object_memory']
+    accepted = [index for index, event in enumerate(events) if event['kind'] == 'skill_program']
+    skill_starts = [index for index, event in enumerate(events) if event['kind'] == 'skill_start']
+    if count != len(calls) or not 1 <= len(calls) <= 3 or len(accepted) != 1:
+        return False
+    if calls[-1][0] >= accepted[0] or skill_starts and calls[-1][0] >= min(skill_starts):
+        return False
+    initial = calls[0][1]
+    if (initial.get('model_call') or {}).get('kind') != 'initial_compile':
+        return False
+    for attempt, (_, call) in enumerate(calls[1:], 1):
+        previous = calls[attempt - 1][1]
+        metadata = call.get('model_call') or {}
+        if (metadata.get('kind') != 'validation_revision' or metadata.get('attempt') != attempt
+                or previous.get('error') != 'responses_invalid_plan' or not previous.get('validation_errors')
+                or not previous.get('request_hash')
+                or metadata.get('previous_request_hash') != previous['request_hash']
+                or call.get('observation_id') != initial.get('observation_id')):
+            return False
+    return not calls[-1][1].get('error')
+
+
 def audit(state, expected, config):
     is_cad = config['right_bin'].get('asset_id') == 'blue_box'
     objects = cad_objects(state, config) if is_cad else primitive_objects(state, config)
@@ -144,15 +170,26 @@ def audit(state, expected, config):
     completed_count, verified_lineage = completed_inputs(ledger, destination)
     events = state.get('events', [])
     mapping = [event for event in events if event['kind'] == 'skill_start' and event['title'] == 'build_scene']
+    joint_errors = {
+        arm: float(np.rad2deg(np.max(np.abs(
+            np.asarray(state['simulation']['arms'][arm]['joints_rad'])
+            - np.asarray(run['planning_settings']['observation'][arm])))))
+        for arm in ('A', 'B')}
     result = {'run_id': run.get('run_id'), 'runtime_status': run['status'],
         'evidence_source': 'independent MuJoCo end-state, not provided to model or runtime control',
         'expected_completed': expected, 'physical_black_inside_right_bin': sum(item['inside_right_bin'] for item in objects),
         'ledger_completed': completed_count, 'verified_entity_lineage': verified_lineage,
         'responses_calls': run.get('metrics', {}).get('responses_call_count'),
-        'build_scene_calls': len(mapping), 'holding': bool(run.get('holding')), 'objects': objects}
+        'compile_responses_calls': run.get('metrics', {}).get('compile_responses_call_count',
+            run.get('metrics', {}).get('responses_call_count')),
+        'inventory_responses_calls': run.get('metrics', {}).get('inventory_responses_call_count', 0),
+        'build_scene_calls': len(mapping), 'holding': bool(run.get('holding')), 'objects': objects,
+        'observation_pose_maximum_joint_error_deg': joint_errors,
+        'both_arms_at_observation_pose': all(np.isfinite(value) and value <= 1. for value in joint_errors.values())}
+    result['responses_pre_execution_valid'] = valid_responses_sequence(events, result['compile_responses_calls'])
     result['passed'] = (run['status'] == 'succeeded' and not result['holding']
         and result['physical_black_inside_right_bin'] == completed_count == expected and verified_lineage
-        and result['responses_calls'] == 1)
+        and result['responses_pre_execution_valid'] and result['both_arms_at_observation_pose'])
     return result
 
 

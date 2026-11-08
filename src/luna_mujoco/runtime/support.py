@@ -71,34 +71,51 @@ def cad_support_geometry(cad, subject_id, capture, tables):
     return {'registered_cad': model, 'candidate_table_relationships': relationships}
 
 
-def support_memory(entity, record, failed_attempt_count):
-    initial = record.get('initial_source', {}).get('task_source_evidence', {})
-    verified_initial = None
-    if (initial.get('source') == 'openai_decisions' and initial.get('status') == 'yes'
-            and initial.get('target_id') == entity['id'] and initial.get('source_id')
-            and initial.get('request_hash') and initial.get('observation_id')):
-        verified_initial = {'support_entity_id': initial['source_id'],
-            'observation_id': initial['observation_id'], 'request_hash': initial['request_hash'],
-            'source': 'openai_decisions', 'relation': 'verified_task_source_membership'}
+def support_memory(entity):
+    """Physical history only; task attempts and intended destinations are not support evidence."""
     previous = entity.get('observed_support')
     if not (isinstance(previous, dict) and previous.get('source') == 'openai_decisions'
             and previous.get('request_hash') and previous.get('observation_id')):
         previous = None
     else:
         previous = {key: previous[key] for key in ('support_entity_id', 'observation_id', 'generation',
-            'source', 'request_hash', 'confidence', 'assessment_basis') if key in previous}
-    return deepcopy({'verified_initial_support': verified_initial,
-        'previous_support_assessment': previous,
-        'last_seen_observation_id': record.get('last_seen_observation_id'),
-        'last_observed_position': record.get('last_observed_position'),
-        'visibility': entity.get('visibility', record.get('visibility', 'unknown')),
-        'status': record.get('status'), 'transfers': record.get('transfers', []),
-        'failed_attempt_count': failed_attempt_count,
+            'source', 'request_hash', 'confidence', 'probability', 'assessment_basis') if key in previous}
+    return deepcopy({'previous_support_assessment': previous,
+        'last_position_measurement': entity.get('last_position_measurement'),
+        'visibility': entity.get('visibility', 'unknown'),
+        'status': entity.get('status'), 'transfers': entity.get('transfers', []),
         'interpretation': 'These are dated observations and recorded actions, not new pixels. '
             'Occlusion alone does not erase an established relation. Assess continuity using history '
             'and current evidence; changed position, manipulation, contacts or conflicting evidence '
             'can invalidate it. Absence of recorded actions is not proof of no external change. '
             'Retained location does not authorize stale grasp geometry or certify motion clearance.'})
+
+
+def measured_supports(observation, capture, candidates):
+    """Pass candidate geometry already measured by perception, without choosing a support."""
+    result = {}
+    for obj in observation.get('objects', []):
+        identifier = obj['id']
+        if identifier not in candidates or not obj.get('cad'):
+            continue
+        try:
+            geometry = cad_support_geometry(obj['cad'], identifier, capture, {})
+        except ValueError as error:
+            result[identifier] = {'geometry_unavailable': str(error)}
+            continue
+        if not geometry:
+            continue
+        reference = obj.get('placement_reference', {})
+        if (reference.get('support_entity_id') == identifier
+                and all(reference.get(key) == capture.get(key) for key in ('observation_id', 'generation'))):
+            polygon = np.asarray(reference.get('region_polygon_world_xy_m', []), dtype=float)
+            floor = reference.get('floor_z_m')
+            if (polygon.ndim == 2 and polygon.shape[1] == 2 and len(polygon) >= 3
+                    and np.isfinite(polygon).all() and type(floor) in (int, float) and np.isfinite(floor)):
+                geometry['support_region'] = {'floor_z_m': floor, 'polygon_world_xy_m': polygon.tolist(),
+                    'source': reference.get('source'), 'observation_id': capture['observation_id']}
+        result[identifier] = geometry
+    return result
 
 
 def support_context(capture, observation, subject, candidates):
@@ -119,6 +136,7 @@ def support_context(capture, observation, subject, candidates):
         'measured_tables': {identifier: {'model': table['model'], 'surface_height_m': table['surface_height_m'],
             'source_observation_id': tables.get('source_observation_id')}
             for identifier, table in tables.get('tables', {}).items() if identifier in candidates},
+        'measured_supports': measured_supports(observation, capture, candidates),
         'limits': 'Visible surfaces only; the lowest measured point need not be the physical bottom. '
             'Table models are retained measured references, not newly seen surfaces. '
             'No simulator object pose or hidden shape is supplied; this is not a clearance certificate.'}

@@ -1,4 +1,4 @@
-"""Read current entity identity and task bindings without exposing execution truth."""
+"""Read permanent entity identity and dated physical history."""
 import hashlib
 import json
 from copy import deepcopy
@@ -8,6 +8,11 @@ def bound_identity_coverage_source(observation):
     """Validate the provenance union without relabeling geometry as a model answer."""
     visual = observation.get('visual_inventory', {})
     coverage = visual.get('identity_coverage', {})
+    if (coverage.get('source') == 'current_segmentation'
+            and not coverage.get('accepted_entity_ids')
+            and visual.get('evidence', {}).get('identity_derivation') == 'no_current_identity_candidates'
+            and not visual.get('evidence', {}).get('questions')):
+        return True
     if coverage.get('source') == 'openai_decisions':
         return True
     if coverage.get('source') != 'mixed_decisions_measured_container':
@@ -37,15 +42,8 @@ def current_inventory_entities(reference, fallback=None):
     state = reference.get('inventory_state', {})
     entities = state.get('entities', fallback if fallback is not None else reference.get('entities', {}))
     retired = set(state.get('retired_entity_ids', ()))
-    return {identifier: deepcopy(entity) for identifier, entity in entities.items() if identifier not in retired}
-
-
-def source_inventory(reference):
-    reference = reference or {}
-    task = reference.get('task_spec', {})
-    bindings = reference.get('task_inventory', {})
-    return {'source_id': bindings.get('source_id', task.get('source_ref')),
-            'source_object_ids': list(bindings.get('source_object_ids', task.get('target_refs', ())))}
+    return {identifier: deepcopy(entity) for identifier, entity in entities.items()
+            if identifier not in retired and entity.get('status', 'active') == 'active'}
 
 
 def visual_inventory_state(reference):
@@ -54,5 +52,6 @@ def visual_inventory_state(reference):
     fields = ('id', 'input_entity_id', 'output_entity_id', 'process_id', 'processing_skill', 'skill', 'status')
     transformations = state.get('transformations', {})
     return {'retired_entity_ids': list(state.get('retired_entity_ids', ())),
+            'object_history': deepcopy(state.get('object_history', {})),
             'transformations': {identifier: {key: deepcopy(record[key]) for key in fields if key in record}
                                 for identifier, record in transformations.items()}}

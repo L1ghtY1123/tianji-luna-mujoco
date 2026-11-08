@@ -37,7 +37,8 @@ def _cad_mesh(geometry):
 
 def _geometry_metadata(geometry):
     return {key: deepcopy(geometry[key]) for key in ('geometry_source', 'instance_id', 'asset_id',
-            'source_sha256', 'mesh_sha256', 'observation_id', 'generation', 'geometry_observation_ids')
+            'source_sha256', 'mesh_sha256', 'observation_id', 'generation', 'geometry_observation_ids',
+            'container_id', 'entry_receipt_id', 'release_binding_id', 'object_pose_measured', 'occupancy_scope')
             if key in geometry}
 
 
@@ -160,7 +161,7 @@ def collision_scene_preview(candidate, grids, model, identity, *, maximum_surfac
         **{key: identity[key] for key in ('scene_token', 'observation_id', 'generation')},
         'voxel_layers': layers,
         'cuboid_layers': [{'name': name, 'enabled': name not in disabled,
-                           'role': 'semantic_instance' if value.get('geometry_source') == 'observed_obb'
+                           'role': 'semantic_instance' if value.get('geometry_source') in {'observed_obb', 'container_occupancy'}
                                    else 'measured_table', **_geometry_metadata(value), 'model': deepcopy(value)}
                           for name, value in model.get('cuboid', {}).items()],
         'table': {'name': 'semantic_table_forbidden', 'enabled': True,

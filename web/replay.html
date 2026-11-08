@@ -44,10 +44,10 @@
           <section class="replay-view panel">
             <div class="tabs" role="tablist" aria-label="回放视图">
               <button id="tab-graph" role="tab" aria-controls="view-graph" aria-selected="true" data-view="graph">graph</button>
-              <button id="tab-inventory" role="tab" aria-controls="view-inventory" aria-selected="false" data-view="inventory" tabindex="-1">物体清单</button>
+              <button id="tab-inventory" role="tab" aria-controls="view-inventory" aria-selected="false" data-view="inventory" tabindex="-1">时间记忆数据库</button>
               <button id="tab-video" role="tab" aria-controls="view-video" aria-selected="false" data-view="video" tabindex="-1">视频</button>
               <button id="tab-observations" role="tab" aria-controls="view-observations" aria-selected="false" data-view="observations" tabindex="-1">观测图</button>
-              <button id="tab-collision" role="tab" aria-controls="view-collision" aria-selected="false" data-view="collision" tabindex="-1">阶段碰撞场景</button>
+              <button id="tab-collision" role="tab" aria-controls="view-collision" aria-selected="false" data-view="collision" tabindex="-1">空间记忆</button>
               <button id="tab-data" role="tab" aria-controls="view-data" aria-selected="false" data-view="data" tabindex="-1">原始数据</button>
             </div>
             <div id="replay-timeline" class="timeline">
@@ -78,8 +78,8 @@
             </section>
             <section id="view-graph" class="tab-view" role="tabpanel" aria-labelledby="tab-graph" hidden>
               <section class="policy-panel">
-                <div class="graph-toolbar"><h2>graph</h2><div class="actions"><a id="standalone-graph" class="button" target="_blank" rel="noopener">全宽查看 ↗</a><button id="export-svg" class="button" title="导出当前编排视图与图例；恢复扩展见完整 JSON">视图 SVG</button><button id="export-png" class="button" title="导出当前编排视图与图例">视图 PNG</button><button id="export-json" class="button" title="包含全部初始及运行时 node / edge">完整 JSON</button></div></div>
-                <div class="graph-controls actions"><button id="graph-zoom-in" class="button" aria-label="放大 graph">＋</button><button id="graph-zoom-out" class="button" aria-label="缩小 graph">−</button><button id="graph-fit" class="button">适应可读宽度</button><button id="graph-reset" class="button">100%</button><span class="muted">长 graph 横向滚动；实际执行顺序见各 scope 下方记录</span></div>
+                <div class="graph-toolbar"><h2>graph</h2><div class="actions"><a id="standalone-graph" class="button" target="_blank" rel="noopener">全宽查看 ↗</a><button id="export-svg" class="button" title="导出当前编排视图与图例；全部分支见完整 JSON">视图 SVG</button><button id="export-png" class="button" title="导出当前编排视图与图例">视图 PNG</button><button id="export-json" class="button" title="包含 Responses 编排的全部 node / edge">完整 JSON</button></div></div>
+                <div class="graph-controls actions"><button id="graph-zoom-in" class="button" aria-label="放大 graph">＋</button><button id="graph-zoom-out" class="button" aria-label="缩小 graph">−</button><button id="graph-fit" class="button">适应画布</button><button id="graph-reset" class="button">100%</button><span class="muted">按箭头阅读 · 点击子图进入 · 放大后可拖动画布</span></div>
                 <div id="policy-plan" aria-live="polite"></div>
               </section>
               <details class="execution-evidence"><summary>执行证据与模型调用</summary>
@@ -90,20 +90,21 @@
               </details>
             </section>
             <section id="view-inventory" class="tab-view" role="tabpanel" aria-labelledby="tab-inventory" hidden>
-              <div class="section-heading"><h2>清单如何变化</h2><span class="badge">归档证据</span></div>
-              <p class="view-note muted">Responses 提议初始实体与任务程序，程序结合身份核验登记永久 ID。拆出的黑件使用独立 ID，通过工序记录关联输入粉件；右盒集合不重复计为新工件。</p>
+              <div class="section-heading"><h2>时间记忆数据库</h2></div>
+              <p class="view-note muted">查看已提交的实例身份、观测、操作历史和输入／产物关系。</p>
               <div id="inventory-origin" class="inventory-origin"></div>
-              <label class="search-label" for="inventory-snapshot">查看清单时刻</label><select id="inventory-snapshot"></select>
+              <label class="search-label" for="inventory-snapshot">查看记忆时刻</label><select id="inventory-snapshot"></select>
               <div id="inventory-board"></div>
-              <details class="legacy-inventory"><summary>完整清单字段与诊断（任务结束时）</summary><section id="replay-object-list" class="object-list" hidden></section></details>
+              <details class="legacy-inventory"><summary>任务结束时的原始记录</summary><section id="replay-object-list" class="object-list" hidden></section></details>
             </section>
             <section id="view-collision" class="tab-view" role="tabpanel" aria-labelledby="tab-collision" hidden>
-              <h2>各次建图的实际碰撞场景</h2>
-              <p class="muted">青色 CAD · 绿色 OBB · 粉色桌面 CUBOID · 灰色已排除几何。拖动旋转，滚轮缩放。</p>
-              <label for="collision-stage">选择建图阶段</label><select id="collision-stage"></select>
+              <h2>空间记忆</h2>
+          <p class="muted">拖动旋转，滚轮缩放；物体名称与颜色见下方图例。</p>
+              <label for="collision-stage">选择碰撞几何版本</label><select id="collision-stage"></select>
               <p id="collision-status" class="muted" role="status"></p>
               <div id="collision-preview" style="height: 560px; min-height: 320px;"></div>
               <ul id="collision-entities"></ul>
+              <details id="collision-details"><summary>几何与版本</summary><pre></pre></details>
             </section>
             <section id="view-data" class="tab-view" role="tabpanel" aria-labelledby="tab-data" hidden>
               <p class="muted">点击图片、视频或 JSON 即可预览；原始文件可下载。</p>

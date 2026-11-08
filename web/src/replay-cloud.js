@@ -48,7 +48,7 @@ export function replayBounds(cloud, lines) {
   return new THREE.Box3().setFromObject(cloud).union(new THREE.Box3().setFromObject(lines));
 }
 
-export function createReplayCloud(container, { points = [], candidates = [], collisionScene = null }) {
+export function createReplayCloud(container, { points = [], candidates = [], collisionScene = null, collisionColor }) {
   if (!Array.isArray(points) || points.some(point => !Array.isArray(point) || point.length !== 3 || !point.every(Number.isFinite))) {
     throw new Error('归档点云必须是有限的世界坐标 Nx3 数组');
   }
@@ -71,7 +71,7 @@ export function createReplayCloud(container, { points = [], candidates = [], col
     new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: .85 }));
   scene.add(lines);
   const collision = new THREE.Group();
-  if (collisionScene) addCollisionLayers(collision, collisionScene);
+  if (collisionScene) addCollisionLayers(collision, collisionScene, collisionColor);
   scene.add(collision);
   let disposed = false;
   function render() { if (!disposed) renderer.render(scene, camera); }
@@ -87,7 +87,7 @@ export function createReplayCloud(container, { points = [], candidates = [], col
     const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
     const radius = box.isEmpty() ? .1 : Math.max(.04, box.getSize(new THREE.Vector3()).length() / 2);
     controls.target.copy(center);
-    camera.position.copy(center).add(new THREE.Vector3(1, -1.4, .9).normalize().multiplyScalar(radius * 3.8));
+    camera.position.copy(center).add(new THREE.Vector3(1, -1.4, .9).normalize().multiplyScalar(radius * 2.8));
     camera.near = Math.max(.0005, radius / 100);
     camera.far = Math.max(10, radius * 30);
     camera.updateProjectionMatrix();

@@ -9,14 +9,32 @@ def condition(name, statement):
     return {'type': 'predicate', 'name': name, 'instructions': statement}
 
 
+def accepted_identity(answer, threshold):
+    """Read an accepted identity while retaining the original model response type."""
+    if answer.get('type') == 'predicate':
+        identifier, score = answer.get('identity_candidate'), answer.get('probability')
+    elif answer.get('type') == 'choice':
+        identifier, score = answer.get('choice'), answer.get('confidence')
+    else:
+        return None
+    if (isinstance(identifier, str) and identifier not in {'unknown', 'reject'}
+            and type(score) in (int, float) and math.isfinite(score) and threshold <= score <= 1.):
+        return identifier
+    return None
+
+
 def parse_answers(body, questions, threshold):
     answers = body.get('answers')
     if not isinstance(answers, list) or len(answers) != len(questions):
         raise VisualInventoryError('visual_decisions_invalid_response')
     judgments = {}
     for question, answer in zip(questions, answers, strict=True):
-        if (not isinstance(answer, dict) or answer.get('name') != question['name']
-                or answer.get('type') != question['type']):
+        if not isinstance(answer, dict) or answer.get('name') != question['name']:
+            raise VisualInventoryError('visual_decisions_invalid_response')
+        if answer.get('type') == 'refusal':
+            judgments[question['name']] = 'unknown'
+            continue
+        if answer.get('type') != question['type']:
             raise VisualInventoryError('visual_decisions_invalid_response')
         field = 'probability' if question['type'] == 'predicate' else 'confidence'
         value = answer.get(field)
@@ -35,6 +53,6 @@ def parse_answers(body, questions, threshold):
 def result_answers(body, name, threshold):
     """Current result checks require predicate responses, including during recomputation."""
     judgments, answers = parse_answers(body, [condition(name, '')], threshold)
-    return {'judgments': judgments, 'answers': answers, 'confidence': answers[0]['probability'],
+    return {'judgments': judgments, 'answers': answers, 'confidence': answers[0].get('probability'),
             'confidence_rule': name + '_predicate_probability',
             'view_scope': 'fused_current_three_rgb'}

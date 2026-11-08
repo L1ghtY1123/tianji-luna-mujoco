@@ -4,8 +4,31 @@ import numpy as np
 GRIPPER_LIMIT_NOISE_TOLERANCE_RAD = 1e-4
 
 
+def gripper_settling_evidence(samples, *, stable_window_s, position_tolerance_rad, velocity_tolerance_rad_s):
+    """Evaluate measured position and velocity over a complete command-local window."""
+    values = np.asarray(samples, dtype=float)
+    unavailable = {'stable': False, 'reason': 'settling_window_incomplete'}
+    if (values.ndim != 2 or values.shape[1] != 3 or len(values) < 2
+            or not np.isfinite(values).all() or np.any(np.diff(values[:, 0]) <= 0)):
+        return unavailable
+    start = max(0, np.searchsorted(values[:, 0], values[-1, 0] - stable_window_s, side='right') - 1)
+    window = values[start:]
+    duration = float(window[-1, 0] - window[0, 0])
+    if duration < stable_window_s - 1e-6:
+        return unavailable
+    dt = np.diff(window[:, 0])
+    squared_speed = np.square(window[:, 2])
+    rms_speed = float(np.sqrt(np.sum(dt * (squared_speed[:-1] + squared_speed[1:]) / 2) / duration))
+    span = float(np.ptp(window[:, 1]))
+    return {'stable': span <= position_tolerance_rad and rms_speed <= velocity_tolerance_rad_s,
+            'window_duration_s': duration, 'position_span_rad': span,
+            'rms_velocity_rad_s': rms_speed, 'maximum_velocity_rad_s': float(np.max(np.abs(window[:, 2]))),
+            'position_tolerance_rad': position_tolerance_rad, 'velocity_tolerance_rad_s': velocity_tolerance_rad_s,
+            'velocity_statistic': 'time_weighted_rms', 'sample_count': len(window)}
+
+
 def verify_gripper_position(feedback, *, tolerance_fraction=.02, stable_window_s=.2):
-    """A close command stopped short of its actual target indicates holding."""
+    """Check stable mechanical closure for the carrying model; not an object-memory fact."""
     unknown = {"success": False, "status": "unknown", "source": "gripper_position"}
     samples = np.asarray(feedback.get("gripper_position_samples", []), dtype=float)
     limits = np.asarray(feedback.get("gripper_limits_rad", []), dtype=float)
@@ -40,11 +63,3 @@ def gripper_open_confirmed(feedback, tolerance_fraction=.02):
     return bool(limits.shape == (2,) and position is not None and np.isfinite(position)
                 and abs(position - limits[0]) <= (limits[1] - limits[0]) * tolerance_fraction)
 
-
-def combine_holding_evidence(position, visual=None):
-    visual = visual or {"status": "unknown", "reason": "not_requested"}
-    statuses = {item["status"] for item in (position, visual) if item["status"] != "unknown"}
-    conflict = len(statuses) > 1 or any(item.get("conflicting_evidence") for item in (position, visual))
-    status = next(iter(statuses)) if len(statuses) == 1 and not conflict else "unknown"
-    return {"success": status == "held", "status": status, "position": position, "visual": visual,
-            "source": "position_and_optional_visual", "conflicting_evidence": conflict}

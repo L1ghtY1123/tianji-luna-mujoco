@@ -406,6 +406,8 @@ class GeometryRuntime(CuroboRuntime):
             attachment_spheres = backend.carrying_spheres_tool.tolist()
             self.logical_carrying_binding = binding
         return {"ok": True, "attached": True, "carrying_owner_id": binding.owner_id,
+                "arm": binding.arm, "instance_id": binding.instance_id,
+                "observation_id": binding.observation_id, "generation": binding.generation,
                 "scene_token": binding.scene_token, "collision_evidence": evidence,
                 "attachment_geometry": evidence.get("attachment_geometry"),
                 "attachment_spheres_tool_m": attachment_spheres,
@@ -934,12 +936,16 @@ class GeometryRuntime(CuroboRuntime):
                 getattr(self, name).clear()
                 for _, saved in self._planner_configurations.values():
                     saved[name].clear()
-            self.geometry_scene, self.geometry_grids, self.geometry_model = identity, grids, model
             apply_inventory_update(identity, payload, model)
-            preview = updated_preview(getattr(self, 'pointcloud_preview', None), identity, payload)
+            self.geometry_scene, self.geometry_grids, self.geometry_model = identity, grids, model
+            preview = updated_preview(getattr(self, 'pointcloud_preview', None), identity, payload, model)
             identity['mapped_object_obbs'] = deepcopy((preview or {}).get('object_obbs', {}).get('mapped', []))
             self._inventory_archive = (identity, grids, model)
             self.pointcloud_preview = preview
+            if payload.get('operation') == 'container_entry' and preview is not None:
+                from .collision_archive import freeze_collision_snapshot
+
+                identity['collision_snapshot'] = freeze_collision_snapshot(preview['collision_scene'])
             self.carrying_binding = self.logical_carrying_binding = None
             if self.observed_free_guard is not None:
                 # Rays remain attached to their original capture; only collision version changes.
@@ -947,8 +953,18 @@ class GeometryRuntime(CuroboRuntime):
                 self.observed_free_guard.selected_instance_id = identity['target_id']
                 self.observed_free_guard.selected_surface_world_m = identity.get('selected_surface_world_m', [])
             if self.motion_coverage is not None:
-                if payload.get('operation') == 'select':
+                if payload.get('operation') in {'select', 'container_entry'}:
                     self.motion_coverage.scene_token = identity['scene_token']
+                    if payload.get('operation') == 'container_entry':
+                        update = {'source': 'operator_container_release_rule',
+                            'target_id': payload['target_id'], 'container_id': payload['container_id'],
+                            'entry_receipt_id': payload['receipt_id'], 'scene_token': identity['scene_token'],
+                            'occupied_bounds': deepcopy(identity['collision_layer_bounds']['layers'][
+                                'semantic_instance::' + payload['target_id']]),
+                            'raw_capture_reused': True, 'requires_separate_world_collision_check': True}
+                        if not any(row.get('entry_receipt_id') == payload['receipt_id']
+                                   for row in self.motion_coverage.bounded_updates):
+                            self.motion_coverage.bounded_updates.append(update)
                 else:
                     self.motion_coverage.invalidate('scene_geometry_changed_requires_registered_rgbd')
             names = [name.removeprefix('semantic_instance::') for name in model.get('voxel', {})

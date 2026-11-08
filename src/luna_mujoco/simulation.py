@@ -21,6 +21,18 @@ MAX_TRAJECTORY_TRACKING_ERROR_RAD = .03
 class GripperLimitError(ValueError):
     code = 'gripper_position_outside_authored_limits'
 
+    def __init__(self, message, details=None):
+        super().__init__(message)
+        self.details = deepcopy(details or {})
+
+
+class GripperStabilityError(TimeoutError):
+    code = 'gripper_stability_timeout'
+
+    def __init__(self, message, details):
+        super().__init__(message)
+        self.details = deepcopy(details)
+
 
 class StaleCommandError(RuntimeError):
     """The scene was reset or reconfigured while a request was in flight."""
@@ -75,6 +87,7 @@ class Simulation:
         self._closed = False
         self._error = None
         self._generation = 1
+        self.world_id = str(uuid4())
         self._revision = 1
         self._command_revision = 0
         self._confirmed = False
@@ -269,7 +282,7 @@ class Simulation:
                          "gripper_closed_command": self._desired_grip[arm] == float(self._model.joint(GRIP_DRIVERS[arm]).range[1]),
                          "gripper_closing_command": self._desired_grip[arm] > float(self._model.joint(GRIP_DRIVERS[arm]).range[0]),
                          "gripper_command_position_rad": self._desired_grip[arm],
-                         "gripper_position_samples": [[t, q] for g, t, q in self._gripper_history[arm]
+                         "gripper_position_samples": [[t, q] for g, t, q, _ in self._gripper_history[arm]
                                                       if g == self._generation and t >= self._data.time - 1.1]}
             arms[arm]['tcp_mount'] = arms[arm]['tcp']
             arms[arm]['tcp'] = front_tcp_pose(arms[arm]['tcp_mount'], arm).tolist()
@@ -307,7 +320,8 @@ class Simulation:
                     mujoco.mj_step(self._model, self._data)
                     for arm in ARM_JOINTS:
                         self._gripper_history[arm].append((self._generation, float(self._data.time),
-                                                          float(self._data.qpos[self._grip_q[arm]])))
+                                                          float(self._data.qpos[self._grip_q[arm]]),
+                                                          float(self._data.qvel[self._grip_v[arm]])))
                     if not np.isfinite(self._data.qpos).all() or not np.isfinite(self._data.qvel).all():
                         raise RuntimeError("non-finite physics state")
                     self._condition.notify_all()
@@ -877,7 +891,7 @@ class Simulation:
 
     def set_gripper(self, arm, closed, generation, *, maximum_position_rad=None, execution_settings=None):
         from .planning_settings import PlanningSettings
-        from .verification import GRIPPER_LIMIT_NOISE_TOLERANCE_RAD
+        from .verification import GRIPPER_LIMIT_NOISE_TOLERANCE_RAD, gripper_settling_evidence
 
         settings = PlanningSettings.model_validate(execution_settings or {})
         self._check_arm(arm)
@@ -895,31 +909,45 @@ class Simulation:
             self._desired_grip[arm] = float(upper if closed else lower)
             start_time = float(self._data.time)
             deadline = time.monotonic() + max(8., settings.gripper_timeout_s * 4)
-            stable_since = None
-            stable_position = None
             while True:
                 self._check_generation(generation)
                 elapsed = self._data.time - start_time
                 speed = abs(self._data.qvel[self._grip_v[arm]])
                 position = float(self._data.qpos[self._grip_q[arm]])
                 tolerance = settings.holding_position_tolerance_fraction * (upper - lower)
-                if speed <= settings.gripper_stable_velocity_rad_s:
-                    if stable_since is None or abs(position - stable_position) > tolerance:
-                        stable_since, stable_position = float(self._data.time), position
-                else:
-                    stable_since, stable_position = None, None
-                stable_duration = 0. if stable_since is None else float(self._data.time) - stable_since
-                if stable_since is not None and stable_duration >= settings.holding_stable_window_s:
+                cutoff = max(start_time, self._data.time - settings.holding_stable_window_s - self._model.opt.timestep)
+                samples = []
+                for g, t, q, v in reversed(self._gripper_history[arm]):
+                    if g != generation or t < cutoff:
+                        break
+                    samples.append((t, q, v))
+                samples.reverse()
+                settling = gripper_settling_evidence(samples,
+                    stable_window_s=settings.holding_stable_window_s,
+                    position_tolerance_rad=float(tolerance),
+                    velocity_tolerance_rad_s=settings.gripper_stable_velocity_rad_s)
+                if settling['stable']:
                     authored_lower, authored_upper = self._model.joint(GRIP_DRIVERS[arm]).range
                     noise = GRIPPER_LIMIT_NOISE_TOLERANCE_RAD
                     if not authored_lower - noise <= position <= authored_upper + noise:
                         raise GripperLimitError(f'gripper_position_outside_authored_limits: arm={arm}, '
                                          f'actual_rad={position:.12g}, minimum_rad={authored_lower:.12g}, '
-                                         f'maximum_rad={authored_upper:.12g}, command_rad={self._desired_grip[arm]:.12g}')
+                                         f'maximum_rad={authored_upper:.12g}, command_rad={self._desired_grip[arm]:.12g}',
+                            {'component': 'robot_execution', 'stage': 'gripper_command', 'arm': arm,
+                             'closed_command': closed, 'position_rad': position,
+                             'command_position_rad': self._desired_grip[arm], 'settling': settling,
+                             'diagnostic_checks': [{'name': 'authored_gripper_limits', 'status': 'no',
+                                 'actual': position, 'minimum_rad': float(authored_lower),
+                                 'maximum_rad': float(authored_upper)}]})
                     return {"arm": arm, "generation": generation, "closed_command": closed,
                             "gripper_position_rad": position,
                             "gripper_closed_fraction": self._gripper_fraction(arm), "duration_s": elapsed,
-                            "stable_duration_s": stable_duration, "final_velocity_rad_s": float(speed)}
+                            "stable_duration_s": settling['window_duration_s'],
+                            "final_velocity_rad_s": float(speed), 'settling_evidence': settling}
                 if elapsed >= settings.gripper_timeout_s or time.monotonic() >= deadline:
-                    raise TimeoutError(f"gripper_stability_timeout: arm {arm}, speed {speed:.6f} rad/s, elapsed {elapsed:.3f}s")
+                    raise GripperStabilityError(
+                        f"gripper_stability_timeout: arm {arm}, speed {speed:.6f} rad/s, elapsed {elapsed:.3f}s",
+                        {'arm': arm, 'closed_command': closed, 'elapsed_s': float(elapsed),
+                         'position_rad': position, 'command_position_rad': self._desired_grip[arm],
+                         'settling': settling})
                 self._condition.wait(timeout=0.02)

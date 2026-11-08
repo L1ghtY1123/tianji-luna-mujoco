@@ -45,8 +45,8 @@ def release_region_reference(capture, binding):
         return reference
     layout = {'support_entity_id': zone.get('support_entity_id'), 'floor_z_m': zone['floor_z_m'],
         'source': reference['source'], 'observation_id': zone.get('observation_id'),
-        'cells': [{'slot_id': 'target-region', 'center_world_xy_m': np.mean(polygon, axis=0).tolist(),
-                   'polygon_world_xy_m': polygon}]}
+        'center_world_xy_m': np.mean(polygon, axis=0).tolist(),
+        'region_polygon_world_xy_m': polygon}
     projections = project_placement_regions(capture, [{'region_id': 'release-target', 'layout': layout}],
         require_visible_support=False)
     for row in projections:

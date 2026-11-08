@@ -1,228 +1,355 @@
-"""Initial Responses owns goals and graph topology; runtime Decisions may extend recovery."""
-
-import re
+"""Shared graph protocol. Skills declare operations and the graph declares control."""
 
 GRAPH_RULES = """
-Return entities, an aggregate immutable task, and an executable graph (version=2).
-The root graph must establish global completion itself: include a reachable verify_task_completion
-skill in the ROOT nodes after the required object tasks and final pose requirements, then connect
-its success edge to the root success end. A successful object subgraph establishes that object's
-receipts only; its success is not task_verified and cannot replace aggregate task verification.
-Use graph, subgraph, node, edge literally. There is no steps/if/recover body syntax.
-Router conditions are evidence questions authored in the graph, not necessarily task completion
-conditions. They select yes/no/unknown edges but establish no skill effects or completion facts.
-Ask one specific condition per router, naming its subject and time scope. Follow a skill's success
-edge for facts its contract already establishes; do not add another visual question merely to
-repeat that same postcondition on unchanged evidence. Independent user requirements and final
-task verification still need their own evidence. A semantic unknown is not a visibility diagnosis:
-camera movement requires evidence of not_visible, cropped or occluded information needed by that question.
-Create the candidate inventory and per-object requirements, then reference those same entity refs in
-the graph, all within this one response. The application allocates permanent IDs consistently afterward.
-Entity color must be a short ENGLISH adjective because it supplies SAM3 fallback prompts.
-Human descriptions may use the user language; never localize color metadata.
-Observe only when its evidence is needed. reuse_current can analyze the supplied initial RGBD
-without recapturing when the capability's version and robot-feedback checks pass. Even fresh reuses
-unchanged scene/command/action/robot-feedback inputs. It cannot manufacture new evidence after an
-unknown judgment. A new viewpoint requires an explicit movement capability. Changed capture/identity inputs require
-identity and current CAD-pose work; identical analyzed inputs reuse their result; a successful equivalent recovery result may be
-explicitly adopted by Decisions when the capability declares recovery_result_reusable.
-segmentation_prompt and segmentation_aliases must be short ENGLISH visual noun phrases for SAM3,
-even for Chinese user instructions. Keep human descriptions in the user's language. Use visible color,
-shape or material, not source/destination/task role; multiple aliases do not mean multiple objects.
-Each candidate task.target_refs must own exactly one subgraph with input_id=that ref and a separate
-task (scope=ids, one target_ref, completion_pose=null). Its source/destination/processing may differ
-from other items. The root task describes aggregate selection and final requirements. Shared scene
-entities such as containers and tables are inventory entries, not necessarily manipulation targets.
-Calling an object-owned subgraph requires inventory_finalized=true BEFORE its entry: invocation binds
-its permanent input ID and task against the confirmed inventory. Observation and confirmation inside
-that object's subgraph cannot satisfy its own invocation prerequisite. Establish the prerequisite in
-the root scope or a shared subgraph before dispatching an object-owned subgraph.
-task.processing is NOT the action list. It contains only required object transformations whose contract
-declares processing_effect=true (for example unpacking). Ordinary grasp-place with no processing MUST
-have processing=[] in both the root task and each item's task. Put manipulation steps only in nodes/edges.
-target_selector describes the CURRENT INPUT objects to select from the initial inventory. Do not
-combine inputs with their future processing outputs in this selector. Future products receive new
-IDs through verified processing lineage; state their required delivery in the task and graph.
-source_ref names the input's original support/container/region, not the input object. Keep target_refs
-and source_ref semantically distinct: the moved object cannot be its own containing source. If no
-shared source is specified or implied, use null and let current support be judged separately.
-An object-owned subgraph owns the complete input-to-product lineage, not just the input's first
-transfer. Its task.destination_ref is the final destination of the resulting deliverable;
-task.work_area_ref is the intermediate processing area. Do not set destination_ref to the
-processing input area when completion_conditions require the product somewhere else. These fields
-also bind $destination and the completion ledger: correct node arguments cannot fix a wrong task
-destination. Check this consistency independently for every object, even when the root task is correct.
-Use a subgraph node with subgraph_id to call a named subgraph. Shared subgraphs use input_id=null,
-task=null. Node IDs must be globally unique. Assign node IDs n001, n002, n003, ... with ONE
-counter across the root and ALL subgraphs. Never restart the counter in a subgraph. Repeated uses
-of the same skill at different phases require different node IDs; for example a move_to_observe
-before grasp and another after delivery are distinct nodes. Edges and scope entry must refer to
-those exact IDs. Before returning, check the complete node-ID list for duplicates and every edge
-endpoint for an existing node in its scope. Subgraph invocation cannot be recursive.
-Every declared node, including failure/unknown end nodes, must be reachable from that scope entry
-through its declared edges. When delegating missing outcomes to runtime Decisions, omit unused
-abort/end nodes; an unconnected root_failure node makes the entire graph invalid.
-Each scope declares entry, nodes and edges. ROOT nodes/edges contain ONLY the root scope, not a global
-index. Put a subgraph body ONLY inside that subgraph's nodes/edges; never duplicate it in the root.
-A root subgraph-call node references subgraph_id, and its success edge continues within the root.
-The callee has its own entry and end. Global uniqueness of IDs does not mean global node storage.
-Node array order has NO execution meaning. Wire every
-successful route explicitly with edges {id, source, target, on}. A skill or subgraph reports success,
-failure or unknown. A router evaluates its graph-declared evidence question via Decisions and reports
-yes/no/unknown. An end node explicitly returns success/failure/unknown. Do not use a success end
-to swallow unknown evidence. Root success requires the specified final facts and verified task ledger.
-The ROOT graph also requires its own explicit success end node. verify_task_completion is a skill,
-not a terminal: connect its success edge to the root success end. Never leave it as a leaf.
-EVERY subgraph needs its own reachable end node. Its final successful skill must have an explicit
-success edge to that end (or another continuing node). Reaching the last node in an array does NOT
-return from a subgraph. Before responding, trace entry -> edges -> end within EACH scope, then trace
-the parent call's success edge. Missing subgraph returns prevent the whole graph from completing.
-Skill nodes use type=skill, id, skill, arguments exactly matching the supplied registry. Immutable task
-requirements are not motion code. $target/$source/$destination/$work_area bind to the active object's
-task on entering its subgraph. Result bindings such as $product exist only after their producer succeeds,
-and cannot leak from a different object's subgraph. Product IDs preserve lineage to their input ID.
-Plan the intended complete task including shared perception, individual operations and final conditions.
-Use registered contracts (including parameter-specific requires/effects and observation invalidation)
-to decide actions, arm choice, mapping, grasp/place/process order and needed evidence. There is no fixed
-unpack pipeline. Observed/inventory_ready/inventory_finalized/task_assessed initially are false; raw RGB
-given to you is not confirmed identity or measured map. The graph must arrange the corresponding skills.
-An initial collision map has no retained object layers. observe_scene measures geometry but does not publish collision layers. Local scope publishes exactly entity_ids, so a target-only first map omits observed containers and other required obstacles. Before dependent motion, selected IDs plus valid retained layers must cover every required inventory collision entity; global includes all currently observed inventory. Scope remains the model choice; missing coverage returns inventory_map_incomplete.
-Before returning, trace the declared facts along each intended success route: every skill's requires
-must follow from initial facts or preceding successful effects. Account for invalidated facts after
-motion. Runtime recovery handles unforeseen outcomes; it is not a substitute for known prerequisites
-of the normal task, such as a resolved placement candidate before trajectory planning.
-You MAY design foreseeable alternative edges. You are NOT required to enumerate all future failures.
-Do not wire every failure/unknown to a generic abort end. In particular uncertain observation, identity,
-support, task binding or planning evidence must use a useful authored recovery branch OR leave that
-outcome without an edge to delegate to Decisions. Uncertainty alone does not justify a terminal end.
-Failure/unknown ends are for established inability to continue, unsupported requests or unresolved
-physical side effects, not a shortcut that prevents the runtime recovery owner from considering options.
-An unhandled failed/unknown skill result or no/unknown router result invokes a runtime Decisions router. Decisions can select
-registered skills and typed parameters to create additional recovery nodes/edges from actual evidence;
-these patches are validated and archived before execution. It cannot change the task or replay completed
-physical work, waive numerical constraints, use stale evidence as current or call Responses again.
-Only contracts marked recovery_retry_safe permit retrying a failed skill; a router may be rejudged
-after obtaining new relevant evidence. Supplemental
-observation means a legal viewpoint change, not repeated same-posture photography. Historical verified
-location and identity survive occlusion, but do not certify fresh geometry. Initial Responses is called
-once. No sub-agents, runtime Responses, scripts, Python or simulator truth are available.
-Production mapping uses measured table cuboids, observed unknown-object OBBs and registered CAD meshes
-whose current FoundationPose estimates have matching source/frame/capture bindings and are accepted
-directly; no postregistration point/depth/silhouette fit validation or ICP is required.
-When the user explicitly declares a subject unknown or without CAD, set its geometry_policy to
-unknown_obb and quote that declaration exactly in geometry_policy_instruction. This requirement binds
-to its permanent ID only after current mask identity confirmation. It skips CAD retrieval and
-FoundationPose for that subject; its OBB is still measured anew. New processing products have separate
-IDs and do not inherit the input's unknown-object policy. Otherwise keep geometry_policy=auto.
-The terms designated/configured region (including 指定区域 and 设定区域) refer to the operator's
-workbench region configuration. Bind that configured region ID; its configured XY is fixed for this
-transfer, not an instruction to search arbitrary points. If that point is blocked, report the failure.
-Known CAD uses its selected arm's
-offline grasp library; unknown models use OBB and GraspGen. CAD identity does not supply current pose.
-Global means all currently
-observed inventory, not full spatial coverage. Local preserves other retained layers. Select scope
-yourself or use the registered decide mode; no model may waive collision, freshness or joint checks.
-Configured invisible XY regions are referenced by their ID, not invented visual objects or boxes.
-When the user names the workbench designated/set/configured area, identify_destination must use
-placement_mode=configured_xy. This binds the supplied point without any XY search. Ordinary
-surface/container placement uses placement_mode=free_region. A region's existence in configuration
-alone does not mean an otherwise unspecified surface task requested that region's center.
-Unqualified task left/right use robot/world left/right (+Y/-Y). An explicitly named
-camera/image/user viewpoint overrides this default; different camera images have different sides.
-An ordinary destination need not have a fixed XY or fully visible floor. The registered skills solve
-poses in measured regions. Use model-selected arms or auto; no color/arm/location defaults define tasks.
-For each object, explain the destination choice in its task.reason using the original user requirement.
-Reference a configured region only when its meaning matches that requirement; a general tabletop request
-may use the identified table, not an arbitrary processing input region. Do not invent metric XY from RGB.
-Bind the destination to the supporting entity or container, not a relative reference: for 'on the table
-left of the cup', the table is the destination and the cup is a reference. Preserve the original wording
-in the immutable task. Do not resolve a placement pose or viewpoint in this initial response.
-perceive_placement_zone requires observed=true. execute_grasp invalidates observed, and verify_grasp does not restore it. observe_scene requires empty hands, so an unbound placement zone cannot be newly interpreted on the normal held-object route. resolve_placement(capture_mode=fresh) acquires candidate images only; it does not establish observed or interpret a missing zone. Trace these existing prerequisites when arranging the intended success route.
-perceive_placement_zone binds the measured container interior or supporting surface and asks Decisions
-whether the original instruction permits any numerically feasible spot in that region. It does not
-expand language into a fixed vocabulary of directions or halves. resolve_placement uses verified held
-OBB or CAD geometry and queries the published collision world with held-object and gripper spheres
-to compute candidate poses.
-The offline workspace is only a TCP position prefilter; fixed rotation and paths still need plan_place.
-Z search is bounded near the support and rejects releases above the configured maximum object gap.
-If a relative or named-region requirement remains, Decisions judges numbered footprint candidates in
-current calibrated RGB; only accepted candidates can reach plan_place. Establish the region and
-collision geometry while empty-handed, before grasping. If candidate-level visual judgment then
-needs current images while holding, resolve_placement(capture_mode=fresh) explicitly acquires those
-images against the still-valid bound scene and region. It does not remeasure geometry or establish
-observed=true. Do not schedule observe_scene or perceive_placement_zone while holding. Stale or missing
-geometry remains an unmet prerequisite; fresh candidate images cannot repair it. No skill silently
-moves a camera, enlarges the region or calls Responses to choose a spot.
-Every placement, including an ordinary container, uses plan_place then execute_place and verify_place.
-plan_place checks approach/place/retreat; execute_place releases between place and retreat. There is no
-registered transport/drop branch. Preserve the full grasp rotation. plan_pose remains a numerical primitive
-for other motion and retreat, not a placement skill. Exact configured XY overrides candidate ranking.
-Skills choose exact poses using measured footprint containment, calibrated workspace, IK and current
-carried-body collisions. Runtime Decisions approves regions/candidate IDs, never numerical XYZ.
-A region is not a proven safe pose; missing geometry or exhausted candidates requests Decisions recovery,
-not a different goal or waived checks. Existing objects and other inventory targets remain obstacles.
-For repeated box-to-table transfers, earlier deliveries remain inventory obstacles. Observe the actual
-released positions and refresh the affected map layers through explicit graph nodes before the next
-placement. A commanded release pose is not an occupancy measurement; occlusion does not erase retained layers.
-The VLA's configured input region, attitude and dual-arm starting pose are capability prerequisites,
-not universal workflow rules. Model all required processing and product rebinding using the registry.
-When selecting a processing capability's configured input region, use that SAME region ID consistently
-in the aggregate/item work_area_ref and intermediate identify_destination nodes. Another configured
-region with coincident XY is not an interchangeable ID or evidence of the same capability prerequisites.
-All target candidates need independent subgraphs. Root edges determine their dispatch order, so use
-inventory/explicit selection_order; nearest is not supported by this explicit dispatch representation.
-Match task.instruction exactly and honor supplied completion_requirements. If unsupported, explain in
-task.reason and use a failure end. Never report completion just because no nodes remain.
-When completion_requirements.after_each_object requests an observation posture and inventory
-observation, honor this explicit user requirement in each object's successful route, including the last.
-It applies after EVERY verified delivery, including an intermediate placement in a processing input
-area, before preparation/processing or another transfer. Final product return cannot substitute for
-the earlier input-delivery return. prepare_unpack and vla_unpack require the matching historical
-post-delivery observation receipt when this user requirement is active.
-Use capability prerequisites to arrange any required map refresh, explicit movement and observation.
-This is a supplied task requirement, not a hidden action performed by grasp/place skills.
-The configured observation posture and the measured task-start posture are distinct references.
-move_to_observe does not by itself prove at_initial_pose, even when the pictures look similar. For final
-robot_pose=initial, arrange return motion if needed. verify_task_completion independently checks the
-measured task-start joint reference: it can confirm an already-correct pose, but never moves the arms.
-Root success requires this final verifier, not a mandatory extra movement when earlier chosen nodes
-already reached the required posture. A wrong final posture remains failure and needs Decisions recovery.
-Each object's success end checks its delivery and required historical observation receipts. If missing,
-Decisions may add recovery nodes/edges and recheck that end only; it never restarts the whole subgraph.
-An observation receipt is retained when later valid graph actions move the arms, including final return.
+Compile this natural-language task online into an initial entity proposal, TaskSpec and version=2
+graph. Use the supplied three-camera RGBD, instance memory, configured regions, CAD catalog and
+skill contracts. Choose the normal sequence, shared subgraphs and finite recovery routes for this
+task. Runtime executes your declared nodes and edges. Responses runs only during initial compilation
+and at most two validation-driven graph revisions before execution. Return compact JSON.
+
+AUTHORING ORDER
+First determine the task and the interfaces of reusable subgraphs. Then compose each body's normal
+path from the supplied skill contracts. Finally add finite recovery routes and trace their effects
+through the entire continuation, including the next loop iteration. Return one complete graph in
+this call. Prefer a small number of shared recovery routes whose input facts agree; duplicating
+every skill into multiple recovery variants increases wiring errors without adding capability.
+The task determines the topology; no example sequence is a mandatory workflow.
+Declare each scope's complete node list, including its success/failure/unknown end nodes, BEFORE
+writing that scope's route groups. Copy endpoint IDs from that list; never invent an endpoint while wiring
+an edge. Recovery routes return to declared checkpoints, not missing numbered nodes. Share bodies
+when their inputs and effects agree instead of copying long transfer bodies for individual objects.
+Separate phases whose completed physical effects must survive a later recovery. A downstream
+evidence failure must not route back through already completed transport or processing actions.
+Emit the root node list first to name the task scopes and their subgraph_id interfaces. Then fill
+every referenced subgraph body and its callees. Copy each definition ID from its declared calls.
+Each local node list precedes its entry/edge references. Check all named scope definitions exist.
+The edges array contains compact route groups with sources, outcomes, target and max_traversals.
+Each group explicitly declares the Cartesian product sources × outcomes going to one target.
+For example, sources=[a,b], outcomes=[failure,unknown], target=stop, max_traversals=1 declares four
+separate bounded edges. All listed sources must support all listed outcomes. Group repeated routes
+to reduce output size. Code generates edge IDs and expands ONLY these declarations. It supplies no
+missing skill, route, retry, action or completion fact. Do not emit id/source/on fields in route groups.
+Identical repeated declarations normalize to one edge with the same traversal budget. Different targets
+or traversal budgets for the same source/outcome remain conflicting declarations and fail validation.
+Historical rejected_proposal and graph_proposal records show expanded runtime edges for diagnostics.
+Your response always uses compact route groups, including scope replacements.
+Each scope also declares on_failure and on_unknown as {target,max_traversals}, or null.
+These are common routes for supported skill and subgraph-call outcomes in that scope. Explicit
+source/outcome routes override a common route. Routers and ends always use their own explicit routes.
+Use common routes for shared failure exits and compatible recovery entries, and list only exceptions
+in edges. The compiler expands the authored defaults into ordinary edges before complete validation.
+Prefer phase-specific scopes with clear failure exits so recovery can preserve previous physical effects.
+During validation revisions, return explicit scope replacements. Omitted scopes keep their previous
+definitions. Each edited scope still includes its complete node list and edges.
+
+VERIFIED AUTHORING LESSONS
+compilation_memory supplies persisted counterexamples from previous experiments under matching
+executable contracts. Apply each lesson to all relevant scopes before emitting the graph. Its example
+IDs belong to rejected historical graphs; choose IDs and topology for the current task. The validator
+still checks these constraints on the complete graph. Object identity memory has a separate purpose.
+Its execution_failures section records terminal skill errors from earlier runs under matching contracts.
+Use those dated failures to review applicable prerequisites and recovery continuations. Retain successful
+physical effects when choosing a recovery checkpoint. The recorded object IDs and measurements belong
+to earlier scenes, and a historical failure alone does not establish a present fact or a working remedy.
+A shared recovery entry must accept the facts from EVERY incoming failure path. A planning failure
+before movement does not establish recovery_needed. A partially executed motion may invalidate
+observed/scene facts. Do not route both into a skill that requires facts present in only one case.
+Trace each skill's requires, planning_effects and failure_effects separately for each incoming edge.
+Reconciliation for failed grasp is only for its declared partial-motion failure, never a generic
+planning-failure prerequisite. A successful physical effect must not be replayed during recovery.
+Share a recovery BODY through separate call nodes for distinct continuations. Each call returns directly
+to its own checkpoint. A shared resume router exposing both an earlier physical phase and a later phase
+admits cross-phase replay paths. Natural-language conditions do not statically exclude those edges.
+Keep input-transfer and product-transfer continuations separate once processing has consumed the input.
+When recovery itself fails or remains unknown, terminate that attempt; do not loop recovery again.
+Remove unused node declarations, including terminal nodes: every node must be reachable from its
+scope entry. Before any observation-return motion, establish observation_motion_scene_ready;
+scene_ready or a selected-target map alone does not establish that different map capability.
+Check this on the final-return path as well as recovery paths.
+
+PLACEMENT SEMANTICS
+identify_destination MUST explicitly select release_mode before generating/screening grasps.
+surface_setdown means gentle release near the support (including a container floor); plan_place
+uses approach/place/retreat. container_release means an allowed drop into an open container from
+above its rim; plan_place uses a single held plan_pose then execute_place stops and opens the gripper.
+Choose by the user's delivery requirements, never by object color. A task requiring gentle support
+contact, precise stacking or orientation after landing uses surface_setdown. For the operator's
+box-above-release delivery request use container_release. Do not invent a plan_pose skill.
+Both modes use perceive_placement_zone -> resolve_placement -> plan_place -> execute_place ->
+verify_place, with the other prerequisites established according to their contracts. Geometry and
+operator configuration determine the height; Responses may not supply a TCP pose or numerical gap.
+Pass the same explicit release_mode to verify_place. Surface verification does not publish current
+object geometry. Before prepare_unpack or any later movement, explicitly observe_scene and build_scene
+after surface_setdown unless a current mapped release is already established. Container entry has a
+different map effect and cannot be used to justify a surface-transfer continuation.
+The mode stays bound to this transfer. Switching mode requires explicit destination rebinding and
+invalidates previously generated grasps and plans. There is no automatic fallback between modes.
+
+ENTITIES AND TASK
+Entities describe external physical objects, containers and supports. Exclude robot links, joints,
+grippers, mounted cameras and cables. A configured unmarked region is a spatial reference.
+Use existing_id for a remembered physical instance and null for a new proposal. Runtime assigns
+permanent decimal IDs. Same-kind instances remain distinct. Give each proposal its clearest camera,
+normalized box, visible description and short English segmentation phrases. Preserve the user's
+instruction exactly. Honor explicit unknown/no-CAD requests through unknown_obb and the exact quote.
+
+The inventory records identity, observations, operations and input/product lineage. Runtime sensing
+updates it with SAM3 and Decisions. The inventory is independent of graph topology and execution order.
+For all/count tasks, target_refs are initial candidates. Later observations may discover more matching
+instances. For ids, they name the exact requested inputs. source_ref is the original source,
+destination_ref the final delivery and work_area_ref intermediate staging/processing. processing lists
+only processing_effect skills. Completion conditions each describe one fact. Preserve requested count,
+order and completion_pose. Otherwise choose an accessible current input.
+
+For all/count, use shared subgraphs with input_id=null and task=null. Select $selected at runtime,
+including when the initial source has zero candidates. Never enumerate one processing scope per initial
+object or bind an input skill to an initial literal target ref. The same policy handles later arrivals.
+After each successful input/product delivery, explicitly move_to_observe(viewpoint=configured), then
+observe_scene(capture_mode=fresh), update the required collision scene and select_target again.
+select_target requires observed=true and observation_pose_ready=true. Each new cycle uses current sensing.
+Give normal outer-loop edges an explicit 1024 traversal budget, independent of initial candidate count.
+Recovery within a shared per-input call remains bounded to one attempt. Budget exhaustion is failure.
+For all, current source confirmed empty ends this batch. Never add a wait-for-arrivals loop after empty.
+For count, finish after the requested number of verified input lineages.
+
+Use select_target to select from the current scene and task history. Success binds $selected.
+identify_target($selected) binds the current operation subject $current. A shared subgraph can handle
+the input and its output, then return through configured observation and fresh sensing to selection.
+For all, select_target asks source presence only when no eligible current input exists. It returns empty
+only after a confident current no. Remaining-but-unlocalized input and uncertain visibility return unknown.
+empty requires an explicit verify_task_completion continuation. A selected unfinished input retains its
+handling obligation. Processing outputs have their own permanent ID and $product binding.
+
+For collection tasks, selection returns unknown when source evidence shows a remaining input whose
+identity cannot currently be localized, or source visibility is insufficient. Do not require every historical
+inventory row to stay visible. Plan a bounded continuation for this case. If final verification later finds
+source_has_remaining_input=yes, provide an authored path that obtains the
+needed current observation/identity and returns to selection, preserving completed transfers and
+processing. The verification result is evidence, not a new target binding. Include a recovery choice
+for selection identity uncertainty when the available skills can improve its evidence. Do not end
+solely because the current selectable set is empty when a legal evidence-recovery route exists.
+
+GRAPH PROTOCOL
+Each scope owns its entry, nodes, edges and explicit end. Calls reference a separately defined
+subgraph_id. Shared subgraphs have input_id=null and task=null. An optional instance-owned subgraph
+has one input_id, task.scope=ids, that single target_ref and completion_pose=null. It verifies its own
+receipts when returning success. Node IDs are globally unique. All nodes and subgraphs must be reachable.
+Edges connect nodes within their own scope. No recursion or cross-scope edges.
+
+Declare exactly one outgoing edge for every possible source outcome. The pair (source, on) is unique
+within a scope. Skill outcomes come from the contract.
+Subgraph calls return success/failure/unknown. A predicate router has choices=[] and emits yes/no/unknown.
+A branch selector lists its exact edge.on values in choices, including unknown, and explains each
+alternative in condition. Failure/unknown ends have no outgoing edges. An owned success end may
+need an unknown edge if its receipts are incomplete. Root success requires task_verified.
+
+Every edge has finite max_traversals. Bounds apply per scope invocation. Exhaustion returns failure
+to the caller. Only retry_safe skills may revisit the same call for the same subject. Distinct inputs
+can reuse shared bodies. Never replay completed or uncertain physical effects as a verification retry.
+
+BINDINGS AND PRECONDITIONS
+$source/$destination/$work_area refer to the active task. $target exists only in an owned subgraph.
+$selected exists after successful selection. $product exists after a successful producer.
+$current follows identify_target while $selected continues to refer to the input. A new selection
+clears earlier operation bindings. An input and its product remain distinct.
+Shared skill_outcome_contract applies to every skill; a skill's outcome_contract adds its specific
+outcome meanings. Use requires/provides/planning_effects/result_bindings/argument_rules/outcome_rules as the executable
+contract. Each node must satisfy its requirements on every incoming path. Shared calls inherit and
+return facts and bindings. A router creates no facts or bindings. initial_facts apply at root entry only.
+
+Contract state semantics: success sets provides to true and applies known planning_effects.
+false establishes false. null removes STATIC knowledge of a fact; it does not assert that the
+runtime fact is false or impossible to establish. Consult the skill description and outputs for
+runtime-dependent effects. Runtime checks the actual required facts before executing each skill.
+For example, verify_place success sets table_release_verified=true precisely when the verified
+current transfer destination is the bound work area; for another destination it is false. Its static
+null reflects that conditional result, not a missing capability. Bind the work area before moving
+its input and preserve the verified release receipt through preparation/processing.
+Non-success sets provides to false and forgets planning_effects except facts in
+failure_preserves, which keep their incoming values. Then failure/unknown applies failure_effects,
+including recovery_needed on execute_grasp failure. argument_rules specialize requires and effects
+for the node's arguments. A recovery that refreshes evidence may invalidate downstream prerequisites.
+Re-establish those prerequisites before resuming, including prerequisites of LATER nodes, not just
+the immediately retried skill. Do not carry an old placement zone or plan across its invalidation.
+Evidence repair may be repeated; completed physical effects may not.
+
+SKILL OWNERSHIP
+Skills and their physical settings belong to the application/operator. Compose the supplied skill
+interfaces; never rewrite implementations, calibration, collision thresholds or numerical settings.
+generate_grasps has no model-selectable tuning arguments. Its configured OBB GraspGen insertion is
+applied once along the executing tool's local +Z before IK (operator default: 0.01 m). CAD library
+poses keep their calibrated transforms. Do not emit parameters/reason to override those settings.
+
+DECISIONS AND RECOVERY
+Unknown means insufficient evidence for the stated question, not a diagnosis of invisibility.
+It may reflect occlusion, partial views, ambiguous identity or conflicting dated evidence.
+Each router asks one factual predicate or one branch choice. Include the subject and time scope.
+Successful skills advance directly using their established results. Reuse accepted identity and task
+semantics within their evidence scope. Numerical workspace, collision and feedback checks stay numerical.
+Failure and unknown are typed skill outcomes. A single authored recovery or terminal route executes
+directly through its edge. No Decisions router is required to approve that route. Use a choice router
+only when selecting among genuinely different legal alternatives needs judgment, or a predicate router
+when the next step depends on an unresolved visual/language fact. Avoid rejudging reported error codes.
+Select a recovery branch directly using returned checks and selected_arm/placement_mode. Do not add
+predicates that merely ask which arm or placement mode is already bound, or restate a numerical result.
+Recovery selectors receive last_failure, current facts, bindings and declared branches with remaining
+traversals. last_result changes after every node. Use last_failure for the original failed checkpoint.
+Decisions selects a declared route. It cannot create nodes, choose outside skills or invent parameters.
+
+Provide useful bounded recovery for recognition uncertainty, missing geometry and planning/grasp
+failure wherever this task's available skills can establish legal prerequisites. Share a recovery
+subgraph or selector when its incoming bindings and facts agree. Include stop and unknown paths.
+A failure with no legal recovery may end explicitly without an extra question approving termination.
+Grasp failures include grasp_search with per-round planner, contact and collision results. A return
+to an already-current configured pose does not improve the view by itself. For missing geometry,
+declare an eligible changed viewpoint. For numerical rejection, consider an eligible alternate arm
+or other declared changed-input route. Preserve stop/unknown when the available routes cannot improve
+the failed condition. A new capture ID alone does not establish improved evidence.
+After recovery, resume the failed checkpoint and preserve completed effects.
+Allow at most one recovery attempt for the same failed checkpoint and selected input/action.
+If any operation inside that recovery fails or remains unknown, end explicitly. Do not start another
+recovery from a failed recovery. If the resumed checkpoint still fails, stop instead of repairing it
+again. Use max_traversals=1 on the corresponding recovery-entry edge; later inputs are separate calls.
+This bound applies to entering recovery, not to the successful prefix being replayed after recovery.
+If recovery returns before the failed checkpoint, give each already-used success edge on that prefix
+at least two traversals in this scope invocation. Otherwise recovery succeeds but cannot reach the
+checkpoint. Alternatively use a separate retry path with its own nodes. Never replay completed effects.
+
+Audit recovery coverage separately from graph validity. required_observation_recovery lists the
+exact skill outcomes checked by the validator.
+Trace each listed outcome of every normal-path call, including calls inside shared subgraphs, through
+its caller returns to an eligible declared observation-recovery route before emitting the graph.
+For empty-hand identity/destination/region evidence failures, expose an eligible observation repair
+wherever its prerequisites can be established. A single recovery can have a direct edge. Do not remove that recovery
+just to make validation easier. Prefer it before an alternate-arm retry when it can improve evidence.
+This coverage is validated for normal empty-hand identity/support unknown outcomes.
+For pre-motion numerical grasp-planning failure, author a bounded route using the actual
+rejection evidence. It may choose another eligible arm or generate fresh grasp candidates and replan,
+then stop if that declared retry fails. Keep all numerical prerequisites and candidate checks.
+Observation recovery is appropriate when the failure indicates deficient or stale sensing.
+Pure collision/IK rejection does not establish the visual limitation required by a wrist viewpoint.
+For the listed identity/support unknown outcomes, expose move_to_observe followed by observe_scene.
+Configured and permitted wrist viewpoints
+both satisfy this coverage. Select a viewpoint that can change the deficient evidence. A caller may own this route.
+Checkpoints reached only while recovering may terminate on failure/unknown; do not recursively recover them.
+Use one branch choice when there are alternatives, and a direct edge when there is one route.
+Do not duplicate a visual-limitation predicate before an alternative-view skill that already asks it.
+If a fresh observation invalidates destination/zone/arm/plans, reconnect before the earliest required
+producer in that continuation. A successful retry is not allowed to inherit invalidated old facts.
+
+When it can improve evidence, use move_to_observe(viewpoint=configured) -> observe_scene -> restore
+invalidated prerequisites -> resume the failed checkpoint. Configured return does not require a separate judgment
+proving occlusion. Establish empty hands and the observation-motion collision map before movement.
+If those prerequisites cannot be established, choose another legal declared route or stop explicitly.
+Before the first map exists, in-place observation/map establishment may be the only available repair.
+Alternative wrist views still require a visual-limitation judgment. Repeating an unchanged capture
+reuses its answer; bounded recovery must stop when it supplies no new usable evidence. Do not claim
+that observing repairs an unreachable grasp/placement pose or a partial motor failure. Partial
+execution keeps actuator/effect receipts and requires a compatible route. Switching arms requires
+arm-specific grasp generation. Fixed placement XY cannot drift.
+While holding, never call the empty-hand observation recovery. For retry_safe numerical planning
+failures before any placement motion, a bounded replan of the same authorized pose may be a useful
+alternative chosen by Decisions; it is not a new grasp/release or permission to relax collision checks.
+Include post-release verification uncertainty in the recovery coverage audit. When the object is
+released and observation motion is legal, expose an evidence-only recovery choice: establish the
+observation-motion map, return to configured observation, observe and retry verification using the
+original release record. If current mapping prerequisites are missing, obtain them first. This path
+must return to verification, never to grasp, transfer, release or processing that already occurred.
+Do not merge this continuation with a pre-grasp recovery that restarts physical effects.
+For an unverified release, obtain a current map containing the released target through observe_scene
+and build_scene before moving; retained pre-release geometry is insufficient. Completed release/retreat feedback and this current map permit observation motion, not destination acceptance.
+An execute_grasp failure is not an ordinary planning retry. Include a separate Decisions choice for
+the reported grasp_not_held_after_lift or grasp_closure_limit_reached_without_holding errors:
+recover_failed_grasp checks stable full-close empty feedback and reconciles the partial action without
+moving. On success, explicitly observe_scene and build_scene(exclusion_state=observation) before
+move_to_observe(configured), then observe again and restore the grasp/placement prerequisites.
+Use a distinct execute_grasp node for the one new attempt; do not revisit the failed physical node
+or reuse its old trajectory. Any failed recovery step or failed second grasp ends this route.
+Other partial execution failures and unconfirmed empty feedback must stop. The recovery skill does
+not locate the object; only fresh observation supplies its current identity and geometry.
+Do not add visual held/not-held judgments. Gripper feedback is execution state, not object-memory state.
+
+PHYSICAL EVIDENCE
+observe_scene updates current identity and geometry with all three cameras. Partial observations retain
+unseen history. New-instance association and task membership are separate. A particular operation still
+needs its target/destination evidence. build_scene publishes measured, retained and action-affected
+collision layers. Local scope changes selected instances, global scope updates current measurements.
+The first successful collision publication must be global. Local updates require an existing global
+base (collision_map_initialized); invalidated geometry can then be refreshed locally. With scope=decide
+before initialization, global is the sole permitted scope and needs no Decisions call.
+Unseen history alone supplies no current measurement. Update changed geometry before later planning.
+For the operator's ordinary container_release delivery, verify_place accepts checked above-container
+release and open feedback as entry. It records source=operator_container_release_rule and publishes
+the measured container bounds as conservative contents occupancy. This enables subsequent collision-
+checked observation return even when stacked contents cannot be individually located. It does not
+claim an individual settled pose. Subsequent sensing can replace an envelope with actual object geometry.
+Surface setdown and additional requested landing relationships retain their visual checks.
+An observation map supports empty-hand sensing motion. A selected-target map has a different exclusion
+state. Ordinary OBB size changes have no anomaly gate. CAD, OBB and cuboid are the collision types.
+
+Honor original placement language and configured region IDs. Designated/configured areas use their
+exact XY. Ordinary surfaces/containers use free_region. Unqualified left/right is robot +Y/-Y.
+Use inside for containers and on for supports. Establish placement geometry before grasping when the
+skill requires empty-hand observation. Robot actions invalidate evidence according to their contracts.
+
+prepare_unpack establishes its capability-specific posture and input conditions. verify_unpack
+captures its own RGBD, verifies processing and registers the product. Subsequent observe_scene measures
+product masks/geometry. Final verification uses its own current RGB and receipts. Explicitly arrange
+the required final robot pose before task completion. All motion retains real numeric checks.
 """
 
-
 FINAL_GRAPH_CHECK = (
-    'Before returning JSON, trace the actual ROOT entry and success edges from the supplied initial facts. '
-    'inventory_finalized starts false. Every object-owned subgraph invocation requires it true BEFORE '
-    'entering that subgraph. Observe/confirm nodes inside the object subgraph cannot establish its own '
-    'invocation prerequisite. Place prerequisite-producing capabilities in a preceding root or shared '
-    'scope, choosing their order from their actual contracts. A shared scope has input_id=null and task=null. '
-    'Then check global node-ID uniqueness, edge endpoints and required final verification. '
-    'Root arrays contain root-owned nodes/edges only; each subgraph body appears exactly once in its '
-    'own scope, never copied into root arrays. A subgraph call references its ID, not its body nodes. '
-    'For each object-owned subgraph, trace the input through its processing outputs to the last '
-    'required delivery. Check that task.destination_ref names THAT final destination and '
-    'task.work_area_ref names the intermediate processing area, consistently with its completion_conditions. '
-    'This is an entry-precondition audit, not permission to invent successful facts or omit checks.')
+    'Walk every scope from entry to explicit end. Check source-node outcome vocabularies, local '
+    'endpoints, reachability and every incoming-path prerequisite/binding. Trace shared calls and '
+    'returns, the next input, product binding and all bounded recoveries. Check all downstream '
+    'requirements after every recovery invalidation. observe_scene invalidates source_support_current; '
+    'before another plan_grasp, explicitly re-establish it through identify_target and restore any '
+    'dependent bindings that identify_target invalidates. A permanent ID is not a current support proof. '
+    'For each pre-motion grasp-planning failure, inspect the available bounded numerical alternatives. '
+    'For an observation recovery, check that its declared route can reach configured observation return, fresh observation and '
+    'rebuilt prerequisites before retry when those motion prerequisites can be established. '
+    'Retrying the identical arm/scene/candidate pool alone does not provide that observation repair. '
+    'Check exactly one route per source/outcome pair after expanding every sources × outcomes group. '
+    'Emit route groups with sources, outcomes, target and max_traversals. Code supplies edge IDs. Include select_target empty '
+    'when used. Verify current selected-input receipts and independent final completion before root '
+    'success. Check the configured final pose on EVERY path into verify_task_completion, including '
+    'retry paths after any motion that invalidates observation_pose_ready. Check an explicit bounded '
+    'empty-grasp recovery choice reaches recover_failed_grasp before any further motor command. '
+    'For all/count, check the shared select/process/return/observe cycle and empty batch termination. '
+    'Each router asks one question. A runtime-selected input/product uses a shared subgraph with '
+    'input_id=null and task=null, not an owned subgraph whose owner is a $ binding. '
+    'Keep entities as updateable memory. Emit compact JSON.')
 
 
-def graph_context(context):
-    # Keep each instruction at least once. Only verbatim sentence duplicates
-    # already present in the supplied skill document leave the catalog prose.
-    documents = context.get('skill_instructions', {})
-    catalog = {}
-    for name, contract in context.get('skill_catalog', {}).items():
-        document = ' '.join(documents.get(name, '').split())
-        sentences = re.split(r'(?<=[.!?])\s+', contract.get('description', ''))
-        description = ' '.join(sentence for sentence in sentences
-            if len(sentence) <= 20 or ' '.join(sentence.split()) not in document)
-        catalog[name] = {**contract, 'description': description}
-    return {**context, 'skill_catalog': catalog, 'rules': GRAPH_RULES,
-        'responses_call_policy': 'Exactly one initial Responses call; subsequent decisions use Decisions. No sub-agents.',
-        'recovery_requirements': 'Foreseeable edges are optional. Runtime Decisions constructs validated recovery nodes/edges for unforeseen outcomes.',
-        'initial_recovery_design': 'Do not enumerate all failures. Plan the complete intended task and any useful known branches.',
-        'execution_failure_context': {**context.get('execution_failure_context', {}),
-            'recovery_owner': 'decisions_runtime_graph_patch',
-            'guidance': 'Unexpected evidence gaps request Decisions; only registered, currently valid capabilities can run.'}}
+def graph_context(context, *, skill_detail='compact'):
+    """Ablate supplementary prose only; all executable contract fields remain present."""
+    from ..core.recovery_coverage import observation_recovery_outcomes
+
+    if skill_detail not in {'compact', 'full'}:
+        raise ValueError('unknown_skill_description_detail')
+    result = dict(context)
+    result['required_observation_recovery'] = {
+        name: outcomes for name, contract in context.get('skill_catalog', {}).items()
+        if (outcomes := observation_recovery_outcomes(contract))}
+    if skill_detail == 'compact':
+        result.pop('skill_instructions', None)
+        result['skill_catalog'] = {name: {key: value for key, value in contract.items()
+            if key not in {'id', 'capability'}} for name, contract in context.get('skill_catalog', {}).items()}
+        for name, contract in result['skill_catalog'].items():
+            contract['description'] = context['skill_catalog'][name].get('capability', contract['description'])
+        outcomes = [contract.get('outcome_contract', {}) for contract in result['skill_catalog'].values()]
+        shared = {key: value for key, value in (outcomes[0].items() if outcomes else [])
+                  if all(other.get(key) == value for other in outcomes)}
+        if shared:
+            result['skill_outcome_contract'] = shared
+            for contract in result['skill_catalog'].values():
+                specific = {key: value for key, value in contract.get('outcome_contract', {}).items()
+                            if key not in shared}
+                if specific:
+                    contract['outcome_contract'] = specific
+                else:
+                    contract.pop('outcome_contract', None)
+    result.update(rules=GRAPH_RULES, skill_description_detail=skill_detail,
+        responses_call_policy='Initial compilation, then at most two graph-validation revisions before task execution.',
+        recovery_owner='responses_authored_graph')
+    return result

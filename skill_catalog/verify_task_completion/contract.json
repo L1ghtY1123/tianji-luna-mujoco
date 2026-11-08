@@ -1,8 +1,7 @@
 {
   "id": "verify_task_completion",
-  "description": "Check the original overall and per-object requirements against current RGB, the verified transfer/processing ledger and actual robot-posture proof. Acquire or reuse current three-camera RGB internally; this needs neither observe_scene nor new SAM3, CAD/OBB geometry or a new collision map. Empty queues and action receipts alone are not success. Dated completed requirements remain completed unless contradicted; historical images are not current visibility. Inspect required final destination, processing and return/after-delivery evidence separately. This judgment does not insert missing actions.",
+  "description": "Check the original overall and per-object requirements against current RGB, the verified transfer/processing ledger and actual robot-posture proof. Acquire or reuse current three-camera RGB internally; this needs neither observe_scene nor new SAM3, CAD/OBB geometry or a new collision map. Empty queues and action receipts alone are not success. Dated completed requirements remain completed unless contradicted; historical images are not current visibility. Inspect required final destination, processing and final return evidence separately. This judgment does not insert missing actions. For scope=all, independently ask whether matching inputs remain in the current source; completion requires a confident no. Use question-local current RGB for this presence check and matching verified receipts for past milestones. Archive actual final-posture feedback separately. Use atomic completion_conditions for processing, delivery and ordering; source closure is checked separately for all scope. Check each requirement once, without another concatenated goal_satisfied predicate. Compilation instantiates the requested final-pose fact from TaskSpec as a prerequisite of this verification and of successful graph termination. Physical motion invalidates prior observation-posture facts. Accept bound operator container-entry receipts for ordinary above-container release delivery. Do not demand new per-instance localization of stored contents for that milestone. Keep arbitrary additional user conditions as separate semantic judgments. Reuse a current source-presence answer from select_target only with the exact capture and action epoch. Confirmed current empty ends this batch. Initial empty batches can succeed once actual final posture and current source closure pass. A graph iteration limit or unresolved source never certifies completion.",
   "requires": {
-    "inventory_finalized": true,
     "grasp_held": false
   },
   "provides": [
@@ -24,6 +23,6 @@
     "task_completion_unchanged_evidence"
   ],
   "invalidates_observation": false,
-  "recovery_retry_safe": true,
-  "capability": "Check the original overall and per-object requirements against current RGB, the verified transfer/processing ledger and actual robot-posture proof"
+  "capability": "Check the original overall and per-object requirements against current RGB, the verified transfer/processing ledger and actual robot-posture proof",
+  "retry_safe": true
 }

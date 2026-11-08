@@ -1,6 +1,6 @@
 {
   "id": "build_scene",
-  "description": "Publish the selected global/local inventory collision layers: accepted current CAD meshes, measured unknown-object OBBs and table cuboids. Reuse compatible resident GPU planners. This does not capture images, run SAM3 or FoundationPose, or integrate TSDF/ESDF in CAD/OBB mode. Global updates all currently observed inventory entities; local updates only the selected entities and preserves valid other layers. Neither means hidden space has been observed. The graph chooses scope and exclusion_state. observation keeps all obstacles for empty-hand viewpoint motion; selected binds the current grasp target. A selected map is not an observation map. Missing or stale required geometry is reported, never repaired by republishing identical data.",
+  "description": "Publish the selected global/local inventory collision layers: accepted current CAD meshes, measured unknown-object OBBs and table cuboids. Reuse compatible resident GPU planners. This does not capture images, run SAM3 or FoundationPose, or integrate TSDF/ESDF in CAD/OBB mode. Global updates all currently observed inventory entities; local updates only the selected entities and preserves valid other layers. Neither means hidden space has been observed. The graph chooses scope and exclusion_state. observation keeps all obstacles for empty-hand viewpoint motion; selected binds the current grasp target. A selected map is not an observation map. Missing or stale required geometry is reported, never repaired by republishing identical data. With scope=local, empty entity_ids uses the currently selected target_id, including a selected product. Explicit local lists refresh their selected object layers. scope=decide requests a mapping strategy judgment when more than one scope is permitted. Required collision bodies come from current measurements, retained layers, action-invalidated bodies and the active target/destination. A historical inventory row without measured geometry does not independently require a collision layer. Missing or stale geometry for an active or affected body remains an explicit failure. The initial publication must be global. Local updates require collision_map_initialized=true from a successful complete global publication; geometry invalidation preserves this base, while reset clears it. With scope=decide before initialization, global is the sole permitted scope and requires no Decisions call. Explicit local requests are never changed to global.",
   "inputs": [
     "current_inventory_observation",
     "selected_target_if_requested",
@@ -12,7 +12,6 @@
   ],
   "requires": {
     "observed": true,
-    "inventory_finalized": true,
     "grasp_held": false,
     "recovery_needed": false
   },
@@ -35,17 +34,29 @@
     "mapping_entity_not_in_inventory",
     "local_mapping_requires_object_entities",
     "local_mapping_entities_not_observed",
-    "inventory_map_incomplete"
+    "inventory_map_incomplete",
+    "local_mapping_requires_global_base"
   ],
   "invalidates_observation": false,
   "planning_effects": {
+    "collision_map_initialized": true,
     "scene_available": true,
     "scene_ready": null,
     "views_ready": null,
     "placement_resolved": false,
     "place_plan_ready": false
   },
+  "failure_preserves": ["collision_map_initialized"],
   "argument_rules": [
+    {
+      "when_arguments": {
+        "scope": "local"
+      },
+      "requires": {
+        "collision_map_initialized": true
+      },
+      "effects": {}
+    },
     {
       "when_arguments": {
         "exclusion_state": "selected"
@@ -73,5 +84,5 @@
       }
     }
   ],
-  "recovery_retry_safe": true
+  "retry_safe": true
 }

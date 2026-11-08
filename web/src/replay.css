@@ -1,3 +1,4 @@
+@import "./graph.css";
 :root{font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif;font-size:20px;line-height:1.5;color:#e1eaf2;background:#0b131c;color-scheme:dark;font-synthesis:none;--muted:#a0b4c5;--border:#2b3e4d;--panel:#111e2a;--mint:#83e4c4}
 #observation-source,#observation-analysis{overflow-wrap:anywhere}
 .replay-main,.object-timeline,.object-route,.object-route-stages{min-width:0}
@@ -137,25 +138,15 @@ body.graph-only .experiment-sidebar{display:none}body.graph-only .replay-workspa
 
 .failure-evidence{margin-top:10px;font-size:20px;overflow-wrap:anywhere}.failure-evidence section{margin:12px 0;padding:10px;border:1px solid #76524f;border-radius:6px}.failure-evidence pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:20px;max-height:420px;overflow:auto}.failure-evidence h3{font-size:24px;margin:12px 0 6px}
 
-/* Executable policy graph: one canvas per actual scope, no nested vertical viewport. */
-.graph-scope{margin:18px 0;border-top:1px solid var(--border);padding-top:14px;min-width:0}
-.graph-scope>summary{font-size:18px;font-weight:600;overflow-wrap:anywhere}
-.graph-legend,.graph-owner{font-size:14px;color:var(--muted);margin:10px 0}
-.graph-key{display:grid;gap:10px;padding:14px;border:1px solid var(--border);border-radius:8px;font-size:14px;margin:12px 0}
-.graph-key>div{display:flex;gap:14px;align-items:center;flex-wrap:wrap}.graph-key strong{min-width:160px}.graph-key span{display:inline-flex;gap:8px;align-items:center;flex-direction:row-reverse}
-.graph-key-swatch{width:12px;height:12px;border:2px solid;border-radius:3px}.graph-key-line{width:32px;border-top:2px solid}.graph-key-line.dashed{border-top-style:dashed}
-.graph-view-note,.graph-recovery-note{font-size:14px;line-height:1.7;color:var(--muted);margin:10px 0}.graph-recovery-note{color:#c8b9ff}
-.graph-execution,.graph-complete{font-size:15px;margin:12px 0}.graph-execution>summary,.graph-complete>summary{cursor:pointer;padding:8px 0}
-.graph-table-scroll{overflow:auto;max-height:650px}.graph-visit-table{width:100%;border-collapse:collapse;font-size:14px}.graph-visit-table th{position:sticky;top:0;background:#192b3b;text-align:left}.graph-visit-table td,.graph-visit-table th{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top;white-space:pre-line;overflow-wrap:anywhere}.graph-visit-table td:first-child{white-space:nowrap}.graph-visit-node{border:0;background:none;color:#c4e4ff;padding:0;text-align:left;font-size:14px;cursor:pointer;white-space:pre-line}.graph-edge-list{font-size:14px;line-height:1.8;overflow-wrap:anywhere}
-.graph-owner p{padding-top:8px}
-.policy-canvas{overflow:auto;background:#101d2b;border-radius:8px;margin:10px 0;scrollbar-gutter:stable;min-width:0}
-.policy-canvas svg{display:block;max-width:none;font-family:Inter,"Segoe UI",sans-serif}
-.graph-node-inspector{padding:12px;border:1px solid var(--border);border-radius:8px;font-size:16px}
-.graph-node-inspector p{margin:8px 0;overflow-wrap:anywhere}
-.graph-node-inspector pre{font-size:14px;max-height:320px;overflow:auto}
-.graph-controls{align-items:center;font-size:14px}
 .execution-evidence>summary{font-size:16px;color:var(--muted)}
 .observation-use{margin:12px 0;font-size:16px;color:var(--muted)}
 .archive-media-preview{display:block;width:100%;max-height:70vh;object-fit:contain;background:#090f17;border-radius:8px}
 body.graph-only .experiment-summary,body.graph-only .brand p{display:none}
 body.graph-only .replay-workspace{padding:12px}
+
+.collision-swatch{display:inline-block;width:14px;height:14px;border:2px solid currentColor;margin-right:8px;vertical-align:middle}
+#collision-status{white-space:pre-line;line-height:1.7}
+
+#collision-entities{display:flex;flex-wrap:wrap;gap:12px;list-style:none;padding:0}
+#collision-entities li{background:#142535;border:1px solid #344b60;border-radius:9px;padding:10px 14px;font-size:20px}
+#collision-status{font-size:20px;margin:14px 0}#collision-details{margin:14px 0;font-size:20px}#collision-details pre{max-height:400px;overflow:auto;margin-top:12px}

@@ -25,11 +25,27 @@ class UnhandledSkillResult(ValueError):
 def result_status(result):
     if not isinstance(result, dict):
         raise TypeError('invalid_skill_result')
-    if result.get('status') == 'unknown':
-        return 'unknown'
+    if result.get('status') in {'unknown', 'empty'}:
+        return result['status']
     if result.get('success') is False or result.get('status') in {'failure', 'failed', 'rejected'}:
         return 'failure'
     return 'success'
+
+
+def bind_failure_context(result, *, skill, arguments, state):
+    """Give returned failures and raised errors the same graph-facing context."""
+    if result_status(result) in {'success', 'empty'}:
+        return result
+    arm = arguments.get('arm')
+    if arm not in {'A', 'B'}:
+        arm = state.get('arm')
+    result = {'skill': skill, 'arguments': deepcopy(arguments),
+              'target_id': arguments.get('target_id') or state.get('target_id'),
+              'destination_id': arguments.get('destination_id') or state.get('destination_id'),
+              'arm': arm, **result}
+    if not result.get('error_code'):
+        result['error_code'] = str(result.get('reason') or 'skill_result_unconfirmed').partition(':')[0]
+    return result
 
 
 class ExecutionState:
@@ -40,10 +56,9 @@ class ExecutionState:
         self.target_ids = list(target_ids)
         self.resolve_target_ids = resolve_target_ids
         self.object_task_context = object_task_context
-        self.failure_bindings = None
         if len(set(self.target_ids)) != len(self.target_ids):
             raise ValueError('duplicate_policy_target')
-        self.bindings = dict(bindings)
+        self.bindings = deepcopy(bindings)
         self.result_bindings = {name: dict(validate_result_bindings(value))
                                 for name, value in (result_bindings or {}).items()}
         self.output_names = {name for outputs in self.result_bindings.values() for name in outputs}
@@ -56,7 +71,6 @@ class ExecutionState:
         self.step_limit = step_limit
         self.steps = 0
         self.results = {}
-        self.unhandled = None
         self.last_result = None
 
     def bind(self, value):

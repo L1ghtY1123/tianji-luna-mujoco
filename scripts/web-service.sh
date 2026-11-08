@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# This independent copy owns only the demo Compose project.
-exec bash "$(dirname -- "${BASH_SOURCE[0]}")/demo-service.sh" "$@"
+if [[ $# -ne 1 ]]; then
+  echo 'Usage: scripts/web-service.sh {start|stop|status|logs}' >&2
+  exit 2
+fi
+exec bash "$(dirname -- "${BASH_SOURCE[0]}")/demo-service.sh" "$1" web

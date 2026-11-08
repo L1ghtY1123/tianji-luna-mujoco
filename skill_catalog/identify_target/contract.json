@@ -1,15 +1,14 @@
 {
   "id": "identify_target",
-  "recovery_retry_safe": true,
-  "description": "Bind an existing permanent instance ID as the current target, including a verified transformation product. Require current associated geometry. Reuse its confirmed creation/support/transfer evidence; only request a current support judgment if no usable support binding exists. This does not select a CAD asset, perform FoundationPose or generate grasps. Source support and intended destination are different relations. Unknown identity/support is reported for the graph to handle.",
+  "description": "Bind an existing permanent instance ID as the current target, including a verified product. Require current associated geometry. Reuse valid confirmed creation/support/transfer evidence; otherwise judge current support. Use a current proposal or a dated remembered relation only as a hypothesis for one current predicate. If explicitly false, exclude that support and ask one different choice among remaining supports; unknown stays unknown. Without a hypothesis, ask one support choice. Show views locating the subject and candidate supports first, retaining all cameras. Supply current candidate CAD/support geometry and separately dated table/history evidence. Source support is not the intended destination. Preserve raw probability/confidence and the factual threshold. This skill does not select CAD, run FoundationPose or generate grasps. Missing current target identity returns unknown with observed_instance_missing_or_ambiguous. A successful observe_scene does not prove this ID is visible. Prefer a graph-authored configured observation return and reobservation when empty hands and a valid motion map can be established; extra wrist viewpoints retain the visual-limitation prerequisite. Unchanged evidence is not retried until yes. Establish source_support_current only from accepted support evidence bound to the current observation. A confirmed historical region alone is not current support evidence. Reuse a same-capture proof without another Decisions request; a new capture requires a current assessment. The permanent ID itself does not change. Support predicates use local A/B image labels mapped to permanent IDs in their structured context. Support judgments display current object identity labels and dated measured table polygons projected with the current calibration. The table's permanent ID and measurement date identify the support reference. Prefer a view locating both subject and support, retain all three current RGB views, and preserve the existing Decisions probability gates. Keep other accepted current instances labelled C for disambiguation, and include one same-capture subject detail using the shared raw-crop presentation.",
   "requires": {
     "observed": true,
-    "task_assessed": true,
     "recovery_needed": false,
     "grasp_held": false
   },
   "provides": [
-    "target_selected"
+    "target_selected",
+    "source_support_current"
   ],
   "inputs": [
     "target_id",
@@ -19,7 +18,8 @@
   "capability": "Bind an existing permanent instance ID as the current target, including a verified transformation product",
   "outputs": [
     "target_selected",
-    "execution_or_evidence_record"
+    "execution_or_evidence_record",
+    "target_id"
   ],
   "errors": [
     "unknown_or_unbound_entity",
@@ -28,7 +28,9 @@
     "missing_measurement_or_evidence",
     "service_or_execution_failure",
     "observed_support_unknown",
-    "observed_support_current_geometry_required"
+    "observed_support_rejected",
+    "observed_support_current_geometry_required",
+    "observed_instance_missing_or_ambiguous"
   ],
   "invalidates_observation": false,
   "planning_effects": {
@@ -58,5 +60,9 @@
     "destination_is_container": false,
     "placement_resolved": false,
     "placement_zone_ready": false
+  },
+  "retry_safe": true,
+  "result_bindings": {
+    "$current": "target_id"
   }
 }

@@ -2,23 +2,33 @@
 from copy import deepcopy
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 
-from ..core.graph import Graph, StrictModel, TaskSpec
+from ..core.graph import Edge, Graph, Identifier, Node, StrictModel, Subgraph, TaskSpec
 
 
 class EntityProposal(StrictModel):
     ref: str = Field(min_length=1)
+    existing_id: str | None = Field(default=None, description=(
+        'Existing permanent instance ID from object_memory when the current subject matches its dated '
+        'reference. Null for a proposed new instance. Never invent an ID or reuse another same-kind instance.'))
     kind: Literal['table', 'bin', 'marker', 'cube', 'sphere', 'cylinder', 'object']
     color: str = Field(description=(
         'Short ENGLISH color adjective, e.g. pink, blue, black or unknown. '
         'Used literally in SAM3 appearance fallback prompts; never localize this field. '
         'Human-facing description may use the user language.'))
-    description: str
+    description: str = Field(description=(
+        'Describe visible color and shape, plus the location that distinguishes this individual in '
+        'reference_camera_id. Name that camera when using image-left/right/upper/lower. '
+        'For similar objects, specify their separate positions relative to visible neighbors. '
+        'Do not use only one object/another object, task role, or a future destination as identification.'))
     bbox: list[float] = Field(min_length=4, max_length=4, description=(
         'Visible subject box [x_min, y_min, x_max, y_max], normalized to [0,1] in the named camera. '
         'Both extents must be positive. Configured unmarked regions are referenced directly, not entities.'))
-    reference_camera_id: Literal['1', '2', '3']
+    reference_camera_id: Literal['1', '2', '3'] = Field(description=(
+        'Choose the initial camera that shows this individual largest and most clearly separated from '
+        'similar neighbors. Prefer a complete view over a clipped or occluded fragment when available. '
+        'Use this same camera for bbox and the appearance description.'))
     parent_ref: str | None
     membership: Literal['required', 'excluded', 'unknown']
     segmentation_prompt: str = Field(description=(
@@ -64,10 +74,40 @@ def object_task_specs(graph):
             for scope in data['subgraphs'] if scope['task'] is not None}
 
 
+def validate_batch_policy(graph, task):
+    """Collection inputs are selected from current sensing through a shared policy."""
+    if not task.supported or task.scope == 'ids':
+        return
+    from ..runtime.validation import GraphValidationError
+
+    data = graph.model_dump()
+    issues = []
+    if any(scope['input_id'] is not None for scope in data['subgraphs']):
+        issues.append('batch_requires_shared_subgraphs:use_runtime_selected_input')
+    skills = [node for scope in [data, *data['subgraphs']] for node in scope['nodes']
+              if node['type'] == 'skill']
+    if not any(node['skill'] == 'select_target' for node in skills):
+        issues.append('batch_requires_select_target:initial_candidates_do_not_close_membership')
+    for node in skills:
+        if (node['skill'] == 'identify_target'
+                and node['arguments'].get('target_id') in task.target_refs):
+            issues.append('batch_target_must_use_runtime_binding:' + node['id'])
+    if issues:
+        raise GraphValidationError(issues)
+
+
 class InitialPlan(StrictModel):
     entities: list[EntityProposal] = Field(min_length=1, max_length=1024)
     task: TaskSpec
     graph: Graph
+
+    @field_validator('graph')
+    @classmethod
+    def graph_owners_match_task(cls, graph: Graph, info: ValidationInfo):
+        task = info.data.get('task')
+        if task is not None and not set(object_task_specs(graph)) <= set(task.target_refs):
+            raise ValueError('object_task_outside_candidate_inventory')
+        return graph
 
     @model_validator(mode='after')
     def coherent_entities(self):
@@ -82,9 +122,59 @@ class InitialPlan(StrictModel):
         if any(entity.ref in self.task.target_refs and entity.membership == 'excluded'
                for entity in self.entities):
             raise ValueError('task_target_membership_conflict')
-        if not set(object_task_specs(self.graph)) <= set(self.task.target_refs):
-            raise ValueError('object_task_outside_candidate_inventory')
         return self
+
+
+class RootGraphRevision(StrictModel):
+    id: Identifier
+    nodes: list[Node] = Field(min_length=1, max_length=512)
+    entry: Identifier
+    edges: list[Edge] = Field(max_length=1536)
+
+
+class GraphRevision(StrictModel):
+    """Explicit scope replacements preserve all unedited model-authored control flow."""
+    root: RootGraphRevision | None = Field(description=(
+        'Null preserves the root scope. Otherwise supply its complete id, nodes, entry and edges. '
+        'Subgraph bodies are edited separately.'))
+    subgraphs: list[Subgraph] = Field(max_length=1024, description=(
+        'Complete bodies of only the subgraphs to replace or add, matched by id. '
+        'Every omitted subgraph keeps its current definition. Include all nodes and edges of each edited body.'))
+    remove_subgraph_ids: tuple[Identifier, ...] = Field(max_length=1024, description=(
+        'Explicitly remove these existing subgraph definitions. Update every affected caller. '
+        'Omitting a body from subgraphs never deletes it.'))
+
+    @model_validator(mode='after')
+    def distinct_edits(self):
+        identifiers = [scope.id for scope in self.subgraphs]
+        if (len(set(identifiers)) != len(identifiers)
+                or len(set(self.remove_subgraph_ids)) != len(self.remove_subgraph_ids)
+                or set(identifiers) & set(self.remove_subgraph_ids)):
+            raise ValueError('graph_revision_conflicting_scope_edits')
+        return self
+
+    def apply_to(self, graph):
+        result = deepcopy(graph)
+        existing = {scope['id'] for scope in result['subgraphs']}
+        if not set(self.remove_subgraph_ids) <= existing:
+            raise ValueError('graph_revision_remove_unknown_scope')
+        if self.root is not None:
+            result.update(self.root.model_dump(mode='json'))
+        replacements = {scope.id: scope.model_dump(mode='json') for scope in self.subgraphs}
+        updated, scopes = set(), []
+        for scope in result['subgraphs']:
+            identifier = scope['id']
+            if identifier in self.remove_subgraph_ids:
+                continue
+            if identifier in replacements:
+                if identifier not in updated:
+                    scopes.append(replacements[identifier])
+                    updated.add(identifier)
+            else:
+                scopes.append(scope)
+        scopes.extend(scope for identifier, scope in replacements.items() if identifier not in updated)
+        result['subgraphs'] = scopes
+        return result
 
 
 def skill_catalog(registry):
@@ -96,13 +186,13 @@ def argument_schema(contract):
         'type': 'object', 'properties': {}, 'additionalProperties': False}))
 
 
-def validate_graph(graph, catalog, *, judgments=None, initial_bindings=(),
+def validate_graph(graph, catalog, *, initial_bindings=(),
                    initial_facts=None, require_completion=False, required_final_facts=None):
     """Validate the graph and skill contracts without generating or rewriting nodes."""
-    from .graph_validation import validate_capabilities
+    from ..runtime.validation import validate_capabilities
 
     graph = graph if isinstance(graph, Graph) else Graph.model_validate(graph)
-    validate_capabilities(graph, skill_catalog(catalog), judgments=judgments, initial_bindings=initial_bindings,
+    validate_capabilities(graph, skill_catalog(catalog), initial_bindings=initial_bindings,
                           initial_facts=initial_facts, require_completion=require_completion,
                           required_final_facts=required_final_facts)
     return graph
@@ -110,8 +200,37 @@ def validate_graph(graph, catalog, *, judgments=None, initial_bindings=(),
 
 def response_schema(model, catalog):
     """Use a closed argument object for each registered skill in strict Responses JSON."""
+    from .graph_authoring import RouteGroup, ScopeFailureRoute
+
     schema = model.model_json_schema()
     definitions = schema.get('$defs', {})
+    definitions['Edge'] = RouteGroup.model_json_schema()
+    definitions['Edge']['description'] = (
+        'One explicit route group. The compiler creates an edge for each sources × outcomes pair, '
+        'with the same target and an independent max_traversals budget. Edge IDs are generated by code. '
+        'All source nodes must support all listed outcomes. Scope defaults apply only when explicitly declared.')
+    # Declare root call interfaces first, then fill their bodies. Local node
+    # declarations precede entry/edge references in every scope.
+    for name, fields in (
+            ('Graph', ('version', 'id', 'nodes', 'subgraphs', 'entry', 'edges')),
+            ('Subgraph', ('id', 'input_id', 'task', 'nodes', 'entry', 'edges')),
+            ('RootGraphRevision', ('id', 'nodes', 'entry', 'edges'))):
+        if name in definitions:
+            properties = definitions[name]['properties']
+            definitions[name]['properties'] = {key: properties[key] for key in fields}
+            properties = definitions[name]['properties']
+            for outcome in ('failure', 'unknown'):
+                properties['on_' + outcome] = {'anyOf': [ScopeFailureRoute.model_json_schema(), {'type': 'null'}],
+                    'description': 'Explicit common ' + outcome + ' route for skill and subgraph-call nodes '
+                        'in this scope. An explicit route for a source/outcome overrides this declaration. '
+                        'Null declares no default. Routers and ends always need their own explicit routes. '
+                        'Choose a declared local node. Prefer a shared failure exit or compatible recovery entry.'}
+            properties['edges']['description'] = (
+                'Explicit local route groups for normal control and exceptions to on_failure/on_unknown. '
+                'Omit routes already covered by the declared scope defaults. Group sources with identical '
+                'outcomes, target and traversal limit. Targets stay in this scope.')
+            # Declare common continuations before the model emits their exceptions.
+            properties['edges'] = properties.pop('edges')
     processing = [name for name, contract in skill_catalog(catalog).items() if contract.get('processing_effect')]
     field = definitions['TaskSpec']['properties']['processing']
     field['items'] = {'type': 'string', 'enum': processing} if processing else {'type': 'string'}
@@ -121,11 +240,12 @@ def response_schema(model, catalog):
     # Shared subgraphs have neither an item owner nor an item TaskSpec.
     owned = deepcopy(definitions['Subgraph'])
     shared = deepcopy(definitions['Subgraph'])
-    owned['properties']['input_id'] = {'type': 'string', 'minLength': 1}
+    owned['properties']['input_id'] = {'type': 'string', 'minLength': 1, 'description': (
+        'A literal candidate ref from the frozen root task.target_refs, never $selected, $current or $product. '
+        'For a runtime-selected input or product, use a shared scope with input_id=null and task=null; '
+        'its skill arguments may use the declared result bindings.')}
     owned['properties']['task'] = {'$ref': '#/$defs/TaskSpec'}
-    owned['description'] = (
-        'Object-owned scope. Its caller must already have inventory_finalized=true. '
-        'An observation or confirmation inside this scope cannot establish its call prerequisite.')
+    owned['description'] = 'Optional instance-specific task scope. Shared scopes can process runtime-selected instances.'
     shared['properties']['input_id'] = {'type': 'null'}
     shared['properties']['task'] = {'type': 'null'}
     shared['description'] = (
@@ -133,10 +253,9 @@ def response_schema(model, catalog):
         'it may establish shared facts before an object-owned scope is called.')
     definitions['Subgraph'] = {'anyOf': [owned, shared]}
     definitions['SubgraphNode']['properties']['subgraph_id']['description'] = (
-        'Existing subgraph ID. Calling an object-owned subgraph binds its task to confirmed inventory '
-        'and requires inventory_finalized=true in the CALLER before entry. Initial inventory_finalized '
-        'is false. Establish this fact through successful predecessor skills in the root or a shared '
-        'scope; placing those skills inside the called object scope is too late.')
+        'Every call receives CURRENT caller facts and returns its changed facts. The next object does '
+        'not restart initial_facts. A preceding object may have invalidated observed or scene_ready; '
+        'establish any required evidence explicitly before the next skill that consumes it.')
     skill_base = definitions['SkillCall']
     variants = []
     for name, contract in skill_catalog(catalog).items():
@@ -155,11 +274,14 @@ def response_schema(model, catalog):
                 return [inline(value) for value in node]
             return node
         variant['properties']['arguments'] = inline(arguments)
+        if name == 'verify_place' and 'release_mode' in variant['properties']['arguments'].get('properties', {}):
+            mode = variant['properties']['arguments']['properties']['release_mode']
+            mode['enum'] = ['surface_setdown', 'container_release']
+            mode.pop('default', None)
         variants.append(variant)
     if not variants:
         raise ValueError('empty_skill_catalog')
     definitions['SkillCall'] = {'anyOf': variants}
-    definitions.pop('RecoveryNode', None)
     definitions.pop('JsonValue', None)
 
     def normalize(node):
@@ -167,9 +289,6 @@ def response_schema(model, catalog):
             node.pop('discriminator', None)
             if 'oneOf' in node:
                 node['anyOf'] = node.pop('oneOf')
-            if 'anyOf' in node:
-                node['anyOf'] = [variant for variant in node['anyOf']
-                                 if variant.get('$ref') != '#/$defs/RecoveryNode']
             if node.get('type') == 'object':
                 node['additionalProperties'] = False
                 node['required'] = list(node.get('properties', {}))

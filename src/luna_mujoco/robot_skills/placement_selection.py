@@ -5,7 +5,7 @@ from ..algorithms import AlgorithmError
 
 
 def rank_support_candidates(candidates, observation, target_id, *, footprint_offsets,
-                            floor_z_m, preference, desired_clearance_m):
+                            floor_z_m, preference, desired_clearance_m, occupancy_bounds=()):
     """Prefer separation from measured obstacles; never infer unobserved free space.
 
     Input candidates are already footprint-inset and ordered by arm reach. Observed
@@ -34,13 +34,17 @@ def rank_support_candidates(candidates, observation, target_id, *, footprint_off
         distance = np.maximum(np.maximum(cloud[:, :2].min(axis=0) - upper,
                                          lower - cloud[:, :2].max(axis=0)), 0.)
         gaps = np.minimum(gaps, np.linalg.norm(distance, axis=1))
+    for identifier, minimum, maximum in occupancy_bounds:
+        distance = np.maximum(np.maximum(np.asarray(minimum) - upper, lower - np.asarray(maximum)), 0.)
+        gaps = np.minimum(gaps, np.linalg.norm(distance, axis=1))
+        obstacle_ids.append(identifier)
     # Once the configured soft-clearance distance is reached, favor arm reach.
     # This avoids chasing the farthest table edge for an insignificant extra gap.
     order = (np.argsort(-np.minimum(gaps, desired_clearance_m), kind='stable')
              if preference == 'clearance' else np.arange(len(points)))
     evidence = {'preference': preference, 'observation_id': observation.get('observation_id'),
-        'source': 'measured_inventory_bounds_and_carried_footprint',
-        'desired_clearance_m': float(desired_clearance_m), 'obstacle_ids': obstacle_ids,
+        'source': 'measured_and_published_bounds_and_carried_footprint',
+        'desired_clearance_m': float(desired_clearance_m), 'obstacle_ids': sorted(set(obstacle_ids)),
         'missing_geometry_ids': sorted(missing), 'collision_proof': False,
         'unknown_space_is_free': False,
         'candidates': [{'position_world_xy_m': points[i].tolist(), 'reach_rank': int(i),

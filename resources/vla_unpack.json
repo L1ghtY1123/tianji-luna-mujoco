@@ -1,4 +1,11 @@
 {
+  "effect": {
+    "input": {"kind": "object", "color": "pink", "description": "pink wrapped workpiece"},
+    "output": {"kind": "object", "color": "black", "description": "separate black unpacked product on the measured work support"},
+    "identity": "distinct_output_instance",
+    "input_lifecycle": "consumed_only_after_visual_confirmation",
+    "confirmation": "New output appearance and disappearance of the bound input are separate visual facts; the action receipt alone confirms neither."
+  },
   "preparation_joints_deg": {
     "A": [-86, 76, 88, -90, 2, 14, -24],
     "B": [106, 61, -113, -78, 27, 36, 37]

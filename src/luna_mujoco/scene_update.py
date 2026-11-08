@@ -1,14 +1,18 @@
-"""Rigid reuse of one measured voxel layer; no hidden geometry or landing reconstruction."""
+"""Versioned updates to measured OBB, cuboid and registered CAD layers."""
 import hashlib
 import json
 from copy import deepcopy
-from dataclasses import replace
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
 from .geometry import rigid_matrix
 from .inventory_map import layer_entity, require_native_inventory_geometry
+
+SCENE_INVALIDATION_SOURCES = frozenset({
+    'mock_vla', 'verified_drop_action_bounds', 'drop_release_action_bounds',
+    'verified_release_action',
+})
 
 
 def transformed_pose(pose, transform):
@@ -19,20 +23,26 @@ def transformed_pose(pose, transform):
     return [*result[:3, 3].tolist(), *Rotation.from_matrix(result[:3, :3]).as_quat(scalar_first=True).tolist()]
 
 
-def transformed_points(points, transform):
-    values = np.asarray(points, dtype=float).reshape(-1, 3)
-    return (values @ transform[:3, :3].T + transform[:3, 3]).tolist()
-
-
 def prepare_scene_update(scene, grids, model, request):
+    if scene and request.get('operation') == 'container_entry' and request.get('generation') == scene.get('generation'):
+        existing = model.get('cuboid', {}).get('semantic_instance::' + request['target_id'], {})
+        record = scene.get('inventory_map', {}).get('entities', {}).get(request['target_id'], {})
+        if (existing.get('geometry_source') == 'container_occupancy'
+                and record.get('status') == 'retained' and record.get('entry_receipt_id') == request.get('receipt_id')
+                and existing.get('entry_receipt_id') == request.get('receipt_id')
+                and existing.get('release_binding_id') == request.get('binding_id')
+                and existing.get('container_id') == request.get('container_id')
+                and request.get('source') == 'operator_container_release_rule'
+                and request.get('exclusion_state') == 'released'):
+            return deepcopy(scene), list(grids), deepcopy(model)
     if not scene or any(request.get(key) != scene.get(key) for key in ('scene_token', 'generation')):
         raise ValueError('scene_update_stale')
     require_native_inventory_geometry(model)
     name = 'semantic_instance::' + request['target_id']
     operation = request.get('operation')
-    if operation not in {'transfer', 'select', 'invalidate', 'local_object'}:
+    if operation not in {'transfer', 'select', 'invalidate', 'local_object', 'container_entry'}:
         raise ValueError('scene_update_operation_invalid')
-    if not any(name in model.get(kind, {}) for kind in ('voxel', 'cuboid', 'mesh')) and operation not in {'invalidate', 'local_object'}:
+    if not any(name in model.get(kind, {}) for kind in ('cuboid', 'mesh')) and operation not in {'invalidate', 'local_object'}:
         raise ValueError('scene_update_target_layer_missing')
     policy = request.get('exclusion_state')
     if policy not in {'selected', 'released', 'observation'} or operation == 'transfer' and policy != 'released':
@@ -41,11 +51,29 @@ def prepare_scene_update(scene, grids, model, request):
     evidence = {'target_id': request['target_id'], 'operation': operation}
     if operation == 'local_object':
         raise ValueError('local_object_requires_registered_rgbd_mapping')
+    if operation == 'container_entry':
+        from .container_occupancy import occupancy_geometry
+
+        container = request.get('container_id')
+        record = scene.get('inventory_map', {}).get('entities', {}).get(container, {})
+        if (policy != 'released' or request.get('source') != 'operator_container_release_rule'
+                or record.get('status') not in {'observed', 'retained'}
+                or not request.get('after_capture_id')):
+            raise ValueError('container_occupancy_evidence_invalid')
+        layer = occupancy_geometry(model, scene, request['target_id'], container,
+                                   request.get('receipt_id'), request.get('binding_id'))
+        for layers in updated_model.values():
+            for layer_name in list(layers):
+                if layer_entity(layer_name) == request['target_id']:
+                    del layers[layer_name]
+        updated_grids = [grid for grid in grids if layer_entity(grid.name) != request['target_id']]
+        updated_model.setdefault('cuboid', {})[name] = layer
+        evidence.update(source=request['source'], container_id=container,
+                        entry_receipt_id=request['receipt_id'], measured=False,
+                        object_pose_measured=False, geometry_invalidated=False)
     if operation == 'invalidate':
         if (not request.get('action_id')
-                or request.get('source') not in {
-                    'mock_vla', 'verified_drop_action_bounds', 'drop_release_action_bounds',
-                    'verified_release_action'}):
+                or request.get('source') not in SCENE_INVALIDATION_SOURCES):
             raise ValueError('scene_invalidation_evidence_invalid')
         # The effect bounds are not a sensor measurement. Preserve the last
         # measured occupied map, but invalidate it before any further motion.
@@ -62,21 +90,6 @@ def prepare_scene_update(scene, grids, model, request):
             raise ValueError('scene_update_release_evidence_missing')
         transform = rigid_matrix(request['T_new_world_from_old_world'])
         found = False
-        for index, grid in enumerate(grids):
-            if grid.name not in target_names:
-                continue
-            pose = transformed_pose(grid.pose, transform)
-            updated_grids[index] = replace(grid, pose=pose, xyzr_tensor=None) \
-                if hasattr(grid, 'xyzr_tensor') else replace(grid, pose=pose)
-            found = True
-            metadata = updated_model['voxel'][grid.name]
-            if 'pose' in metadata:
-                metadata['pose'] = pose
-            if 'centers_base_m' in metadata:
-                metadata['centers_base_m'] = transformed_points(metadata['centers_base_m'], transform)
-            metadata.pop('surface_cell_bounds_world_m', None)
-            metadata.pop('surface_cell_bounds_source', None)
-            metadata['position_source'] = 'action_prediction'
         for kind in ('cuboid', 'mesh'):
             for layer_name in target_names:
                 metadata = updated_model.get(kind, {}).get(layer_name)
@@ -112,10 +125,14 @@ def prepare_scene_update(scene, grids, model, request):
                     layer.pop("maximum_world_m", None)
                     layer.update(status="unavailable", invalidation_reason="release_prediction_requires_fresh_bounds")
             identity["collision_layer_bounds"] = bounds
+    if operation == 'container_entry':
+        from .collision_mapping import collision_layer_bounds
+
+        identity['collision_layer_bounds'] = collision_layer_bounds(updated_grids, updated_model, identity)
     return identity, updated_grids, updated_model
 
 
-def updated_preview(preview, identity, request):
+def updated_preview(preview, identity, request, model=None):
     result = deepcopy(preview)
     if result is None:
         return None
@@ -131,11 +148,17 @@ def updated_preview(preview, identity, request):
                     row['status'] = 'stale'
     collision = result.get('collision_scene', {})
     collision['scene_token'] = identity['scene_token']
-    for layer in collision.get('voxel_layers', []):
-        layer['enabled'] = layer['name'] not in identity['disabled_obstacle_names']
-        if request['operation'] == 'transfer' and layer['name'] == 'semantic_instance::' + request['target_id']:
-            transform = rigid_matrix(request['T_new_world_from_old_world'])
-            layer.update(position_source='action_prediction', provenance='transformed_measured_voxels',
-                         pose_wxyz=transformed_pose(layer['pose_wxyz'], transform),
-                         surface_centers_world_m=transformed_points(layer['surface_centers_world_m'], transform))
+    if request['operation'] == 'container_entry' and model is not None:
+        from .collision_mapping import _geometry_metadata
+
+        name = 'semantic_instance::' + request['target_id']
+        layer = model['cuboid'][name]
+        collision.setdefault('mesh_layers', {}).pop(name, None)
+        collision['cuboid_layers'] = [row for row in collision.get('cuboid_layers', []) if row['name'] != name]
+        collision['cuboid_layers'].append({'name': name, 'enabled': True, 'role': 'semantic_instance',
+            **_geometry_metadata(layer), 'model': deepcopy(layer)})
+        collision['coverage'] = deepcopy(identity['coverage'])
+        if 'object_obbs' in result:
+            result['object_obbs']['mapped'] = [row for row in result['object_obbs']['mapped']
+                                               if row['instance_id'] != request['target_id']]
     return result

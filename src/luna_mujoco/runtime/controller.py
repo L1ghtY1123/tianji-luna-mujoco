@@ -9,7 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ..agent.decisions import ChoiceRequest, DecisionsJudgments, JudgmentRequest
+from ..agent.decisions import DecisionsJudgments
+from ..agent.inventory import InventoryRegistrar
 from ..agent.responses import ResponsesBudget, ResponsesCompiler
 from ..agent.schema import (
     Graph,
@@ -18,16 +19,12 @@ from ..agent.schema import (
     skill_catalog,
     validate_graph,
 )
-from ..agent.task_binding import (
-    bind_destination_choice,
-    destination_candidates,
-    destination_question,
-    target_membership_question,
-)
 from ..algorithms import AlgorithmError
+from ..compilation_memory import CompilationMemory
+from ..core.decisions import ChoiceRequest, GraphDecisionRequest, GraphDecisionResult, JudgmentRequest
 from ..core.placement import ResolvePlacementArguments
 from ..inventory_order import robot_distance_order
-from ..inventory_reference import bound_identity_coverage_source
+from ..inventory_reference import bound_identity_coverage_source, current_inventory_entities
 from ..perception import PerceptionError
 from ..placement import observed_object, public_observation
 from ..robot_skills.container_geometry import container_transport_region
@@ -37,15 +34,15 @@ from ..robot_skills.placement_zone import measured_object_region
 from ..robot_skills.unpack import VLAUnpack
 from ..runner import Runner, public_summary
 from ..skills import NoArguments
-from ..task_progress import current_table_measurements
 from ..visual_api import VisualAPI
-from ..visual_assistance import VisualCallBudget
 from ..vla_configuration import vla_unpack_configuration
-from .diagnostics import DiagnosticError, exception_details, failure_record, judgment_details
-from .execution_state import result_status
+from ..world_inventory import WorldInventory
+from .decision_inputs import destination_reference_evidence
+from .diagnostics import DiagnosticError, failure_record, judgment_details, skill_error_result
+from .execution_state import bind_failure_context, result_status
 from .inventory import PolicyTaskProgress
+from .memory import execution_snapshot
 from .native_graph import NativeGraphExecutor
-from .parameters import GraspArguments, apply_grasp_parameters
 from .placement import (
     candidate_capture_rejection,
     capture_candidate_view,
@@ -53,7 +50,6 @@ from .placement import (
     perceive_for_controller,
     resolve_xy_then_z,
 )
-from .placement_retry import placement_attempt, placement_retry_block, record_placement_failure
 from .support import support_context, support_memory
 
 
@@ -66,6 +62,11 @@ class DestinationArguments(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     destination_id: str
     destination_kind: Literal['support_region', 'container']
+    release_mode: Literal['surface_setdown', 'container_release'] = Field(description=(
+        'Choose surface_setdown for gentle placement near a support, including a container floor. '
+        'Choose container_release only when the task permits dropping into an open container from '
+        'just above its rim. This semantic choice is bound before grasp screening; numerical height '
+        'comes from operator configuration. Never use container_release for a support_region.'))
     placement_mode: Literal['free_region', 'configured_xy'] = Field(default='free_region', description=(
         'Use configured_xy when the user names the workbench designated/set/configured area: '
         'use its configured XY exactly, with no XY search. Use free_region for an ordinary '
@@ -80,6 +81,13 @@ class DestinationArguments(BaseModel):
         'All placements preserve the full measured grasp rotation. No automatic tilt or yaw search.'))
 
 
+    @model_validator(mode='after')
+    def coherent_release_mode(self):
+        if self.release_mode == 'container_release' and self.destination_kind != 'container':
+            raise ValueError('container_release_requires_container')
+        return self
+
+
 class ArmArguments(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     arm: Literal['auto', 'A', 'B'] = 'auto'
@@ -89,11 +97,19 @@ class PrepareUnpackArguments(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
 
 
+class VerifyPlaceArguments(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    release_mode: Literal['bound', 'surface_setdown', 'container_release'] = Field(default='bound', description=(
+        'Declare the same mode as identify_destination and the executed transfer. surface_setdown '
+        'requires current mapping before later movement. Ordinary container_release can publish '
+        'operator-authorized contents occupancy. bound resolves an existing direct caller binding.'))
+
+
 class ObserveArguments(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     capture_mode: Literal['reuse_current', 'fresh'] = Field(default='reuse_current', description=(
         'Use the latest three-camera capture when its action/scene/command versions and measured '
-        'arm/gripper feedback still match. Both modes reuse unchanged evidence; age alone and a '
+        'arm/gripper feedback still match. fresh always acquires a new capture. With reuse_current, age alone and a '
         'failed decision do not force another capture. A changed viewpoint or scene requires acquisition. '
         'An identical failed analysis is not repeated. Reuse preserves the original observation ID/time.'))
 
@@ -102,7 +118,7 @@ class ObservationMotionArguments(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     viewpoint: Literal['configured', 'wrist_tilt_positive', 'wrist_tilt_negative'] = Field(
         default='configured', description=(
-            'configured returns to the operator observation pose and can satisfy the requested post-delivery '
+            'configured returns to the operator observation pose and can satisfy the required final '
             'return. The two wrist_tilt alternatives offset both sixth joints by +12 or -12 degrees from '
             'that pose to obtain different wrist-camera views. They are movement proposals, not certified '
             'visible viewpoints; current-map cuRobo planning and execution checks are mandatory. '
@@ -117,6 +133,7 @@ class BuildSceneArguments(BaseModel):
         'Local CAD/OBB object IDs to refresh. Declared table IDs may accompany these objects; '
         'measured table cuboids use the separate support input and are always included. '
         'A nonempty local selection must contain at least one CAD/OBB object. '
+        'An empty list with scope=local uses the currently selected target_id. '
         'Global uses an empty list. Region names and marker IDs are not collision entities.'))
     exclusion_state: Literal['selected', 'observation'] = 'selected'
 
@@ -133,16 +150,17 @@ class PolicyController(RobotOperations):
     """The composition root owns model calls; skills receive only bound state."""
 
     def __init__(self, *args, compiler=None, judgments=None, known_assets=None,
-                 environment_assumptions=None, **kwargs):
+                 environment_assumptions=None, world_inventory=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.environment_assumptions = copy.deepcopy(environment_assumptions or {})
         schemas = {'identify_target': TargetArguments, 'identify_destination': DestinationArguments,
                    'choose_arm': ArmArguments, 'build_scene': BuildSceneArguments,
                    'prepare_unpack': PrepareUnpackArguments, 'observe_scene': ObserveArguments,
+                   'verify_place': VerifyPlaceArguments,
                    'move_to_observe': ObservationMotionArguments,
-                   'generate_grasps': GraspArguments, 'resolve_placement': ResolvePlacementArguments}
-        names = ('move_to_observe', 'return_to_initial_pose', 'observe_scene', 'confirm_inventory', 'identify_target', 'identify_destination',
-                 'choose_arm', 'build_scene', 'generate_grasps', 'plan_grasp', 'execute_grasp',
+                   'resolve_placement': ResolvePlacementArguments}
+        names = ('move_to_observe', 'return_to_initial_pose', 'observe_scene', 'select_target', 'identify_target', 'identify_destination',
+                 'choose_arm', 'build_scene', 'generate_grasps', 'plan_grasp', 'execute_grasp', 'recover_failed_grasp',
                  'verify_grasp', 'perceive_placement_zone', 'resolve_placement',
                  'plan_place', 'execute_place', 'verify_place', 'prepare_unpack',
                  'vla_unpack', 'verify_unpack',
@@ -150,13 +168,18 @@ class PolicyController(RobotOperations):
         for name in names:
             self.registry.register(name, schemas.get(name, NoArguments), partial(self._dispatch, name))
         config = VisualAPI.from_environment()
+        self.judgments = judgments or DecisionsJudgments(api_key=config.api_key, timeout_s=config.timeout_s)
+        self.world_inventory = world_inventory or WorldInventory(self.data_dir.parent / 'world-inventory.sqlite3')
+        self.world_namespace = self.simulation.world_id
+        self.inventory_registrar = InventoryRegistrar(self.world_inventory, self.judgments)
+        self.algorithms.perception.visual_inventory.register_instance = self.inventory_registrar.register_observed
         self.compiler = compiler or ResponsesCompiler(api_key=config.api_key,
             budget=ResponsesBudget(),
-            timeout_s=float(os.environ.get('LUNA_RESPONSES_TIMEOUT_S', '180')),
+            compilation_memory=CompilationMemory(self.data_dir / 'compilation-memory.sqlite3'),
+            timeout_s=float(os.environ.get('LUNA_RESPONSES_TIMEOUT_S', '600')),
             registry=self.registry, known_assets=known_assets, configured_regions={DESTINATION_ID: {
                 'description': 'configured unmarked work area on the measured main table',
                 'region': self.region}})
-        self.judgments = judgments or DecisionsJudgments(api_key=config.api_key, timeout_s=config.timeout_s)
         self.unpack_effect = VLAUnpack(self.simulation)
         self.task_spec = None
         self.active_object_task = None
@@ -237,6 +260,8 @@ class PolicyController(RobotOperations):
             raise DiagnosticError('initial_reference_capture_invalidated', {
                 'component': 'observation_provenance', 'observation_id': identifier,
                 'reason': reason, 'scope': 'first_analysis_of_compilation_reference'})
+        if mode == 'fresh':
+            reason = 'model_requested_fresh_capture'
         result = await self.capture_observation(context, capture=capture if reason is None else None)
         context.pop('fine_capture', None)
         product_capture = context.get('unpacked_grasp_capture')
@@ -257,21 +282,17 @@ class PolicyController(RobotOperations):
         return result
 
     async def _step(self, name, context, arguments=None):
-        from ..agent.completion import has_confirmed_delivery, required_observation_return
         from ..robot_skills.return_pose import observation_motion_scene_ready
 
         self.check_generation()
         self.check_log()
-        self.state['facts']['observation_motion_scene_ready'] = observation_motion_scene_ready(context)
-        previous = getattr(getattr(self, 'graph_executor', None), 'last_result', None) or {}
+        self.state['facts']['observation_motion_scene_ready'] = observation_motion_scene_ready(
+            context, collision=self.spatial_memory.collision_snapshot())
         if name == 'move_to_observe':
             configured = (arguments or {}).get('viewpoint', 'configured') == 'configured'
-            required_return = configured and (context.pop('pending_required_return', False)
-                or required_observation_return(self.environment_assumptions.get('completion_requirements', {}),
-                                               previous.get('reason')))
-            visibility_motion = context.pop('pending_visibility_motion', False)
-            if not required_return and (not configured or visibility_motion
-                    or previous.get('status') in {'failure', 'unknown'}):
+            # The authored recovery may return to the configured observation pose
+            # without another semantic permission check. Physical prerequisites remain.
+            if not configured:
                 await self._require_visibility_recovery(context)
         self.begin_step(name)
         if self.state.get('partial_execution_failure'):
@@ -288,12 +309,19 @@ class PolicyController(RobotOperations):
         except (Exception, asyncio.CancelledError) as error:
             for fact in effects:
                 self.state['facts'][fact] = False
-            self._record_partial_execution_failure(context, {
-                'status': 'failure', 'success': False,
-                'reason': getattr(error, 'code', None) or str(error) or type(error).__name__})
+            for fact, value in self.registry.contracts[name].failure_effects.items():
+                if value is None:
+                    self.state['facts'].pop(fact, None)
+                else:
+                    self.state['facts'][fact] = value
+            failure = skill_error_result(error, self.state, arguments or {})
+            self._record_partial_execution_failure(context, failure)
+            if self.task_progress is not None:
+                self._persist_inventory(context, name, failure)
             raise
         finally:
-            self.state['facts']['observation_motion_scene_ready'] = observation_motion_scene_ready(context)
+            self.state['facts']['observation_motion_scene_ready'] = observation_motion_scene_ready(
+                context, collision=self.spatial_memory.collision_snapshot())
             if self.registry.contracts[name].invalidates_observation:
                 # A new raw result photograph is not an ID-associated inventory
                 # observation. Successful provides below may explicitly restore it.
@@ -303,40 +331,123 @@ class PolicyController(RobotOperations):
         status = result_status(result)
         for fact in effects:
             self.state['facts'][fact] = status == 'success'
-        # Persist history only after the observation skill and all of its checks
-        # succeeded and its declared observed effect has been applied.
-        if (status == 'success' and 'observed' in effects
-                and self.environment_assumptions.get('completion_requirements', {}).get('after_each_object')):
-            feedback = self.simulation.robot_snapshot()
-            if self.is_observation_pose(context, feedback):
-                delivered = set(self.task_progress.completed_input_ids())
-                for identifier in (self.task_inventory or {}).get('selected_ids', []):
-                    current = identifier
-                    while self.task_progress.records.get(current, {}).get('output_entity_id'):
-                        current = self.task_progress.records[current]['output_entity_id']
-                    record = self.task_progress.records.get(current, {})
-                    if has_confirmed_delivery(record):
-                        delivered.add(identifier)
-                for identifier in sorted(delivered):
-                    self._record_post_delivery_observation(context, identifier)
-        if status != 'success':
+        if status in {'failure', 'unknown'}:
+            for fact, value in self.registry.contracts[name].failure_effects.items():
+                if value is None:
+                    self.state['facts'].pop(fact, None)
+                else:
+                    self.state['facts'][fact] = value
             self._record_partial_execution_failure(context, result)
         elif (self.registry.contracts[name].requires.get('recovery_needed') is True
               and not self.state['facts'].get('recovery_needed')):
             self.state.pop('partial_execution_failure', None)
         self.emit('skill_complete', name, {'result': result, 'duration_s': time.monotonic() - started})
         if self.task_progress is not None:
+            if name != 'observe_scene' or status != 'success':
+                self._persist_inventory(context, name, result)
             self.sync_inventory(context)
             if name.startswith('verify_') or name == 'observe_scene':
                 calls = [event for event in self.events if event['kind'] == 'visual_decisions_call'
                          and event.get('invocation_id') == self.state['current_step']['invocation_id']]
-                self.emit('inventory_snapshot', '当前物体清单', {
+                self.emit('inventory_snapshot', '时间记忆数据库快照', {
                     'checkpoint': name, 'task_progress': self.state['task_progress'],
+                    'temporal_memory': self.object_memory.snapshot(),
                     'model_event_ids': [event['id'] for event in calls],
-                    'evidence_source': 'gripper_feedback' if name == 'verify_grasp' else 'visual_checkpoint'})
+                    'evidence_source': result.get('container_entry', {}).get('source') or (
+                        'robot_feedback' if name == 'verify_grasp' else 'visual_checkpoint')})
         return result
 
+    def record_object_operation(self, context, operation):
+        """Commit at the physical checkpoint, before any later stage can fail."""
+        proposed = copy.deepcopy(self.object_memory)
+        proposed.record_operation(operation)
+        from ..memory_contracts import ObjectRecord
+
+        record = ObjectRecord.model_validate(proposed.entities()[operation.entity_id])
+        self.world_inventory.record(operation.entity_id, operation.event_key, operation.kind,
+            record.model_dump(mode='json', exclude={'id'}), operation.evidence)
+        self.object_memory = proposed
+        if self.task_progress is not None:
+            self.sync_inventory(context)
+
+    def record_object_observation(self, context, observation):
+        """Persist accepted measurements before exposing either memory's new version."""
+        from .memory import geometry_update, merge_geometry_measurements, observation_update
+
+        capture = context['latest_capture']
+        if any(observation.get(key) != capture.get(key) for key in ('observation_id', 'generation')):
+            raise ValueError('observation_commit_capture_mismatch')
+        proposed_memory = copy.deepcopy(self.object_memory)
+        proposed_memory.observe(observation_update(observation, proposed_memory.entities()))
+        proposed_geometry = merge_geometry_measurements(self.geometry_measurements, geometry_update(observation))
+        self._persist_inventory({**context, 'observation': observation}, 'observe_scene',
+            {'status': 'success'}, source_memory=proposed_memory)
+        if proposed_geometry != self.geometry_measurements:
+            self.spatial_memory.invalidate([])
+        self.geometry_measurements = proposed_geometry
+
+    def _persist_inventory(self, context, skill, result, *, source_memory=None):
+        """Record dated evidence without deciding graph control or task completion."""
+        import numpy as np
+
+        from ..visual_inventory import mask_box
+
+        source_memory = self.object_memory if source_memory is None else source_memory
+        memory = source_memory.entities()
+        observation = context.get('observation', {})
+        capture = context.get('latest_capture', {})
+        operation_observation_id = ((result.get('container_entry') or result.get('visual_evidence', {})).get('observation_id')
+            if skill == 'verify_place' else None) or observation.get('observation_id')
+        observed = skill == 'observe_scene' and result_status(result) == 'success'
+        identifiers = {key for key, entity in memory.items() if entity['status'] == 'active'} if observed else {
+            self.state.get('target_id'), result.get('selected_id'), result.get('input_entity_id'), result.get('output_entity_id')}
+        if skill == 'select_target':
+            identifiers = {result.get('selected_id')}
+        if observed:
+            self.world_inventory.store_capture(capture)
+            self.world_inventory.store_instance_masks(capture, observation)
+        proposed_memory = copy.deepcopy(source_memory)
+        events = []
+        for identifier in identifiers & memory.keys():
+            entity = proposed_memory.entities()[identifier]
+            if observed:
+                masks = [(int(np.count_nonzero(mask)), camera, mask)
+                    for camera, view in observation.get('views', {}).items()
+                    if (mask := view.get('instance_masks', {}).get(identifier)) is not None and np.any(mask)]
+                if masks:
+                    _, camera, mask = max(masks, key=lambda row: row[0])
+                    entity.update(reference_observation_id=observation['observation_id'],
+                        reference_camera_id=camera, bbox=mask_box(mask), identity_source='openai_decisions',
+                        identity_request_hash=observation['visual_inventory']['evidence']['request_hash'])
+            from ..memory_contracts import ObjectOperation, ObjectRecord
+            proposed_memory.update(ObjectRecord.model_validate(entity))
+            event = self.run_id + ':' + self.state['current_step']['invocation_id']
+            if observed:
+                event += ':observation'
+            evidence = {
+                'run_id': self.run_id, 'observation_id': operation_observation_id,
+                'status': result_status(result), 'reason': result.get('reason'),
+                'step': copy.deepcopy(self.state['current_step'])}
+            from .memory import release_memory_changes
+
+            memory_result = result
+            if skill == 'verify_place' and context.get('container_entry_receipt'):
+                memory_result = {**result, 'container_entry': context['container_entry_receipt']}
+            changes = (release_memory_changes(entity, context.get('release_execution_evidence', {}),
+                context.get('release_verification_attempt', {}), memory_result) if skill == 'verify_place' else {})
+            operation = ObjectOperation(
+                entity_id=identifier, event_key=event, kind=skill,
+                observation_id=operation_observation_id, evidence=evidence,
+                **changes)
+            proposed_memory.record_operation(operation)
+            current = ObjectRecord.model_validate(proposed_memory.entities()[identifier]).model_dump(mode='json')
+            events.append((identifier, operation.event_key, operation.kind,
+                           {key: value for key, value in current.items() if key != 'id'}, operation.evidence))
+        self.world_inventory.record_many(events)
+        self.object_memory = proposed_memory
+
     async def _bootstrap(self, context):
+        self.inventory_registrar.world_key = self.world_namespace + ':' + str(self.state['generation'])
         self.compiler.scene_context['grasp_parameter_defaults'] = {
             key: context['planning_settings'][key] for key in
             ('grasp_insertion_m', 'grasp_maximum_tilt_deg', 'grasp_require_away_from_robot')}
@@ -359,53 +470,73 @@ class PolicyController(RobotOperations):
         self.state['facts']['observation_pose_ready'] = at_observation_pose
         self.compiler.initial_facts = {
             **getattr(self.compiler, 'initial_facts', {}), 'observation_pose_ready': at_observation_pose,
-            'at_initial_pose': True}
+            'collision_map_initialized': self.spatial_memory.initialized, 'at_initial_pose': True}
         self.record_observation(capture, 'initial')
         audit, done = self.visual_audit_sink()
         self.compiler.audit = audit
         try:
-            proposal = await self.call_algorithm(self.compiler.discover, capture,
-                                                 instruction=self.state['instruction'])
+            self.compiler.memory_reference = self.inventory_registrar.reference()
+            plan = await self.call_algorithm(self.compiler.compile, capture, instruction=self.state['instruction'])
+            if not plan.task.supported:
+                raise ValueError('task_capability_missing:' + plan.task.reason)
+            proposal_observations = await self.call_algorithm(
+                self.algorithms.perception.prepare_proposal_observations,
+                capture, [entity.model_dump(mode='json') for entity in plan.entities])
+            self.inventory_registrar.audit = audit
+            registration = await self.call_algorithm(self.inventory_registrar.bind_proposals,
+                plan.entities, capture, instruction=self.state['instruction'],
+                proposal_observations=proposal_observations)
+            from .compiled_task import bind_compiled_task
+            proposal = bind_compiled_task(plan, registration, self.inventory_registrar.entities())
         finally:
             done.set()
         self.task_spec = TaskSpec.model_validate(proposal['task_spec'])
-        if not self.task_spec.supported:
-            raise ValueError('task_capability_missing:' + self.task_spec.reason)
         self.task_inventory = copy.deepcopy(proposal['task_inventory'])
         self.policy_graph = Graph.model_validate(proposal['policy_graph'])
         self.object_tasks = object_task_specs(self.policy_graph)
         self.active_object_task = None
         validate_graph(self.policy_graph, self.registry)
-        reference = copy.deepcopy(proposal['reference'])
+        from ..object_memory import restored_object_record
+        stored = self.world_inventory.entities(world_key=self.inventory_registrar.world_key)
+        self.object_memory.restore(tuple(restored_object_record(entity) for entity in stored))
+        self.object_memory.restore(tuple(restored_object_record(entity) for entity in proposal['entities'].values()))
+        reference = {**self.world_inventory.reference(self.object_memory.entities()),
+            'observation_id': capture['observation_id'], 'generation': capture.get('generation'),
+            'views': {camera: {'rgb': view['rgb']} for camera, view in capture['views'].items()},
+            'unresolved_proposals': copy.deepcopy(proposal['unresolved_proposals']),
+            'inventory_state': self.object_memory.snapshot()}
         reference['owner_id'] = self.run_id
+        reference['identity_references'].update(registration.get('identity_references', {}))
         from ..observation_labels import responses_reference_labels
 
         self.record_annotation(capture, responses_reference_labels(capture, reference))
         context.update(initial_capture=capture, latest_capture=capture, fine_capture=capture,
                        visual_inventory_reference=reference)
-        self.task_progress.initialize_scene_inventory({'objects': [], 'scene_entities': proposal['entities'],
-                                                       'observation_id': capture['observation_id']})
+        self.object_memory.observation_id = capture['observation_id']
+        self.task_progress.register_entities(self.object_memory.entities(),
+            {key: row.get('visual_membership', 'unknown') for key, row in proposal['entities'].items()})
+        self.task_progress.configure_task(self.task_spec, [], object_tasks=self.object_tasks)
         self.state.update(task_spec=self.task_spec.model_dump(mode='json'),
                           policy_graph=self.policy_graph.model_dump(mode='json'))
         self.emit('skill_catalog', '本次 graph 使用的 skills 契约', {'skills': skill_catalog(self.registry)})
-        self.emit('skill_program', 'Responses 初始 graph', self.state['policy_graph'])
-        diagnostics = proposal.get('evidence', {}).get('graph_preflight_diagnostics', [])
-        if diagnostics:
-            self.emit('policy_preflight_diagnostics', '初始 graph 中需运行时恢复的前提缺口', {'diagnostics': diagnostics})
+        self.emit('skill_program', 'Responses 已校验执行 graph', self.state['policy_graph'])
 
     async def observe(self, context, *, checkpoint=None, capture=None, camera_ids=None,
                       purpose=None, recovery=False):
-        if self.task_spec is None:
-            raise ValueError('task_compilation_required_before_observation_skill')
         checkpoint = checkpoint or 'initial'
         capture = await self.capture_observation(context, capture=capture, recovery=recovery)
         from ..robot_skills.placement_resolution import digest
-        from .recovery_evidence import observation_inputs
+        from .memory import perception_motion_context
+        from .observation_inputs import observation_inputs, observation_identity_scope
+
+        context['association_scope'] = observation_identity_scope(
+            self.object_memory, self.spatial_memory, self.task_progress, self.task_spec,
+            target_id=self.state.get('target_id'))
 
         def analysis_key():
-            inputs = observation_inputs(context, self.state['facts'])
-            inputs['physical_facts'].pop('recovery_needed', None)
-            return digest({'capture_id': capture['observation_id'], 'checkpoint': checkpoint, 'inputs': inputs})
+            inputs = observation_inputs(context)
+            return digest({'capture_id': capture['observation_id'], 'checkpoint': checkpoint, 'inputs': inputs,
+                'cad_motion_context': perception_motion_context(self.object_memory, self.spatial_memory)})
 
         key = analysis_key()
         previous = context.get('_observation_analysis', {})
@@ -418,7 +549,6 @@ class PolicyController(RobotOperations):
                 self.emit('observation_analysis_reused', '复用未变化的场景观测结果',
                     {'observation_id': capture['observation_id'], 'action_epoch': self.observation_epoch})
                 return context['observation']
-        context['visual_plan'] = {checkpoint: 'verify_transfer' if checkpoint == 'post_place' else 'associate_inventory'}
         try:
             observation = await Runner.observe(self, context, checkpoint=checkpoint, capture=capture,
                 camera_ids=['1', '2', '3'], purpose='geometry', recovery=recovery)
@@ -426,7 +556,6 @@ class PolicyController(RobotOperations):
             if any(word in str(error) for word in ('unknown', 'uncertain', 'identity_unresolved')):
                 context['_observation_analysis'] = {'key': analysis_key(), 'failure': str(error)}
             raise
-        observation['task_inventory'] = self.task_inventory
         # A configured work area is an explicit prior, not a visually invented marker.
         for identifier in self.compiler.configured_regions:
             configuration = self.compiler.configured_regions[identifier]
@@ -434,70 +563,103 @@ class PolicyController(RobotOperations):
                 identifier=identifier, support_id=self.task_inventory.get('support_id'))
             observation['objects'] = [obj for obj in observation['objects'] if obj['id'] != identifier]
             observation['objects'].append(region)
-            self.task_progress.scene_entities[identifier] = copy.deepcopy(region)
+            self.planning_regions[identifier] = copy.deepcopy(region)
         context.update(observation=observation, inventory_observation=copy.deepcopy(observation))
+        self.sync_inventory(context)
         context['_observation_analysis'] = {'key': analysis_key()}
         return observation
 
     async def _refresh_observed_support(self, context, identifier):
-        entities = self.task_progress.scene_entities
+        entities = self.object_memory.entities()
         entity = entities.get(identifier, {})
         previous = entity.get('observed_support')
         capture = context['latest_capture']
-        source_id = entity.get('current_region') or entity.get('initial_parent_id')
-        source_missing = (entities.get(source_id, {}).get('kind') == 'bin'
-                          and not any(obj['id'] == source_id for obj in context.get('observation', {}).get('objects', [])))
-        if (previous is None and source_id and not source_missing) or (isinstance(previous, dict)
+        record = self.task_progress.records.get(identifier, {})
+        if (isinstance(previous, dict)
                 and previous.get('observation_id') == capture['observation_id']
-                and previous.get('source') == 'openai_decisions' and previous.get('request_hash')):
+                and previous.get('source') == 'openai_decisions' and previous.get('request_hash')
+                and previous.get('support_entity_id')):
             return
         candidates = {key: {field: value[field] for field in ('id', 'kind', 'color', 'description') if field in value}
                       for key, value in entities.items() if value.get('kind') in {'table', 'bin'}}
         if not candidates:
             raise ValueError('observed_support_candidates_missing')
         measured = support_context(capture, context.get('observation', {}), entity, candidates)
-        measured['support_memory'] = support_memory(entity, self.task_progress.records.get(identifier, {}),
-            getattr(self.task_progress, 'attempts', {}).get(identifier, 0))
-        requests = [JudgmentRequest(name='support_' + str(index), instructions=(
-            'The CURRENT direct support or containing receptacle of the ' + entity.get('color', '') + ' '
-            + entity.get('kind', 'object') + ' (ID ' + identifier + ') is the '
-            + support.get('color', '') + ' ' + support['kind'] + ' (ID ' + key + '). '
-            'Assess the current relationship from CURRENT RGB, measured geometry and dated verified '
-            'support_memory. A previously verified location remains useful when partially occluded; '
-            'do not discard it only because a later camera view is incomplete. Check recorded transfers, '
-            'attempts and contradictory current evidence before retaining a relation. Reference labels '
-            'and requested destinations alone are not facts. For an object inside a box on a table, '
-            'the box is the direct container, not the table underneath. Use ordinary resting-object '
-            'support from the spatial relationship; seeing the exact contact pixels or hidden box floor '
-            'is not required. This asks which support contains/carries the object, not whether its pose '
-            'or contact force was measured exactly. Judge only this support relation, independently '
-            'of CAD retrieval, task completion and whether a future grasp is feasible. Keep uncertain '
-            'when the combined evidence is insufficient or contradictory. This answer does not select '
-            'a recovery action; a separate visibility assessment determines whether another view is needed.'))
-            for index, (key, support) in enumerate(candidates.items())]
+        measured['support_memory'] = support_memory(entity)
+        proposal = entity.get('current_identity_proposal', {})
+        # A dated relation can focus a CURRENT question without establishing its answer.
+        remembered = measured['support_memory'].get('previous_support_assessment') or {}
+        if (proposal.get('observation_id') == capture['observation_id']
+                and proposal.get('parent_id') in candidates):
+            proposed_support = proposal['parent_id']
+            hypothesis_source = proposal
+        elif remembered.get('support_entity_id') in candidates:
+            proposed_support = remembered['support_entity_id']
+            hypothesis_source = remembered
+        else:
+            proposed_support = proposal.get('parent_id')
+            hypothesis_source = proposal
+        if proposed_support in candidates:
+            measured['support_hypothesis'] = {'support_entity_id': proposed_support,
+                'source': hypothesis_source.get('source'),
+                'observation_id': hypothesis_source.get('observation_id'),
+                'role': 'Dated hypothesis to check in CURRENT images, not an accepted current relation. '
+                        'If CURRENT evidence shows a different support, answer no to this hypothesis.'}
+        from ..agent.support import support_question
+        requests = [support_question(entity, candidates, proposed_support)]
         # Dated verified relations are memory, while old free-text descriptions
         # and requested destinations are not current support evidence.
         reference = copy.deepcopy(context.get('visual_inventory_reference', {}))
         reference.setdefault('entities', {identifier: measured['subject'], **measured['support_candidates']})
-        for record in reference['entities'].values():
-            record.pop('description', None)
-            record.pop('initial_parent_id', None)
+        for reference_entity in reference['entities'].values():
+            reference_entity.pop('description', None)
+            reference_entity.pop('initial_parent_id', None)
         result = await self._judge(context, requests, extra=measured, include_task=False, reference=reference)
-        judgments = [result['judgments'][request.name] for request in requests]
-        accepted = [index for index, decision in enumerate(judgments) if decision['status'] == 'yes']
-        if len(accepted) != 1 or any(decision['status'] != 'no' for index, decision in enumerate(judgments)
-                                     if index not in accepted):
-            raise DiagnosticError('observed_support_unknown', judgment_details(result, requests))
-        index = accepted[0]
-        proof = {'support_entity_id': list(candidates)[index], 'observation_id': capture['observation_id'],
+        judgment = result['judgments']['current_support']
+        if proposed_support in candidates and judgment['status'] == 'no':
+            # A false hypothesis rules out that support, not all other supports.
+            # Ask one different selection question; never retry this predicate until yes.
+            remaining = {key: value for key, value in candidates.items() if key != proposed_support}
+            measured['rejected_support_hypothesis'] = {
+                'support_entity_id': proposed_support, 'observation_id': capture['observation_id'],
+                'request_hash': result['evidence']['request_hash'], 'probability': judgment.get('probability')}
+            measured.pop('support_hypothesis', None)
+            measured['support_candidates'] = {key: value for key, value in measured['support_candidates'].items()
+                                              if key in remaining}
+            proposed_support = None
+            requests = [support_question(entity, remaining)]
+            result = await self._judge(context, requests, extra=measured, include_task=False, reference=reference)
+            judgment = result['judgments']['current_support']
+        if proposed_support in candidates:
+            support_id = proposed_support if judgment['status'] == 'yes' else None
+            score = {'probability': judgment.get('probability')}
+        else:
+            support_id = judgment.get('value') if judgment['status'] == 'known' else None
+            score = {'confidence': judgment.get('confidence')}
+        if support_id not in candidates:
+            rejected = judgment['status'] == 'no' or judgment.get('value') == 'none_of_listed'
+            raise DiagnosticError('observed_support_rejected' if rejected else 'observed_support_unknown',
+                                  judgment_details(result, requests))
+        proof = {'support_entity_id': support_id, 'observation_id': capture['observation_id'],
                  'generation': capture.get('generation'), 'source': 'openai_decisions',
                  'request_hash': result['evidence']['request_hash'],
                  'assessment_basis': 'current_evidence_and_verified_memory',
                  'support_memory': copy.deepcopy(measured['support_memory']),
-                 'confidence': judgments[index]['probability'], 'judgments': copy.deepcopy(result['judgments'])}
-        entity['observed_support'] = copy.deepcopy(proof)
+                 **score, 'judgments': copy.deepcopy(result['judgments'])}
+        from ..memory_contracts import ObjectOperation
+
+        self.record_object_operation(context, ObjectOperation(entity_id=identifier,
+            event_key=self.run_id + ':' + self.state['current_step']['invocation_id'] + ':support',
+            kind='observed_support', observation_id=capture['observation_id'],
+            observed_support=copy.deepcopy(proof), evidence=copy.deepcopy(proof)))
         if identifier in self.task_progress.records:
             self.task_progress.records[identifier]['observed_support'] = copy.deepcopy(proof)
+            if not record.get('transfers') and not record.get('input_entity_id'):
+                initial = record.setdefault('initial_source', {})
+                initial.update(measurement_observation_id=capture['observation_id'],
+                    task_source_evidence={**copy.deepcopy(proof), 'status': 'yes',
+                        'target_id': identifier, 'source_id': support_id,
+                        'source_kind': entities[support_id]['kind']})
         self.task_progress.ledger_revision += 1
         for snapshot in (context.get('observation', {}), context.get('inventory_observation', {})):
             if snapshot.get('observation_id') != capture['observation_id']:
@@ -509,65 +671,194 @@ class PolicyController(RobotOperations):
         self.emit('observed_support_refreshed', 'Decisions 确认当前支撑关系', {'target_id': identifier, **proof})
 
     def sync_inventory(self, context):
-        inventory = self.task_progress.inventory_state()
+        inventory = self.object_memory.snapshot()
+        self.task_inventory['selected_ids'] = list(self.task_progress.input_ids)
         self.state['task_inventory'] = copy.deepcopy(self.task_inventory)
-        self.state['task_progress'] = self.task_progress.snapshot()
+        self.state['task_progress'] = execution_snapshot(
+            self.task_progress, self.object_memory, self.geometry_measurements, self.planning_regions)
         reference = context.get('visual_inventory_reference')
         if reference is not None:
-            reference['task_inventory'] = copy.deepcopy(self.task_inventory)
             reference['inventory_state'] = inventory
-            reference['entities'] = {key: copy.deepcopy(value) for key, value in inventory['entities'].items()
-                                     if key not in inventory['retired_entity_ids']}
-
-    def _required_visible_ids(self, observation):
-        current = {item['id'] for item in observation['objects']
-                   if item.get('kind') not in {'table', 'marker'}}
-        if not self.task_progress.inventory_finalized:
-            return set(self.task_inventory['source_object_ids']) | current
-        # Established IDs survive partial views. Only newly consumed measurements
-        # need current identity proof; missing geometry remains in the map ledger.
-        return current
-
-    def _require_visible_inventory(self, observation):
-        # Missing background coverage belongs to the collision guard, not task identity.
-        required = self._required_visible_ids(observation)
-        visible = {obj['id'] for obj in observation['objects']}
-        missing = required - visible
-        if missing:
-            raise DiagnosticError('task_target_geometry_unknown:' + ','.join(sorted(missing)), {
-                'component': 'perception_geometry', 'observation_id': observation['observation_id'],
-                'diagnostic_checks': [{'name': 'required_visible_ids', 'actual': sorted(visible),
-                                       'expected': sorted(required), 'missing': sorted(missing)}],
-                'unknowns': ['缺少几何不等于 SAM3 低分；需要检查对应相机的查询、身份关联和有效深度记录。']})
+            reference['entities'] = current_inventory_entities(reference)
+            reference['identity_references'] = self.world_inventory.reference(reference['entities'])['identity_references']
 
     def _check_source_view(self, observation):
-        # Any calibrated camera may support a target. Full-space coverage is checked separately.
-        self._require_visible_inventory(observation)
-        self._validate_inventory_evidence(observation)
+        """Validate only the identities attached to current measured geometry."""
+        visual = observation.get('visual_inventory', {})
+        coverage = visual.get('identity_coverage', {})
+        evidence = visual.get('evidence', {})
+        measured = {item['id'] for item in observation['objects']
+                    if item.get('kind') not in {'table', 'marker'}}
+        threshold = coverage.get('minimum_confidence')
+        if (not bound_identity_coverage_source(observation)
+                or coverage.get('observation_id') != observation['observation_id']
+                or not coverage.get('request_hash')
+                or coverage['request_hash'] != evidence.get('request_hash')
+                or type(threshold) not in (int, float) or not .8 <= threshold <= 1.
+                or not measured.issubset(coverage.get('accepted_entity_ids', []))):
+            raise DiagnosticError('source_inventory_unknown', {
+                'component': 'current_identity_evidence',
+                'observation_id': observation['observation_id'],
+                'identity_coverage': copy.deepcopy(coverage),
+                'measured_entity_ids': sorted(measured)})
+
+    async def _classify_task_inputs(self, context):
+        """Ask only for newly observed instances whose task membership is unresolved."""
+        observation = context['observation']
+        unresolved = []
+        for obj in observation['objects']:
+            identifier = obj['id']
+            record = self.task_progress.records.get(identifier)
+            if record is None or self.task_progress.membership.get(identifier) != 'unknown':
+                continue
+            if self.task_spec.scope == 'ids':
+                self.task_progress.membership[identifier] = (
+                    'required' if identifier in self.task_spec.target_refs else 'excluded')
+                continue
+            cached = record.get('task_membership_evidence', {})
+            if cached.get('observation_id') != observation['observation_id']:
+                result = await self._judge(context, [JudgmentRequest(name='input_matches_task',
+                    instructions='The current identified physical instance subject.id is an eligible input '
+                    'requested by task, including its input description and source restriction. '
+                    'Judge present task membership only. Use current appearance, source relation and '
+                    'recorded processing history. Task completion and future feasibility are separate.')],
+                    extra={'verification_scope': 'input_membership',
+                           'subject_history': {key: value for key, value in self.object_memory.entities()[identifier].items()
+                               if key in {'id', 'observed_support', 'processing_history', 'input_entity_id',
+                                          'output_entity_id', 'creation_evidence', 'transfers', 'last_position_measurement'}},
+                           'subject': {key: copy.deepcopy(obj[key]) for key in
+                               ('id', 'kind', 'color', 'position', 'measured_relationships') if key in obj}})
+                answer = result['judgments']['input_matches_task']
+                cached = {'observation_id': observation['observation_id'], 'answer': copy.deepcopy(answer),
+                          'request_hash': result['evidence']['request_hash']}
+                record['task_membership_evidence'] = cached
+            status = cached['answer']['status']
+            self.task_progress.membership[identifier] = (
+                'required' if status == 'yes' else 'excluded' if status == 'no' else 'unknown')
+            if status == 'unknown':
+                unresolved.append({'entity_id': identifier, **copy.deepcopy(cached)})
+        return unresolved
+
+    async def _select_target(self, context):
+        observation = context['observation']
+        completed = self.task_progress.completed_input_ids()
+        pending = set(self.task_progress.input_ids) - completed
+        if pending:
+            return {'status': 'failure', 'success': False, 'reason': 'selected_input_unfinished',
+                    'input_ids': sorted(pending)}
+        pose_facts = {key: self.state['facts'].get(key, False)
+                      for key in ('observation_pose_ready', 'grasp_view_ready')}
+        self.reset_transfer(context)
+        self.state['facts'].update(pose_facts)
+        if self.task_spec.quantity is not None and len(completed) >= self.task_spec.quantity:
+            return {'status': 'empty', 'success': False, 'reason': 'requested_quantity_selected'}
+        unresolved_membership = await self._classify_task_inputs(context)
+        candidates = [obj for obj in observation['objects']
+            if self.task_progress.membership.get(obj['id']) == 'required'
+            and obj['id'] not in completed
+            and not self.task_progress.records.get(obj['id'], {}).get('input_entity_id')
+            and self.task_progress.records.get(obj['id'], {}).get('status') not in {'consumed', 'completed', 'deferred'}
+            and (self.task_spec.scope != 'ids' or obj['id'] in self.task_spec.target_refs)]
+        if self.task_spec.selection_order == 'nearest':
+            ordered = robot_distance_order(candidates)
+            by_id = {obj['id']: obj for obj in candidates}
+            candidates = [by_id[row['id']] for row in ordered]
+        elif self.task_spec.scope == 'ids':
+            ranks = {identifier: index for index, identifier in enumerate(self.task_spec.target_refs)}
+            candidates.sort(key=lambda obj: ranks[obj['id']])
+        if candidates:
+            selected, evidence = candidates[0], []
+            if len(candidates) > 1 and self.task_spec.selection_order == 'explicit' and self.task_spec.scope != 'ids':
+                measured = {obj['id']: obj for obj in public_observation(observation)['objects']}
+                # Keep every eligible candidate in consideration within the single-question choice limit.
+                for offset in range(0, len(candidates), 62):
+                    batch = candidates[offset:offset + 62]
+                    if offset:
+                        batch = [selected, *batch]
+                    options = {obj['id']: obj for obj in batch}
+                    requests = [ChoiceRequest(name='next_input', selection_mode='proposal',
+                        choices=(*options, 'unknown'), instructions=(
+                            'Choose the next eligible input to handle from selection_candidates. Honor the user task '
+                            'and any stated ordering. Otherwise prefer an exposed grasping surface, less occlusion '
+                            'and more clearance from neighbors or container walls in CURRENT RGB and measured geometry. '
+                            'Compare candidate positions with the supplied support/container region polygons. '
+                            'For otherwise similar inputs, favor room for the gripper around the object. '
+                            'Use the permanent ID labels to identify candidates. The array order has no priority. '
+                            'This is an operation proposal. Numerical grasp, collision and trajectory checks follow. '
+                            'Choose unknown when the required ordering or candidate binding cannot be resolved.'))]
+                    judgment = await self._judge(context, requests, extra={
+                        'verification_scope': 'next_input_selection',
+                        'selection_support_geometry': [obj for obj in measured.values()
+                                                       if obj.get('kind') in {'bin', 'table'}],
+                        'selection_candidates': [measured[identifier] for identifier in options]})
+                    identifier = judgment['judgments']['next_input'].get('value')
+                    if identifier not in options:
+                        return {'status': 'unknown', 'success': False, 'reason': 'target_selection_unknown',
+                                'details': judgment_details(judgment, requests)}
+                    selected = options[identifier]
+                    evidence.append({'request_hash': judgment['evidence']['request_hash'],
+                                     'choice': copy.deepcopy(judgment['judgments']['next_input'])})
+            return {'status': 'success', 'success': True, 'selected_id': selected['id'],
+                    'observation_id': observation['observation_id'], 'selection_evidence': evidence}
+        unresolved = observation.get('visual_inventory', {}).get('unassociated_candidates', [])
+        details = {'unassociated_candidates': copy.deepcopy(unresolved),
+                   'unresolved_membership': unresolved_membership}
+        missing_requested = set(self.task_spec.target_refs) - completed if self.task_spec.scope == 'ids' else set()
+        if missing_requested:
+            return {'status': 'unknown', 'success': False, 'reason': 'target_identity_unresolved',
+                    'details': {**details, 'missing_entity_ids': sorted(missing_requested)}}
+        if self.task_spec.scope == 'all':
+            from ..agent.completion import source_presence_request
+
+            requests = [source_presence_request()]
+            presence = await self._judge(context, requests, extra={'verification_scope': 'task_completion'})
+            context['source_presence_evidence'] = {
+                'observation_id': observation['observation_id'], 'epoch': self.observation_epoch,
+                'result': copy.deepcopy(presence)}
+            answer = presence['judgments']['source_has_remaining_input']['status']
+            if answer != 'no':
+                return {'status': 'unknown', 'success': False,
+                    'reason': 'remaining_input_unlocalized' if answer == 'yes' else 'source_inventory_unknown',
+                    'details': {**details, **judgment_details(presence, requests)}}
+            return {'status': 'empty', 'success': False, 'reason': 'source_confirmed_empty',
+                    'observation_id': observation['observation_id'], 'source_presence': presence}
+        return {'status': 'empty', 'success': False, 'reason': 'no_current_eligible_input',
+                'observation_id': observation['observation_id'], 'details': details}
 
     async def build_scene(self, context, exclusion_state):
         # Only a verified transformation can retire an input identity.
         if self.task_progress is None:
             return await super().build_scene(context, exclusion_state)
-        retired = self.task_progress.inventory_state()['retired_entity_ids']
-        metadata = context.setdefault('mapping_lifecycle', {})
-        metadata['retired_entity_ids'] = retired
-        metadata['required_entity_ids'] = [identifier
-            for identifier, record in self.task_progress.scene_entities.items()
-            if identifier not in retired and record.get('kind') not in {'table', 'marker'}]
+        retired = self.object_memory.snapshot()['retired_entity_ids']
+        self.spatial_memory.require_entities(self._collision_entity_ids(context), retired)
         return await super().build_scene(context, exclusion_state)
+
+    def _collision_entity_ids(self, context):
+        """Collect measured, retained and action-affected collision bodies."""
+        entities = self.object_memory.entities()
+        identifiers = {obj['id'] for obj in context.get('observation', {}).get('objects', [])}
+        identifiers.update((self.spatial_memory.scene or {}).get('inventory_map', {}).get('entities', {}))
+        identifiers.update(self.spatial_memory.lifecycle().get('invalidated_entity_ids', []))
+        identifiers.update((self.state.get('target_id'), self.state.get('destination_id')))
+        return {identifier for identifier in identifiers if identifier in entities
+                and entities[identifier].get('kind') not in {'table', 'marker'}}
 
     async def _mapping_strategy(self, context, arguments):
         request = BuildSceneArguments.model_validate(arguments)
-        inventory = self.task_progress.scene_entities
-        retired = set(self.task_progress.inventory_state()['retired_entity_ids'])
+        inventory = self.object_memory.entities()
+        retired = set(self.object_memory.snapshot()['retired_entity_ids'])
         known = {key: value for key, value in inventory.items()
                  if key not in retired and value.get('kind') not in {'marker', 'table'}}
         tables = {key for key, value in inventory.items()
                   if key not in retired and value.get('kind') == 'table'}
         observed_ids = {item['id'] for item in context['observation']['objects']}
-        if set(request.entity_ids) - set(known) - tables:
-            raise ValueError('mapping_entity_not_in_inventory')
+        unavailable = set(request.entity_ids) - set(known) - tables
+        if unavailable:
+            raise DiagnosticError('mapping_entity_not_in_inventory', {
+                'requested_entity_ids': request.entity_ids,
+                'unavailable_entity_ids': sorted(unavailable),
+                'retired_entity_ids': sorted(unavailable & retired),
+                'target_id': self.state.get('target_id')})
         # Table cuboids are already carried by the measured support input; the
         # per-instance layer selector addresses only CAD/OBB objects. Preserve
         # the declared support choice in the audit reason, never as an object mask.
@@ -576,15 +867,23 @@ class PolicyController(RobotOperations):
         if request.scope == 'local' and selected_tables and not entities:
             raise ValueError('local_mapping_requires_object_entities')
         scope, source = request.scope, self.state.get('active_policy_node', {}).get('author', 'responses')
+        if scope == 'decide' and not self.spatial_memory.initialized:
+            # Before a base exists, global is the sole permitted scope.
+            scope, source = 'global', 'sole_permitted_scope'
+        if scope == 'local' and not entities:
+            target = self.state.get('target_id')
+            if target not in known:
+                raise DiagnosticError('mapping_entity_not_in_inventory', {
+                    'target_id': target, 'reason': 'local_mapping_requires_current_target_or_explicit_entities'})
+            entities = [target]
         decision = None
-        if scope == 'decide' or (scope == 'local' and not entities):
-            previous_scene = context.get('scene') or {}
+        if scope == 'decide':
+            previous_scene = self.spatial_memory.scene or {}
             retained_map_available = bool(previous_scene.get('scene_token'))
             mapped_inventory = previous_scene.get('inventory_map', {})
             layer_records = mapped_inventory.get('entities')
-            lifecycle = context.get('mapping_lifecycle', {})
-            required_ids = sorted((set(known) | set(mapped_inventory.get('required_entity_ids', []))
-                                   | set(lifecycle.get('required_entity_ids', []))) - retired)
+            lifecycle = self.spatial_memory.lifecycle()
+            required_ids = sorted(self._collision_entity_ids(context) - retired)
             local_candidates = sorted(set(known) & observed_ids)
             layer_state = {}
             for identifier in required_ids:
@@ -604,7 +903,7 @@ class PolicyController(RobotOperations):
                     'proves_workspace_coverage': False},
                 'local': {'update_candidate_ids': local_candidates,
                     'effect': 'Create or update only model-selected currently observed entities; retain other existing layers. '
-                              'Unselected missing or stale required layers remain unresolved, including on the first map.',
+                              'Unselected missing or stale required layers remain unresolved. Requires an initialized global base.',
                     'proves_workspace_coverage': False}}
             requests = []
             if scope == 'decide':
@@ -616,13 +915,11 @@ class PolicyController(RobotOperations):
                                   'Use required_collision_entity_ids, entity_layer_state and scope_effects. Global creates '
                                   'or updates all currently observed inventory; it does not mean all space is visible. '
                                   'Local creates or updates a selected subset while retaining other existing layers; '
-                                  'unselected required missing/stale layers remain unresolved. Either scope may be chosen '
-                                  'for the first map when justified. Neither choice proves safe motion. Choose unknown '
+                                  'unselected required missing/stale layers remain unresolved. The initial global base '
+                                  'has already been published. Neither choice proves safe motion. Choose unknown '
                                   'when the strategy cannot be justified. Consider the task objects, source, destination, '
-                                  'current observation extent and changed geometry. Head/wrist cameras need not see '
-                                  'the back of the shoulder or every surface of their own tools; absence of a whole-tool '
-                                  'free-ray certificate is a coverage limitation, not proof that task geometry is missing '
-                                  'or that a collision occurred. Do not infer unseen geometry.')))
+                                  'current observation extent and changed geometry. This selects inventory geometry updates, '
+                                  'not robot visibility or motion feasibility. Do not infer unseen geometry.')))
             names = {f'update_entity_{index}': key
                      for index, key in enumerate(local_candidates)} if not entities else {}
             requests.extend(JudgmentRequest(name=name, instructions=(
@@ -634,7 +931,7 @@ class PolicyController(RobotOperations):
                 'may need no update. Updating does not prove movement or authorize clearing old surfaces. '
                 'Unseen does not mean absent or safe; keep uncertain evidence uncertain.'))
                 for name, identifier in names.items())
-            decision = await self._judge(context, requests, extra={'mapping_evidence': {
+            decision = await self._judge(context, requests, extra={'verification_scope': 'mapping_update', 'mapping_evidence': {
                 'requested_scope': scope, 'observation': public_observation(context['observation']),
                 'previous_observation': public_observation(context.get('scene_observation')),
                 'inventory_entities': {key: {field: value[field] for field in (
@@ -670,291 +967,12 @@ class PolicyController(RobotOperations):
         reason = request.reason.strip()
         if not reason:
             reason = ('Decisions mapping choice; request_hash=' + decision['evidence']['request_hash']
-                      if decision is not None else 'Explicit scope in ' + source + '-authored graph node')
+                      if decision is not None else 'Initial global base required; local scope is not yet permitted'
+                      if source == 'sole_permitted_scope' else 'Explicit scope in ' + source + '-authored graph node')
         if selected_tables:
             reason += '; declared support cuboids use measured table input: ' + ','.join(selected_tables)
         return {'requested_scope': scope, 'scope_reason': reason,
                 'mapping_entity_ids': entities if scope == 'local' else [], 'strategy_source': source}
-
-    def _validate_inventory_evidence(self, observation):
-        visual = observation.get('visual_inventory', {})
-        coverage = visual.get('identity_coverage', {})
-        evidence = visual.get('evidence', {})
-        required = self._required_visible_ids(observation)
-        threshold = coverage.get('minimum_confidence')
-        check = observation.get('demo_inventory_check', {})
-        confidence = check.get('confidence')
-        if (not bound_identity_coverage_source(observation)
-                or coverage.get('observation_id') != observation['observation_id']
-                or not coverage.get('request_hash')
-                or coverage['request_hash'] != evidence.get('request_hash')
-                or type(threshold) not in (int, float) or not .8 <= threshold <= 1.
-                or not required.issubset(coverage.get('accepted_entity_ids', []))
-                or check.get('source') != 'openai_decisions'
-                or check.get('observation_id') != observation['observation_id']
-                or check.get('request_hash') != coverage['request_hash']
-                or type(confidence) not in (int, float) or not 0. <= confidence <= 1.
-                or check.get('status') not in {'none', 'not_requested', 'unknown'}
-                or check.get('status') != 'unknown' and confidence < .8):
-            raise DiagnosticError(
-                'unlisted_source_object' if check.get('status') in {'extra', 'unlisted'}
-                else 'source_inventory_unknown', {
-                    **copy.deepcopy(evidence), 'component': 'inventory_evidence_validation',
-                    'observation_id': observation['observation_id'],
-                    'diagnostic_checks': [
-                        {'name': 'identity_coverage', 'actual': copy.deepcopy(coverage),
-                         'expected': {'source': 'openai_decisions or bound mixed_decisions_measured_container',
-                                      'minimum_confidence': .8,
-                                      'accepted_entity_ids_include': sorted(required),
-                                      'observation_id': observation['observation_id'],
-                                      'request_hash': evidence.get('request_hash')}},
-                        {'name': 'source_inventory_check', 'actual': copy.deepcopy(check),
-                         'expected': 'current matching observation/hash; none/not_requested with confidence >= .8, '
-                                     'or unknown with pending closure'}]})
-        # Enumeration uncertainty does not negate separately confirmed identities.
-        # Retain it as unknown; only fresh final source evidence can close an all task.
-        self.state['visible_inventory_resolution'] = copy.deepcopy(check)
-
-    async def _confirm_task_binding(self, context, task_spec=None, target_ids=None):
-        """Confirm proposed task roles with current Decisions evidence before any motion."""
-        if task_spec is None and self.object_tasks:
-            proofs = {}
-            for identifier, item_task in self.object_tasks.items():
-                proofs[identifier] = await self._confirm_task_binding(context, item_task, [identifier])
-            if self.task_spec.scope == 'all':
-                proofs['aggregate'] = await self._confirm_task_binding(context, self.task_spec)
-            self.state['object_task_binding_evidence'] = proofs
-            return {'success': True, 'object_tasks': proofs}
-        task_spec = task_spec or self.task_spec
-        targets = list(target_ids if target_ids is not None else self.task_inventory['source_object_ids'])
-        current_entities = {obj['id']: {
-            **{key: copy.deepcopy(obj[key]) for key in (
-                'id', 'kind', 'color', 'description', 'coverage', 'position',
-                'visible_centroid_world', 'source', 'position_source', 'observation_provenance') if key in obj},
-            'entity_type': ('configured_region' if obj['id'] in self.compiler.configured_regions
-                            else 'observed_entity')}
-            for obj in context['observation']['objects']}
-        for identifier, measured in current_table_measurements(context['observation']).items():
-            current_entities[identifier] = {**current_entities.get(identifier, {}), **measured}
-        from ..task_binding_images import current_instance_locations
-
-        locations = current_instance_locations(context['observation'])
-        choices = destination_candidates(list(current_entities.values()), locations)
-        observed_destination = (task_spec.destination_ref is not None
-                                and task_spec.destination_ref not in self.compiler.configured_regions)
-        requests = []
-        required = []
-        if task_spec.source_ref is not None:
-            source = context['observation'].get('scene_entities', {}).get(task_spec.source_ref, {})
-            description = json.dumps({key: source[key] for key in ('kind', 'color', 'description')
-                                      if key in source}, ensure_ascii=False)
-            requests.append(JudgmentRequest(name='source_identity', instructions=(
-                'Is entity ' + task_spec.source_ref + ' (' + description + ') the ORIGINAL supporting surface, '
-                'containing receptacle or source region from which input objects ' + json.dumps(targets)
-                + ' matching ' + repr(task_spec.target_selector) + ' are to be taken in the original instruction? '
-                'Source means the support/container/region, NOT the input material or the object to be moved. '
-                'An input object cannot be its own source. For an object inside a box, assess the box as '
-                'the source, not the contents or the table under that box. '
-                'Check only this origin relationship in CURRENT RGB; do not judge final delivery, processing or CAD. '
-                'Use reference boxes to locate the proposed entity; labels, descriptions and a measured plane '
-                'alone do not establish the visual answer. Do not judge metric containment or whole-surface visibility.')))
-            required.append('source_identity')
-        configured_bindings = {}
-        for role, identifier in (('destination', task_spec.destination_ref),
-                                 ('work_area', task_spec.work_area_ref)):
-            if identifier is None:
-                continue
-            if identifier in self.compiler.configured_regions:
-                region = observed_object(context['observation'], identifier)
-                support = region.get('placement_reference', {})
-                if support.get('source') != 'configured_xy_measured_support':
-                    raise ValueError('configured_region_requires_measured_support:' + identifier)
-                support_id = self.task_inventory.get('support_id') or support['support_entity_id']
-                name = role + '_support_visible'
-                configured_bindings[identifier] = {
-                    'source': 'operator_configuration_and_measured_support', 'support_entity_id': support_id,
-                    'observation_id': context['observation']['observation_id'],
-                    'placement_reference': copy.deepcopy(support)}
-                support_entity = context['observation'].get('scene_entities', {}).get(support_id, {})
-                color = support_entity.get('color')
-                surface = ((color + ' ') if color and color != 'unknown' else '') + 'tabletop'
-                description = support_entity.get('description', 'supporting surface')
-                instructions = (
-                    f'Is any part of the {surface} ({support_id}, {description}) '
-                    'visible in at least one CURRENT RGB camera? A visible part of its supporting surface is sufficient. '
-                    'This question is only surface visibility. The configured coordinate region does not need a visible '
-                    'marker or boundary. Do not judge the region position, free placement space, robot reach or task completion.')
-            else:
-                name = role + '_identity'
-                entity = context['observation'].get('scene_entities', {}).get(identifier, {})
-                description = json.dumps({key: entity[key] for key in ('kind', 'color', 'description')
-                                          if key in entity}, ensure_ascii=False)
-                instructions = ('For the active object described by context.object_task.target_selector, '
-                    'does its requested ' + role + ' refer to visible entity ' + identifier
-                    + ' (' + description + ')? Use context.object_task.' + role + '_ref and instruction '
-                    'with the current RGB and identity reference. Different objects may have different destinations. '
-                    'The question is ' + role + ' identity, not whether the object is already placed or the motion is safe. '
-                    'Do not require an empty surface or whole-surface visibility.')
-            if role != 'destination' or identifier in self.compiler.configured_regions:
-                requests.append(JudgmentRequest(name=name, instructions=instructions))
-                required.append(name)
-            if role == 'destination':
-                destination_type = ('configured_region' if identifier in self.compiler.configured_regions
-                                    else 'observed_entity')
-                if destination_type == 'observed_entity':
-                    destination_request = destination_question(
-                        self.task_spec.instruction, task_spec.target_selector, choices,
-                        processing=task_spec.processing)
-                else:
-                    destination_instructions = (
-                        'Original user instruction: ' + json.dumps(self.task_spec.instruction, ensure_ascii=False)
-                        + '. For object IDs ' + json.dumps(targets) + ' matching '
-                        + repr(task_spec.target_selector) + ', is destination ' + identifier
-                        + ' the support, container or configured region that instruction requests? '
-                        'Compare current RGB, identity references and current_entities with measured_location_rule, '
-                        'including distinctions such as left/right. '
-                        + 'This is a configured region; require authorization in the original instruction or '
-                           'required processing. An unspecified free table area does not authorize a processing region. '
-                        + 'Judge destination selection only. The proposal in object_task is not user authorization. '
-                        'The unchanged task still constrains free space, subregion, relative position and pose '
-                        'within this destination; perceive_placement_zone and resolve_placement check these before execution.')
-                    destination_request = JudgmentRequest(
-                        name='destination_requirement_matches', instructions=destination_instructions)
-                requests.append(destination_request)
-                required.append('destination_requirement_matches')
-        for index, identifier in enumerate(targets):
-            name = 'target_' + str(index)
-            requests.append(target_membership_question(name, identifier, task_spec.target_selector,
-                self.task_spec.instruction, processing=task_spec.processing))
-            required.append(name)
-        if task_spec.scope == 'all':
-            requests.append(JudgmentRequest(name='source_complete', instructions=(
-                'Is the current source scope sufficiently visible to confirm that the supplied candidate IDs '
-                'include every independently distinguishable object matching the original target_selector? '
-                'Additional matching objects or unresolved occluded relevant areas prevent a yes. '
-                'Do not treat the proposed inventory size as evidence that the source is complete.')))
-        if not requests:
-            raise ValueError('task_binding_has_no_verifiable_roles')
-        result = await self._judge(context, requests, extra={
-            'candidate_ids': targets, 'configured_regions': self.compiler.configured_regions,
-            'object_task': task_spec.model_dump(mode='json'),
-            'proposed_task_binding': {
-                'status': 'proposed_not_yet_confirmed',
-                'original_instruction': self.task_spec.model_dump(mode='json').get('instruction'),
-                'target_ids': targets, 'destination_id': task_spec.destination_ref,
-                'destination_type': ('configured_region'
-                    if task_spec.destination_ref in self.compiler.configured_regions else 'observed_entity')
-                    if task_spec.destination_ref is not None else None},
-            'measured_location_rule': (
-                'Positions are metres in robot world: +X is forward, +Y is robot LEFT, -Y is robot RIGHT, '
-                '+Z is up. Camera image left/right depends on viewpoint and is not generally robot left/right; '
-                'respect any perspective explicitly named in the original instruction. visible_centroid_world '
-                'is the measured visible surface centroid, not the full object centre or a free placement. '
-                'Use observation_provenance to distinguish current and historical measurements. '
-                'Configured region positions are supplied coordinates, not observed physical markers. '
-                'Locations help interpret the requested side; they do not alone prove identity or safety.'
-                ' Default task convention: unqualified left/right mean ROBOT/world left/right, '
-                'not the left/right edge of a camera image. An explicitly named camera/image/user '
-                'viewpoint in the instruction overrides this default. For robot-relative side, '
-                'use the current measured world Y of the already identity-associated entity; '
-                'camera images still establish which physical object each ID denotes.'),
-            'configured_bindings': configured_bindings,
-            'current_entities': list(current_entities.values()),
-            'current_instance_locations': locations,
-            **({'destination_candidates': choices} if observed_destination else {})})
-        if observed_destination:
-            bind_destination_choice(result, choices, task_spec.destination_ref)
-        if all(result['judgments'][name]['status'] == 'yes' for name in required):
-            from ..robot_skills.placement_resolution import digest
-
-            result['confirmed_task_scope'] = {
-                'owner_id': self.run_id, 'generation': context['observation']['generation'],
-                'task_sha256': digest(task_spec.model_dump(mode='json')), 'input_ids': targets,
-                'destination_ref': task_spec.destination_ref,
-                'request_hash': result['evidence'].get('request_hash')}
-        context['task_binding_evidence'] = copy.deepcopy(result)
-        self.state['task_binding_evidence'] = copy.deepcopy(result)
-        self.emit('task_binding', 'Decisions 确认任务对象与区域', result)
-        judgments = result['judgments']
-        for index, identifier in enumerate(targets):
-            self.task_progress.records[identifier]['task_membership_evidence'] = {
-                **judgments['target_' + str(index)], **result['evidence']}
-        if 'source_complete' in judgments:
-            self.task_inventory['source_scope_evidence'] = copy.deepcopy(result)
-            self.state['source_inventory_resolution'] = {
-                'status': 'confirmed' if judgments['source_complete']['status'] == 'yes' else 'unknown',
-                'responses_status': task_spec.source_inventory_complete,
-                'scope': 'task_source_scope', 'accepted_ids': targets,
-                'evidence': copy.deepcopy(result['evidence'])}
-        for name in required:
-            if judgments[name]['status'] != 'yes':
-                raise DiagnosticError('task_binding_unconfirmed:' + name,
-                    judgment_details(result, requests, failed_names=[name]))
-        source = self.task_progress.scene_entities.get(task_spec.source_ref)
-        if source is not None and source.get('kind'):
-            # Tables and configured regions can live in the scene inventory
-            # rather than the per-object grasp geometry list. Their identity
-            # has just been confirmed by Decisions; this grants no clearance.
-            for identifier in targets:
-                initial = self.task_progress.records[identifier].setdefault('initial_source', {})
-                initial['measurement_observation_id'] = context['observation']['observation_id']
-                initial['task_source_evidence'] = {
-                    **copy.deepcopy(result['evidence']), 'status': 'yes', 'target_id': identifier,
-                    'source_id': source['id'], 'source_kind': source['kind']}
-        return result
-
-    def _bind_inventory(self, context):
-        task, observation = self.task_inventory, context['observation']
-        self._require_visible_inventory(observation)
-        self._validate_inventory_evidence(observation)
-        targets = list(task['source_object_ids'])
-        ordered = []
-        if self.task_spec.selection_order == 'nearest':
-            if self.state['visible_inventory_resolution']['status'] == 'unknown':
-                raise DiagnosticError('inventory_order_unconfirmed', {
-                    'component': 'inventory_evidence_validation', 'stage': 'bind_inventory',
-                    'observation_id': observation['observation_id'],
-                    'diagnostic_checks': [{'name': 'selection_order', 'actual': 'nearest',
-                        'expected': 'complete source enumeration before global nearest selection'},
-                        {'name': 'source_inventory_check',
-                         'actual': copy.deepcopy(self.state['visible_inventory_resolution'])}],
-                    'known_facts': ['目标身份已独立确认，但当前来源枚举仍为 unknown。'],
-                    'unknowns': ['未确认是否还有遗漏的匹配物体，因此不能证明已选物体是全局最近者。'],
-                    'requested_order': self.task_spec.selection_order})
-            ordered = robot_distance_order([observed_object(observation, identifier) for identifier in targets])
-            targets = [row['id'] for row in ordered]
-        if self.task_spec.quantity is not None:
-            if len(targets) < self.task_spec.quantity:
-                raise ValueError('requested_count_exceeds_confirmed_inventory')
-            targets = targets[:self.task_spec.quantity]
-        if not targets or len(targets) != len(set(targets)):
-            raise ValueError('invalid_target_inventory')
-        task['selected_ids'] = targets
-        task['execution_order'] = {'source': ('measured_rgbd_centroids' if ordered else 'confirmed_inventory_order'),
-                                  'selection_order': self.task_spec.selection_order, 'selected_ids': targets,
-                                  'candidates': ordered, 'observation_id': observation['observation_id']}
-        self.emit('target_execution_order', '按任务约束确定执行顺序', task['execution_order'])
-        self.task_progress.requested_count = self.task_spec.quantity
-        for identifier, record in self.task_progress.records.items():
-            # Visual selector membership and the requested count are separate facts.
-            # A matched candidate outside the selected count remains a scene obstacle.
-            record['candidate_membership'] = record.get('visual_membership', 'unknown')
-            if identifier in task['source_object_ids']:
-                record['visual_membership'] = 'required' if identifier in targets else 'excluded'
-        self.task_progress.assess_membership({identifier: 'required' if identifier in targets else 'excluded'
-                                             for identifier in self.task_progress.records})
-        self.task_progress.freeze_inventory(observation)
-        for rank, identifier in enumerate(targets, 1):
-            self.task_progress.records[identifier]['execution_rank'] = rank
-        self.task_progress.configure_task(self.task_spec, targets, object_tasks=self.object_tasks)
-        self.sync_inventory(context)
-        self.state['facts'].update(inventory_finalized=True, task_assessed=True)
-        self.state['task_inventory'] = copy.deepcopy(task)
-        context['visual_inventory_reference']['task_inventory'] = copy.deepcopy(task)
-        self.emit('inventory_snapshot', '固定任务物体清单', {'checkpoint': 'bind_inventory',
-                  'task_progress': self.task_progress.snapshot(), 'model_event_ids': [],
-                  'evidence_source': 'decisions_task_binding'})
-        return self.task_progress.snapshot()
 
     def _bind_region(self, observation):
         identifier = self.state.get('destination_id') or self.task_inventory.get('destination_id')
@@ -965,9 +983,10 @@ class PolicyController(RobotOperations):
             observation['objects'] = [obj for obj in observation['objects'] if obj['id'] != identifier]
             observation['objects'].append(destination)
             observation.setdefault('scene_entities', {})[identifier] = copy.deepcopy(destination)
-            self.task_progress.scene_entities[identifier] = copy.deepcopy(destination)
+            self.planning_regions[identifier] = copy.deepcopy(destination)
             self.task_progress.bind_shared_work_area(destination, observation)
-            request = self.task_progress.placement_requests[(self.task_progress.transfer_index(), identifier)]
+            request = self.task_progress.placement_requests[(self.task_progress.current_id, self.task_progress.transfer_index(), identifier)]
+            request['release_mode'] = self.task_progress.records[self.task_progress.current_id]['release_mode']
             request['source'] = destination['source']
             request['free_placement'] = True
             request['placement_preference'] = self.task_progress.records[self.task_progress.current_id].get(
@@ -975,8 +994,9 @@ class PolicyController(RobotOperations):
             return self.task_progress.placement_request(identifier)
         destination = observed_object(observation, identifier)
         self.task_progress.bind_shared_work_area(destination, observation)
-        key = (self.task_progress.transfer_index(), identifier)
+        key = (self.task_progress.current_id, self.task_progress.transfer_index(), identifier)
         request = self.task_progress.placement_requests[key]
+        request['release_mode'] = self.task_progress.records[self.task_progress.current_id]['release_mode']
         reference = destination['placement_reference']
         request['free_placement'] = not (reference.get('precise_xy') or reference.get('fixed_xy'))
         request.pop('fixed_xy', None)
@@ -1031,16 +1051,10 @@ class PolicyController(RobotOperations):
             identifier = arguments['target_id']
             record = self.task_progress.records.get(identifier, {})
             root = record.get('root_input_id', identifier)
-            if self.active_object_task is None or root != self.active_object_task.target_refs[0]:
+            if self.active_object_task is not None and root != self.active_object_task.target_refs[0]:
                 raise ValueError('target_outside_active_object_task:' + identifier)
-        if skill == 'confirm_inventory':
-            if self.task_progress.inventory_finalized:
-                return {'success': True, 'inventory': self.task_progress.snapshot(),
-                        'confirmation_reused': True, 'scope': 'immutable_initial_task_selection',
-                        'current_scene_reverified': False}
-            await self._confirm_task_binding(context)
-            snapshot = self._bind_inventory(context)
-            return {'success': True, 'inventory': snapshot}
+        if skill == 'select_target':
+            return await self._select_target(context)
         if skill == 'verify_task_completion':
             await self._complete(context)
             self.state['status'] = 'running'
@@ -1055,7 +1069,8 @@ class PolicyController(RobotOperations):
             strategy = await self._mapping_strategy(context, arguments)
             if strategy.get('status') == 'unknown':
                 return strategy
-            context.setdefault('mapping_lifecycle', {}).update(strategy)
+            from ..memory_contracts import CollisionUpdate
+            self.spatial_memory.request_update(CollisionUpdate.model_validate(strategy))
             self.state['mapping_strategy'] = copy.deepcopy(strategy)
             if mapping.exclusion_state == 'observation':
                 self.state['facts'].update(scene_ready=False, views_ready=False)
@@ -1064,13 +1079,13 @@ class PolicyController(RobotOperations):
             if context.get('holding') or self.state.get('partial_execution_failure'):
                 raise ValueError('target_change_requires_verified_release')
             previous = self.task_progress.records.get(self.state.get('target_id'), {})
-            if self.state['facts'].get('grasp_completed') and not previous.get('confirmed_observation_id'):
+            if (self.state['facts'].get('grasp_completed') and not previous.get('confirmed_observation_id')
+                    and not previous.get('container_entry')):
                 raise ValueError('target_change_requires_verified_release')
             pose_facts = {key: self.state['facts'].get(key, False)
                           for key in ('observation_pose_ready', 'grasp_view_ready')}
             self.reset_transfer(context)
             self.state['facts'].update(pose_facts)
-            self.state['facts']['task_assessed'] = True
         if skill == 'identify_target':
             await self._refresh_observed_support(context, arguments['target_id'])
         if skill == 'vla_unpack':
@@ -1089,9 +1104,11 @@ class PolicyController(RobotOperations):
             self.state['facts'].update(plan_ready=False, grasps_ready=False)
             for key in ('plan', 'plan_binding', 'plan_observation_id', 'grasps', 'grasps_observation_id'):
                 context.pop(key, None)
-            choice = apply_grasp_parameters(context, GraspArguments.model_validate(arguments))
-            self.emit('skill_parameters_selected', '本次抓取的模型参数与配置来源', {
-                **choice, 'target_id': self.state['target_id'], 'arm': self.state['arm']})
+            self.emit('skill_configuration', '本次抓取使用工作台配置', {
+                'source': 'operator_configuration',
+                'parameters': {key: context['planning_settings'][key] for key in (
+                    'grasp_insertion_m', 'grasp_maximum_tilt_deg', 'grasp_require_away_from_robot')},
+                'target_id': self.state['target_id'], 'arm': self.state['arm']})
             observation = context['observation']
             destination = observed_object(observation, self.state['destination_id'])
             if destination['kind'] == 'bin':
@@ -1100,8 +1117,9 @@ class PolicyController(RobotOperations):
                     raise ValueError('current_target_geometry_required')
                 context['grasp_placement_request'] = {
                     'object_id': self.state['target_id'],
-                    'transport_region': container_transport_region(destination, context['scene'], observation),
+                    'transport_region': container_transport_region(destination, self.spatial_memory.scene, observation),
                     'orientation_mode': 'preserve',
+                    'release_mode': self.task_progress.records[self.state['target_id']]['release_mode'],
                     'free_placement': True}
                 context['grasps'] = await self.call_algorithm(self.algorithms.generate_grasps,
                     observation, self.state['target_id'], arm=self.state['arm'],
@@ -1110,6 +1128,10 @@ class PolicyController(RobotOperations):
                 context['grasps_observation_id'] = observation['observation_id']
                 return context['grasps']
         if skill == 'identify_destination':
+            if arguments['release_mode'] == 'container_release' and arguments['destination_kind'] != 'container':
+                raise ValueError('container_release_requires_container')
+            context.pop('destination_permission', None)
+            permission = None
             identifier = arguments['destination_id']
             observation = context['observation']
             entity = observation.get('scene_entities', {}).get(identifier, {})
@@ -1141,8 +1163,15 @@ class PolicyController(RobotOperations):
                     'respect the original user handling and location constraints? An intermediate transfer '
                     'does not satisfy the final destination. Judge semantic permission, not geometric safety.'))]
                 judgment = await self._judge(context, requests, extra={
+                    'verification_scope': 'intermediate_destination',
                     'intermediate_destination_id': arguments['destination_id'],
+                    'destination_id': arguments['destination_id'],
+                    'destination_evidence': {key: copy.deepcopy(destination[key]) for key in
+                        ('id', 'kind', 'color', 'position', 'position_source', 'placement_reference') if key in destination},
                     'destination_kind': destination['kind'],
+                    'intermediate_placement_mode': arguments.get('placement_mode'),
+                    'declared_destination_references': destination_reference_evidence(
+                        observation, self.compiler.configured_regions, local_task),
                     'final_destination_id': local_task.destination_ref})
                 verdict = judgment['judgments']['intermediate_destination_allowed']['status']
                 if verdict != 'yes':
@@ -1150,6 +1179,7 @@ class PolicyController(RobotOperations):
                             'reason': ('intermediate_destination_rejected' if verdict == 'no'
                                        else 'intermediate_destination_constraint_unconfirmed'),
                             'details': judgment_details(judgment, requests)}
+                permission = judgment
             if destination.get('position_source') == 'configured_xy_measured_support':
                 if arguments.get('placement_mode') == 'configured_xy':
                     destination['placement_reference']['fixed_xy'] = True
@@ -1163,23 +1193,39 @@ class PolicyController(RobotOperations):
                          'destination_is_container'):
                 self.state['facts'][fact] = False
             self.state['destination_id'] = identifier
+            destination = {**destination, 'reference_id': arguments['destination_id']}
             context['destination'] = destination
+            if permission is not None:
+                from ..robot_skills.placement_resolution import digest
+
+                context['destination_permission'] = {
+                    'target_id': self.state['target_id'], 'destination_id': identifier,
+                    'reference_id': arguments['destination_id'],
+                    'task_sha256': digest(local_task.model_dump(mode='json')),
+                    'observation_id': observation['observation_id'],
+                    'region_sha256': digest(destination.get('placement_reference', {})),
+                    'evidence': copy.deepcopy(permission)}
             context['destination_orientation_mode'] = 'preserve'
             self.task_progress.records[self.state['target_id']].update(
                 destination_id=identifier, destination_ref=arguments['destination_id'],
-                destination_kind=destination['kind'],
+                destination_kind=destination['kind'], release_mode=arguments['release_mode'],
                 placement_preference=arguments.get('placement_preference', 'clearance'))
             if destination['kind'] == 'marker':
                 self._bind_region(context['observation'])
             self.state['facts']['destination_is_container'] = measured_kind == 'container'
-            return {'destination_id': identifier, 'success': True,
+            self.state['facts']['container_release_mode'] = arguments['release_mode'] == 'container_release'
+            return {'destination_id': identifier, 'success': True, 'release_mode': arguments['release_mode'],
                     'placement_preference': arguments.get('placement_preference', 'clearance'),
                     'selection_scope': 'bound_region_not_yet_validated_motion_goal'}
         if skill == 'choose_arm':
+            observed_object(context['observation'], self.state['target_id'])
+            if self.state['destination_id'] is not None:
+                observed_object(context['observation'], self.state['destination_id'])
             requested = arguments.get('arm', 'auto')
             evaluations = await self.call_algorithm(self.algorithms.evaluate_reachability,
                 context['observation'], self.state['target_id'], self.state['destination_id'],
                 requested_arm=None if requested == 'auto' else requested)
+            context['reachability_evaluations'] = evaluations
             available = [arm for arm in ('A', 'B') if evaluations.get(arm, {}).get('reachable')
                          and requested in ('auto', arm)]
             if context.get('holding'):
@@ -1189,7 +1235,7 @@ class PolicyController(RobotOperations):
             if len(available) == 1:
                 arm = available[0]
             else:
-                from ..agent.decisions import ChoiceRequest
+                from ..core.decisions import ChoiceRequest
                 requests = [ChoiceRequest(name='execution_arm',
                     instructions='Choose for the bound CURRENT target_id and destination_id, not the original '
                                  'processing input. Choose one eligible arm as a planning proposal using the '
@@ -1199,10 +1245,20 @@ class PolicyController(RobotOperations):
                                  'subsequent numerical planners must validate those. A pending above-container '
                                  'release pose is expected at this stage and does not by itself prevent selecting '
                                  'an arm. Preserve explicit user arm constraints. Choose unknown only if the '
-                                 'supplied task constraints or entity bindings cannot be resolved.',
+                                 'supplied task constraints or entity bindings cannot be resolved. '
+                                 'Use previous_same_target_failure to compare the earlier arm and numerical '
+                                 'rejection with current evidence. Consider another eligible arm when the failed '
+                                 'inputs have not improved. A new capture ID alone is not improved evidence. '
+                                 'The previous failure does not establish that either arm will now succeed.',
                     choices=(*available, 'unknown'), selection_mode='proposal')]
                 entities = public_observation(context['observation'])['objects']
+                failure = public_summary(getattr(self.graph_executor, 'last_failure', None))
+                if (failure and (failure.get('target_id') != self.state['target_id']
+                        or failure.get('skill') not in {'plan_grasp', 'execute_grasp', 'plan_place', 'execute_place'})):
+                    failure = None
                 judgment = await self._judge(context, requests, extra={
+                    'verification_scope': 'execution_arm',
+                    'previous_same_target_failure': failure,
                     'feasible_arms': available, 'workspace_evaluations': evaluations,
                     'robot_arm_names': {'A': 'robot left arm', 'B': 'robot right arm'},
                     'current_measured_entities': [entity for entity in entities
@@ -1213,7 +1269,6 @@ class PolicyController(RobotOperations):
                             'details': judgment_details(judgment, requests)}
             self.task_progress.bind_arm(arm)
             self.state['arm'] = arm
-            context['reachability_evaluations'] = evaluations
             return {'arm': arm, 'evaluations': evaluations, 'success': True}
         if skill == 'plan_place':
             for key in ('place_plan', 'place_plan_binding', 'place_plan_observation_id'):
@@ -1224,22 +1279,14 @@ class PolicyController(RobotOperations):
             await self.verify_scene(context)
             observation = self.measured_state(context)
             await self.execution_stage(context, 'prepare_attachment', self.prepare_attachment, context, observation)
-            attempt = placement_attempt(context, self.state, observation,
-                                        self.registry.contracts['plan_place'].requires)
-            blocked = placement_retry_block(context, attempt)
-            if blocked:
-                raise AlgorithmError('Placement inputs already failed; new numerical evidence required',
-                    code='place_no_valid_candidate', details=blocked['placement_evidence'])
-            try:
-                context['place_plan'] = await self.call_algorithm(self.algorithms.plan_place, observation,
-                    self.state['target_id'], self.state['arm'], context['scene'], context['holding'],
-                    self.state['destination_id'], planning_settings=context['planning_settings'],
-                    placement_request=self._bind_region(context['observation']),
-                    placement_resolution=context['placement_resolution'], report_progress=True)
-            except AlgorithmError as error:
-                if error.code == 'place_no_valid_candidate':
-                    record_placement_failure(context, attempt, error.details)
-                raise
+            binding = self.motion_plan_binding(context, observation=observation)
+            context['place_plan'] = await self.call_algorithm(self.algorithms.plan_place, observation,
+                self.state['target_id'], self.state['arm'], self.spatial_memory.scene, context['holding'],
+                self.state['destination_id'], planning_settings=context['planning_settings'],
+                placement_request=self._bind_region(context['observation']),
+                placement_resolution=context['placement_resolution'], report_progress=True)
+            binding.require_current(self.motion_plan_binding(context))
+            context['place_plan']['input_binding'] = binding.model_dump()
             context['place_plan_observation_id'] = context['observation']['observation_id']
             context['place_plan_binding'] = {key: self.state[key] for key in ('target_id', 'destination_id', 'arm')}
             return context['place_plan']
@@ -1262,59 +1309,48 @@ class PolicyController(RobotOperations):
         )
 
         capture_id = context.get('latest_capture', {}).get('observation_id')
+        failure = public_summary(getattr(getattr(self, 'graph_executor', None), 'last_failure', None))
+        arguments = (failure or {}).get('arguments', {})
+        subject_id = (arguments.get('target_id') or arguments.get('destination_id')
+                      or (failure or {}).get('target_id') or (failure or {}).get('destination_id'))
+        subject = context.get('visual_inventory_reference', {}).get('entities', {}).get(subject_id, {})
+        subject = {key: subject[key] for key in ('id', 'color', 'kind') if key in subject}
+        if subject_id:
+            subject['id'] = subject_id
+        failed_checks = (failure or {}).get('details', {}).get('diagnostic_checks', [])
+        required_question = next((check['question'] for check in failed_checks
+            if check.get('status') in {'no', 'unknown'} and isinstance(check.get('question'), str)), None)
         proof = context.get('visibility_recovery', {})
-        if proof.get('observation_id') != capture_id or proof.get('epoch') != self.observation_epoch:
-            result = await self._judge(context, visibility_requests(), extra={
+        if (proof.get('observation_id') != capture_id or proof.get('epoch') != self.observation_epoch
+                or proof.get('failed_result') != failure):
+            result = await self._judge(context, visibility_requests(subject,
+                failed_skill=(failure or {}).get('skill'), required_judgment=required_question), extra={
                 'verification_scope': 'graph_recovery',
-                'failed_result': getattr(getattr(self, 'graph_executor', None), 'last_result', None),
-                'failed_node': self.state.get('current_step')})
+                'subject': subject,
+                'required_judgment': required_question,
+                'failed_result': failure,
+                'failed_node': (failure or {}).get('node_id')})
             proof = {'observation_id': context['latest_capture']['observation_id'],
-                'epoch': self.observation_epoch, 'answer': visibility_assessment(result['judgments'])}
+                'epoch': self.observation_epoch, 'failed_result': failure,
+                'answer': visibility_assessment(result['judgments'])}
             context['visibility_recovery'] = proof
         self.emit('visibility_recovery_checked', '补观测移动的视觉原因', proof)
         if not visibility_allows_motion(proof.get('answer', {})):
             raise ValueError('viewpoint_requires_visual_limitation')
         context.pop('visibility_recovery', None)
 
-    async def _request_recovery_judgments(self, context, requests, extra):
-        from ..agent.visibility_recovery import VISIBILITY_FIELDS, visibility_assessment
-
-        requested = any(request.name in VISIBILITY_FIELDS for request in requests)
-        failed = extra.get('failed_node', {})
-        failure = (failed.get('id'), failed.get('skill'), extra.get('failed_result', {}).get('reason'))
-        capture_id = context.get('latest_capture', {}).get('observation_id')
-        proof = context.get('visibility_recovery', {})
-        reuse = (requested and proof.get('observation_id') == capture_id
-                 and proof.get('epoch') == self.observation_epoch and proof.get('failure') == failure
-                 and 'judgments' in proof)
-        if reuse:
-            requests = [request for request in requests if request.name not in VISIBILITY_FIELDS]
-            extra = {**extra, 'current_visibility_assessment': proof['answer']}
-        decision = await self._judge(context, requests, extra=extra) if requests else {'judgments': {}}
-        if reuse:
-            decision['judgments'].update(proof['judgments'])
-            self.emit('visibility_recovery_reused', '复用同一画面的视觉缺口判断', {
-                'observation_id': capture_id, 'failure': failure, 'answer': proof['answer']})
-        elif requested:
-            judgments = {name: decision['judgments'][name] for name in VISIBILITY_FIELDS}
-            context['visibility_recovery'] = {
-                'observation_id': context['latest_capture']['observation_id'],
-                'epoch': self.observation_epoch, 'failure': failure,
-                'answer': visibility_assessment(judgments), 'judgments': judgments}
-        return decision
-
     async def _judge(self, context, requests, *, extra=None, include_task=True, reference=None):
         capture = context['latest_capture']
         if context.get('capture_epochs', {}).get(capture['observation_id']) != self.observation_epoch:
             xy_proposal = ((extra or {}).get('verification_scope') == 'placement_xy_proposal'
-                and (extra or {}).get('scene_token') == context.get('scene', {}).get('scene_token')
+                and (extra or {}).get('scene_token') == self.spatial_memory.scene.get('scene_token')
                 and bool((extra or {}).get('scene_token'))
                 and all(isinstance(item, ChoiceRequest) and item.selection_mode == 'proposal' for item in requests))
             if xy_proposal:
                 # This selects a location in an already verified region. Old RGB
                 # is explicitly historical context, never a current visual fact.
                 extra = {**extra, 'image_evidence_scope': 'historical_scene_for_xy_proposal'}
-            elif (extra or {}).get('verification_scope') not in {'graph_recovery', 'graph_recovery_continuation'}:
+            elif (extra or {}).get('verification_scope') not in {'graph_recovery', 'policy_condition'}:
                 raise ValueError('fresh_observation_required_before_judgment')
             else:
                 # Recovery has current RGB, without an implicit full observation.
@@ -1329,154 +1365,20 @@ class PolicyController(RobotOperations):
                          'target_id': self.state.get('target_id'),
                          'destination_id': self.state.get('destination_id')} if include_task else {})
             judgment_context = {**judgment_context, **(extra or {})}
-            if judgment_context.get('verification_scope') in {'graph_recovery', 'graph_recovery_continuation'}:
-                from ..recovery_context_compaction import compact_recovery_context
-
-                judgment_context = compact_recovery_context(judgment_context)
+            observation = context.get('observation', {})
+            if (observation.get('observation_id') == capture['observation_id']
+                    and observation.get('generation') == capture.get('generation')
+                    and 'current_instance_locations' not in judgment_context):
+                from ..task_binding_images import current_instance_locations
+                judgment_context['current_instance_locations'] = current_instance_locations(observation)
             return await self.call_algorithm(self.judgments.judge, capture, requests=requests,
                 context=judgment_context,
                 reference=context['visual_inventory_reference'] if reference is None else reference)
         finally:
             done.set()
 
-    def _record_post_delivery_observation(self, context, identifier):
-        from ..agent.completion import has_confirmed_delivery
-
-        requirement = self.environment_assumptions.get('completion_requirements', {}).get('after_each_object', {})
-        if not requirement:
-            return
-        feedback = self.simulation.robot_snapshot()
-        current = identifier
-        while self.task_progress.records[current].get('output_entity_id'):
-            current = self.task_progress.records[current]['output_entity_id']
-        record = self.task_progress.records[current]
-        if (identifier not in self.task_progress.completed_input_ids()
-                and not has_confirmed_delivery(record)):
-            raise ValueError('policy_target_not_verified:' + identifier)
-        delivery = {'entity_id': current, 'confirmed_observation_id': record.get('confirmed_observation_id'),
-                    'current_region': record.get('current_region'), 'transfer_index': record.get('transfer_index')}
-        previous = self.task_progress.records[identifier].get('post_delivery_observation', {})
-        if (previous.get('status') == 'verified' and previous.get('generation') == feedback.get('generation')
-                and previous.get('delivery') == delivery):
-            return  # Later robot motion does not undo this verified historical requirement.
-        capture = context.get('latest_capture', {})
-        observation = context.get('observation', {})
-        observation_id = observation.get('observation_id')
-        if requirement.get('robot_pose') == 'observation' and (
-                not self.state['facts'].get('observation_pose_ready')
-                or not self.is_observation_pose(context, feedback)):
-            raise ValueError('object_observation_pose_not_reached:' + identifier)
-        if requirement.get('observe_inventory') and (
-                not self.state['facts'].get('observed') or not observation_id
-                or capture.get('observation_id') != observation_id
-                or capture.get('generation') != feedback.get('generation')
-                or context.get('capture_epochs', {}).get(observation_id) != self.observation_epoch
-                or requirement.get('robot_pose') == 'observation' and not self.is_observation_pose(context, capture)):
-            raise ValueError('object_post_delivery_observation_missing:' + identifier)
-        evidence = {'status': 'verified', 'input_id': identifier,
-            'delivery': delivery,
-            'source': 'actual_joint_feedback_and_completed_inventory_observation',
-            'observation_id': observation_id, 'generation': feedback.get('generation'),
-            'action_epoch': self.observation_epoch, 'required_pose': requirement.get('robot_pose'),
-            'actual_joints_rad': {arm: copy.deepcopy(feedback['arms'][arm]['joints_rad']) for arm in ('A', 'B')},
-            'inventory_observed': bool(requirement.get('observe_inventory'))}
-        self.task_progress.records[identifier]['post_delivery_observation'] = evidence
-        record['post_delivery_observation'] = evidence
-        if record.get('transfers'):
-            record['transfers'][-1]['post_delivery_observation'] = copy.deepcopy(evidence)
-        self.task_progress.ledger_revision += 1
-        self.sync_inventory(context)
-        self.emit('object_post_delivery_observation', '物体交付后的回位与观测证据', evidence)
-
     async def _execute_graph(self, context):
         active_input = None
-
-        async def propose_recovery(node, result, history, bindings):
-            from ..agent.recovery import RecoveryPlanner, recovery_measurements
-            from .recovery_evidence import (
-                blocked_operations,
-                operation_evidence,
-                operation_signature,
-                operation_signatures,
-                reusable_observation_result,
-            )
-
-            if self.state.get('partial_execution_failure'):
-                return {'action': 'stop', 'reason': 'unresolved_physical_side_effect', 'evidence': result}
-            async def request(requests, extra):
-                return await self._request_recovery_judgments(context, requests, extra)
-            planner = RecoveryPlanner(request, skill_catalog(self.registry), self.registry.validate_arguments)
-            def placement_block():
-                attempt = placement_attempt(context, self.state, self.measured_state(context),
-                    self.registry.contracts['plan_place'].requires, node_id=node['id'])
-                return placement_retry_block(context, attempt)
-
-            rejected = []
-            seen = context.setdefault('graph_recovery_signatures', set())
-            for _ in range(3):
-                evidence = operation_evidence(context, node['id'], result.get('reason'), self.state['facts'],
-                    self.task_progress.completed_input_ids(), failed_skill=node.get('skill'), target_id=self.state.get('target_id'))
-                capture_id = context.get('latest_capture', {}).get('observation_id')
-                capture_current = context.get('capture_epochs', {}).get(capture_id) == self.observation_epoch
-                unavailable = blocked_operations(seen, evidence, capture_current=capture_current)
-                if node.get('skill') == 'plan_place':
-                    # Pixels/facts alone cannot establish whether numerical goals changed.
-                    unavailable = [row for row in unavailable if row.get('action') != 'retry']
-                    blocked = placement_block()
-                    if blocked:
-                        unavailable.append(blocked)
-                proposal = await planner.propose(node, public_summary(result), public_summary(history[-8:]), bindings,
-                    facts=copy.deepcopy(self.state['facts']),
-                    inventory=list(context.get('visual_inventory_reference', {}).get('entities', {})) +
-                              list(self.compiler.configured_regions),
-                    context={'ledger': public_summary(self.task_progress.snapshot()),
-                        'completion_requirements': copy.deepcopy(self.environment_assumptions.get(
-                            'completion_requirements', {})),
-                        'active_object_task': self.active_object_task.model_dump(mode='json') if self.active_object_task else None,
-                        'original_task': self.task_spec.model_dump(mode='json'),
-                        'rejected_proposals': unavailable + rejected,
-                        'current_measurements': public_summary(recovery_measurements(context)),
-                        'reusable_recovery_result': reusable_observation_result(
-                            context, history, self.observation_epoch, self.registry.contracts) or {},
-                        'current_observation_id': context.get('latest_capture', {}).get('observation_id')})
-                if proposal['action'] == 'use_recovery_result':
-                    current = reusable_observation_result(context, history, self.observation_epoch,
-                                                          self.registry.contracts)
-                    if not current or current['node_id'] != proposal.get('source_node_id'):
-                        proposal = {'action': 'rejected', 'reason': 'recovery_result_no_longer_current'}
-                if proposal['action'] == 'skill':
-                    try:
-                        self.registry.validate_arguments(proposal['skill'], proposal['arguments'])
-                    except ValueError as error:
-                        proposal.update(action='rejected', reason=str(error))
-                if proposal['action'] not in {'retry', 'skill', 'rejected'}:
-                    self.emit('policy_recovery_decision', 'Decisions 生成恢复 node/edge', {
-                        'node_id': node['id'], 'proposal': proposal, 'history': public_summary(history)})
-                    return proposal
-                evidence = operation_evidence(context, node['id'], result.get('reason'), self.state['facts'],
-                    self.task_progress.completed_input_ids(), failed_skill=node.get('skill'), target_id=self.state.get('target_id'))
-                signature = operation_signature(evidence, proposal)
-                signatures = operation_signatures(evidence, proposal)
-                if node.get('skill') == 'plan_place' and proposal['action'] == 'retry':
-                    blocked = placement_block()
-                    if blocked:
-                        proposal = {**proposal, **blocked, 'action': 'rejected'}
-                elif signature in seen:
-                    proposal = {**proposal, 'action': 'rejected', 'reason': 'identical_evidence_and_operation_no_progress'}
-                seen.update(signatures)
-                self.emit('policy_recovery_decision', 'Decisions 生成恢复 node/edge', {
-                    'node_id': node['id'], 'proposal': proposal, 'history': public_summary(history)})
-                if proposal['action'] != 'rejected':
-                    if proposal.get('skill') == 'move_to_observe':
-                        from ..agent.completion import required_observation_return
-
-                        required_return = required_observation_return(
-                            self.environment_assumptions.get('completion_requirements', {}), result.get('reason'))
-                        context['pending_required_return'] = required_return
-                        context['pending_visibility_motion'] = not required_return
-                    return proposal
-                rejected.append({key: proposal[key] for key in ('action', 'skill', 'arguments', 'reason') if key in proposal})
-            return {'action': 'stop', 'reason': 'decisions_recovery_repeated_invalid_proposals', 'evidence': rejected}
 
         async def enter_object_task(task):
             self.active_object_task = TaskSpec.model_validate(task) if task is not None else None
@@ -1484,10 +1386,8 @@ class PolicyController(RobotOperations):
 
 
         def confirmed_targets():
-            if not self.task_progress.inventory_finalized:
-                raise ValueError('task_inventory_not_confirmed')
             completed = self.task_progress.completed_input_ids()
-            return [identifier for identifier in self.task_inventory['selected_ids'] if identifier not in completed]
+            return [identifier for identifier in self.task_spec.target_refs if identifier not in completed]
 
         async def before_target(identifier, index):
             nonlocal active_input
@@ -1495,7 +1395,7 @@ class PolicyController(RobotOperations):
                 shared_evidence = {key: self.state['facts'].get(key, False)
                                    for key in ('observed', 'observation_pose_ready', 'grasp_view_ready')}
                 self.reset_transfer(context)
-                self.state['facts'].update(**shared_evidence, task_assessed=True)
+                self.state['facts'].update(shared_evidence)
             active_input = identifier
 
         async def after_target(identifier):
@@ -1503,78 +1403,61 @@ class PolicyController(RobotOperations):
             if identifier not in completed:
                 return {'status': 'unknown', 'success': False,
                         'reason': 'policy_target_not_verified:' + identifier}
-            try:
-                self._record_post_delivery_observation(context, identifier)
-            except ValueError as error:
-                if not str(error).startswith(('object_post_delivery_observation_missing:',
-                                              'object_observation_pose_not_reached:')):
-                    raise
-                return {'status': 'unknown', 'success': False, 'reason': str(error),
-                        'required_obligation': copy.deepcopy(self.environment_assumptions.get(
-                            'completion_requirements', {}).get('after_each_object', {}))}
 
         async def invoke(name, args):
             try:
-                return await self._step(name, context, args)
-            except (ValueError, AlgorithmError, PerceptionError) as error:
-                code = getattr(error, 'code', None) or str(error)
-                unknown = code.startswith(('visual_identity_unknown', 'task_binding_unconfirmed',
-                    'task_target_geometry_unknown', 'source_inventory_unknown', 'observed_support_unknown',
-                    'observed_support_current_geometry_required', 'observed_instance_missing_or_ambiguous',
-                    'task_completion_unconfirmed'))
-                details = exception_details(error)
-                if (name == 'resolve_placement' and code == 'placement_no_candidate'
-                        and 'effective_arguments' in details and self.state.get('active_policy_node')):
-                    from .recovery_evidence import operation_evidence, record_failed_operation
+                result = await self._step(name, context, args)
+            except (ValueError, AlgorithmError, PerceptionError, TimeoutError) as error:
+                result = skill_error_result(error, self.state, args)
+            from ..core.outcome_evidence import outcome_state
+            from ..core.outcomes import GraphSkillResult
+            result = bind_failure_context(result, skill=name, arguments=args, state=self.state)
+            outputs = {field: result[field] for field in self.registry.contracts[name].result_bindings.values()
+                       if field in result}
+            return GraphSkillResult(status=result_status(result), outputs=public_summary(outputs),
+                                    evidence=outcome_state(result))
 
-                    evidence = operation_evidence(context, self.state['active_policy_node']['node_id'], code,
-                        self.state['facts'], self.task_progress.completed_input_ids())
-                    record_failed_operation(context.setdefault('graph_recovery_signatures', set()), evidence, name,
-                        [details['effective_arguments'], {'preference': 'decide'}, {}])
-                if code.startswith(('task_binding_unconfirmed', 'task_completion_unconfirmed')) and any(
-                        check.get('status') == 'no' for check in details.get('diagnostic_checks', [])
-                        if check.get('required') is True):
-                    unknown = False  # A negative visual answer is not missing evidence.
-                return {'success': False, 'status': 'unknown' if unknown else 'failure',
-                        'reason': getattr(error, 'code', None) or str(error),
-                        'error_code': getattr(error, 'code', None),
-                        'message': str(error)[:1000], 'details': details,
-                        'partial_execution': copy.deepcopy(self.state.get('current_step'))}
-
-        async def judge(name, bindings):
+        async def judge(request: GraphDecisionRequest):
             from ..agent.completion import completion_obligations
 
-            declared = {node.condition for scope in [graph, *graph.subgraphs]
+            name, bindings = request.condition, request.bindings
+            choices, branches = request.choices, request.branches
+            declared = {(node.condition, tuple(node.choices)) for scope in [graph, *graph.subgraphs]
                         for node in scope.nodes if node.type == 'router'}
-            if name not in declared:
+            if (name, tuple(choices)) not in declared:
                 raise ValueError('undeclared_policy_judgment:' + name)
-            requests = [JudgmentRequest(name='condition', instructions=name)]
+            from .decision_inputs import available_branch_choices, branch_evidence
+            available_choices = available_branch_choices(choices, branches) if choices else ()
+            if choices and not any(choice != 'unknown' for choice in available_choices):
+                return GraphDecisionResult(status='unknown', value='unknown', reason='no_available_declared_branch',
+                    details={'producer': 'runtime_branch_availability', 'declared_branches': list(branches)})
+            requests = [ChoiceRequest(name='condition', instructions=name, choices=available_choices,
+                                      selection_mode='proposal') if choices else
+                        JudgmentRequest(name='condition', instructions=name)]
+            available_operations = branch_evidence(graph, branches, skill_catalog(self.registry),
+                request.last_failure) if choices else {'skill_contracts': skill_catalog(self.registry)}
             result = await self._judge(context, requests, extra={
                 'verification_scope': 'policy_condition', 'policy_bindings': copy.deepcopy(bindings),
-                'verified_obligations': completion_obligations(self.task_progress.snapshot())})
-            status = result['judgments']['condition']['status']
-            if status not in {'yes', 'no'}:
-                if status == 'unknown':
-                    # Preserve the router's third outcome so its explicit unknown edge can run.
-                    return None
-                raise DiagnosticError('policy_judgment_unknown:judgment:' + name,
-                                      judgment_details(result, requests))
-            return status == 'yes'
+                'last_result': copy.deepcopy(request.last_result),
+                'last_failure': copy.deepcopy(request.last_failure),
+                'declared_branches': copy.deepcopy(list(branches)),
+                'current_facts': copy.deepcopy(self.state['facts']),
+                **available_operations,
+                'selected_arm': self.state.get('arm'),
+                'arm_evaluations': context.get('reachability_evaluations', {}),
+                'edge_selection_only': True,
+                'verified_obligations': completion_obligations(self.task_progress.snapshot(), self.object_memory.snapshot())})
+            # The executor consumes this exact typed result. A bool/None return
+            # discards the probability, abstention reason and failed question.
+            return GraphDecisionResult(**result['judgments']['condition'], details=judgment_details(result, requests))
 
         graph = self.policy_graph
         completed = self.task_progress.completed_input_ids()
         pending = [identifier for identifier in self.task_inventory.get('selected_ids', []) if identifier not in completed]
-        native_options = {'propose_recovery': propose_recovery,
-            'reusable_result_skills': {name for name, contract in self.registry.contracts.items()
-                if contract.recovery_result_reusable and not contract.invalidates_observation},
-            'reusable_result_ignored_arguments': {name: contract.recovery_result_ignored_arguments
-                for name, contract in self.registry.contracts.items() if contract.recovery_result_reusable},
-            'repeatable_skills': {name for name, contract in self.registry.contracts.items() if contract.recovery_retry_safe}}
+        repeatable = {name for name, contract in self.registry.contracts.items() if contract.retry_safe}
 
         def emit_graph(kind, title, data):
-            if kind == 'policy_graph_patch':
-                self.state['policy_graph'] = copy.deepcopy(data['policy_graph'])
-            elif kind == 'policy_node_started':
+            if kind == 'policy_node_started':
                 self.state['active_policy_node'] = copy.deepcopy(data)
             self.emit(kind, title, data)
 
@@ -1589,15 +1472,23 @@ class PolicyController(RobotOperations):
                              for name, contract in self.registry.contracts.items()},
             is_target_pending=lambda identifier: identifier not in (
                 self.task_progress.completed_input_ids()),
-            check_cancelled=self.check_generation, emit=emit_graph, **native_options,
-            step_limit=max(4096, min(131072, len(pending) * 128 * 3 + 128)))
+            check_cancelled=self.check_generation, emit=emit_graph, repeatable_skills=repeatable,
+            step_limit=131072)
         await self.graph_executor.run(graph)
 
     async def _complete(self, context):
-        from ..agent.completion import COMPLETION_MILESTONE_RULE, completion_obligations
+        from ..agent.completion import (
+            COMPLETION_MILESTONE_RULE,
+            completion_expected_status,
+            completion_failures,
+            completion_obligations,
+            source_presence_request,
+        )
 
         completed = self.task_progress.completed_input_ids()
-        if set(completed) != set(self.task_inventory['selected_ids']):
+        if (set(completed) != set(self.task_progress.input_ids)
+                or self.task_spec.scope == 'ids' and set(completed) != set(self.task_spec.target_refs)
+                or self.task_spec.quantity is not None and len(completed) != self.task_spec.quantity):
             raise ValueError('policy_finished_with_pending_targets')
         pose_proof = None
         if self.task_spec.completion_pose == 'observation':
@@ -1606,7 +1497,8 @@ class PolicyController(RobotOperations):
                 raise DiagnosticError('completion_pose_unconfirmed', {
                     'component': 'robot_feedback', 'expected_pose': 'observation',
                     'actual_feedback': feedback})
-            pose_proof = {'success': True, 'expected_pose': 'observation', 'source': 'actual_joint_feedback'}
+            pose_proof = {'success': True, 'expected_pose': 'observation',
+                          'source': 'actual_joint_feedback', 'actual_feedback': feedback}
         if self.task_spec.completion_pose == 'initial':
             from ..robot_skills.return_pose import initial_pose_verdict
             if context.get('holding') or self.holding_state is not None:
@@ -1616,24 +1508,20 @@ class PolicyController(RobotOperations):
             self.state['facts']['at_initial_pose'] = bool(pose_proof['success'])
             if not pose_proof['success']:
                 raise DiagnosticError('completion_pose_unconfirmed', pose_proof)
+        self.state['completion_pose_evidence'] = copy.deepcopy(pose_proof)
         previous = self.state.get('completion_evidence', {}).get('judgments', {})
-        mode = 'fresh' if any(row.get('status') != 'yes' for row in previous.values()) else 'reuse_current'
+        mode = 'fresh' if completion_failures(previous) else 'reuse_current'
         capture = await self.capture_scene_observation(context, {'capture_mode': mode}, purpose='task_completion')
         completion_key = (capture['observation_id'], self.observation_epoch, self.task_progress.ledger_revision)
-        if (previous and any(row.get('status') != 'yes' for row in previous.values())
+        if (completion_failures(previous)
                 and context.get('completion_request_key') == completion_key):
             raise ValueError('task_completion_unchanged_evidence')
         self.record_observation(capture, 'task_completion')
-        requirements = '; '.join(self.task_spec.completion_conditions)
         lineage = ('For original input IDs ' + json.dumps(self.task_inventory['selected_ids'])
                    + ' and their independently bound processing output lineages, ')
-        requests = [JudgmentRequest(name='goal_satisfied', instructions=(
-            lineage + 'Do the CURRENT images and recorded per-object verified evidence support the user completion '
-            'conditions? ' + requirements + ' Do not infer success from an empty work queue. '
-            'For requested robot posture use verified_robot_pose numerical feedback, not visual joint estimation.'
-            + COMPLETION_MILESTONE_RULE))]
-        # Preserve the model's conditions verbatim, but expose which obligation
-        # failed instead of reporting only one opaque conjunction probability.
+        # Evaluate each declared requirement. Asking the same conjunction again
+        # as goal_satisfied adds no evidence and can contradict its own terms.
+        requests = []
         for index, condition in enumerate(self.task_spec.completion_conditions):
             requests.append(JudgmentRequest(name=f'completion_condition_{index}', instructions=(
                 lineage + 'Do the CURRENT images and recorded per-object verified evidence support this single '
@@ -1650,25 +1538,40 @@ class PolicyController(RobotOperations):
                     'do CURRENT images and verified ledger evidence support this item requirement: ' + condition
                     + '? Another item completing its own goal is not evidence for this one.'
                     + COMPLETION_MILESTONE_RULE)))
-        if self.task_spec.scope == 'all':
-            requests.append(JudgmentRequest(name='source_complete', instructions=(
-                'Is the source scope sufficiently observed to confirm no unprocessed objects matching '
-                'target_selector remain, including initially missed targets? Occluded relevant areas '
-                'or ambiguous membership are uncertain, not empty. Non-target objects may remain.')))
+        presence = context.get('source_presence_evidence', {})
+        reuse_presence = (self.task_spec.scope == 'all' and presence.get('observation_id') == capture['observation_id']
+                         and presence.get('epoch') == self.observation_epoch)
+        if self.task_spec.scope == 'all' and not reuse_presence:
+            requests.append(source_presence_request())
         result = await self._judge(context, requests, extra={
-            'verified_obligations': completion_obligations(self.task_progress.snapshot()),
+            'verified_obligations': completion_obligations(self.task_progress.snapshot(), self.object_memory.snapshot()),
             'verified_robot_pose': pose_proof, 'verification_scope': 'task_completion'})
+        if reuse_presence:
+            requests.append(source_presence_request())
+            result['judgments']['source_has_remaining_input'] = copy.deepcopy(
+                presence['result']['judgments']['source_has_remaining_input'])
+            result['reused_source_presence'] = copy.deepcopy(presence)
         self.state['completion_evidence'] = result
         context['completion_request_key'] = completion_key
-        if any(row['status'] != 'yes' for row in result['judgments'].values()):
-            raise DiagnosticError('task_completion_unconfirmed', judgment_details(result, requests))
+        result['expected_status'] = {request.name: completion_expected_status(request.name) for request in requests}
+        failed = completion_failures(result['judgments'])
+        if failed:
+            details = judgment_details(result, requests, failed_names=failed)
+            for check in details['diagnostic_checks']:
+                check['expected_status'] = completion_expected_status(check['name'])
+            raise DiagnosticError('task_completion_unconfirmed', details)
         self.state['status'] = 'succeeded'
 
     async def _run(self, run_id, initial):
         from ..robot_skills.return_pose import initial_joint_reference
         context = {'initial': initial, 'planning_settings': copy.deepcopy(self.state['planning_settings']),
-                   'initial_joint_reference': initial_joint_reference(initial),
-                   'visual_call_budget': VisualCallBudget(limit=0)}
+                   'initial_joint_reference': initial_joint_reference(initial)}
+        from ..object_memory import ObjectMemory
+        from ..spatial_memory import SpatialMemory
+        self.object_memory = ObjectMemory()
+        self.spatial_memory = SpatialMemory()
+        self.geometry_measurements = {}
+        self.planning_regions = {}
         self.task_spec = self.task_inventory = self.policy_graph = None
         self.object_tasks = {}
         self.active_object_task = None
@@ -1683,9 +1586,9 @@ class PolicyController(RobotOperations):
                           requested_arm=None, attributes={'kind': 'any', 'color': 'any'},
                           destination_attributes={'kind': 'any', 'color': 'any'})
         self.state['facts'].update(needs_place=True, collection_task=True, center_reachability_enabled=True,
-                                   inventory_finalized=False, inventory_ready=False, task_assessed=False,
+                                   inventory_ready=False, collision_map_initialized=False,
                                    observed=False, task_verified=False)
-        self.emit('run_start', '执行物体清单策略图', {'instruction': self.state['instruction']})
+        self.emit('run_start', '执行在线策略图', {'instruction': self.state['instruction']})
         try:
             self.begin_step('initialize_task_geometry')
             self.check_generation()
@@ -1713,13 +1616,25 @@ class PolicyController(RobotOperations):
             record = failure_record(error, self.state)
             self.state.update(status='needs_attention', error=str(error)[:1000], **record,
                               failed_step=copy.deepcopy(self.state.get('current_step')))
+            memory = getattr(self.compiler, 'compilation_memory', None)
+            if memory is not None:
+                try:
+                    memory.record_execution_failure(catalog=skill_catalog(self.registry), run_id=self.run_id,
+                                                    report=record['failure_report'])
+                except Exception as memory_error:  # noqa: BLE001 -- preserve the original task failure and its evidence
+                    self.emit('compilation_memory_error', '执行经验写入失败', {'error': str(memory_error)})
             self.emit('skill_error', '策略执行需要处理', {'code': record['error_code'],
                       'details': record['error_details'], 'failure_report': record['failure_report']})
         finally:
-            self.state['task_progress'] = self.task_progress.snapshot()
+            self.state['task_progress'] = execution_snapshot(
+                self.task_progress, self.object_memory, self.geometry_measurements, self.planning_regions)
             self.state['current_step'] = None
+            memory_calls = sum(event['kind'] == 'visual_decisions_call'
+                and event.get('data', {}).get('purpose') == 'update_object_memory' for event in self.events)
             self.state['metrics'] = {'run_duration_s': time.monotonic() - self.run_started_at,
-                                     'responses_call_count': self.compiler.budget.used}
+                'responses_call_count': self.compiler.budget.used + memory_calls,
+                'compile_responses_call_count': self.compiler.budget.used,
+                'inventory_responses_call_count': memory_calls}
             self.emit('run_end', '任务结束', self.state)
             if self.experiment is not None:
                 self.experiment.stop(self.state)

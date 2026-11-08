@@ -1,13 +1,14 @@
 {
   "id": "identify_destination",
-  "description": "Bind an observed support/container or an operator-configured work area for the current transfer. Preserve the original location requirement. A designated/set/configured area means the workbench setting and uses its exact XY; do not search for or visually invent a marker. A normal table/container permits region-based placement. Intermediate destinations need explicit semantic permission. This does not choose a collision-free XYZ or plan a path.",
+  "description": "Bind the destination and explicit release_mode for this transfer before grasp generation. surface_setdown gently releases near a support; container_release releases above an open container rim only when task semantics permit dropping. Geometry and the operator setting determine height, never model coordinates. Rebinding invalidates old grasp/placement plans. Bind an observed support/container or an operator-configured work area for the current transfer. Preserve the original location requirement. A designated/set/configured area means the workbench setting and uses its exact XY; do not search for or visually invent a marker. A normal table/container permits region-based placement. Intermediate destinations need explicit semantic permission. This does not choose a collision-free XYZ or plan a path. Missing current destination identity returns unknown with observed_instance_missing_or_ambiguous. Author a bounded observation recovery when its prerequisites can be established. Retained valid collision layers can support an observation-map update before changing viewpoint. The recovery returns to destination binding and does not replay completed manipulation. When checking semantic permission for a reference outside the declared destinations, supply selected placement mode plus both task work-area/final-destination references, their configurations and current measurements. A different reference name alone does not prove a different physical location.",
   "inputs": [
     "destination_id",
     "target_id",
     "current_observation",
     "destination_kind",
     "placement_preference",
-    "orientation_mode"
+    "orientation_mode",
+    "release_mode"
   ],
   "requires": {
     "target_selected": true,
@@ -24,7 +25,8 @@
     "execution_or_evidence_record",
     "destination_id",
     "placement_preference",
-    "selection_scope"
+    "selection_scope",
+    "release_mode"
   ],
   "errors": [
     "intermediate_destination_rejected",
@@ -33,7 +35,8 @@
     "precondition_not_satisfied",
     "missing_measurement_or_evidence",
     "service_or_execution_failure",
-    "destination_kind_mismatch"
+    "destination_kind_mismatch",
+    "container_release_requires_container"
   ],
   "invalidates_observation": false,
   "planning_effects": {
@@ -66,7 +69,25 @@
       "effects": {
         "destination_is_container": true
       }
+    },
+    {
+      "when_arguments": {
+        "release_mode": "surface_setdown"
+      },
+      "requires": {},
+      "effects": {
+        "container_release_mode": false
+      }
+    },
+    {
+      "when_arguments": {
+        "release_mode": "container_release"
+      },
+      "requires": {},
+      "effects": {
+        "container_release_mode": true
+      }
     }
   ],
-  "recovery_retry_safe": true
+  "retry_safe": true
 }

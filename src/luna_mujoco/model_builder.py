@@ -30,7 +30,6 @@ TCP_BODIES = {"A": "TCP_Link_L", "B": "TCP_Link_R"}
 ARM_POSITION_STIFFNESS = 240000.
 ARM_POSITION_DAMPING = 600.
 ARM_POSITION_EFFORT_MULTIPLIER = 10.
-ARM_COLORS = [0x4C72B0, 0xDD8452, 0x55A868, 0xC44E52, 0x8172B3, 0x937860, 0xDA8BC3]
 COLORS = {
     "black": [0.035, 0.040, 0.050, 1.0], "red": [0.8, 0.12, 0.1, 1.0],
     "blue": [0.1, 0.35, 0.85, 1.0], "green": [0.15, 0.62, 0.3, 1.0],
@@ -286,18 +285,17 @@ class ModelBuilder:
                     if role == "visual":
                         name = link.get("name", "")
                         match = re.fullmatch(r"Link([1-7])_[LR]", name)
-                        color = ARM_COLORS[int(match[1]) - 1] if match else None
+                        color = 0xD9D9D9 if match else 0x999999
                         if "WristCam" in source.name:
-                            color = 0xB3E5FC if "Window" in source.name else 0x29B6F6
-                        if color is not None:
-                            material = element.find("material")
-                            if material is None:
-                                material = ET.SubElement(element, "material")
-                            rgba = material.find("color")
-                            if rgba is None:
-                                rgba = ET.SubElement(material, "color")
-                            rgba.set("rgba", " ".join(str((color >> shift & 255) / 255)
-                                                     for shift in (16, 8, 0)) + " 1")
+                            color = 0x555555 if "Window" in source.name else 0xAAAAAA
+                        material = element.find("material")
+                        if material is None:
+                            material = ET.SubElement(element, "material")
+                        rgba = material.find("color")
+                        if rgba is None:
+                            rgba = ET.SubElement(material, "color")
+                        rgba.set("rgba", " ".join(str((color >> shift & 255) / 255)
+                                                 for shift in (16, 8, 0)) + " 1")
         settings = root.find("mujoco")
         if settings is None:
             settings = ET.SubElement(root, "mujoco")

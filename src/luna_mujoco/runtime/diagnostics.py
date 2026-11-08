@@ -22,6 +22,27 @@ def exception_details(error):
     return details
 
 
+def skill_error_result(error, state, arguments):
+    """Use the same typed outcome in graph routing and permanent object history."""
+    code = getattr(error, 'code', None) or str(error) or type(error).__name__
+    details = exception_details(error)
+    unknown = details.get('status') == 'unknown' or code.startswith((
+        'visual_identity_unknown', 'task_target_geometry_unknown', 'source_inventory_unknown',
+        'observed_support_unknown', 'observed_support_current_geometry_required',
+        'observed_instance_missing_or_ambiguous', 'task_completion_unconfirmed'))
+    if code.startswith('task_completion_unconfirmed') and any(
+            check.get('status') in {'yes', 'no'}
+            and check['status'] != check.get('expected_status', 'yes')
+            for check in details.get('diagnostic_checks', []) if check.get('required') is True):
+        unknown = False
+    return {'success': False, 'status': 'unknown' if unknown else 'failure',
+        'arm': state.get('arm'), 'generation': state.get('generation'),
+        'target_id': details.get('target_id') or arguments.get('target_id') or state.get('target_id'),
+        'reason': code, 'error_code': getattr(error, 'code', None) or code.partition(':')[0],
+        'message': str(error)[:1000], 'details': details,
+        'partial_execution': deepcopy(state.get('current_step'))}
+
+
 def judgment_details(result, requests, *, failed_names=None):
     """Keep the actual question alongside the score used by the acceptance rule."""
     details = deepcopy(result.get('evidence', {}))
@@ -70,6 +91,9 @@ def _component(code, details):
         return 'perception_geometry'
     if code == 'explicit_observation_return_required':
         return 'policy_runtime'
+    if code in {'placement_no_candidate', 'place_no_valid_candidate', 'no_collision_free_source_ik',
+                'grasp_candidate_preconditions_rejected', 'grasp_destination_samples_exhausted'}:
+        return 'motion_planning'
     if details.get('component'):
         return details['component']
     if code.startswith(('planning_', 'grasp_lift_', 'grasp_no_transport_', 'execution_observation_',
@@ -77,7 +101,7 @@ def _component(code, details):
         return 'motion_planning'
     if code.startswith('sam3_'):
         return 'sam3'
-    if code.startswith(('visual_', 'decisions_', 'task_binding_unconfirmed', 'task_completion_unconfirmed')):
+    if code.startswith(('visual_', 'decisions_', 'instance_registration_unconfirmed', 'task_completion_unconfirmed')):
         return 'decisions'
     if code.startswith('responses_'):
         return 'responses'
@@ -143,8 +167,18 @@ def _planning_evidence(details):
                 break
         if len(checks) >= 12:
             break
-    return checks, [{'stage': stage, 'code': code, 'count': count}
-                    for (stage, code), count in counts.items()]
+    summaries = [{'stage': stage, 'code': code, 'count': count} for (stage, code), count in counts.items()]
+    if not summaries and isinstance(details.get('failure_counts'), list):
+        summaries = deepcopy(details['failure_counts'])
+    search = details.get('placement_search')
+    if isinstance(search, dict):
+        checks.append({'name': 'bounded_placement_search', 'status': 'failed',
+                       'question': '当前抓取姿态和场景下，已尝试的放置候选为何未通过？',
+                       'actual': deepcopy(search)})
+        phases = search.get('phase_failures', [])
+        summaries = ([{'stage': row['phase'], 'code': row['code'], 'count': row['count']} for row in phases]
+                     if phases else [{'stage': 'release_pose', **row} for row in search.get('failure_counts', [])])
+    return checks, summaries
 
 
 def build_failure_report(code, details, state):
@@ -182,7 +216,7 @@ def build_failure_report(code, details, state):
                            'actual': details['allocator_message']})
         next_step = '核对分配器原始消息、常驻规划器显存及当前步骤的临时分配峰值。'
     elif component == 'perception_mapping':
-        summary = '清单碰撞地图缺少当前有效几何；观测部分成功不表示地图已完整更新。'
+        summary = '空间记忆缺少当前有效几何，需要补齐对应实例的碰撞模型。'
         for field, label in (('missing_entity_ids', '缺少地图层'), ('stale_entity_ids', '几何已过期')):
             entities = details.get(field, [])
             if entities:
@@ -215,6 +249,7 @@ def build_failure_report(code, details, state):
         row.get('required') is False,
         row.get('status') not in {'unknown', 'no', 'fail', 'failed', 'error', 'no_candidates'}))
     report = {'component': component, 'code': code, 'summary': summary,
+              'skill': (state.get('current_step') or state.get('failed_step') or {}).get('skill'),
               'stage': details.get('stage') or (state.get('current_step') or state.get('failed_step') or {}).get('skill'),
               'target_id': state.get('target_id'), 'arm': state.get('arm') or details.get('arm'),
               'observation_id': details.get('observation_id') or evidence.get('observation_id'),
@@ -237,6 +272,8 @@ def failure_record(error, state):
         if result.get('status') in {'failure', 'failed', 'unknown', 'rejected'} or result.get('success') is False:
             code = result.get('error_code') or result.get('reason') or code
             details = result_details(result)
+            if result.get('skill'):
+                state = {**state, 'current_step': {'skill': result['skill']}}
             if result.get('evaluations'):
                 details['diagnostic_checks'] = [{'name': 'arm_reachability', 'actual': result['evaluations']}]
     record.update(error_code=code, error_details=details,
@@ -249,7 +286,11 @@ def result_details(result):
     fields = ('component', 'stage', 'purpose', 'observation_id', 'request_hash',
               'diagnostic_checks', 'known_facts', 'unknowns', 'evidence_refs', 'sam3_queries')
     details = {}
-    for source in (result.get('visual_evidence') or {}, result, result.get('details') or {}):
+    semantic = result.get('evidence') or {}
+    if not isinstance(semantic, dict):
+        semantic = {}
+    for source in (semantic.get('evidence') or {}, semantic, result.get('visual_evidence') or {},
+                   result, result.get('details') or {}):
         details.update({key: deepcopy(source[key]) for key in fields if key in source})
     details.update(deepcopy(result.get('details') or {}))
     for key in ('observation_assessment', 'workspace_evidence'):

@@ -1,6 +1,6 @@
 {
   "id": "execute_grasp",
-  "description": "Execute the selected current approach/grasp trajectory, close the gripper, validate actual closure/start/collision state, then execute the planned lift. The first lift has no object attachment, as configured by the user. Preserve partial physical effects on failure; never replay them as an ordinary retry. Return measured execution/holding evidence. Attachment is prepared only after successful lift and holding confirmation.",
+  "description": "Execute the selected current approach/grasp trajectory, close the gripper, validate actual closure/start/collision state, then execute the planned lift. The first lift has no object attachment. Preserve partial physical effects on failure; never replay them as an ordinary retry. Prepare the execution-layer carrying collision model after successful lift and mechanical feedback checks. No visual holding judgment is requested. Record gripper events only as robot action evidence, never as object identity, location or processing state. Before lift, mark the prior current location as no longer guaranteed. Visual object location and processing checks remain separate. Gripper settling uses the full position-range and time-weighted RMS velocity window; a timeout includes measured window statistics. On failure expose recovery_needed=true; only the explicit recover_failed_grasp skill can reconcile confirmed empty-grasp failures. Decisions selects the authored bounded branch. MotionPlanBinding binds target, destination, arm, generation, observation, scene and settings; execution checks it before physical commands. During grasp descent and closure, the executing Link3 fingers and Link4 linkage may contact the selected target. Contact-link/environment, peer-arm, other-link/target and self-collision checks retain their configured clearance. Gripper joint-limit violations retain actual position, command, authored limits and settling statistics in failure evidence.",
   "requires": {
     "plan_ready": true,
     "arm_selected": true,
@@ -27,11 +27,20 @@
     "stale_generation_or_observation",
     "precondition_not_satisfied",
     "missing_measurement_or_evidence",
-    "service_or_execution_failure"
+    "service_or_execution_failure",
+    "gripper_stability_timeout",
+    "grasp_not_held_after_lift",
+    "gripper_position_outside_authored_limits"
   ],
   "invalidates_observation": true,
   "planning_effects": {
     "observed": false,
-    "at_initial_pose": false
+    "at_initial_pose": false,
+    "observation_pose_ready": false
+  },
+  "failure_effects": {
+    "recovery_needed": true,
+    "plan_ready": false,
+    "observed": false
   }
 }

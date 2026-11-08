@@ -14,9 +14,9 @@ import yaml
 from .algorithms import AlgorithmError, Algorithms
 from .demo_grasp import (
     arm_wrist_reach,
-    filter_fixed_slot_reach,
+    filter_placement_reach,
     filter_transport_reach,
-    fixed_slot_reach_context,
+    placement_reach_context,
     prepare_grasp_candidates,
 )
 from .demo_gripper_quality import predict_gripper_compatibility
@@ -38,6 +38,7 @@ from .robot_skills.placement_selection import (
     check_goal_workspace,
     check_height_workspace,
 )
+from .scene_update import SCENE_INVALIDATION_SOURCES
 
 
 @lru_cache(maxsize=8)
@@ -189,6 +190,7 @@ class DemoAlgorithms(Algorithms):
                 "rotation_threshold_rad": settings["ik_rotation_threshold_rad"],
                 "downward_dot": downward, "horizontal_away_from_robot_dot": away_dot,
                 "maximum_tilt_deg": settings['grasp_maximum_tilt_deg'],
+                "require_away_from_robot": settings['grasp_require_away_from_robot'],
                 "reference": "original_graspgen_tool_pose_with_arm_jaw_symmetry"}
 
     def _grasp_ik_candidate(self, candidate, snapshot, target_id, arm, scene, settings):
@@ -213,7 +215,7 @@ class DemoAlgorithms(Algorithms):
                 "T_world_tcp": achieved.tolist(), "source_ik_fk": deepcopy(item["achieved_tool_pose"]),
                 "fk_goal_validation": evidence}, evidence
 
-    def _grasp_destination_candidates(self, valid, snapshot, target_id, arm, scene, settings, destination_id):
+    def _grasp_destination_candidates(self, valid, snapshot, target_id, arm, scene, settings, destination_id, placement_request):
         from itertools import product
 
         from .grasp_placement_screen import fixed_gripper_spheres, screen_grasp_placement
@@ -229,6 +231,12 @@ class DemoAlgorithms(Algorithms):
             return valid, {'applied': False, 'reason': 'current_placement_region_unavailable',
                 'destination_id': destination_id}
         self._binding(snapshot, target_id, scene)
+        from .container_release import container_release_reference, release_mode
+
+        mode = release_mode(placement_request)
+        reference = deepcopy(reference) | {'release_mode': mode}
+        if mode == 'container_release':
+            reference.update(container_release_reference(destination, scene, snapshot, settings))
         target = observed_object(snapshot, target_id)
         cad = target.get('cad')
         if cad is not None:
@@ -252,7 +260,8 @@ class DemoAlgorithms(Algorithms):
             return self.request('/tools/query_world_spheres', {**payload, 'spheres_world_m': spheres.tolist()})
 
         kept, evidence = screen_grasp_placement(valid, points, reference, fixed_gripper_spheres(arm), query,
-            scene_token=scene['scene_token'], settings=settings, uncertainty_m=target.get('uncertainty_m', .005))
+            scene_token=scene['scene_token'], settings=settings, uncertainty_m=target.get('uncertainty_m', .005),
+            measured_reference_world_m=np.asarray(target['points_world_m'], dtype=float).mean(axis=0))
         evidence.update(arm=arm, target_id=target_id, destination_id=destination_id,
             observation_id=snapshot['observation_id'], generation=snapshot['generation'],
             placement_reference=deepcopy(reference), object_geometry_point_count=len(points),
@@ -364,7 +373,7 @@ class DemoAlgorithms(Algorithms):
             reach_context = {"robot_base_world_m": arm_wrist_reach(arm)["robot_base_world_m"],
                              "measured_reference_world_m": np.asarray(target["points_world_m"]).mean(axis=0)}
         else:
-            reach_context = fixed_slot_reach_context(snapshot, target_id, arm, placement_request, settings)
+            reach_context = placement_reach_context(snapshot, target_id, arm, placement_request, settings)
             reach_context.update(nominal_object_min_world_z_m=float(object_geometry[:, 2].min()),
                                  nominal_object_geometry_source=input_source)
         result = super().generate_grasps(
@@ -424,21 +433,21 @@ class DemoAlgorithms(Algorithms):
             return {**result, 'candidates': [], 'candidate_count': 0,
                     'downward_filter': evidence, 'candidate_replay': replay}
         if transport:
-            accepted, reach_evidence = filter_transport_reach(accepted, object_geometry, arm, placement_request)
+            accepted, reach_evidence = filter_transport_reach(accepted, object_geometry, arm, placement_request, settings.model_dump())
         else:
-            accepted, reach_evidence = filter_fixed_slot_reach(accepted, reach_context)
+            accepted, reach_evidence = filter_placement_reach(accepted, reach_context)
         replay['pre_budget_eligible_indices'] = [candidate['index'] for candidate in accepted]
         accepted = accepted[:candidate_count]
         replay['pre_ik_eligible_indices'] = [candidate['index'] for candidate in accepted]
         replay['reach_filter'] = deepcopy(reach_evidence)
         if not accepted and not transport:
-            raise AlgorithmError("no downward grasp passes the fixed-slot nominal 3D reach screen",
-                                 code="grasp_no_fixed_slot_reachable_candidate",
+            raise AlgorithmError("no downward grasp passes the placement-region nominal 3D reach screen",
+                                 code="grasp_no_placement_reachable_candidate",
                                  details={"downward_filter": evidence,
-                                          "fixed_slot_reach_filter": reach_evidence,
+                                          "placement_reach_filter": reach_evidence,
                                           "candidate_replay": replay})
         return {**result, "candidates": accepted, "candidate_count": len(accepted),
-                "downward_filter": evidence, "fixed_slot_reach_filter": reach_evidence,
+                "downward_filter": evidence, "placement_reach_filter": reach_evidence,
                 "candidate_replay": replay}
 
 
@@ -452,6 +461,15 @@ class DemoAlgorithms(Algorithms):
         if support_floor_z_m is not None:
             payload["support_floor_z_m"] = float(support_floor_z_m)
         result = self.request("/perception/update", payload)
+        return {**scene, **result}
+
+    def publish_container_occupancy(self, scene, receipt):
+        result = self.request('/perception/update', {
+            'scene_token': scene['scene_token'], 'generation': scene['generation'],
+            'target_id': receipt['target_id'], 'container_id': receipt['destination_id'],
+            'operation': 'container_entry', 'exclusion_state': 'released',
+            'source': receipt['source'], 'receipt_id': receipt['receipt_id'],
+            'binding_id': receipt['binding_id'], 'after_capture_id': receipt['observation_id']})
         return {**scene, **result}
 
     def measure_local_object(self, capture, work_area, appearance):
@@ -486,7 +504,7 @@ class DemoAlgorithms(Algorithms):
         """Record geometry changed by an action; never invent replacement occupancy."""
         if (not isinstance(target_id, str) or not target_id
                 or not isinstance(action_id, str) or not action_id
-                or source not in {"mock_vla", "verified_drop_action_bounds", "drop_release_action_bounds"}):
+                or source not in SCENE_INVALIDATION_SOURCES):
             raise ValueError("invalid scene invalidation provenance")
         result = self.request("/perception/update", {
             "scene_token": scene["scene_token"], "generation": scene["generation"],
@@ -635,10 +653,11 @@ class DemoAlgorithms(Algorithms):
                     pose = np.asarray(resolved['goal']['T_world_tcp'])
                     bottom = (held_geometry_points(holding) @ pose[:3, :3].T + pose[:3, 3])[:, 2].min()
                     gap = float(bottom - placement_zone['floor_z_m'])
-                    if gap > settings['place_max_release_gap_m'] + 1e-9:
+                    maximum_gap = resolved['goal']['release_reference']['height_search']['bounds']['maximum_object_floor_gap_m']
+                    if gap > maximum_gap + 1e-9:
                         raise AlgorithmError('Clear pose is too high above the intended support',
                             code='placement_release_too_high', details={'object_floor_gap_m': gap,
-                                'maximum_object_floor_gap_m': settings['place_max_release_gap_m']})
+                                'maximum_object_floor_gap_m': maximum_gap})
                     resolved['goal']['release_reference']['object_floor_gap_m'] = gap
                 except AlgorithmError as error:
                     if error.code not in RETRYABLE_PLACEMENT_ERRORS:
@@ -725,7 +744,7 @@ class DemoAlgorithms(Algorithms):
                     raise
                 failures.append({'candidate_id': candidate['candidate_id'], 'code': error.code, 'details': error.details})
                 continue
-            feedback_check.update(authorization='current_three_phase_trajectory_checks',
+            feedback_check.update(authorization='current_mode_specific_trajectory_checks',
                 reference_endpoint_proof_current=bool(feedback_check['consistent']))
             result.update(placement_request=deepcopy(placement_request),
                 resolution_feedback_check=feedback_check,
@@ -738,7 +757,7 @@ class DemoAlgorithms(Algorithms):
             if 'semantic_selection' in resolution:
                 result['selection_evidence']['semantic_selection'] = deepcopy(resolution['semantic_selection'])
             return result
-        raise AlgorithmError('No resolved placement candidate produced a checked three-stage path',
+        raise AlgorithmError('No resolved placement candidate produced a checked path for its bound release mode',
             code='place_no_valid_candidate', details={'candidate_failures': failures,
                 'resolution_id': resolution['resolution_id'], 'whole_destination_infeasible': False})
 
@@ -774,6 +793,12 @@ class DemoAlgorithms(Algorithms):
                 if gripper_spheres is None else gripper_spheres),
             clearance_m=settings["trajectory_collision_clearance_m"], observation_id=observation["observation_id"],
             release_height_m=settings['place_release_height_m'])
+        from .container_release import container_goal, container_release_reference, release_mode
+
+        mode = release_mode(placement_request)
+        goal['release_reference']['release_mode'] = mode
+        if mode == 'container_release':
+            goal = container_goal(goal, holding, container_release_reference(destination, scene, observation, settings))
         binding = self._held_binding(observation, target_id, arm, scene, holding)
         payload = self._motion_request(observation, arm, scene, goal["T_world_tcp"], settings)
         payload.update(carrying_binding=binding, approach_axis=settings["place_approach_axis"],
@@ -787,8 +812,15 @@ class DemoAlgorithms(Algorithms):
             from .release_height_search import height_input_digest, height_positions, height_search_bounds
 
             try:
-                bounds = height_search_bounds(goal['T_world_tcp'], held_geometry_points(holding),
-                    goal['release_reference']['floor_z_m'], settings['place_max_release_gap_m'])
+                if mode == 'container_release':
+                    from .container_release import container_height_bounds
+                    reference = goal['release_reference']
+                    bounds = container_height_bounds(goal['T_world_tcp'], held_geometry_points(holding),
+                        reference['floor_z_m'], reference['rim_z_m'], settings['container_release_gap_m'],
+                        settings['ik_position_threshold_m'])
+                else:
+                    bounds = height_search_bounds(goal['T_world_tcp'], held_geometry_points(holding),
+                        goal['release_reference']['floor_z_m'], settings['place_max_release_gap_m'])
             except ValueError as error:
                 if str(error) != 'placement_release_too_high':
                     raise
@@ -828,7 +860,7 @@ class DemoAlgorithms(Algorithms):
                 raise AlgorithmError('release conflicts with a required destination robot configuration',
                     code='placement_configuration_conflict', details=proof)
             goal['release_reference']['required_robot_configuration_clearance'] = proof
-        if destination.get('kind') == 'bin':
+        if destination.get('kind') == 'bin' and mode == 'surface_setdown':
             points = np.asarray(destination.get('points_world_m', []), float)
             if points.ndim != 2 or points.shape[1:] != (3,) or not len(points) or not np.isfinite(points).all():
                 raise ValueError('placement_container_rim_unobserved')
@@ -863,6 +895,8 @@ class DemoAlgorithms(Algorithms):
             planning_settings=planning_settings, placement_request=placement_request,
             progress=progress, cancelled=cancelled) if resolved is None else deepcopy(resolved))
         goal, payload, binding, settings = (resolved[key] for key in ('goal', 'payload', 'binding', 'settings'))
+        if placement_request['release_mode'] != goal['release_reference']['release_mode']:
+            raise ValueError('placement_release_mode_changed')
         # The pose stays frozen; trajectory planning starts from current joint feedback.
         payload.update(self._motion_request(observation, arm, scene, goal['T_world_tcp'], settings))
         if progress:
@@ -871,7 +905,8 @@ class DemoAlgorithms(Algorithms):
         self._check_cancelled(cancelled)
         started = time.monotonic()
         try:
-            response = self.request("/tools/plan_place", payload)
+            container = goal['release_reference']['release_mode'] == 'container_release'
+            response = self.request('/tools/plan_carried_pose' if container else '/tools/plan_place', payload)
         except AlgorithmError:
             self._check_cancelled(cancelled)
             raise
@@ -880,15 +915,25 @@ class DemoAlgorithms(Algorithms):
             raise AlgorithmError("place plan returned a stale scene token", code="planning_stale_scene")
         if response.get("collision_evidence", {}).get("optimizer_attachment") is not True:
             raise AlgorithmError("place plan did not optimize the carried object", code="attachment_not_applied")
-        if not isinstance(response.get("phases"), dict) or set(response["phases"]) != {"approach", "place"}:
-            raise AlgorithmError("place plan has incomplete phases", code="algorithm_invalid_response")
-        raw = self._native_phases(response["phases"], arm)
-        phases, checks = self._complete_place_candidate(
-            observation, arm, scene, binding, raw, settings, cancelled=cancelled)
+        if container:
+            from .trajectory_postprocessing import build_execution_phases
+
+            if response.get('attached') is not True or not response.get('trajectory'):
+                raise AlgorithmError('container release requires a held trajectory', code='algorithm_invalid_response')
+            raw = self._native_phases({'place': response['trajectory']}, arm)
+            phases = build_execution_phases(raw, settings['time_scale'])
+            checks = {'place': self.validate_execution(observation, arm, scene, 'place', phases['place'],
+                binding, planning_settings=settings)}
+        else:
+            if not isinstance(response.get("phases"), dict) or set(response["phases"]) != {"approach", "place"}:
+                raise AlgorithmError("place plan has incomplete phases", code="algorithm_invalid_response")
+            raw = self._native_phases(response["phases"], arm)
+            phases, checks = self._complete_place_candidate(
+                observation, arm, scene, binding, raw, settings, cancelled=cancelled)
         selection = {"candidate_index": 0, "rule": "single_fixed_object_reference_and_grasp_rotation",
-                     "retreat_checked": True, "yaw_delta_deg": 0., "candidate_count": 1}
+                     "retreat_checked": not container, "release_mode": goal["release_reference"]["release_mode"], "yaw_delta_deg": 0., "candidate_count": 1}
         if progress:
-            progress("planning_complete", "cuRobo 固定放置及撤离校验完成",
+            progress("planning_complete", "cuRobo 放置模式对应轨迹校验完成",
                      {**selection, "duration_s": time.monotonic() - started})
         return {"arm": arm, "target_id": target_id, "destination_id": destination_id,
             "observation_id": observation["observation_id"], "generation": observation["generation"],

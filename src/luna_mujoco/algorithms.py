@@ -20,7 +20,6 @@ from .planning_settings import PlanningSettings
 from .trajectory_postprocessing import build_execution_phases
 
 
-
 class AlgorithmError(RuntimeError):
     def __init__(self, message, *, code="algorithm_error", details=None):
         super().__init__(message)
@@ -28,8 +27,48 @@ class AlgorithmError(RuntimeError):
         self.details = details
 
 
+def _proven_endpoint_rejection(proof):
+    if (not isinstance(proof, dict) or proof.get('accepted') is not False
+            or proof.get('reference') != 'original_graspgen_tool_pose_with_arm_jaw_symmetry'):
+        return False
+    fields = ('position_error_m', 'rotation_error_rad', 'position_threshold_m',
+              'rotation_threshold_rad', 'downward_dot', 'horizontal_away_from_robot_dot',
+              'maximum_tilt_deg')
+    if any(type(proof.get(key)) not in (int, float) or not np.isfinite(proof[key]) for key in fields):
+        return False
+    position, rotation, pos_limit, rot_limit, downward, away, tilt = (proof[key] for key in fields)
+    if not (position >= 0 and 0 <= rotation <= np.pi and pos_limit > 0
+            and 0 < rot_limit <= np.pi and -1 <= downward <= 1 and -1 <= away <= 1
+            and 0 <= tilt <= 180):
+        return False
+    checks = {
+        'nominal_position_tolerance_exceeded': position > pos_limit + 1e-9,
+        'nominal_rotation_tolerance_exceeded': rotation > rot_limit + 1e-9,
+        'achieved_tool_tilt_exceeded': downward < np.cos(np.deg2rad(tilt)) - 1e-9,
+        'achieved_tool_points_toward_robot': proof.get('require_away_from_robot') is True and away < -1e-9,
+    }
+    reasons = proof.get('reason')
+    if not isinstance(reasons, str) or not reasons:
+        return False
+    if reasons in {'predicted_noncontact_geometry_conflict', 'predicted_open_pad_clearance_conflict'}:
+        prediction = proof.get('predicted_gripper_compatibility', {})
+        if not isinstance(prediction, dict):
+            return False
+        field = ('minimum_padded_open_pad_gap_m' if reasons == 'predicted_open_pad_clearance_conflict'
+                 else 'minimum_padded_noncontact_gap_m')
+        gap = prediction.get(field)
+        return (prediction.get('accepted') is False and prediction.get('reason') == reasons
+                and prediction.get('source') == 'predicted_centered_jaw_width_on_frozen_cloud'
+                and bool(prediction.get('model_fingerprint')) and bool(prediction.get('points_world_sha256'))
+                and type(gap) in (float, int) and np.isfinite(gap) and gap < 0)
+    return set(reasons.split(';')) == {reason for reason, rejected in checks.items() if rejected}
+
+
 def determinate_grasp_failure(failure):
-    """Accept completed solver failure or a finite, proven contact shortfall."""
+    """Accept finite completed numeric rejections, never missing/invalid evidence."""
+    if (isinstance(failure, dict) and failure.get('stage') == 'grasp_endpoint_validation'
+            and failure.get('code') == 'planning_grasp_endpoint_rejected'):
+        return _proven_endpoint_rejection(failure.get('details'))
     if (isinstance(failure, dict) and failure.get('stage') == 'command_validation'
             and failure.get('code') == 'execution_collision'):
         proof = failure.get('details') or {}
@@ -38,7 +77,9 @@ def determinate_grasp_failure(failure):
         return (proof.get('collision_free') is False and proof.get('motion_collision_checks_passed') is False
             and proof.get('failure_reason') == 'collision_or_joint_bounds'
             and proof.get('phase') in {'approach_grasp', 'grasp', 'grasp_closure', 'grasp_lift'}
-            and proof.get('collision_scope') == 'measured_obstacles_and_both_robot_arms'
+            and proof.get('collision_scope') in {
+                'published_inventory_geometry_and_both_robot_arms',
+                'measured_obstacles_and_both_robot_arms'}
             and type(index) is int and type(count) is int and 0 <= index < count
             and type(checked) is int and checked > 0 and bool(proof.get('scene_token'))
             and isinstance(digest, str) and len(digest) == 64 and all(c in '0123456789abcdef' for c in digest))
@@ -48,14 +89,26 @@ def determinate_grasp_failure(failure):
 
         return is_proven_contact_shortfall(failure.get('details'))
     if (not isinstance(failure, dict) or failure.get("stage") != "planner"
-            or failure.get("error") is not None or failure.get("status") != "Grasp planning completed."):
+            or failure.get("error") is not None):
+        return False
+    # Public BatchMotionPlanner.plan_grasp also returns at a failed phase.
+    # These are completed planning attempts with no physical execution.
+    failed_phase = {
+        'Goalset planning returned None.': 0,
+        'No grasp in goal set was reachable.': 0,
+        'Planning to approach pose failed.': 1,
+        'Planning to grasp pose failed.': 2,
+        'Planning to lift pose failed.': 3,
+    }.get(failure.get('status'))
+    if failed_phase is None and failure.get('status') != 'Grasp planning completed.':
         return False
     phases = failure.get("phase_success", {})
     if not isinstance(phases, dict):
         return False
     flags = [phases.get(name) for name in ("goalset", "approach", "grasp", "lift")]
     return (all(type(value) is bool for value in flags) and not all(flags)
-            and not any(flags[index] and not flags[index - 1] for index in range(1, 4)))
+            and not any(flags[index] and not flags[index - 1] for index in range(1, 4))
+            and (failed_phase is None or not any(flags[failed_phase:])))
 
 
 class Algorithms:
@@ -219,25 +272,6 @@ class Algorithms:
             if unresolved:
                 raise AlgorithmError('semantic_scene_identity_unresolved', code='semantic_scene_identity_unresolved',
                     details={'unresolved': unresolved})
-            task_ids = set(snapshot.get('task_member_ids', [])) | {target_id}
-            for query in snapshot.get('declared_environment', []):
-                observed = any(obj['id'] not in task_ids and obj.get('kind') not in {'bin', 'marker', 'table'}
-                               and obj.get('color') == query['color'] for obj in snapshot['objects'])
-                historical = set()
-                if strategy and query.get('status') == 'observed':
-                    for identifier in query.get('observed_ids', []):
-                        entity = inventory.get(identifier, {})
-                        position = np.asarray(entity.get('position', []), dtype=float)
-                        if (identifier not in task_ids and identifier not in lifecycle.get('retired_entity_ids', [])
-                                and entity.get('kind') not in {'bin', 'marker', 'table'}
-                                and entity.get('color') == query['color'] and entity.get('observation_id')
-                                and entity.get('position_source') != 'simulation_truth'
-                                and position.shape == (3,) and np.isfinite(position).all()):
-                            historical.add(identifier)
-                if not observed and not historical:
-                    raise AlgorithmError('declared_obstacle_not_observed', code='declared_obstacle_not_observed',
-                        details={'query': query, 'reason': 'no_distinct_non_task_object'})
-                retained_required.update(historical)
         views = {}
         coverage_views = {}
         camera_capture_metadata = {}
@@ -479,7 +513,7 @@ class Algorithms:
         return deepcopy({key: replay[key] for key in fields if key in replay})
 
     def evaluate_reachability(self, snapshot, target_id, destination_id=None, *, requested_arm=None):
-        from .task_progress import measured_position
+        from .observation_geometry import measured_position
 
         if requested_arm not in (None, 'A', 'B'):
             raise ValueError('invalid_requested_arm')
@@ -508,7 +542,7 @@ class Algorithms:
         return result
 
     def evaluate_arms(self, snapshot, target_id, grasps, scene, *, planning_settings=None,
-                      progress=None, cancelled=None, destination_id=None, requested_arm=None):
+                      progress=None, cancelled=None, destination_id=None, requested_arm=None, placement_request):
         if requested_arm not in (None, 'A', 'B'):
             raise ValueError('invalid_requested_arm')
         bound_arm = grasps.get('arm')
@@ -597,7 +631,7 @@ class Algorithms:
                     progress("ik_batch_complete", "cuRobo batched IK 完成", completed)
                 self._check_cancelled(cancelled)
             valid, destination_screening = self._grasp_destination_candidates(
-                valid, snapshot, target_id, arm, scene, settings, destination_id)
+                valid, snapshot, target_id, arm, scene, settings, destination_id, placement_request)
             self._check_cancelled(cancelled)
             result[arm] = {**sampling, **({"graspgen_replay_inputs": replay_inputs} if replay_inputs else {}),
                            "valid_candidates": valid, "tested_count": len(candidates),
@@ -812,7 +846,9 @@ class Algorithms:
             elif placement_request.get('region'):
                 payload['next_motion_kind'] = 'place'
         result = self.request("/carrying/prepare", {**payload, "carrying_binding": binding})
-        if result.get("attached") is not True or result.get("scene_token") != scene["scene_token"]:
+        expected = {key: binding[key] for key in ('arm', 'instance_id', 'observation_id', 'generation', 'scene_token')}
+        expected['carrying_owner_id'] = binding['owner_id']
+        if result.get("attached") is not True or any(result.get(key) != value for key, value in expected.items()):
             raise AlgorithmError("attachment preparation failed", code="attachment_not_applied")
         return result
 
@@ -850,7 +886,7 @@ class Algorithms:
     def _grasp_ik_candidate(self, candidate, snapshot, target_id, arm, scene, settings):
         return candidate, None
 
-    def _grasp_destination_candidates(self, valid, snapshot, target_id, arm, scene, settings, destination_id):
+    def _grasp_destination_candidates(self, valid, snapshot, target_id, arm, scene, settings, destination_id, placement_request):
         return valid, None
 
     def _grasp_plan_evidence(self, candidate, item, phases, snapshot, target_id, arm, scene, settings):
@@ -1029,12 +1065,14 @@ class Algorithms:
                                 from .grasp_contact_prediction import bounded_contact_prediction
 
                                 contact = bounded_contact_prediction(
-                                    self._target(snapshot, target_id)['points_world_m'], candidate['T_world_tcp'],
+                                    self._target(snapshot, target_id)['points_world_m'],
+                                    goal_evidence.get('grasp_endpoint_fk', {}).get('T_world_tcp', candidate['T_world_tcp']),
                                     arm, limit, settings['holding_position_tolerance_fraction'])
                                 checks['closure']['bounded_contact_prediction'] = contact
                                 if not contact['opposing_contact_predicted']:
                                     raise AlgorithmError('bounded closure cannot reach observed opposing pad contacts',
-                                        code='planning_bounded_contact_unreachable', details=contact)
+                                        code='planning_bounded_contact_unreachable', details={
+                                            **contact, 'closure_collision': checks['closure']['full_range_rejection']})
                 except AlgorithmError as error:
                     check_cancelled()
                     if error.code not in {"planning_phase_start_changed", "execution_collision",
@@ -1088,13 +1126,14 @@ class Algorithms:
                         "start_joints_deg": evaluation["start_joints_deg"],
                         "other_joints_deg": evaluation["other_joints_deg"], "joint_drift_deg": joint_drift,
                         "joint_drift_threshold_deg": 1.}
-        exhaustion = {**expected, "sampling_round": evaluation.get("sampling_round"),
+        exhaustion = {**expected, "scope": "internal_frozen_candidate_pool",
+            "sampling_round": evaluation.get("sampling_round"),
             "start_joints_deg": deepcopy(evaluation["start_joints_deg"]),
             "other_joints_deg": deepcopy(evaluation["other_joints_deg"]),
             "candidate_indices": indices, "planned_candidate_count": planned_count,
             "unplanned_candidate_indices": indices[planned_count:],
             "outcome": "determinate_planner_failure" if candidates and len(failures) == len(candidates)
-                and all(determinate_grasp_failure(row) for row in failures) else "not_retryable"}
+                and all(determinate_grasp_failure(row) for row in failures) else "pool_expansion_not_permitted"}
         raise AlgorithmError(f"no valid three-phase grasp plan for arm {arm}: {failures}",
             code="planning_no_valid_candidate", details={"arm": arm, "failures": failures,
                 "batches": batches, "pool_exhaustion": exhaustion})

@@ -4,6 +4,9 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
+# Finer intervals reduce conservative sweep inflation; every interval remains covered.
+CLOSURE_SAMPLE_STEP_RAD = .00025
+
 
 def safe_closure_prefix(angles, valid):
     """Only the contiguous collision-free prefix can authorize a close command."""
@@ -27,7 +30,7 @@ def grasp_closure_samples(robot_config, arm, urdf_path, maximum_driver_rad=None)
                 or not lower < maximum_driver_rad <= upper):
             raise ValueError('closure limit must be inside authored limits')
         upper = float(maximum_driver_rad)
-    angles = np.linspace(lower, upper, int(np.ceil((upper - lower) / .02)) + 1)
+    angles = np.linspace(lower, upper, int(np.ceil((upper - lower) / CLOSURE_SAMPLE_STEP_RAD)) + 1)
     padding = gripper_sweep_padding(robot_config, arm, urdf_path, float(np.diff(angles).max()))
     return angles, padding
 

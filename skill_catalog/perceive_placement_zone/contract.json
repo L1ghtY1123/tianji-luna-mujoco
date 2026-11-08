@@ -1,6 +1,6 @@
 {
   "id": "perceive_placement_zone",
-  "description": "Obtain the current destination support region and interpret only this transfer location clause. Use an accepted CAD interior-floor/surface definition or a measured support plane; do not demand visible depth for a registered CAD floor. Reuse an already confirmed destination relation when its binding is valid. Decide whether the language authorizes the entire region or adds a relative position/subregion/orientation constraint. Selecting a container on the left/right does not itself constrain a point within that container. CAD selection, grasp method, later processing, return posture and task completion are outside these questions. Unknown geometry or language returns an explicit reason; the graph chooses any legal recovery movement, observation and retry.",
+  "description": "Preserve the destination-bound release_mode in the placement intent. The interior/support plane remains its measured floor; it is never relabeled as the rim. Obtain the current destination support region and interpret only this transfer location clause. Use an accepted CAD interior-floor/surface definition or a measured support plane; do not demand visible depth for a registered CAD floor. Reuse an already confirmed destination relation when its binding is valid. Decide whether the language authorizes the entire region or adds a relative position/subregion/orientation constraint. Selecting a container on the left/right does not itself constrain a point within that container. CAD selection, grasp method, later processing, return posture and task completion are outside these questions. Unknown geometry or language returns an explicit reason; the graph chooses any legal recovery movement, observation and retry. Reuse a positive identify_destination intermediate permission only for the identical target, destination/reference, task, capture and region configuration. This permission does not certify final delivery. Ask separately about any additional within-region language constraint.",
   "capability": "Obtain the current destination support region and interpret only this transfer location clause",
   "inputs": [
     "original_instruction",
@@ -24,7 +24,9 @@
     "placement_zone",
     "intent",
     "semantic_scope",
-    "evidence"
+    "evidence",
+    "details",
+    "required_evidence"
   ],
   "planning_effects": {
     "placement_resolved": false,
@@ -36,8 +38,9 @@
     "placement_horizontal_surface_unobserved",
     "fresh_observation_required_before_judgment",
     "placement_region_semantics_unknown",
-    "cad_support_not_horizontal"
+    "cad_support_not_horizontal",
+    "placement_destination_mismatch"
   ],
   "invalidates_observation": false,
-  "recovery_retry_safe": true
+  "retry_safe": true
 }

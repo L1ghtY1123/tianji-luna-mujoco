@@ -1,6 +1,6 @@
 {
   "id": "move_to_observe",
-  "description": "Plan and execute an explicit empty-hand dual-arm camera movement against a current observation map or an authorized retained scene. viewpoint=configured returns to the operator observation posture. wrist_tilt_positive/negative offset both sixth joints by +12/-12 degrees to propose distinct wrist-camera views; these require joint-limit, collision and execution checks and do not certify visibility. Alternative viewpoints do not satisfy a required return to the configured posture. Capture at the reached viewpoint, then return for the graph to choose analysis. Do not repeat an unchanged alternative viewpoint. The skill does not insert observe_scene, verify_place or a retry. If no current/authorized collision scene exists, motion is unavailable; a branch cannot waive that requirement.",
+  "description": "Plan and execute an explicit empty-hand dual-arm camera movement against a current observation map or an authorized retained scene. viewpoint=configured returns to the operator observation posture. Prefer this configured return for bounded recovery, followed in the graph by observe_scene, restoration of invalidated prerequisites and retry of the failed checkpoint. Decisions chooses the authored recovery branch; configured return requires no additional visual-limitation question. Empty hands, a valid observation-motion map, joint limits, collisions and execution checks remain required. wrist_tilt_positive/negative offset both sixth joints by +12/-12 degrees and still require one current visual-limitation judgment for the original failed skill and subject. Alternative viewpoints do not satisfy a required configured return and do not certify visibility. Capture at the reached viewpoint, then return control to the graph. Do not repeat an unchanged alternative viewpoint. This skill does not insert observe_scene, verification or retry. A new observation does not prove numerical planning infeasibility or partial motor execution has been repaired. Preserve original failure evidence through intermediate mapping. After release with unconfirmed destination semantics, observation motion requires the original completed release/open-gripper feedback, a current observation collision map containing the released target measured after that release. Obtain this map through graph-selected observe_scene and build_scene before moving. Do not use the retained pre-release map for this case. Destination acceptance remains unknown until verify_place succeeds; movement does not confirm placement.",
   "inputs": [
     "current_robot_feedback",
     "latest_collision_scene",
@@ -16,7 +16,7 @@
     "observation_pose_ready",
     "grasp_view_ready"
   ],
-  "capability": "Plan and execute an explicit empty-hand dual-arm camera movement against a current observation map or an authorized retained scene. Recovery viewpoints require a current Decisions diagnosis of not_visible, cropped or occluded evidence; CAD/identity ambiguity, timeouts and planning failures alone cannot authorize movement.",
+  "capability": "Plan and execute an explicit empty-hand dual-arm camera movement against a current observation map or an authorized retained scene",
   "outputs": [
     "observation_pose_ready",
     "grasp_view_ready",
@@ -28,10 +28,10 @@
     "precondition_not_satisfied",
     "missing_measurement_or_evidence",
     "service_or_execution_failure",
-    "viewpoint_requires_visual_limitation"
+    "viewpoint_requires_visual_limitation",
+    "observation_release_evidence_insufficient"
   ],
   "invalidates_observation": true,
-  "recovery_retry_safe": true,
   "planning_effects": {
     "observation_motion_scene_ready": false,
     "observed": false,
@@ -65,5 +65,6 @@
         "observation_pose_ready": false
       }
     }
-  ]
+  ],
+  "retry_safe": true
 }

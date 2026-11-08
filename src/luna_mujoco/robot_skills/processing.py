@@ -1,26 +1,18 @@
-"""Independent configured unpack preparation, effect and result-verification skills."""
+"""Execution adapters for unpack skills and data-only product evidence projection."""
 import asyncio
 import copy
 from uuid import uuid4
 
 import numpy as np
 
-from ..vla_configuration import vla_unpack_configuration
+from ..memory_contracts import ObjectRecord, ProductRegistration
+from ..vla_configuration import vla_processing_effect, vla_unpack_configuration
 from .evidence import unpack_table_support, validate_table_release_reference
 
 
-def create_unpack_product(input_id, action, result, capture, *, owner_id):
-    """Create a distinct identity only from a bound current visual result."""
+def unpack_product_proposal(input_id, action, result, capture, *, owner_id, source: ObjectRecord, measurement):
+    """Validate observed product facts; execution owns the database transaction and ID."""
     visual = result.get('visual_evidence', {})
-    view_valid = visual.get('view_scope') == 'fused_current_three_rgb'
-    if visual.get('view_scope') == 'independent_current_three_rgb':
-        witnesses = visual.get('camera_evidence', [])
-        selected = [row for row in witnesses if row.get('camera_id') == visual.get('selected_camera_id')]
-        view_valid = (len(witnesses) == 3 and {row.get('camera_id') for row in witnesses} == {'1', '2', '3'}
-            and len(selected) == 1 and selected[0].get('request_hash') == result.get('request_hash')
-            and selected[0].get('observation_id') == capture.get('observation_id')
-            and selected[0].get('required_judgments') == {'unpack_result': 'yes', 'wrapper_removed': 'yes'}
-            and selected[0].get('confidence') == visual.get('confidence'))
     if (not owner_id or result.get('success') is not True or result.get('status') != 'confirmed'
             or result.get('target_id') != input_id or not result.get('request_hash')
             or result.get('observation_id') != capture.get('observation_id')
@@ -30,21 +22,55 @@ def create_unpack_product(input_id, action, result, capture, *, owner_id):
             or action.get('completed') is not True or not action.get('process_id')
             or not action.get('action_id') or visual.get('action_id') != action['action_id']
             or visual.get('judgments') != {'unpack_result': 'yes'}
-            or not view_valid
+            or visual.get('view_scope') != 'fused_current_three_rgb'
+            or set(result.get('camera_ids', [])) != {'1', '2', '3'}
+            or visual.get('required_judgments') != {'unpack_result': 'yes', 'wrapper_removed': 'yes'}
             or type(visual.get('confidence')) not in (int, float) or not .8 <= visual['confidence'] <= 1.):
         raise ValueError('product_requires_confirmed_visible_result')
-    identifier = 'product-' + uuid4().hex
+    if source.id != input_id:
+        raise ValueError('processing_source_identity_mismatch')
+    from ..cameras import deproject_view
+    from ..visual_inventory import array_stamp, mask_box
+
+    camera = measurement.get('camera_id')
+    view = capture.get('views', {}).get(camera, {})
+    mask = np.asarray(measurement.get('mask'))
+    points = np.asarray(measurement.get('points_world_m'))
+    if (measurement.get('source') != 'current_rgbd_object_surface'
+            or measurement.get('appearance') != 'unpacked'
+            or any(measurement.get(key) != capture.get(key) for key in ('observation_id', 'generation'))
+            or (measurement.get('component_evidence') or {}).get('new_candidate_count') != 1
+            or mask.dtype != np.bool_ or mask.shape != np.shape(view.get('depth_m'))
+            or points.shape != (int(mask.sum()), 3) or len(points) < 30
+            or not np.isfinite(points).all()
+            or not np.allclose(points, deproject_view(view, mask), atol=1e-6, rtol=0)):
+        raise ValueError('product_reference_measurement_mismatch')
+    output = vla_processing_effect()['output']
     evidence = {'source': 'confirmed_unpack_process_output', 'processing_skill': 'vla_unpack',
-        'process_id': action['process_id'], 'input_entity_id': input_id, 'output_entity_id': identifier,
+        'process_id': action['process_id'], 'input_entity_id': input_id,
         'owner_id': owner_id, 'observation_id': capture['observation_id'], 'generation': capture['generation'],
         'request_hash': result['request_hash'], 'action_id': action['action_id'],
-        'relationship': 'processing_input_and_output_are_distinct_entities'}
-    return {'id': identifier, 'kind': 'object', 'color': 'black',
-        'description': 'separate black unpacked product on the measured work support',
+        'relationship': 'processing_input_and_output_are_distinct_entities',
+        'verified_question': copy.deepcopy(next(q for q in result['questions'] if q['name'] == 'unpack_result')),
+        'verified_answer': copy.deepcopy(next(a for a in result['answers'] if a['name'] == 'unpack_result')),
+        'verification_request_hash': result['question_requests']['unpack_result']['request_hash'],
+        'before_observation_id': visual['table_release_reference']['observation_id'],
+        'localization': {'source': measurement['source'], 'camera_id': camera,
+            'observation_id': capture['observation_id'], 'generation': capture['generation'],
+            'mask': array_stamp(mask), 'points_world_m': array_stamp(points),
+            'component_evidence': copy.deepcopy(measurement['component_evidence'])}}
+    return ProductRegistration(event_key='process:' + action['process_id'], attributes={**output, 'world_key': source.world_key,
         'process_id': action['process_id'], 'input_entity_id': input_id, 'processing_skill': 'vla_unpack',
         'identity_source': 'confirmed_current_product_creation', 'creation_evidence': evidence,
-        'visual_membership': 'required', 'roles': ['product', 'collision'],
-        'segmentation_query': {'kind': 'object', 'color': 'black', 'prompt': 'black object'}}
+        'reference_observation_id': capture['observation_id'], 'reference_camera_id': camera,
+        'bbox': mask_box(mask), 'identity_request_hash': result['request_hash'],
+        'last_position_measurement': {'observation_id': capture['observation_id'],
+            'position_world_m': ((points.min(axis=0) + points.max(axis=0)) / 2).tolist(),
+            'source': measurement['source']},
+        'roles': ['product', 'collision'],
+        'processing_history': [*source.processing_history, 'vla_unpack'],
+        'segmentation_query': {'kind': output['kind'], 'color': output['color'],
+                               'prompt': output['color'] + ' object'}})
 
 
 class ProcessingSkills:
@@ -68,16 +94,6 @@ class ProcessingSkills:
                 or pending.get('verified') is not True or not release.get('release_feedback_id')
                 or context.get('post_place_capture', {}).get('generation') != self.state['generation']):
             raise ValueError('unpack_requires_verified_table_release_and_empty_hands')
-        requirement = getattr(self, 'environment_assumptions', {}).get(
-            'completion_requirements', {}).get('after_each_object', {})
-        if requirement:
-            proof = self.task_progress.records.get(target, {}).get('post_delivery_observation', {})
-            delivery = proof.get('delivery', {})
-            if (proof.get('status') != 'verified' or proof.get('generation') != self.state['generation']
-                    or delivery.get('entity_id') != target
-                    or delivery.get('confirmed_observation_id') != release.get('observation_id')
-                    or requirement.get('observe_inventory') and proof.get('inventory_observed') is not True):
-                raise ValueError('processing_requires_post_delivery_observation')
         return release
 
     def _processing_work_area(self, context):
@@ -105,14 +121,26 @@ class ProcessingSkills:
         support = unpack_table_support(observation, support_id)
         known = []
         objects = {item['id']: item for item in observation.get('objects', [])}
-        for identifier, entity in self.task_progress.scene_entities.items():
-            if identifier == self.state['target_id'] or entity.get('kind') != 'object' or entity.get('color') != 'black':
+        from ..container_occupancy import published_container_occupancy
+
+        entities = self.object_memory.entities()
+        scene = self.spatial_memory.scene
+        invalidated = self.spatial_memory.lifecycle()['invalidated_entity_ids']
+        for identifier, entity in entities.items():
+            if (identifier == self.state['target_id'] or entity.get('kind') != 'object'
+                    or entity.get('color') != 'black' or entity.get('status') in {'consumed', 'removed'}):
                 continue
             measured = objects.get(identifier, {})
             points = np.asarray(measured.get('points_world_m'), float)
             if (measured.get('position_source') == 'simulation_truth' or points.ndim != 2
                     or points.shape[1] != 3 or not len(points) or not np.isfinite(points).all()):
-                raise ValueError('unpack_existing_black_identity_requires_measured_geometry:' + identifier)
+                container_id = (entity.get('container_entry') or {}).get('destination_id')
+                occupied = published_container_occupancy(
+                    entity, entities.get(container_id, {}), scene, invalidated)
+                if occupied is None:
+                    raise ValueError('unpack_existing_black_identity_requires_measured_geometry:' + identifier)
+                known.append(occupied)
+                continue
             known.append({'id': identifier, 'minimum_world_m': points.min(axis=0).tolist(),
                           'maximum_world_m': points.max(axis=0).tolist()})
         support['known_black_objects'] = known
@@ -127,7 +155,7 @@ class ProcessingSkills:
         object_xy = np.asarray(endpoint.get('actual_object_reference_world_xy_m'), float)
         angle = endpoint.get('rotation_error_rad')
         expected = np.asarray(config['input_xy_m'])
-        entity = self.task_progress.scene_entities.get(self.state['target_id'], {})
+        entity = self.object_memory.entities().get(self.state['target_id'], {})
         if (entity.get('color') != 'pink' or reference.get('object_id') != self.state['target_id']
                 or object_xy.shape != (2,)
                 or not np.isfinite(object_xy).all()
@@ -163,7 +191,7 @@ class ProcessingSkills:
         self._vla_input_requirements(context)
         observation = self.measured_state(context)
         goals = vla_unpack_configuration(context['planning_settings'])['preparation_joints_deg']
-        scene = context['scene'] | {'return_after_place': True}
+        scene = self.spatial_memory.scene | {'return_after_place': True}
         plan = await self.call_algorithm(self.algorithms.plan_dual_vla_motion,
             observation, scene, goals, planning_settings=context['planning_settings'])
         feedback = self.simulation.robot_snapshot()
@@ -217,10 +245,7 @@ class ProcessingSkills:
         receipt.update(table_release_feedback_id=release['release_feedback_id'],
             process_id='process-' + uuid4().hex, processing_skill='vla_unpack')
         context['processing_action'] = copy.deepcopy(receipt)
-        context['scene_refresh_required'] = True
-        lifecycle = context.setdefault('mapping_lifecycle', {})
-        lifecycle['invalidated_entity_ids'] = sorted(
-            set(lifecycle.get('invalidated_entity_ids', ())) | {self.state['target_id']})
+        self.spatial_memory.invalidate([self.state['target_id']])
         self.state['facts'].update(scene_ready=False, scene_available=False, observation_map_ready=False)
         # The effect invalidates prior object poses. New map publication belongs
         # to the graph; the effect receipt supplies no measured geometry.
@@ -248,8 +273,8 @@ class ProcessingSkills:
             table_release_capture=before, table_release_reference=copy.deepcopy(reference), active_target_ids=[target])
         self.emit('visual_unpack_result', 'Decisions：拆包结果与观测充分性', result)
         # Verification supplies current visual evidence, not a mapping policy.
-        # A graph-selected build_scene must decide scope and publish fresh TSDF/ESDF.
-        context['scene_refresh_required'] = True
+        # A graph-selected build_scene publishes refreshed CAD/OBB/cuboid layers.
+        self.spatial_memory.invalidate([])
         self.state['facts'].update(scene_ready=False, scene_available=False, observation_map_ready=False)
         if result['success']:
             try:
@@ -277,18 +302,36 @@ class ProcessingSkills:
                 result['visual_evidence']['workspace_evidence'] = workspace
                 self.emit('unpack_workspace_checked', '实测黑件位置与执行臂工作空间核对', workspace)
         if result['success']:
-            product = create_unpack_product(target, action, result, capture, owner_id=self.run_id)
+            from ..object_memory import restored_object_record
+
+            registration = unpack_product_proposal(target, action, result, capture, owner_id=self.run_id,
+                source=restored_object_record(self.world_inventory.get(target)), measurement=measured)
+            self.world_inventory.store_capture(capture)
+            product = self.world_inventory.register_product(registration.event_key, registration.attributes,
+                reference_masks={measured['camera_id']: measured['mask']})
+            product = {**product, 'visual_membership': 'required'}
+            # Adopt the committed physical facts before task bookkeeping can fail.
+            # Otherwise the failure handler could write an older active input back.
+            self.object_memory.restore(tuple(restored_object_record(self.world_inventory.get(identifier))
+                for identifier in (target, product['id'])))
             support_id = work_area.get('table_id') or work_area.get('support_entity_id')
             if support_id:
                 product['observed_support'] = {'support_entity_id': support_id,
                     'observation_id': capture['observation_id'], 'request_hash': result['request_hash'],
                     'source': 'openai_decisions'}
+            physical_product = dict(product, roles=['product', 'collision'])
+            physical_product['processing_history'] = [
+                *self.object_memory.entities()[target].get('processing_history', []), product['processing_skill']]
+            product_record = restored_object_record(physical_product)
+            self.object_memory.update(product_record)
             self.task_progress.register_product(product)
             reference = context['visual_inventory_reference']
             reference.setdefault('product_references', {})[product['id']] = {
                 'observation_id': capture['observation_id'], 'generation': capture['generation'],
                 'verification_capture': copy.deepcopy(result['verification_capture']),
                 'entity': copy.deepcopy(product), 'evidence': copy.deepcopy(product['creation_evidence']),
+                'before_capture': copy.deepcopy(result['visual_evidence']['table_release_reference']),
+                'before_views': {camera: {'rgb': view['rgb']} for camera, view in before['views'].items()},
                 'views': {camera: {'rgb': view['rgb']} for camera, view in capture['views'].items()}}
             self.state['target_id'] = product['id']
             self.sync_inventory(context)
@@ -303,5 +346,5 @@ class ProcessingSkills:
                 **copy.deepcopy(product['creation_evidence']), 'product_entity': copy.deepcopy(product)})
             self.state['facts'].update(observation_pose_ready=observation_pose_ready, grasp_view_ready=False, observation_map_ready=False,
                 observed=False, scene_available=False,
-                inventory_finalized=True, task_assessed=True, needs_place=True)
+                needs_place=True)
         return result

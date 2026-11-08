@@ -204,18 +204,15 @@ def fixed_release_goal(destination, holding, placement_request, attachment_spher
     layout = request.get("layout")
     if not isinstance(layout, dict):
         raise TypeError("placement_requires_bound_layout")
-    slot_id = request.get("slot_id")
-    cells = [cell for cell in layout["cells"] if cell.get("slot_id", cell.get("index", -1) + 1) == slot_id]
-    if len(cells) != 1 or request.get("object_id") != holding["instance_id"]:
-        raise ValueError("placement_slot_not_bound")
-    cell = cells[0]
+    if request.get("object_id") != holding["instance_id"]:
+        raise ValueError("placement_object_not_bound")
     support = destination["placement_reference"]
     if support.get("observation_id", observation_id) != observation_id:
         raise ValueError("destination_support_reference_stale")
-    floor = float(cell.get("floor_z_m", layout.get("floor_z_m", support["floor_z_m"])))
+    floor = float(layout.get("floor_z_m", support["floor_z_m"]))
     if not np.isfinite(floor) or abs(floor - float(support["floor_z_m"])) > .005:
         raise ValueError("placement_support_movement_unresolved")
-    center = np.asarray(request.get('selected_reference_world_xy_m', cell["center_world_xy_m"]), dtype=float)
+    center = np.asarray(request.get('selected_reference_world_xy_m', layout["center_world_xy_m"]), dtype=float)
     precise = support.get('precise_xy') is True
     fixed = support.get('fixed_xy') is True
     if fixed:
@@ -245,13 +242,13 @@ def fixed_release_goal(destination, holding, placement_request, attachment_spher
     object_reference = visible_reference_tool_m(holding) if precise or fixed else np.zeros(3)
     goal = grasp.copy()
     goal[:2, 3] = center - (rotation @ object_reference)[:2]
-    for polygon in (cell["polygon_world_xy_m"], layout["region_polygon_world_xy_m"]):
-        vertices = np.asarray(polygon, dtype=float)
-        if vertices.ndim != 2 or vertices.shape[1] != 2 or not np.isfinite(vertices).all():
-            raise ValueError("placement_requires_measured_region_polygon")
-        hull = ConvexHull(vertices)
-        if np.any(center @ hull.equations[:, :2].T + hull.equations[:, 2] > 1e-9):
-            raise ValueError("placement_front_outside_assigned_region")
+    polygon = layout["region_polygon_world_xy_m"]
+    vertices = np.asarray(polygon, dtype=float)
+    if vertices.ndim != 2 or vertices.shape[1] != 2 or not np.isfinite(vertices).all():
+        raise ValueError("placement_requires_measured_region_polygon")
+    hull = ConvexHull(vertices)
+    if np.any(center @ hull.equations[:, :2].T + hull.equations[:, 2] > 1e-9):
+        raise ValueError("placement_front_outside_assigned_region")
     attachment_bottom = lowest_sphere_z(attachment, rotation)
     gripper_bottom = lowest_sphere_z(gripper, rotation)
     # Explicit commanded-height reserve for measured loaded servo error; this
@@ -287,11 +284,10 @@ def fixed_release_goal(destination, holding, placement_request, attachment_spher
         "height_source": "minimum_fixed_rotation_attachment_and_gripper_support_clearance",
         "height_limiting_geometry": "gripper" if gripper_min_z > attachment_min_z else "attachment",
         "minimum_mount_z_m": {"attachment": attachment_min_z, "gripper": gripper_min_z},
-        "region_id": request.get("region_id"), "slot_id": slot_id,
-        "region_position_index": slot_id - 1, "layout_revision": request.get("layout_revision"),
+        "region_id": request.get("region_id"),
+        "layout_revision": request.get("layout_revision"),
         "region_polygon_world_xy_m": layout["region_polygon_world_xy_m"],
-        "slot_polygon_world_xy_m": cell["polygon_world_xy_m"],
-        "object_id": holding["instance_id"], "placement_target_count": request.get("target_count"),
+        "object_id": holding["instance_id"],
         "measured_object_reference_tool_m": visible_reference_tool_m(holding).tolist(),
         "object_reference_world_xy_m": (rotation @ visible_reference_tool_m(holding) + goal[:3, 3])[:2].tolist(),
         "region_constraint": "finger_front_in_configured_region",
@@ -318,7 +314,7 @@ def fixed_release_goal(destination, holding, placement_request, attachment_spher
                          'measured_visible_surface_centroid_is_not_volume_center'])
     return {"T_world_tcp": goal.tolist(), "destination_id": destination["id"],
         "candidate_index": 0, "yaw_delta_world_rad": 0., "frame": "world",
-        "source": "fixed_demo_slot_and_measured_holding",
+        "source": "bound_region_and_measured_holding",
         "object_reference_world_m": (rotation @ object_reference + goal[:3, 3]).tolist(),
         "release_reference": reference}
 
@@ -345,6 +341,10 @@ def release_endpoint_evidence(goal, holding, actual_tcp):
     minimum_z = floor + max(clearance, reference.get('configured_release_height_m', clearance)) + RELEASE_PLANNING_RESERVE_M - min(
         lowest_sphere_z(attachment, expected[:3, :3]), lowest_sphere_z(gripper, expected[:3, :3]))
     finite = np.isfinite([floor, clearance, attachment_gap, gripper_gap, xy_error]).all()
+    container = reference.get('release_mode') == 'container_release'
+    if container:
+        minimum_z = reference['rim_z_m'] + reference['container_release_gap_m'] - float(
+            (held_geometry_points(holding) @ expected[:3, :3].T)[:, 2].min())
     height_valid = valid_height_resolution(reference, expected, minimum_z, scene_token=goal.get("scene_token"), holding=holding)
     object_gap, maximum_gap, gap_valid = None, None, True
     if 'height_search' in reference:
@@ -352,15 +352,13 @@ def release_endpoint_evidence(goal, holding, actual_tcp):
 
         object_gap = object_floor_gap(held_geometry_points(holding), actual, floor)
         maximum_gap = reference['height_search']['bounds']['maximum_object_floor_gap_m']
-        gap_valid = object_gap <= maximum_gap + 1e-9
+        gap_valid = (reference['height_search']['bounds'].get('minimum_object_floor_gap_m', 0.) - 1e-9
+                     <= object_gap <= maximum_gap + 1e-9)
     world_sphere_xy = (attachment[:, :3] @ actual[:3, :3].T + actual[:3, 3])[:, :2]
-    footprint_inside = True
-    front_inside = True
-    for name in ("slot_polygon_world_xy_m", "region_polygon_world_xy_m"):
-        hull = ConvexHull(np.asarray(reference[name], dtype=float))
-        distance = world_sphere_xy @ hull.equations[:, :2].T + hull.equations[:, 2]
-        footprint_inside = footprint_inside and bool(np.all(distance + attachment[:, 3, None] <= 1e-9))
-        front_inside = front_inside and bool(np.all(actual_reference[:2] @ hull.equations[:, :2].T + hull.equations[:, 2] <= 1e-9))
+    hull = ConvexHull(np.asarray(reference["region_polygon_world_xy_m"], dtype=float))
+    distance = world_sphere_xy @ hull.equations[:, :2].T + hull.equations[:, 2]
+    footprint_inside = bool(np.all(distance + attachment[:, 3, None] <= 1e-9))
+    front_inside = bool(np.all(actual_reference[:2] @ hull.equations[:, :2].T + hull.equations[:, 2] <= 1e-9))
     precise = reference.get('precise_xy') is True
     xy_valid = True
     if precise:
@@ -371,9 +369,14 @@ def release_endpoint_evidence(goal, holding, actual_tcp):
             and np.allclose(object_xy, reference['target_reference_world_xy_m'], atol=1e-9, rtol=0)
             and xy_error <= tolerance)
     region_valid = front_inside if front_target or precise else footprint_inside
+    if container:
+        full_xy = (held_geometry_points(holding) @ actual[:3, :3].T + actual[:3, 3])[:, :2]
+        region_valid = bool(np.all(full_xy @ hull.equations[:, :2].T + hull.equations[:, 2] <= 1e-9))
+        gap_valid = bool(gap_valid and position_error <= reference['release_position_tolerance_m'] + 1e-9)
     valid = bool(finite and clearance >= 0 and height_valid and region_valid and xy_valid and gap_valid
         and attachment_gap >= clearance - 1e-9 and gripper_gap >= clearance - 1e-9)
-    return {"at_release_goal": valid, "attachment_floor_gap_m": float(attachment_gap),
+    return {"at_release_goal": valid, 'release_mode': reference.get('release_mode', 'surface_setdown'),
+        'object_rim_gap_m': float(object_gap + floor - reference['rim_z_m']) if container else None, "attachment_floor_gap_m": float(attachment_gap),
         "object_floor_gap_m": object_gap, "maximum_object_floor_gap_m": maximum_gap,
         "object_floor_gap_valid": gap_valid,
         "gripper_floor_gap_m": float(gripper_gap), "position_error_m": position_error,

@@ -28,7 +28,8 @@ def sdk_voxel_grid(grid):
 
 PRIMITIVE_AUDIT_FIELDS = frozenset({"position_source", "settling_envelope_floor_z_m", "action_id", "observation_id",
     "geometry_source", "generation", "instance_id", "asset_id", "source_sha256", "mesh_sha256",
-    "geometry_observation_ids"})
+    "geometry_observation_ids", "container_id", "container_geometry_sha256", "container_geometry_source",
+    "entry_receipt_id", "release_binding_id", "source", "object_pose_measured", "occupancy_scope"})
 
 
 def sdk_scene_model(model, *, include_voxel_metadata=False):

@@ -23,9 +23,11 @@ def assessment(judgments, expected, observation_id, *, require_sufficiency=True)
               if judgments.get(name) not in (value, 'unknown', None)]
     if require_sufficiency and judgments.get('observation_sufficient') != 'yes':
         missing.append('observation_sufficient')
-    needs_observation = bool(missing)
+    # A definite violated requirement already disproves a conjunction. Preserve
+    # other missing evidence without disguising that contradiction as uncertainty.
+    needs_observation = bool(missing) and not failed
     return {'observation_id': observation_id, 'required_criteria': dict(expected),
         'judgments': dict(judgments), 'missing_evidence': missing, 'failed_criteria': failed,
         'needs_observation': needs_observation,
-        'status': 'unknown' if needs_observation else 'rejected' if failed else 'confirmed',
+        'status': 'rejected' if failed else 'unknown' if missing else 'confirmed',
         'policy': 'task_criteria_and_current_evidence_not_camera_count'}

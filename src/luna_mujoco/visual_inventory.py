@@ -1,4 +1,4 @@
-"""Bind SAM3 candidates to fixed RGB-discovered identities; never discover IDs here."""
+"""Associate current measured subjects with permanent instance memory."""
 import base64
 import hashlib
 import json
@@ -9,6 +9,7 @@ from io import BytesIO
 import numpy as np
 from PIL import Image
 
+from .decision_conditions import parse_answers
 from .observation_labels import project_placement_regions, raster_visual_annotations
 from .visual_api import VisualAPI, VisualInventoryError
 
@@ -57,16 +58,16 @@ def candidate_identity_evidence(candidate, identifier, evidence):
     retained = next((row for row in evidence.get('retained_identity_answers', [])
                      if row['answer']['name'] == source_name), None)
     answer = next(row for row in evidence['answers'] if row['name'] == name)
-    prefix = 'match_' + source_name.removeprefix('identity_') + '_'
     original = ([retained['answer']] if retained else [row for row in evidence.get(
-        'original_decisions_answers', evidence['answers']) if row['name'] == source_name or row['name'].startswith(prefix)])
+        'original_decisions_answers', evidence['answers']) if row['name'] == source_name])
     questions = ([retained['question']] if retained else [row for row in evidence.get('questions', [])
-        if row['name'] == source_name or row['name'].startswith(prefix)])
+        if row['name'] == source_name])
     provenance = deepcopy(evidence['candidate_provenance'][candidate])
     return {'source': 'openai_decisions', 'entity_id': identifier, 'candidate': candidate,
         'camera': provenance['camera'], 'observation_id': evidence['observation_id'],
         'generation': evidence['generation'],
-        'request_hash': retained['request_hash'] if retained else evidence['request_hash'],
+        'request_hash': retained['request_hash'] if retained else evidence.get('question_requests', {}).get(
+            source_name, {}).get('request_hash', evidence['request_hash']),
         'answer': deepcopy(answer), 'original_decisions_answers': deepcopy(original),
         'questions': deepcopy(questions), 'candidate_provenance': provenance,
         **({'view_correspondence': deepcopy(correspondence)} if correspondence else {})}
@@ -75,6 +76,36 @@ def candidate_identity_evidence(candidate, identifier, evidence):
 def reference_content(reference, *, current_capture=None):
     if not reference:
         return []
+    if reference.get('identity_references'):
+        from .observation_labels import outline_masks, raster_visual_annotations
+
+        content = []
+        grouped = {}
+        for identifier, stored in reference['identity_references'].items():
+            if identifier not in reference.get('entities', {}):
+                continue
+            key = (stored['observation_id'], stored['camera_id'])
+            group = grouped.setdefault(key, {'rgb': stored['rgb'], 'time': stored.get('time'), 'items': [], 'masks': []})
+            mask = stored.get('views', {}).get(stored['camera_id'], {}).get('mask')
+            if mask is not None:
+                group['masks'].append(mask)
+            group['items'].append({'id': identifier, 'image_label': 'R' + identifier,
+                                   'display_label': 'R' + identifier, 'box': stored['bbox']})
+        for (capture_id, camera), group in grouped.items():
+            current_rgb = (current_capture or {}).get('views', {}).get(camera, {}).get('rgb')
+            same_pixels = current_rgb is not None and np.array_equal(group['rgb'], current_rgb)
+            content.extend([{'type': 'input_text', 'text': json.dumps({
+                'image_role': 'instance_reference', 'camera': camera, 'observation_id': capture_id,
+                'capture_time_s': group['time'],
+                'mask_contours_supplied': bool(group['masks']),
+                'pixels_identical_to_current_same_camera': bool(same_pixels),
+                'pixel_comparison_meaning': 'Exact RGB equality checked by code. Boxes are locating '
+                    'proposals on the same pixels, and still require an identity judgment.',
+                'items': group['items'], 'meaning': 'Dated instance reference. Boxes belong to these '
+                    'stored pixels. Current identity still requires correspondence with current RGB.'})},
+                image_part(raster_visual_annotations(outline_masks(group['rgb'], group['masks']),
+                    group['items'], label_layout='near_box'))])
+        return content
     content = [{'type': 'input_text', 'text': 'INITIAL RGB REFERENCE. These IDs are permanent; positions may change.'}]
     current = current_capture or {}
     if (current.get('observation_id') and current['observation_id'] == reference.get('observation_id')
@@ -111,6 +142,9 @@ def product_reference_content(reference, capture, entities):
     for identifier, stored in reference.get('product_references', {}).items():
         if identifier not in entities:
             continue
+        located = reference.get('identity_references', {}).get(identifier, {})
+        if located.get('request_hash') and located.get('views'):
+            continue
         evidence = stored.get('evidence', {})
         proof = stored.get('verification_capture', {})
         entity = entities[identifier]
@@ -135,21 +169,65 @@ def product_reference_content(reference, capture, entities):
                     or list(rgb.shape) != stamp.get('shape')
                     or hashlib.sha256(rgb.tobytes()).hexdigest() != stamp.get('rgb_sha256')):
                 break
+            same_pixels = bool(np.array_equal(rgb, capture.get('views', {}).get(camera, {}).get('rgb')))
+            current_creation = stored['observation_id'] == capture['observation_id'] and same_pixels
             metadata = {'image_role': 'verified_product_reference', 'entity_id': identifier,
                 'description': entity.get('description'), 'camera_id': camera,
                 'observation_id': stored['observation_id'], 'request_hash': evidence['request_hash'],
-                'pixels_identical_to_current_same_camera': bool(np.array_equal(
-                    rgb, capture.get('views', {}).get(camera, {}).get('rgb'))),
+                'capture_time_s': proof['time'],
+                'pixels_identical_to_current_same_camera': same_pixels,
                 'pixel_comparison_meaning': 'Exact RGB equality verified by code, '
                     'not identity inferred from image similarity.',
-                'meaning': 'Historical RGB when this independent product was first visually confirmed. '
-                    'Use its described appearance and visible surroundings to match current candidates. '
-                    'It is not the consumed input in INITIAL images. Other subjects in this full frame '
-                    'do not acquire this ID. This reference does not prove current location or success; '
-                    'retain unknown for ambiguous correspondence.'}
+                'meaning': ('The product was visually confirmed in this CURRENT capture. '
+                            if current_creation else 'This dated RGB records the visually confirmed product. ')
+                    + 'Use the product description and its surroundings to identify its subject within this '
+                    'full scene. Other visible subjects retain their separate identities. '
+                    'Report uncertainty when several subjects fit the same reference.'}
             parts.extend([{'type': 'input_text', 'text': json.dumps(metadata)}, image_part(rgb)])
         else:
-            content.extend(parts)
+            before = stored.get('before_capture', {})
+            if (before.get('observation_id') != evidence.get('before_observation_id')
+                    or not before.get('observation_id') or before.get('owner_id') != reference['owner_id']
+                    or before.get('target_id') != evidence['input_entity_id']
+                    or before.get('generation') != capture['generation']
+                    or type(before.get('time')) not in (int, float) or not math.isfinite(before['time'])
+                    or before['time'] >= proof['time']
+                    or not evidence.get('verification_request_hash')
+                    or evidence.get('verified_question', {}).get('type') != 'predicate'
+                    or evidence.get('verified_answer', {}).get('name') != evidence['verified_question']['name']
+                    or set(stored.get('before_views', {})) != {'1', '2', '3'}):
+                continue
+            creation = {'entity_id': identifier, 'description': entity['description'],
+                'observation_id': evidence['observation_id'],
+                'request_hash': evidence['verification_request_hash'],
+                'verified_question': deepcopy(evidence['verified_question']),
+                'answer': deepcopy(evidence['verified_answer']),
+                'meaning': 'This accepted observation established the new product reference, without locating a mask. '
+                    'Judge whether the queried candidate is the subject of this observation. '
+                    'BEFORE is the recorded pre-processing scene; the product creation references identify '
+                    'the verified post-processing capture. Later current captures may show subsequent motion.'}
+            if entity.get('processing_skill') == 'vla_unpack':
+                from .vla_configuration import vla_processing_effect
+
+                creation['skill_effect'] = vla_processing_effect()
+                creation['skill_effect_scope'] = (
+                    'Declared processing capability, not proof of this execution. The bound creation '
+                    'observation above records whether its expected effect was actually confirmed.')
+            before_parts = []
+            for camera, view in stored['before_views'].items():
+                rgb, stamp = view.get('rgb'), before.get('images', {}).get(camera, {})
+                if (not isinstance(rgb, np.ndarray) or rgb.dtype != np.uint8
+                        or list(rgb.shape) != stamp.get('shape')
+                        or hashlib.sha256(rgb.tobytes()).hexdigest() != stamp.get('rgb_sha256')):
+                    break
+                metadata = {'image_role': 'product_creation_before', 'entity_id': identifier,
+                    'camera': camera, 'observation_id': before['observation_id'],
+                    'capture_time_s': before['time'], 'creation_reference': creation,
+                    'meaning': 'BEFORE processing, after verified table release. This image precedes the '
+                        'verified product creation; the new product is not expected in this earlier image.'}
+                before_parts.extend([{'type': 'input_text', 'text': json.dumps(metadata)}, image_part(rgb)])
+            else:
+                content.extend([*parts, *before_parts])
     return content
 
 
@@ -160,17 +238,16 @@ def annotation_content(rgb, camera, items, *, role, regions=()):
             image_part(raster_visual_annotations(rgb, items, regions=regions))]
 
 
-def valid_assigned_slot(record):
-    slot = record.get('assigned_slot') or {}
-    if (not record.get('region_id') or record.get('slot_id') is None
-            or slot.get('slot_id') != record['slot_id'] or not slot.get('layout_revision')):
+def valid_placement_region(record):
+    region = record.get('placement_region') or {}
+    if not record.get('region_id') or not region.get('layout_revision'):
         return False
     try:
-        polygon = np.asarray(slot.get('polygon_world_xy_m'), dtype=float)
-        center = np.asarray(slot.get('center_world_xy_m'), dtype=float)
+        polygon = np.asarray(region.get('polygon_world_xy_m'), dtype=float)
+        center = np.asarray(region.get('center_world_xy_m'), dtype=float)
         return (polygon.ndim == 2 and polygon.shape[1] == 2 and len(polygon) >= 3
                 and np.isfinite(polygon).all() and center.shape == (2,) and np.isfinite(center).all()
-                and math.isfinite(slot.get('floor_z_m')))
+                and math.isfinite(region.get('floor_z_m')))
     except (ValueError, TypeError):
         return False
 
@@ -180,15 +257,17 @@ class VisualInventory(VisualAPI):
     source = 'openai_decisions'
     error_prefix = 'visual_decisions'
 
-    def __init__(self, *, minimum_confidence=.8, **kwargs):
+    def __init__(self, *, minimum_confidence=.8, register_instance=None, **kwargs):
         super().__init__(**kwargs)
         if not .5 < minimum_confidence <= 1.:
             raise ValueError('visual_decisions_invalid_confidence')
         self.minimum_confidence = minimum_confidence
+        self.register_instance = register_instance
 
     def resolve(self, capture, detections, *, instruction, reference=None, entities=None, progress=None,
                 landmarks=None, table_scope=None, placement_regions=(), purpose=None, source_inventory=None,
-                identity_context=None, candidate_indices=None, progress_question_ids=None, reference_capture=None):
+                identity_context=None, candidate_indices=None, progress_question_ids=None, reference_capture=None,
+                association_scope=None):
         if not entities:
             raise VisualInventoryError('visual_inventory_initial_rgb_required')
         progress = progress or {}
@@ -198,34 +277,40 @@ class VisualInventory(VisualAPI):
                               if isinstance(record.get('destination_id'), str) and record['destination_id'].strip()}
         regions = deepcopy(list(placement_regions or ()))
         for record in progress_questions.values():
-            if valid_assigned_slot(record):
-                slot = record['assigned_slot']
-                regions.append({'region_id': record['region_id'], 'layout_revision': slot['layout_revision'],
-                    'layout': {'cells': [slot], 'floor_z_m': slot['floor_z_m'],
-                               'support_entity_id': record.get('destination_id'), 'source': 'measured_assigned_slot'}})
+            if valid_placement_region(record):
+                region = record['placement_region']
+                regions.append({'region_id': record['region_id'], 'layout_revision': region['layout_revision'],
+                    'layout': {'region_polygon_world_xy_m': region['polygon_world_xy_m'],
+                               'center_world_xy_m': region['center_world_xy_m'], 'floor_z_m': region['floor_z_m'],
+                               'support_entity_id': record.get('destination_id'), 'source': 'measured_placement_region'}})
         projections = project_placement_regions(capture, regions, require_visible_support=False)
         # Depth/calibration are consumed locally only to draw 2D destination overlays.
-        projections = [{key: region[key] for key in ('camera_id', 'region_id', 'slot_id', 'polygon', 'center')
+        projections = [{key: region[key] for key in ('camera_id', 'region_id', 'polygon', 'center')
                         if key in region} for region in projections]
-        # The full layout and a target's assigned slot can project the same cell.
+        # The shared destination can appear in more than one transfer record.
         projections = list({json.dumps(region, sort_keys=True): region for region in projections}.values())
         semantic = {key: {field: value for field, value in obj.items() if field in
-            {'id', 'kind', 'color', 'description', 'appearance_keywords', 'initial_parent_id', 'roles', 'display_id'}}
+            {'id', 'kind', 'color', 'description', 'appearance_keywords', 'initial_parent_id', 'roles',
+             'current_identity_proposal', 'last_position_measurement', 'observed_support', 'creation_evidence', 'segmentation_query'}}
             for key, obj in entities.items()}
         status = {key: {field: value for field, value in record.items() if field in
-            {'status', 'destination_id', 'region_id', 'slot_id', 'transfer_index', 'release_feedback_id'}}
+            {'status', 'destination_id', 'region_id', 'transfer_index', 'release_feedback_id'}}
             for key, record in progress.items()}
         content = [{'type': 'input_text', 'text': json.dumps({
-            'observation_id': capture['observation_id'], 'generation': capture['generation'], 'purpose': purpose,
-            'task': instruction, 'fixed_entities': semantic, 'transport_progress': status,
+            'observation_id': capture['observation_id'], 'capture_time_s': capture.get('time'),
+            'generation': capture['generation'], 'purpose': purpose,
+            'task': instruction, 'memory_entities': semantic, 'transport_progress': status,
+            'association_scope': {key: list((association_scope or {}).get(key, ()))
+                                  for key in ('focus_entity_ids', 'deferred_entity_ids')},
             **({'source_inventory': source_inventory} if source_inventory is not None else {}),
             **(identity_context or {}),
             'rules': 'Use RGB appearance, initial references and scene context to match physical identity. '
             'Current numbered boxes locate SAM3 proposals, not established identities. '
             'appearance_keywords are initial visible-description proposals, not verified facts or extra '
             'evidence. Compare them against current pixels; a contradictory view must remain uncertain. '
-            'Use the original full RGB images and their annotated versions; '
-            'no segmentation contours or depth measurements are supplied. SAM3 prompts are proposals, not truth. '
+            'Use supplied CURRENT RGB and the evidence identified in each view. The final single-question '
+            'input declares whether candidate mask contours and measured surface locations are supplied. '
+            'SAM3 prompts are proposals, not truth. '
             'A box may enclose other objects, especially container contents. Match the proposed subject, not every pixel. '
             'Boxes only locate subjects; they do not show segmentation pixel ownership. Do not judge mask quality. '
             'Several camera candidates or repeated same-frame proposals may show one entity. '
@@ -237,7 +322,7 @@ class VisualInventory(VisualAPI):
             'Judge visibility and destination directly from full RGB even if SAM3 missed an object. '
             'Action history is context, never proof of success. Region overlays are locally projected references, '
             'not evidence of visible support or exact object pose.'}, ensure_ascii=False)}]
-        content.extend(reference_content(reference))
+        content.extend(reference_content(reference, current_capture=capture))
         content.extend(product_reference_content(reference, capture, entities))
         indices = list(range(len(detections))) if candidate_indices is None else list(candidate_indices)
         if (len(indices) != len(detections) or len(set(indices)) != len(indices)
@@ -293,11 +378,12 @@ class VisualInventory(VisualAPI):
             question = choice('identity_' + str(indices[index]), f'Which permanent entity is the proposed subject of {subject}? '
                 'Locate its numbered box in the annotated view and compare current RGB with that entity\'s '
                 'INITIAL or verified PRODUCT reference. A created product has its own appearance and ID. '
-                'Reject unrelated or outside-inventory subjects. '
+                'Choose new_instance for a distinct external physical object absent from memory when offered. '
+                'Reject robot parts or non-object regions. '
                 'Identify the proposed subject, not every object inside its rectangle. '
                 'For a container proposal, identify the container even when its box includes contents. '
                 'Unknown when the subject cannot be distinguished or matched to one permanent identity.',
-                eligible_options + ['reject', 'unknown'])
+                eligible_options + (['new_instance'] if self.register_instance else []) + ['reject', 'unknown'])
             if exclusions:
                 question['instructions'] += (
                     ' The supplied identity_geometry_exclusions prove that some current surfaces are too far '
@@ -306,49 +392,38 @@ class VisualInventory(VisualAPI):
             if anchors:
                 question['instructions'] += ' ' + CURRENT_ANCHOR_IDENTITY_RULE
             questions.append(question)
-        for identifier, entity in entities.items():
-            if entity.get('kind') == 'table':
-                continue
-            questions.append(choice('visibility_' + identifier,
-                f'Is declared entity {identifier} visible in ANY CURRENT RGB view? '
-                'Look at full images regardless of SAM3 proposals. visible requires identifiable pixels; '
-                'unseen means absent/occluded; unknown means uncertain identity.', ['visible', 'unseen', 'unknown']))
         for identifier, record in progress_questions.items():
-            slot_rule = ''
-            if 'region_id' in record or 'slot_id' in record:
-                slot_rule = (f"Assigned region {record.get('region_id')}, slot {record.get('slot_id')}. "
-                    'Slot XY specifies the TCP anchor, not object-centre or footprint containment. '
-                    'Check visible support/destination consistency; do not infer millimetre TCP accuracy. ')
-                if not valid_assigned_slot(record):
-                    slot_rule += 'Assigned-slot reference is unavailable; return unknown. '
+            region_rule = ''
+            if 'region_id' in record:
+                region_rule = (f"Destination region {record.get('region_id')}. "
+                    'Check visible support/destination consistency. ')
+                if not valid_placement_region(record):
+                    region_rule += 'Destination-region reference is unavailable; return unknown. '
             questions.append(choice('progress_' + identifier,
                 f"Where is entity {identifier} NOW relative to destination {record.get('destination_id')}? "
-                + slot_rule + 'at_destination requires visible support on that region or inside that container, '
-                'not held. elsewhere means visibly outside it or held; unknown for hidden, uncertain identity '
-                'or unknown destination. Use current RGB even without a SAM3 candidate.',
+                + region_rule + 'at_destination means visibly on the assigned support or inside the container. '
+                'elsewhere means visibly outside that destination; unknown means the location cannot be resolved. '
+                'Judge location only. Use current RGB even without a SAM3 candidate.',
                 ['at_destination', 'elsewhere', 'unknown']))
-        if len(questions) > 200 or sum(part['type'] == 'input_image' for part in content) > 128:
-            raise VisualInventoryError('visual_inventory_input_limit')
-        if not questions:
-            raise VisualInventoryError('visual_inventory_no_candidates')
         payload = {'model': 'gpt-6-luna', 'input': [{'role': 'user', 'content': content}], 'questions': questions}
 
         def parse(body, evidence):
-            answers = body.get('answers', [])
-            if not isinstance(answers, list) or len(answers) != len(questions):
-                raise VisualInventoryError('visual_decisions_invalid_response')
-            judgments = {}
-            for question, answer in zip(questions, answers, strict=True):
-                if not isinstance(answer, dict) or answer.get('name') != question['name']:
-                    raise VisualInventoryError('visual_decisions_invalid_response')
-                value, confidence = answer.get('choice'), answer.get('confidence', 0.)
-                if not isinstance(confidence, (int, float)) or not 0. <= confidence <= 1.:
-                    raise VisualInventoryError('visual_decisions_invalid_response')
-                if answer.get('type') != 'choice' or confidence < self.minimum_confidence:
-                    value = 'unknown'
-                if value not in [item['value'] for item in question['choices']]:
-                    raise VisualInventoryError('visual_decisions_invalid_response')
-                judgments[question['name']] = value
+            registered = evidence.get('registered_entities', {})
+            entities.update(registered)
+            typed_questions = deepcopy(questions)
+            for question, answer in zip(typed_questions, body['answers'], strict=True):
+                if question['name'].startswith('identity_'):
+                    question['choices'].extend({'value': identifier} for identifier in registered)
+                if answer.get('type') == 'predicate' and question['name'].startswith('identity_'):
+                    if answer.get('identity_candidate') not in {row['value'] for row in question['choices']}:
+                        raise VisualInventoryError('identity_proposal_binding_invalid')
+                    question.update(type='predicate')
+                    question.pop('choices')
+            judgments, answers = parse_answers(body, typed_questions, self.minimum_confidence)
+            for answer in answers:
+                if answer.get('type') == 'predicate' and answer['name'].startswith('identity_'):
+                    judgments[answer['name']] = (answer['identity_candidate']
+                        if judgments[answer['name']] == answer.get('identity_accept_status', 'yes') else 'unknown')
             evidence = {**evidence, 'answers': answers, 'generation': capture['generation'],
                         'candidate_provenance': candidate_provenance,
                         'identity_geometry_exclusions': deepcopy(
@@ -365,31 +440,38 @@ class VisualInventory(VisualAPI):
                 bound_detections.append(entry)
             result = self._groups(bound_detections, names, entities, local_judgments, evidence,
                                   purpose=purpose, reference=reference, progress=progress)
+            result['registered_entities'] = deepcopy(registered)
             observed = {group[0]['entity_id'] for group in result['groups']}
             result['missing_geometry_ids'] = [key for key, item in entities.items()
                 if item.get('kind') not in {'table', 'marker'} and key not in observed]
-            result['visibility'] = {key: judgments['visibility_' + key] for key, item in entities.items()
-                                    if item.get('kind') != 'table'}
+            result['visibility'] = {key: 'visible' if key in result.get('identity_coverage', {}).get(
+                'accepted_entity_ids', observed) else 'unknown' for key, item in entities.items()
+                if item.get('kind') != 'table'}
             result['progress'] = {}
             for identifier, record in progress_records.items():
                 state = judgments.get('progress_' + identifier, 'unknown')
-                if ('region_id' in record or 'slot_id' in record) and not valid_assigned_slot(record):
+                if 'region_id' in record and not valid_placement_region(record):
                     state = 'unknown'
-                result['progress'][identifier] = {'status': state, 'destination_id': record.get('destination_id'),
-                    'region_id': record.get('region_id'), 'slot_id': record.get('slot_id'),
-                    'layout_revision': (record.get('assigned_slot') or {}).get('layout_revision'),
+                result['progress'][identifier] = {'status': state, 'location_judgment': judgments.get('progress_' + identifier),
+                    'destination_id': record.get('destination_id'),
+                    'region_id': record.get('region_id'),
+                    'layout_revision': (record.get('placement_region') or {}).get('layout_revision'),
                     'observation_id': capture['observation_id'], 'source': self.source}
                 if identifier not in progress_questions:
                     result['progress'][identifier].update(source='unbound_destination',
                                                           reason='progress_destination_unbound')
             return result
-        subjects = {name: {'silhouette_mask': detection['silhouette_mask'].copy(),
+        subjects = {name: {**{key: deepcopy(detection[key]) for key in ('camera_id', 'kind', 'color', 'prompt') if key in detection},
+                           'silhouette_mask': detection['silhouette_mask'].copy(),
                            'candidate_provenance': deepcopy(candidate_provenance[name])}
                     for name, detection in zip(names, detections, strict=True)}
         return self.request(payload, capture, purpose, parse, identity_subjects=subjects)
 
     def request(self, payload, capture, purpose, parse, *, identity_subjects=None):
         # Raw masks stay local; the base categorical request keeps its existing input.
+        if sum(part['type'] == 'input_image' for message in payload['input']
+               for part in message['content']) > 128:
+            raise VisualInventoryError('visual_inventory_input_limit')
         return super().request(payload, capture, purpose, parse)
 
     def _groups(self, detections, names, entities, judgments, evidence, *, purpose=None, reference=None,
@@ -449,14 +531,14 @@ class VisualInventory(VisualAPI):
 
     def _identity_failure_evidence(self, evidence, detection, candidate, answer):
         score = detection.get('score')
+        identifier = answer.get('identity_candidate', answer.get('choice'))
         context = {'candidate_id': candidate, 'camera_id': detection['camera_id'],
-                   'prompt': detection['prompt'], 'entity_id': answer.get('choice')
-                   if answer.get('choice') not in {'unknown', 'reject'} else None,
+                   'prompt': detection['prompt'], 'entity_id': identifier
+                   if identifier not in {'unknown', 'reject'} else None,
                    'sam3_score': float(score) if score is not None else None}
-        pair_prefix = 'match_' + str(answer.get('name', '')).removeprefix('identity_') + '_'
         relevant, other = [], []
         for check in evidence.get('diagnostic_checks', []):
-            if check['name'] == answer.get('name') or check['name'].startswith(pair_prefix):
+            if check['name'] == answer.get('name'):
                 relevant.append(dict(check, **context))
             else:
                 other.append(deepcopy(check))
@@ -464,6 +546,7 @@ class VisualInventory(VisualAPI):
         return {**evidence, **context, 'candidate': candidate, 'diagnostic_checks': checks,
                 'unknowns': [*evidence.get('unknowns', []), *(['sam3_score_not_recorded'] if score is None else [])],
                 'choice': answer.get('choice'), 'confidence': answer.get('confidence'),
+                'probability': answer.get('probability'),
                 'minimum_confidence': self.minimum_confidence}
 
     @staticmethod

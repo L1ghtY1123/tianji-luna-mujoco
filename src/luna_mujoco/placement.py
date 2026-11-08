@@ -7,9 +7,9 @@ from scipy.spatial import ConvexHull, QhullError
 
 from .carrying import require_measured_carrying_provenance
 from .geometry import rigid_matrix
-from .task_progress import SOURCE_BIN_MIN_XY_FRACTION, confirmed_task_source
+from .observation_geometry import SOURCE_BIN_MIN_XY_FRACTION
 
-OBJECT_FIELDS = ("id", "display_id", "kind", "color", "position", "visible_centroid_world",
+OBJECT_FIELDS = ("id", "kind", "color", "position", "visible_centroid_world",
                  "confidence", "coverage", "coverage_fraction", "uncertainty_m",
                  "estimated", "source", "color_evidence")
 PLACEMENT_REFERENCE_FIELDS = ("position_world_m", "floor_z_m", "region_polygon_world_xy_m", "source",
@@ -168,7 +168,7 @@ def measured_source_relationships(source, objects):
     return relationships
 
 
-def grasp_support_reference(observation, target_id, tcp, *, source_reference=None, scene_token=None, source_record=None):
+def grasp_support_reference(observation, target_id, tcp, *, source_reference=None, scene_token=None):
     """Record measured table/bin support; visible point minima are not hidden bottoms."""
     target = observed_object(observation, target_id)
     points = np.asarray(target.get("points_world_m"), dtype=float)
@@ -205,16 +205,12 @@ def grasp_support_reference(observation, target_id, tcp, *, source_reference=Non
                         and current_support.get('request_hash')):
                     confirmed_id = current_support.get('support_entity_id')
             else:
-                record = source_record if isinstance(source_record, dict) and source_record.get('id') == target_id else {}
+                record = inventory.get('entities', {}).get(target_id, {})
                 transfers = record.get('transfers', [])
                 if transfers:
                     latest = transfers[-1]
                     if latest.get('observation_id') and latest.get('release_feedback_id'):
                         confirmed_id = latest.get('destination_id')
-                else:
-                    confirmed = confirmed_task_source(record)
-                    if confirmed and confirmed['source_kind'] == 'bin':
-                        confirmed_id = confirmed['source_id']
             if confirmed_id != inside_id:
                 raise PlacementError('source_support_binding_unconfirmed', {
                     'target_id': target_id, 'planned_source_id': inside_id,

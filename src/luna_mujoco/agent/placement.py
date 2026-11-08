@@ -1,5 +1,5 @@
 """Ground original placement requirements by judging measured candidate IDs."""
-from .decisions import JudgmentRequest
+from ..core.decisions import JudgmentRequest
 
 
 def placement_region_questions(*, configured=False):
@@ -8,7 +8,7 @@ def placement_region_questions(*, configured=False):
         'For current_transfer only, is the supplied destination_id the support/container '
         'required for the CURRENT target by the original instruction? This is a destination '
         'identity and language check before placement, not proof of completed delivery. '
-        'Use current observations and the confirmed per-ID task binding; future completion '
+        'Use current observations and the compiled task requirements and accepted current instance identity; future completion '
         'receipts and a prior input processing area are separate requirements.')
     if configured:
         matching = (
@@ -20,8 +20,8 @@ def placement_region_questions(*, configured=False):
             'with the location clause for this transfer, including a declared processing work area. '
             'Do not require the target to be grasped or placed yet. Do not substitute the later product '
             'destination for the current input work area. This checks requested location, not completed '
-            'delivery, numerical safety, or later observation/return receipts. Unknown configuration '
-            'or a conflicting region binding remains uncertain; do not invent a region or waive exact XY.')
+            'delivery, numerical safety, or later observation/return receipts. A known conflicting region '
+            'is a no; missing or uninterpretable configuration is uncertain. Do not invent a region or waive exact XY.')
     return [JudgmentRequest(name='placement_destination_matches', instructions=matching),
         JudgmentRequest(name='placement_additional_spatial_constraint', instructions=(
         'Read the original natural-language instruction for the placement stage identified by current_transfer. '
@@ -40,7 +40,7 @@ def placement_region_questions(*, configured=False):
 
 
 async def select_placement_candidates(judge, candidates, *, context):
-    """Select IDs from measured proposals in one Decisions request; never emit poses."""
+    """Select measured proposal IDs through independent typed questions."""
     visible = [candidate for candidate in candidates if candidate['visible_camera_ids']]
     if not visible:
         return {'status': 'unknown', 'reason': 'placement_candidates_not_visible',
@@ -65,7 +65,10 @@ async def select_placement_candidates(judge, candidates, *, context):
         'placement_candidates': visible})
     accepted = [candidate['candidate_id'] for candidate, request in zip(visible, requests, strict=True)
                 if result.get('judgments', {}).get(request.name, {}).get('status') == 'yes']
-    return {'status': 'success' if accepted else 'unknown',
-        'reason': 'placement_candidates_selected' if accepted else 'placement_no_semantic_candidate',
+    all_rejected = len(visible) == len(candidates) and all(
+        result.get('judgments', {}).get(request.name, {}).get('status') == 'no' for request in requests)
+    return {'status': 'success' if accepted else 'failure' if all_rejected else 'unknown',
+        'reason': 'placement_candidates_selected' if accepted else
+                  'placement_candidates_rejected' if all_rejected else 'placement_no_semantic_candidate',
         'candidate_ids': accepted, 'evidence': result}
 

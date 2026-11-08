@@ -1,7 +1,7 @@
 """Pair-specific clearance for the intended target during open-hand descent.
 
-The two gripping pads may approach the target surface without the ordinary hard clearance.
-They must still be nonpenetrating and keep the configured clearance from every other entity.
+The executing Link3 fingers and Link4 linkage may contact the selected target during descent and closure.
+They keep the configured clearance from every other entity.
 This policy never applies to approach transit, palms, cameras or the peer arm.
 """
 from contextlib import contextmanager
@@ -16,29 +16,25 @@ def gripping_pad_links(arm):
     return {prefix + '_Link3_L', prefix + '_Link3_R'}
 
 
-def combine_grasp_costs(full, environment, nonpenetration, sphere_links, arm):
-    """Keep full clearance except for pad/target pairs with nonpenetration proof."""
-    arrays = [np.asarray(value) for value in (full, environment, nonpenetration)]
+def grasp_contact_links(arm):
+    contacts = gripping_pad_links(arm)
+    prefix = 'gripL' if arm == 'A' else 'gripR'
+    return contacts | {prefix + '_Link4_L', prefix + '_Link4_R'}
+
+
+def combine_grasp_costs(full, environment, sphere_links, arm):
+    """Apply the selected-target exemption to the executing contact links."""
+    arrays = [np.asarray(value) for value in (full, environment)]
     if (arrays[0].ndim != 3 or any(value.shape != arrays[0].shape for value in arrays)
             or any(not np.isfinite(value).all() for value in arrays)
             or set(sphere_links) != set(range(arrays[0].shape[-1]))):
         raise ValueError('grasp contact costs or sphere mapping are invalid')
-    indices = [index for index, link in sphere_links.items() if link in gripping_pad_links(arm)]
+    indices = [index for index, link in sphere_links.items() if link in grasp_contact_links(arm)]
     if not indices:
-        raise ValueError('grasp contact pad geometry missing')
+        raise ValueError('grasp contact geometry missing')
     result = arrays[0].copy()
-    result[..., indices] = np.maximum(arrays[1][..., indices], arrays[2][..., indices])
+    result[..., indices] = arrays[1][..., indices]
     return result
-
-
-def combine_closure_costs(full, environment, sphere_links, arm):
-    """Allow pad contact while retaining target clearance for every other link.
-
-    Closing is an intentional contact motion. The static pregrasp target is
-    not a rigid nonpenetration model for the moving/contacting pad pair.
-    Environment, peer hand and nonpad target costs remain mandatory.
-    """
-    return combine_grasp_costs(full, environment, np.zeros_like(full), sphere_links, arm)
 
 
 @contextmanager

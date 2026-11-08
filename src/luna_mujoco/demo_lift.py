@@ -25,7 +25,11 @@ def source_clearance_lift(snapshot, target_id, arm, candidates, scene, settings)
             or bounds.get("observation_id") != snapshot.get("observation_id")
             or bounds.get("generation") != snapshot.get("generation") or not isinstance(bounds.get("layers"), dict)):
         raise ValueError("grasp_lift_requires_current_collision_bounds")
-    entities = snapshot.get("inventory_state", {}).get("entities") or snapshot.get("scene_entities", {})
+    inventory = snapshot.get("inventory_state", {})
+    entities = inventory.get("entities") or snapshot.get("scene_entities", {})
+    retired = set(inventory.get("retired_entity_ids", []))
+    if target_id in retired:
+        raise ValueError("grasp_lift_target_retired")
     target_entity = entities.get(target_id, {})
     support = target_entity.get("observed_support")
     if support is not None:
@@ -88,21 +92,23 @@ def source_clearance_lift(snapshot, target_id, arm, candidates, scene, settings)
         "scope": "lift_height_reference_only"}
     if not inside(target):
         raise LiftGeometryError("grasp_lift_target_outside_source_region", reference)
-    completed = set(snapshot.get("completed_target_ids", []))
-    if target_id in completed:
-        raise ValueError("grasp_lift_target_already_completed")
-    neighbors, excluded = [], {}
-    for identifier, entity in entities.items():
-        if identifier == target_id or entity.get("initial_parent_id") != source_id:
+    neighbors, excluded = [], {identifier: "retired_entity" for identifier in retired}
+    # Neighbors are current published obstacles, not historical input siblings.
+    # Retained CAD/OBB bounds do not require another mask of the same obstacle.
+    for layer in bounds["layers"].values():
+        identifier = layer.get("instance_id")
+        if (not identifier or identifier in {target_id, source_id}
+                or identifier in neighbors or layer.get("enabled") is not True):
             continue
-        if identifier in completed:
-            excluded[identifier] = "completed_target"
-        elif inside(observed_object(snapshot, identifier)):
-            neighbors.append(identifier)
-        else:
-            excluded[identifier] = "outside_measured_source_region"
-    for identifier in neighbors:
-        layers.extend(_reference_layers(bounds, scene, identifier))
+        published = _reference_layers(bounds, scene, identifier)
+        neighbor_lower = np.min([item["minimum_world_m"] for item in published], axis=0)
+        neighbor_upper = np.max([item["maximum_world_m"] for item in published], axis=0)
+        if np.any(neighbor_upper[:2] < lower[:2]) or np.any(neighbor_lower[:2] > upper[:2]):
+            excluded[identifier] = "outside_published_source_region"
+            continue
+        excluded.pop(identifier, None)
+        neighbors.append(identifier)
+        layers.extend(published)
     top = max(float(layer["maximum_world_m"][2]) for layer in layers)
     effective, proof = _lift_settings(snapshot, target_id, arm, candidates, scene, settings,
                           source_id, neighbors, excluded, layers, top, support_kind="bin")
@@ -124,7 +130,8 @@ def _reference_layers(bounds, scene, identifier):
         upper = np.asarray(layer.get("maximum_world_m"), dtype=float)
         allowed = (layer.get('source') == 'native_surface_voxel_cell_bounds'
             or layer.get('source') == 'published_cuboid_bounds' and layer.get('kind') == 'cuboid'
-                and layer.get('geometry_source') == 'observed_obb' and layer.get('instance_id') == identifier
+                and layer.get('geometry_source') in {'observed_obb', 'container_occupancy'}
+                and layer.get('instance_id') == identifier
             or layer.get('source') == 'published_cad_mesh_bounds' and layer.get('kind') == 'mesh'
                 and layer.get('geometry_source') == 'registered_cad' and layer.get('instance_id') == identifier)
         if (layer.get("enabled") is not True or layer_name in scene.get("disabled_obstacle_names", [])

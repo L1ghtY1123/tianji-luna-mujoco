@@ -35,7 +35,8 @@ def main():
         while True:
             response = client.get("/api/state")
             response.raise_for_status()
-            readiness = response.json()["run"]
+            ready_state = response.json()
+            readiness = ready_state["run"]
             if readiness.get("algorithm_cleanup_error"):
                 raise RuntimeError(readiness["algorithm_cleanup_error"])
             if not readiness.get("algorithm_pending"):
@@ -49,6 +50,8 @@ def main():
         if response.is_error:
             print(json.dumps({"start_status": response.status_code, "detail": response.text}), flush=True)
         response.raise_for_status()
+        owned_run_id = response.json()['run_id']
+        server_instance_id = ready_state['server_instance_id']
         started = time.monotonic()
         previous = None
         while True:
@@ -56,6 +59,15 @@ def main():
             response.raise_for_status()
             state = response.json()
             run = state["run"]
+            if run.get('run_id') != owned_run_id:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                interruption = {'validation_status': 'interrupted', 'owned_run_id': owned_run_id,
+                    'server_instance_id_at_start': server_instance_id,
+                    'elapsed_s': time.monotonic() - started, 'last_progress': previous,
+                    'observed_progress': state, 'reason': 'active_run_changed_or_server_restarted'}
+                args.output.write_text(json.dumps(interruption, ensure_ascii=False, indent=2), encoding='utf-8')
+                print(json.dumps(interruption, ensure_ascii=False), flush=True)
+                return 2
             progress = (run.get("status"), (run.get("current_step") or {}).get("skill"), run.get("target_id"))
             if progress != previous:
                 print(json.dumps({"elapsed_s": round(time.monotonic() - started, 1),
@@ -67,6 +79,8 @@ def main():
                 response.raise_for_status()
                 state = response.json()
                 run = state['run']
+                if run.get('run_id') != owned_run_id or state.get('server_instance_id') != server_instance_id:
+                    raise RuntimeError('Run or server changed while collecting acceptance evidence')
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 args.output.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
                 print(json.dumps({"status": run["status"], "error": run.get("error"),

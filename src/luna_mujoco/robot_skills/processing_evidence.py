@@ -2,13 +2,13 @@
 import hashlib
 import json
 import math
-from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 
-from ..decision_conditions import condition, parse_answers, result_answers
+from ..decision_conditions import condition, parse_answers
 from ..observation_requirements import assessment
-from ..visual_api import VisualAPI, VisualInventoryError
+from ..visual_api import VisualAPI, VisualInventoryError, merge_decision_evidence
 from ..visual_inventory import image_part
+from ..vla_configuration import vla_processing_effect
 from .evidence import (
     _require,
     unpack_verification_capture,
@@ -39,42 +39,55 @@ def _validate_action(capture, target_id, action, owner_id, *, source):
 
 
 def unpack_result_questions():
-    return [condition('unpack_result', "In this camera's CURRENT view, a black workpiece is visible on the main "
-        'tabletop, outside both blue bins. It may be partly occluded by an open gripper; judge its exposed '
-        'body in this image. Black robot components and workpieces inside a blue bin do not count.'),
-        condition('wrapper_removed', 'Compare the pink wrapped task object resting on the tabletop in BEFORE with CURRENT. '
-            'Its former tabletop area is visible and the intact pink wrapped object is no longer there. '
-            'Pink or magenta robot housings are not the task wrapper. Occlusion does not establish removal; '
-            'a still-visible intact target anywhere in CURRENT contradicts removal. The separate product may '
-            'be at another tabletop position. This question checks the bound pink wrapper disappearance, '
-            'not the product identity or how the action occurred.')]
+    effect = vla_processing_effect()
+    return [condition('unpack_result', f"Is a new separate {effect['output']['color']} workpiece visible on the main tabletop in "
+        'CURRENT, outside both blue bins, that was not present there in BEFORE? Compare the whole tabletop, '
+        'not just the former wrapper location: processing may move the output elsewhere on this table. '
+        'Black robot components and pre-existing workpieces do not count. One clear current view is '
+        'sufficient; wrapper disappearance is checked separately.'),
+        condition('wrapper_removed', f"The bound {effect['input']['color']} wrapper on the tabletop in BEFORE has disappeared in "
+            'CURRENT. Compare its former tabletop area across the current camera views. Other pink objects '
+            'inside the source bin are separate instances. Occlusion alone does not establish removal.')]
 
 
-def unpack_result_evidence(body, minimum_confidence):
-    selected = [row for row in body.get('answers', []) if row.get('name') == 'unpack_result']
-    return result_answers({'answers': selected}, 'unpack_result', minimum_confidence)
+def unpack_result_context(question_name):
+    context = {
+        'subject': 'The bound pink wrapped input previously released onto the main table.',
+        'image_times': 'BEFORE follows verified table release. CURRENT follows the unpacking action. '
+            'Each time has three simultaneous camera views. The action record does not prove its result.',
+        'evidence_rule': 'Use BEFORE to identify the bound processing area and CURRENT for the requested '
+            'visible result. One clear current view is sufficient. Keep occluded or ambiguous evidence uncertain.'}
+    if question_name == 'unpack_result':
+        context['evidence_rule'] = (
+            'Compare the whole main tabletop in BEFORE and CURRENT for the requested visible change. '
+            'The processing action can relocate its output across the tabletop; its location need not '
+            'match the old wrapper location. One clear current view is sufficient. '
+            'Keep occluded or ambiguous evidence uncertain.')
+        context['expected_appearance'] = (
+            'A new separate black solid workpiece, possibly irregular with protrusions, on the main tabletop. '
+            'Distinguish its body from robot fingers using the before/current views. Existing workpieces '
+            'inside the bins are outside this question.')
+    elif question_name == 'wrapper_removed':
+        context['reference_subject'] = (
+            'Only the pink wrapper on the main table in BEFORE. Other pink objects inside the source bin '
+            'are different instances. A visible black part alone does not prove this wrapper disappeared.')
+    else:
+        raise ValueError('unknown_unpack_question')
+    return context
 
 
-def unpack_result_context():
-    return {
-        'task': 'Unwrap the bound pink foam-wrapped workpiece and confirm its separate black inner part on the measured support.',
-        'stage': 'BEFORE images show the verified pink workpiece placed on the main table. '
-                 'CURRENT images were taken after the unpacking action. Its result must be checked visually; '
-                 'the action record alone does not establish success.',
-        'views': 'One camera is supplied independently. BEFORE is historical; CURRENT is the scene to verify. '
-                 'Judge only what this camera makes visible. Hidden or ambiguous subjects remain uncertain.',
-        'scope': 'Judge workpieces on the main tabletop. Black robot or gripper parts and black workpieces '
-                 'inside containers do not count.',
-        'appearance': 'The expected black workpiece is an irregular solid part with protrusions, not '
-                      'necessarily a rectangular block. A workpiece near or partly behind an open gripper '
-                      'still counts if its exposed body is distinguishable from the robot. Do not require '
-                      'a visible air gap between the workpiece and fingers.',
-        'required_outcome': 'The pink foam has been removed and its black inner workpiece is separately '
-            'on the main tabletop. The assigned execution arm must also reach its measured location; '
-            'that geometric requirement is checked separately with calibrated RGBD and the robot workspace. '
-            'Do not guess metric reachability from RGB. Report insufficient observation when the visual '
-            'requirements cannot be confirmed or ruled out; the policy graph must explicitly obtain another view before reconfirmation.',
-    }
+def unpack_question_payload(capture, before, question, *, target_id, audit_marker):
+    context = dict(unpack_result_context(question['name']), observation_id=capture['observation_id'],
+                   before_observation_id=before['observation_id'], target_id=target_id, audit_marker=audit_marker)
+    context['processing_effect'] = vla_processing_effect()
+    content = [{'type': 'input_text', 'text': json.dumps(context)}]
+    for camera in ('1', '2', '3'):
+        content.extend([
+            {'type': 'input_text', 'text': 'BEFORE UNPACKING, AFTER VERIFIED TABLE RELEASE RGB camera ' + camera},
+            image_part(before['views'][camera]['rgb']),
+            {'type': 'input_text', 'text': 'CURRENT RGB camera ' + camera},
+            image_part(capture['views'][camera]['rgb'])])
+    return {'model': 'gpt-6-luna', 'input': [{'role': 'user', 'content': content}], 'questions': [deepcopy(question)]}
 
 
 def verify_unpacking(client, capture, *, target_id, release_evidence, action_evidence, owner_id, work_area,
@@ -101,23 +114,13 @@ def verify_unpacking(client, capture, *, target_id, release_evidence, action_evi
         'table_release_reference': table_release_reference}
     marker = hashlib.sha256(json.dumps({**scope, 'verification_capture': verification_capture},
                                       sort_keys=True).encode()).hexdigest()
-    context = dict(unpack_result_context(), observation_id=capture['observation_id'], audit_marker=marker)
     questions = unpack_result_questions()
     def parse(body, evidence):
-        answers = body.get('answers')
-        if not isinstance(answers, list) or len(answers) != len(questions):
-            raise VisualInventoryError('visual_decisions_invalid_response')
-        judgments = {}
-        for answer, question in zip(answers, questions, strict=True):
-            if answer == {'type': 'refusal', 'name': question['name']}:
-                judgments[question['name']] = 'unknown'
-            else:
-                current, _ = parse_answers({'answers': [answer]}, [question], client.minimum_confidence)
-                judgments.update(current)
+        judgments, answers = parse_answers(body, questions, client.minimum_confidence)
         result_answer = next(answer for answer in answers if answer['name'] == 'unpack_result')
         views = {'judgments': {'unpack_result': judgments['unpack_result']},
                  'answers': [deepcopy(result_answer)], 'confidence': result_answer.get('probability'),
-                 'confidence_rule': 'unpack_result_predicate_probability', 'view_scope': 'single_current_rgb'}
+                 'confidence_rule': 'unpack_result_predicate_probability', 'view_scope': 'fused_current_three_rgb'}
         # These questions already require visible current evidence. A second
         # meta-question about the same evidence can contradict both concrete
         # answers without identifying any missing fact. Derive completeness
@@ -126,7 +129,9 @@ def verify_unpacking(client, capture, *, target_id, release_evidence, action_evi
                                  capture['observation_id'], require_sufficiency=False)
         observation['sufficiency_source'] = 'required_visual_criteria'
         success = observation['status'] == 'confirmed'
-        visual = {**evidence, **views, 'status': 'confirmed' if success else 'unknown',
+        reason = None if success else ('unpack_visual_criteria_' + observation['status'] + ':'
+            + ','.join(observation['failed_criteria'] or observation['missing_evidence']))
+        visual = {**evidence, **views, 'status': observation['status'],
                   'target_id': target_id, 'action_id': action_evidence['action_id'],
                   'identity_source': 'verified_single_active_execution_chain', 'visibility_source': 'openai_decisions',
                   'identity_scope': 'process_input_only_not_product_identity',
@@ -136,32 +141,24 @@ def verify_unpacking(client, capture, *, target_id, release_evidence, action_evi
                   'table_release_reference': deepcopy(table_release_reference),
                   'verification_capture': deepcopy(verification_capture),
                   'work_area_zoom': None, 'observation_assessment': observation,
-                  'camera_id': evidence['camera_ids'][0], 'required_judgments': judgments}
-        return {**evidence, 'success': success, 'status': visual['status'], 'target_id': target_id,
+                  'required_judgments': judgments}
+        return {**evidence, 'success': success, 'status': visual['status'], 'reason': reason, 'target_id': target_id,
                 'generation': capture['generation'], 'appearance': 'unpacked' if success else 'unconfirmed',
                 'action_id': action_evidence['action_id'], 'visual_evidence': visual,
                 'verification_capture': deepcopy(verification_capture),
                 'observation_assessment': observation,
                 'response': deepcopy(body), 'geometry_updated': False}
 
-    def camera_result(camera):
-        content = [{'type': 'input_text', 'text': json.dumps({**context, 'camera_id': camera})},
-            {'type': 'input_text', 'text': 'BEFORE UNPACKING, AFTER VERIFIED TABLE RELEASE RGB camera ' + camera},
-            image_part(table_release_capture['views'][camera]['rgb']),
-            {'type': 'input_text', 'text': 'CURRENT RGB camera ' + camera},
-            image_part(capture['views'][camera]['rgb'])]
-        payload = {'model': 'gpt-6-luna', 'input': [{'role': 'user', 'content': content}], 'questions': questions}
-        scoped_capture = {**capture, 'views': {camera: capture['views'][camera]}}
-        return VisualAPI.request(client, payload, scoped_capture, 'verify_unpacking', parse)
-
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        results = list(executor.map(camera_result, ('1', '2', '3')))
-    selected = max(results, key=lambda row: (row['success'], row['visual_evidence']['confidence'] or -1.))
-    result = deepcopy(selected)
-    result['visual_evidence'].update(view_scope='independent_current_three_rgb',
-        aggregation='one_complete_camera_witness_for_both_required_facts',
-        selected_camera_id=selected['visual_evidence']['camera_id'],
-        camera_evidence=[{key: row['visual_evidence'][key] for key in
-            ('camera_id', 'request_hash', 'observation_id', 'required_judgments', 'confidence', 'status')}
-            | {'answers': deepcopy(row['response']['answers'])} for row in results])
-    return result
+    answers, records = [], []
+    for question in questions:
+        payload = unpack_question_payload(capture, table_release_capture, question, target_id=target_id, audit_marker=marker)
+        try:
+            body, evidence = VisualAPI.request(client, payload, capture, 'verify_unpacking',
+                                              lambda body, evidence: (body, evidence))
+        except VisualInventoryError as error:
+            error.evidence['completed_questions'] = merge_decision_evidence(records, capture, 'verify_unpacking')
+            raise
+        answers.extend(body.get('answers', []))
+        records.append({**evidence, 'answers': body.get('answers', [])})
+    return parse({'model': 'gpt-6-luna', 'answers': answers},
+                 merge_decision_evidence(records, capture, 'verify_unpacking'))

@@ -13,7 +13,7 @@ from ..inventory_map import layer_entity
 from ..object_obb import held_geometry_points
 from ..observation_labels import project_placement_regions
 from ..placement import visible_reference_tool_m
-from ..placement_candidates import subdivision_xy_candidates, subdivision_cell_centers
+from ..placement_candidates import subdivision_cell_centers, subdivision_xy_candidates
 from .placement_selection import rank_support_candidates
 from .placement_zone import placement_constraint_mask
 
@@ -133,7 +133,8 @@ def _occupancy_context(observation, scene, ignored, floor_z):
                 and isinstance(layer.get('cell_count'), int) and layer['cell_count'] > 0)
             model = ((layer.get('kind'), layer.get('source'), layer.get('geometry_source')) in {
                 ('mesh', 'published_cad_mesh_bounds', 'registered_cad'),
-                ('cuboid', 'published_cuboid_bounds', 'observed_obb')}
+                ('cuboid', 'published_cuboid_bounds', 'observed_obb'),
+                ('cuboid', 'published_cuboid_bounds', 'container_occupancy')}
                 and name == 'semantic_instance::' + identifier
                 and layer.get('instance_id') == identifier
                 and layer.get('generation') == scene.get('generation')
@@ -160,45 +161,41 @@ def candidate_requests(observation, target_id, holding, request, zone, settings,
         raise ValueError('placement_support_geometry_stale')
     if zone['destination_id'] != request.get('destination_id', zone['destination_id']):
         raise ValueError('placement_destination_changed')
+    if request['release_mode'] != zone['intent']['release_mode']:
+        raise ValueError('placement_release_mode_changed')
     rotation = rigid_matrix(holding['grasp_support_reference']['T_world_tcp_at_grasp'])[:3, :3]
     footprint = held_geometry_points(holding) @ rotation.T
-    cell = next(cell for cell in request['layout']['cells'] if cell['slot_id'] == request['slot_id'])
     precise = request.get('precise_xy') or not request.get('free_placement')
     if precise:
-        cell = next(cell for cell in request['layout']['cells'] if cell['slot_id'] == request['slot_id'])
-        positions = np.array([request.get('selected_reference_world_xy_m', cell['center_world_xy_m'])])
+        positions = np.array([request.get('selected_reference_world_xy_m', request['layout']['center_world_xy_m'])])
         destination = next(item for item in observation['objects'] if item['id'] == zone['destination_id'])
         fixed = destination['placement_reference'].get('precise_xy') or destination['placement_reference'].get('fixed_xy')
         offset = (rotation @ visible_reference_tool_m(holding))[:2] if fixed else np.zeros(2)
     else:
         positions = (subdivision_xy_candidates(zone['polygon_world_xy_m'],
             offsets_world_xy_m=footprint[:, :2]) if subdivision_cells is None else
-            subdivision_cell_centers(cell['polygon_world_xy_m'],
+            subdivision_cell_centers(zone['polygon_world_xy_m'],
                 offsets_world_xy_m=footprint[:, :2], cell_count=subdivision_cells))
         offset = np.zeros(2)
     generated = len(positions)
     keep = placement_constraint_mask(positions - offset, footprint[:, :2], zone,
         clearance_m=settings['trajectory_collision_clearance_m'] + holding.get('uncertainty_m', .005))
-    # The release-goal contract also binds its reference to the assigned cell.
-    # Filter every subdivided proposal here, before any workspace/world query.
-    cell = next(cell for cell in request['layout']['cells'] if cell['slot_id'] == request['slot_id'])
-    for polygon in (cell['polygon_world_xy_m'], request['layout']['region_polygon_world_xy_m']):
-        hull = ConvexHull(np.asarray(polygon, float))
-        keep &= np.all(positions @ hull.equations[:, :2].T + hull.equations[:, 2] <= 1e-9, axis=1)
+    hull = ConvexHull(np.asarray(request['layout']['region_polygon_world_xy_m'], float))
+    keep &= np.all(positions @ hull.equations[:, :2].T + hull.equations[:, 2] <= 1e-9, axis=1)
     positions = positions[keep]
     constrained_count = len(positions)
     # Bounds remain provenance/ranking context. Only the existing 3D world
     # checker may reject occupancy: an XY overlap can be an empty overhang.
     ignored = {target_id, zone['destination_id'], zone['support_entity_id']}
     margin = settings['trajectory_collision_clearance_m'] + holding.get('uncertainty_m', .005)
-    _, missing, retained, model_sources = _occupancy_context(observation, scene, ignored, zone['floor_z_m'])
+    bounds, missing, retained, model_sources = _occupancy_context(observation, scene, ignored, zone['floor_z_m'])
     ranked_observation = {**observation, 'objects': [obj for obj in observation['objects'] if obj['id'] not in ignored]}
     ranking = None
     if len(positions):
         _, ranking = rank_support_candidates(positions, ranked_observation, target_id,
             footprint_offsets=footprint[:, :2] - offset, floor_z_m=zone['floor_z_m'],
             preference=request.get('placement_preference', zone['intent']['preference']),
-            desired_clearance_m=settings['optimizer_collision_activation_distance_m'])
+            desired_clearance_m=settings['optimizer_collision_activation_distance_m'], occupancy_bounds=bounds)
     evidence = {'generated_count': generated, 'constraint_accepted_count': constrained_count,
         'occupied_candidate_count': 0,
         'retained_occupancy_ids': retained,
@@ -237,7 +234,7 @@ def project_placement_candidates(capture, resolution, holding, *, geometry_bindi
     held = held_geometry_points(holding)
     if held.ndim != 2 or held.shape[1:] != (3,) or not len(held) or not np.isfinite(held).all():
         raise ValueError('placement_held_geometry_missing')
-    cells, candidates = [], []
+    regions, candidates = [], []
     for candidate in resolution['candidates']:
         pose = rigid_matrix(candidate['goal']['T_world_tcp'])
         points = held @ pose[:3, :3].T + pose[:3, 3]
@@ -245,16 +242,15 @@ def project_placement_candidates(capture, resolution, holding, *, geometry_bindi
         polygon = [[lower[0], lower[1]], [upper[0], lower[1]],
                    [upper[0], upper[1]], [lower[0], upper[1]]]
         identifier = candidate['candidate_id']
-        cells.append({'slot_id': identifier, 'center_world_xy_m': ((lower + upper) / 2).tolist(),
-                      'polygon_world_xy_m': np.asarray(polygon).tolist()})
+        regions.append({'region_id': identifier, 'layout': {
+            'center_world_xy_m': ((lower + upper) / 2).tolist(),
+            'region_polygon_world_xy_m': np.asarray(polygon).tolist(),
+            'support_entity_id': zone['support_entity_id'], 'floor_z_m': zone['floor_z_m'],
+            'source': 'measured_candidate_footprint_proposal', 'observation_id': capture['observation_id']}})
         candidates.append({'candidate_id': identifier, 'visible_camera_ids': [],
             'footprint_world_xy_m': np.asarray(polygon).tolist(),
             'tcp_position_world_m': pose[:3, 3].tolist(), 'orientation_policy': 'preserve_grasp'})
-    layout = {'support_entity_id': zone['support_entity_id'], 'floor_z_m': zone['floor_z_m'],
-        'source': 'measured_candidate_footprint_proposal', 'observation_id': capture['observation_id'],
-        'cells': cells}
-    projected = project_placement_regions(capture, [{'region_id': 'placement', 'layout': layout}],
-                                          require_visible_support=False)
+    projected = project_placement_regions(capture, regions, require_visible_support=False)
     projections = {}
     by_id = {candidate['candidate_id']: candidate for candidate in candidates}
     for projection in projected:
@@ -263,7 +259,7 @@ def project_placement_candidates(capture, resolution, holding, *, geometry_bindi
             continue
         camera = projection['camera_id']
         projections.setdefault(camera, []).append(projection)
-        by_id[projection['slot_id']]['visible_camera_ids'].append(camera)
+        by_id[projection['region_id']]['visible_camera_ids'].append(camera)
     return {'candidates': candidates, 'projections': projections,
         'observation_id': capture['observation_id'], 'generation': capture['generation'],
         'geometry_observation_id': zone['observation_id'],

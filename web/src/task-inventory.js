@@ -1,4 +1,4 @@
-const STATUS_NAMES = { observed: '已观测', selected: '已选择', consumed: '已消耗', completed: '已完成' };
+const STATUS_NAMES = { active: '活动实例', observed: '已观测', selected: '已选择', consumed: '已消耗', removed: '已移除', completed: '已完成' };
 
 export function isTaskInventory(progress) {
   return Boolean(progress && Array.isArray(progress.selected_input_ids) && progress.transformations
@@ -12,7 +12,8 @@ export function inventoryTransformations(progress) {
 
 export function inventoryEntities(progress) {
   const catalog = progress?.entities ?? progress?.all_entities ?? progress?.objects ?? [];
-  return Array.isArray(catalog) ? catalog : Object.values(catalog);
+  return (Array.isArray(catalog) ? catalog : Object.values(catalog))
+    .filter(entity => entity.source !== 'configured_demo_region');
 }
 
 export function renderTaskInventory(container, progress, bindings = null) {
@@ -34,7 +35,7 @@ export function renderTaskInventory(container, progress, bindings = null) {
   const objects = new Map((progress.objects ?? []).map(item => [item.id, item]));
   const entities = inventoryEntities(progress).map(entity => ({ ...entity, ...objects.get(entity.id) }));
   section('登记实体', entities.map(item => {
-    let text = `${item.display_id ? `#${item.display_id} ` : ''}${item.description ?? item.name ?? item.kind ?? '实体'}`
+    let text = `${item.id ? `ID ${item.id} ` : ''}${item.description ?? item.name ?? item.kind ?? '实体'}`
       + ` · ${STATUS_NAMES[item.status] ?? item.status ?? '状态未记录'} · ID ${item.id}`;
     if (item.current_region) text += ` · 当前区域 ${item.current_region}`;
     if (retired.has(item.id)) text += ' · 已退役';
@@ -52,8 +53,10 @@ export function renderTaskInventory(container, progress, bindings = null) {
     `输入 ID ${id} · 来源 ${task.source_ref ?? '未指定'} · 最终目的地 ${task.destination_ref ?? '未指定'}`
     + ` · 处理 ${task.processing?.join(' → ') || '直接搬运'}`
     + ` · 完成条件 ${task.completion_conditions?.join('；') || '未记录'}`));
-  section('初始实体档案', inventoryEntities({ entities: progress.initial_entities ?? {} }).map(item =>
-    `${item.description ?? item.name ?? item.kind ?? '实体'} · ID ${item.id}`), true);
+  if (progress.initial_entities) {
+    section('初始实体档案', inventoryEntities({ entities: progress.initial_entities }).map(item =>
+      `${item.description ?? item.name ?? item.kind ?? '实体'} · ID ${item.id}`));
+  }
   if (bindings) renderTaskBindings(container, bindings);
 }
 
@@ -61,7 +64,7 @@ export function renderTaskBindings(container, bindings) {
   const document = container.ownerDocument;
   const details = document.createElement('details');
   const title = document.createElement('summary');
-  title.textContent = '任务清单绑定';
+  title.textContent = '任务引用与本次已选输入';
   const content = document.createElement('pre');
   content.className = 'candidate-detail';
   content.textContent = JSON.stringify(bindings, null, 2);

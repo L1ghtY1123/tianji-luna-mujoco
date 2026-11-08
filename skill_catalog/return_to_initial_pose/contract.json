@@ -1,6 +1,6 @@
 {
   "id": "return_to_initial_pose",
-  "description": "Return both empty hands to the actual joint posture recorded at task start, using the current or explicitly authorized retained collision scene. If already there, verify measured joints without movement. This is distinct from the operator observation posture. No implicit observation or completion judgment is inserted. The graph includes this skill when the user requires final return.",
+  "description": "Return both empty hands to the actual joint posture recorded at task start, using the current or explicitly authorized retained collision scene. If already there, verify measured joints without movement. This is distinct from the operator observation posture. No implicit observation or completion judgment is inserted. The graph includes this skill when the user requires final return. After release with unconfirmed destination semantics, observation motion requires the original completed release/open-gripper feedback, a current observation collision map containing the released target measured after that release. Obtain this map through graph-selected observe_scene and build_scene before moving. Do not use the retained pre-release map for this case. Destination acceptance remains unknown until verify_place succeeds; movement does not confirm placement.",
   "inputs": [
     "initial_joint_reference",
     "current_robot_feedback",
@@ -22,9 +22,9 @@
   "errors": [
     "initial_pose_reference_stale",
     "initial_pose_unconfirmed",
-    "return_requires_verified_release",
     "observation_motion_requires_current_map",
-    "service_or_execution_failure"
+    "service_or_execution_failure",
+    "observation_release_evidence_insufficient"
   ],
   "invalidates_observation": true,
   "planning_effects": {
@@ -32,5 +32,5 @@
     "observation_pose_ready": null,
     "grasp_view_ready": null
   },
-  "recovery_retry_safe": true
+  "retry_safe": true
 }

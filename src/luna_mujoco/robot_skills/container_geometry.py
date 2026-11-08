@@ -114,6 +114,7 @@ def container_transport_region(destination, scene, observation):
            if region_source.startswith('validated_cad_') else {}),
         'source_observation_id': destination['placement_reference'].get('source_observation_id',
                                                                         observation['observation_id']),
+        'floor_z_m': float(reference['floor_z_m']),
         'occupied_top_z_m': evidence['maximum_world_m'][2],
         'observation_id': observation['observation_id'], 'occupancy': evidence}
 

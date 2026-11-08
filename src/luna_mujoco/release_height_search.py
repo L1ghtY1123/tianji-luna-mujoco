@@ -11,7 +11,7 @@ from .release_clearance import CLEARANCE_COST_EPSILON
 
 HEIGHT_STEP_M = .001
 IK_BATCH_SIZE = 100
-# Same numerical feedback-consistency contract as runtime.placement_retry.
+# Numerical feedback consistency only; not a collision or execution tolerance.
 # This is not an IK, collision, servo or release acceptance tolerance.
 FEEDBACK_CONSISTENCY_ATOL_RAD = 1e-6
 
@@ -34,11 +34,10 @@ def object_floor_gap(points, pose, floor_z):
 
 
 def height_search_bounds(pose, points, floor_z, maximum_gap):
-    from .planning_settings import PlanningSettings
-
     transform = rigid_matrix(pose)
     points = geometry_points(points)
-    maximum_gap = PlanningSettings(place_max_release_gap_m=maximum_gap).place_max_release_gap_m
+    if not np.isfinite(maximum_gap) or maximum_gap < 0:
+        raise ValueError("release_object_floor_gap_bound_invalid")
     if not np.isfinite(floor_z):
         raise ValueError('release_object_floor_gap_bound_invalid')
     gap = object_floor_gap(points, transform, floor_z)
@@ -100,7 +99,12 @@ def validate_search(search, points, payload):
 
     rotation = Rotation.from_quat(np.asarray(payload['goal_quaternion_wxyz'])[[1, 2, 3, 0]]).as_matrix()
     settings = payload['planning_settings']
-    expected = height_search_bounds(pose, points, bounds['floor_z_m'], settings['place_max_release_gap_m'])
+    if bounds.get('release_mode') == 'container_release':
+        from .container_release import rebuild_container_bounds
+        expected = rebuild_container_bounds(bounds, pose, points, gap=settings['container_release_gap_m'],
+            tolerance=settings['ik_position_threshold_m'])
+    else:
+        expected = height_search_bounds(pose, points, bounds['floor_z_m'], settings['place_max_release_gap_m'])
     if (bounds != expected or search['arm'] != payload['arm']
             or search['input_sha256'] != height_input_digest(payload)
             or not np.allclose(pose[:3, 3], payload['goal_position_m'], atol=1e-9, rtol=0)
@@ -149,7 +153,8 @@ def _ik_rejection(item, pose, points, search, scene_token):
             or max(item['rotation_error_rad'], rotation_error) > search['ik_rotation_threshold_rad'] + 1e-9):
         return 'held_ik_pose_tolerance_exceeded', None
     gap = object_floor_gap(points, actual, search['bounds']['floor_z_m'])
-    if gap > search['bounds']['maximum_object_floor_gap_m'] + 1e-9:
+    if (gap < search['bounds'].get('minimum_object_floor_gap_m', 0.) - 1e-9
+            or gap > search['bounds']['maximum_object_floor_gap_m'] + 1e-9):
         return 'achieved_object_floor_gap_exceeded', gap
     return None, gap
 
@@ -244,13 +249,18 @@ def valid_held_height_resolution(reference, expected, minimum_z, points, scene_t
         search = reference['height_search']
         bounds = search['bounds']
         initial = rigid_matrix(bounds['initial_T_world_tcp'])
+        if bounds.get('release_mode') == 'container_release':
+            from .container_release import rebuild_container_bounds
+            expected_bounds = rebuild_container_bounds(bounds, initial, points)
+        else:
+            expected_bounds = height_search_bounds(initial, points, reference['floor_z_m'],
+                bounds['maximum_object_floor_gap_m'])
         if (proof['scope'] != 'held_ik_release_endpoint' or proof['search'] != search
                 or proof['status'] != 'first_world_and_held_ik_valid_sample'
                 or proof['scene_token'] != scene_token
                 or proof['maximum_height_increase_m'] != bounds['maximum_height_increase_m']
                 or proof['resolution_m'] != bounds['resolution_m']
-                or bounds != height_search_bounds(initial, points, reference['floor_z_m'],
-                                                   bounds['maximum_object_floor_gap_m'])
+                or bounds != expected_bounds
                 or not np.allclose(initial[:3, 3], [*expected[:2, 3], minimum_z], atol=1e-9, rtol=0)
                 or not np.allclose(initial[:3, :3], expected[:3, :3], atol=1e-9, rtol=0)):
             return False

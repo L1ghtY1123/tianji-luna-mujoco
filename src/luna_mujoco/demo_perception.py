@@ -6,12 +6,6 @@ from copy import deepcopy
 import numpy as np
 
 from .cameras import deproject_view
-from .demo_completed_tracking import (
-    completed_candidate_scopes,
-    completed_identity_tracks,
-    merge_completed_correspondence,
-    verify_completed_correspondence,
-)
 from .demo_container_tracking import (
     container_correspondence,
     merge_container_correspondence,
@@ -20,113 +14,44 @@ from .demo_container_tracking import (
 )
 from .demo_geometry import fit_inventory_table, supported_surface_points
 from .demo_identity_presentation import improve_identity_presentation, release_verification_context
-from .identity_pixel_evidence import IDENTICAL_REGION_RULE, identical_reference_regions
-from .inventory_reference import current_inventory_entities, source_inventory, visual_inventory_state
-from .multiview_identity import (
-    expand_identity_answers,
-    measured_view_groups,
-    reduce_identity_questions,
-    validate_group_proof,
-)
+from .inventory_reference import current_inventory_entities, visual_inventory_state
 from .perception import (
     Perception,
     PerceptionError,
     _readonly,
-    _remove_own_robot_surface,
 )
 from .visual_api import VisualInventoryError
-from .visual_inventory import VisualInventory, choice, mask_box
+from .visual_inventory import VisualInventory, mask_box
 
 
-def _box_iou(first, second):
-    intersection = max(0., min(first[2], second[2]) - max(first[0], second[0])) * max(
-        0., min(first[3], second[3]) - max(first[1], second[1]))
-    union = ((first[2] - first[0]) * (first[3] - first[1])
-             + (second[2] - second[0]) * (second[3] - second[1]) - intersection)
-    return intersection / union if union > 0 else 0.
-
-
-def _same_capture_context(capture, detections, reference):
+def _same_capture_context(capture, reference):
     if (not reference or not capture.get('observation_id')
-            or reference.get('observation_id') != capture['observation_id']):
-        return None
+            or reference.get('observation_id') != capture['observation_id']
+            or reference.get('generation') != capture.get('generation')):
+        return {}
     verified = {}
     for camera, view in capture['views'].items():
-        initial = reference.get('views', {}).get(camera, {})
-        if 'rgb' not in initial:
-            continue
-        current_rgb, initial_rgb = np.asarray(view['rgb']), np.asarray(initial['rgb'])
-        if current_rgb.dtype == initial_rgb.dtype and np.array_equal(current_rgb, initial_rgb):
-            verified[camera] = hashlib.sha256(np.ascontiguousarray(current_rgb).tobytes()).hexdigest()
-    if not verified:
-        return None
-    overlaps = []
-    for index, detection in enumerate(detections):
-        camera = detection['camera_id']
-        if camera not in verified:
-            continue
-        box = mask_box(detection['silhouette_mask'])
-        references = [{'reference_entity_id': identifier, 'reference_box': entity['bbox'],
-                   'box_iou': _box_iou(box, entity['bbox'])}
-                  for identifier, entity in reference.get('entities', {}).items()
-                  if entity.get('reference_camera_id') == camera and entity.get('bbox')]
-        if not references:
-            continue
-        overlaps.append({'camera': camera, 'candidate': 'candidate-' + str(index), 'current_box': box,
-                         'same_camera_reference_box_overlaps': references})
-    return {
-        'same_capture_reference': {
-            'initial_reference_observation_id': reference['observation_id'],
-            'current_observation_id': capture['observation_id'], 'generation': capture.get('generation'),
-            'verified_camera_ids': sorted(verified), 'raw_rgb_sha256_by_camera': verified,
-            'hash_encoding': 'C-contiguous RGB array bytes; shape, dtype and every pixel compared before hashing',
-            'meaning': 'For the verified cameras only, initial and current RGB are the same frozen capture '
-                       'with identical pixels. Only annotations differ; no intervening object exchange occurred.'},
-        'same_capture_box_correspondence_proposals': overlaps,
-        'box_correspondence_rule': 'These are same-camera 2D rectangle overlaps, not established identity or mask '
-            'ownership. Reference boxes are fallible proposals: they can be displaced, truncated or cover only an edge. '
-            'Identical pixels prove capture equality, not box accuracy. Zero overlap does not rule out identity; '
-            'high overlap does not establish it. Rows are not ranked identity candidates and IoU is not an identity '
-            'probability. Match the full RGB subject, appearance description and visible neighbors across views. '
-            'A box can contain several subjects, especially containers. Retain reject/unknown for unrelated '
-            'or ambiguous subjects.'}
+        initial = reference.get('views', {}).get(camera, {}).get('rgb')
+        current = np.asarray(view['rgb'])
+        if initial is not None and current.dtype == initial.dtype and np.array_equal(current, initial):
+            verified[camera] = hashlib.sha256(np.ascontiguousarray(current).tobytes()).hexdigest()
+    return {'same_capture_reference': {
+        'initial_reference_observation_id': reference['observation_id'],
+        'current_observation_id': capture['observation_id'], 'generation': capture.get('generation'),
+        'verified_camera_ids': sorted(verified), 'raw_rgb_sha256_by_camera': verified}}
 
-
-def _demo_progress_instructions(instructions):
-    return instructions.replace(
-        'Slot XY specifies the TCP anchor, not object-centre or footprint containment.',
-        'Slot XY specifies the calibrated finger front. Local geometry checks '
-        'front XY within the region; RGB does not certify millimetre pose accuracy.').replace(
-        'Check visible support/destination consistency; do not infer millimetre TCP accuracy.',
-        'Region outlines are support-plane projections onto the tabletop, not a 3D enclosure. '
-        'Assess the object base/contact, not its entire silhouette or SAM3 box. Elevated object pixels '
-        'may extend outside the same 2D polygon while its supporting base is inside.').replace(
-        'at_destination requires visible support on that region or inside that container, not held.',
-        'at_destination requires visible base/support on the assigned region or inside the destination '
-        'container, and no visible holding by the gripper. Use the union of current views to assess '
-        'support and separation from the gripper; action history is not proof.')
 
 
 class DemoVisualInventory(VisualInventory):
-    """Decisions adds an explicit visible-unlisted-object check to fixed identity."""
+    """Associate current subjects while preserving unresolved identity evidence."""
 
-    def __init__(self, *, legacy_identity_protocol=False, **kwargs):
-        super().__init__(**kwargs)
-        # Explicit archive/test compatibility only; production never enables it.
-        self.legacy_identity_protocol = legacy_identity_protocol
-
-    def resolve(self, capture, detections, *, reference=None, entities=None, reference_capture=None, **kwargs):
+    def resolve(self, capture, detections, *, reference=None, entities=None, reference_capture=None,
+                association_scope=None, **kwargs):
         # Runtime inventory is authoritative; original RGB remains historical evidence.
         entities = current_inventory_entities(reference, entities)
         entities = {key: value for key, value in entities.items()
                     if value.get('source') != 'configured_demo_region'}
-        kwargs['source_inventory'] = source_inventory(reference)
-        identity_context = _same_capture_context(capture, detections, reference) or {}
-        identical_regions = identical_reference_regions(capture, detections, reference, reference_capture)
-        if identical_regions:
-            identity_context.update(identical_reference_regions=identical_regions,
-                                    identical_reference_region_rule=IDENTICAL_REGION_RULE)
-        identity_context['task_spec'] = deepcopy((reference or {}).get('task_spec', {}))
+        identity_context = _same_capture_context(capture, reference)
         identity_context['inventory_state'] = visual_inventory_state(reference)
         if kwargs.get('progress'):
             kwargs['progress'] = {key: value for key, value in kwargs['progress'].items() if key in entities}
@@ -149,51 +74,22 @@ class DemoVisualInventory(VisualInventory):
                 'Robot world +Y is physical robot LEFT, -Y is RIGHT, and +X is forward. '
                 'Match each declared entity across all observed regions using RGB and geometry. '
                 'Color, task role, camera number or location alone does not establish identity.'))
-        tracks, scopes, tracking = {}, {}, None
-        all_entities, all_detections = entities, detections
-        view_groups = measured_view_groups(capture, detections)
-        if view_groups:
-            identity_context['current_measured_view_groups'] = view_groups
+        all_detections = detections
         containers = (container_correspondence(capture, detections, reference, entities)
                       if kwargs.get('purpose') in {'associate_inventory', 'verify_transfer'} else None)
+        from .observation_identity import covered_container_candidates
+
+        covered = (covered_container_candidates(capture, detections, association_scope, containers)
+                   if kwargs.get('purpose') == 'associate_inventory' else [])
+        covered_indices = {row['candidate_index'] for row in covered}
         if kwargs.get('purpose') == 'associate_inventory':
-            tracks = completed_identity_tracks(capture, reference, kwargs.get('progress'), entities)
-            scopes = completed_candidate_scopes(capture, detections, tracks)
-            if scopes:
-                tracking = verify_completed_correspondence(self, capture, detections, tracks, scopes)
-                scoped_ids = {scope['owner_id'] for scope in scopes.values()}
-                confirmed_ids = set(tracking['candidate_mapping'].values())
-                indices = [index for index in range(len(detections)) if index not in scopes]
-                detections = [detections[index] for index in indices]
-                # A failed auxiliary view cannot remove an identity from the
-                # independent association questions for other current views.
-                entities = {key: value for key, value in entities.items() if key not in confirmed_ids}
-                reference = {**reference, 'entities': {
-                    key: value for key, value in reference.get('entities', {}).items() if key not in confirmed_ids}}
-                kwargs['candidate_indices'] = indices
-                kwargs['progress_question_ids'] = set(kwargs.get('progress', {})) - scoped_ids
-                kwargs['placement_regions'] = ()
-                identity_context['candidate_geometric_location_hints'] = [
-                    row for row in locations if int(row['candidate'].removeprefix('candidate-')) in indices]
-                identity_context['completed_correspondence_request_hash'] = tracking['request_hash']
-                identity_context['fixed_reference_labels'] = {
-                    identifier: f'Reference {index + 1}' for index, identifier in enumerate(sorted(all_entities))
-                    if identifier in entities}
-                identity_context['completed_source_correspondences'] = [{
-                    'entity_id': identifier, 'display_id': all_entities[identifier].get('display_id'),
-                    'description': all_entities[identifier].get('description', 'task object'),
-                    'slot_id': track['binding']['slot_id'], 'observation_id': capture['observation_id'],
-                    'generation': capture['generation'], 'request_hash': tracking['request_hash'],
-                    'status': 'confirmed' if identifier in tracking['candidate_mapping'].values() else 'unknown',
-                    'current_candidates': [
-                        {'candidate': 'Candidate ' + index, 'camera': all_detections[int(index)]['camera_id'],
-                         'box': mask_box(all_detections[int(index)]['silhouette_mask'])}
-                        for index, owner in tracking['candidate_mapping'].items() if owner == identifier]}
-                    for identifier, track in tracks.items()]
+            # Current contents already covered by a published occupied envelope
+            # can retain their dated identity until an operation needs them.
+            kwargs['progress_question_ids'] = ()
         if containers and containers['candidate_mapping']:
             indices = kwargs.get('candidate_indices', list(range(len(detections))))
             retained = [(index, detection) for index, detection in zip(indices, detections, strict=True)
-                        if str(index) not in containers['candidate_mapping']]
+                        if str(index) not in containers['candidate_mapping'] and index not in covered_indices]
             kwargs['candidate_indices'] = [index for index, _ in retained]
             detections = [detection for _, detection in retained]
             identity_context['container_correspondence'] = containers
@@ -211,7 +107,15 @@ class DemoVisualInventory(VisualInventory):
                 'measured_surface_source': 'current_registered_rgbd_candidate_surface',
                 **geometry.get('candidate-' + index, {})}
                 for index, identifier in containers['candidate_mapping'].items()]
-        from .identity_geometry import cad_identity_exclusions
+        from .identity_geometry import (
+            cad_identity_exclusions,
+            projected_reference_surfaces,
+            projected_surface_pairs,
+        )
+
+        identity_context['projected_candidate_surfaces'] = projected_surface_pairs(capture, all_detections)
+        identity_context['projected_reference_surfaces'] = projected_reference_surfaces(
+            capture, all_detections, (reference or {}).get('identity_references', {}))
 
         exclusions = cad_identity_exclusions(
             capture, all_detections, identity_context.get('current_confirmed_container_anchors', []),
@@ -219,256 +123,27 @@ class DemoVisualInventory(VisualInventory):
         if exclusions:
             identity_context['identity_geometry_exclusions'] = exclusions
         kwargs['identity_context'] = identity_context
-        try:
-            result = super().resolve(capture, detections, reference=reference, entities=entities, **kwargs)
-        except VisualInventoryError as error:
-            if tracking is not None:
-                error.evidence['completed_tracking'] = tracking
-            raise
+        result = super().resolve(capture, detections, reference=reference, entities=entities,
+                                 association_scope=association_scope, **kwargs)
+        result['association_scope'] = {key: list((association_scope or {}).get(key, ()))
+                                       for key in ('focus_entity_ids', 'deferred_entity_ids')}
+        result['deferred_candidates'] = covered
         if containers and containers['candidate_mapping']:
             result = merge_container_correspondence(self, all_detections, entities, containers, result)
-        if tracking is not None:
-            frozen = (reference or {}).get('inventory_state', {}).get('inventory_finalized') is True
-            partial_completed = {identifier for identifier, record in (kwargs.get('progress') or {}).items()
-                                 if frozen and record.get('status') == 'completed'}
-            result = merge_completed_correspondence(
-                self, capture, all_detections, all_entities, tracking, result,
-                partial_completed_ids=partial_completed)
         return result
 
     def request(self, payload, capture, purpose, parse, *, identity_subjects=None):
-        payload = deepcopy(payload)
+        payload = improve_identity_presentation(payload)
         content = payload['input'][0]['content']
         context = json.loads(content[0]['text'])
-        # Completed/container correspondence can remove candidates before this
-        # request. Keep the full geometric proof, but only expand subject views
-        # that still carry candidate provenance in this request.
-        context['identity_request_candidate_ids'] = [
-            row['candidate'] for part in content if part.get('type') == 'input_text'
-            and part['text'].startswith('{')
-            and isinstance(row := json.loads(part['text']), dict)
-            and 'candidate_provenance' in row and 'candidate' in row]
-        context['rules'] = (
-            'Use the union of all CURRENT full RGB views to associate the declared scene entities. '
-            'All observed regions are in scope, including supports, containers, task objects and obstacles. '
-            'Robot arms, grippers and attached robot hardware without a corresponding declared scene entity '
-            'are outside this inventory; reject those proposals. '
-            'Match physical subjects using RGB appearance and frozen INITIAL or verified PRODUCT references; distinguish '
-            'individual objects and retain unknown for ambiguous correspondence. SAM3 prompts and boxes '
-            'are proposals, not identity or segmentation ownership. Multiple views can show one object. '
-            'Measured geometric locations are hints, not identity. Task roles, colors and camera numbers '
-            'do not assign identity. INITIAL images show historical appearances, not additional current objects. '
-            'Regions are intended destinations, not physical markers or proof of release. '
-            'Judge visibility from all current images even when SAM3 misses an entity. Action history is '
-            'context, never success evidence. Check for visible unlisted task candidates matching '
-            'task_spec.target_selector and its source constraints across all observed regions. '
-            'Unlisted non-task objects are intentionally outside this inventory map; geometric '
-            'visibility and clearance are checked separately, never certified by this judgment. '
-            'Do not infer hidden contents or empty space.')
-        context['rules'] += (
-            ' Retired entity IDs describe consumed inputs and cannot identify current objects. '
-            'Verified transformation outputs have independent IDs and their own appearance; use their '
-            'PRODUCT reference images when supplied, not the consumed input in INITIAL images. '
-            'Lineage records link inputs and outputs without equating their visual identities. '
-            'Historical reference pixels are not additional current objects; containers keep identity '
-            'when their contents change. Execution receipts never prove current visual success.')
-        if context.get('completed_source_correspondences'):
-            context['rules'] += (
-                ' Completed source objects have a separate CURRENT correspondence check in this same capture. '
-                'Its confirmed rows locate those known objects by current C label, camera, box and slot; '
-                'unknown rows are NOT confirmed. Only confirmed IDs are omitted from this request\'s identity '
-                'choices and visibility questions; unknown IDs and their historical reference images remain '
-                'available for independent matching in other views. Reject a proposal whose subject is an independently confirmed '
-                'completed object; do not assign it to an unmoved source ID. For the global unlisted check, '
-                'confirmed completed objects are listed known objects, not extra source objects. '
-                'Initial RGB images are historical and may still show those objects at their old source positions. '
-                'Use initial references only for the remaining IDs being matched in this request.')
-        if context.get('container_correspondence'):
-            context['rules'] += (
-                ' container_correspondence records independent current registered-depth and mask matching '
-                'to initially Decisions-confirmed, unmanipulated containers. It is measured tracking evidence, '
-                'not a model answer. Only those matched candidate identity questions are omitted. All container '
-                'IDs remain choices for other candidates; use current RGB for those and for visibility. '
-                'current_confirmed_container_anchors remain labeled in the CURRENT annotated views with '
-                'their permanent IDs, camera, box, measured world bounds and tracking provenance. '
-                'Compare unresolved subjects with these same-capture anchors before historical references. '
-                'Multiple cameras can observe the same container, but simultaneously distinct containers '
-                'in this same capture cannot share one permanent ID. Movement between captures does not '
-                'explain two distinct current subjects; changed contents do not change container identity. '
-                'Use RGB and calibrated geometry together; a camera number or location alone never assigns an ID. '
-                'Keep unknown if the current correspondence remains ambiguous. '
-                'This tracking does not identify task objects or prove there are no unlisted objects.')
-        original_questions = deepcopy(payload['questions'])
-        view_groups = context.get('current_measured_view_groups', {})
-        validate_group_proof(view_groups, capture)
-        from .identity_proposals import resolve_identity_proposals, scope_same_capture_identity
-
-        content[0]['text'] = json.dumps(context, ensure_ascii=False)
-        _, same_view_questions = scope_same_capture_identity(payload)
-        # An exact same-capture reference takes priority; otherwise use the
-        # largest observed subject, not the first camera's tiny occluded fragment.
-        # This selects a question, never an identity or confidence.
-        visible_pixels = {'identity_' + candidate.removeprefix('candidate-'):
-                          int(np.count_nonzero(subject['silhouette_mask']))
-                          for candidate, subject in (identity_subjects or {}).items()}
-        payload['questions'], identity_aliases = reduce_identity_questions(
-            original_questions, view_groups, preferred_questions=same_view_questions,
-            visible_pixels=visible_pixels)
-        if identity_aliases:
-            context['measured_view_identity_aliases'] = identity_aliases
-            context['rules'] += (
-                ' current_measured_view_groups contains mutual registered RGBD surface correspondences '
-                'within this CURRENT capture, with depth, calibration and mask hashes. Each listed group '
-                'is one measured physical surface observed by different cameras. Judge its permanent ID '
-                'once using all member RGB views and the historical references. The omitted member questions '
-                'inherit that same answer and confidence through the recorded measured correspondence. '
-                'This geometric grouping does not choose a permanent ID; keep unknown when reference '
-                'identity is ambiguous. Visibility and scene closure remain separate judgments.')
-        content[0]['text'] = json.dumps(context, ensure_ascii=False)
-        same_capture = context.get('same_capture_reference')
-        if same_capture:
-            for part in content:
-                if part.get('type') == 'input_text' and part['text'].startswith('INITIAL RGB REFERENCE.'):
-                    part['text'] = (
-                        'INITIAL RGB REFERENCE. For cameras ' + json.dumps(same_capture['verified_camera_ids'])
-                        + ', initial and current are the SAME frozen capture with identical pixels; only annotations '
-                        'differ. Permanent IDs locate the same physical subjects in those views. '
-                        'Other cameras or later captures may differ; positions may change there.')
-        for question in payload['questions']:
-            if question['name'].startswith('progress_'):
-                question['instructions'] = _demo_progress_instructions(question['instructions'])
-        closure_name, extra_status = 'scene_inventory_closure', 'unlisted'
-        payload['questions'].append(choice(closure_name,
-            'Across all observed regions in the CURRENT full RGB views, are there visible task '
-            'candidates matching task_spec.target_selector and its source constraints that are not '
-            'represented by the declared permanent source_object_ids? For all/count scope, '
-            'a matching subject listed only in fixed_entities but absent from source_object_ids '
-            'is still a missing task candidate. For ids scope, only the explicitly requested subset '
-            'is relevant; other matching subjects are not omissions. Independently confirmed '
-            'completed objects and their verified transformation products are not new source candidates. '
-            'Ignore non-task supports, containers, obstacles, robot parts, reflections and annotations. '
-            'Unlisted non-task objects are intentionally filtered from the inventory map. '
-            'none means each visible task candidate is represented; it does not certify hidden space '
-            'or source emptiness. unlisted means a clearly visible relevant subject lacks a declared '
-            'entity. unknown means correspondence or current visibility is insufficient. '
-            'Missing segmentation candidates never prove absence.', ['none', 'unlisted', 'unknown']))
-        if len(payload['questions']) > 200:
-            raise VisualInventoryError('visual_inventory_input_limit')
-
-        def with_demo_check(body, evidence):
-            answers = body.get('answers')
-            if not isinstance(answers, list) or len(answers) != len(payload['questions']):
-                raise VisualInventoryError('visual_decisions_invalid_response')
-            answer = answers[-1]
-            if not isinstance(answer, dict) or answer.get('name') != closure_name:
-                raise VisualInventoryError('visual_decisions_invalid_response')
-            confidence = answer.get('confidence', 0.)
-            if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
-                raise VisualInventoryError('visual_decisions_invalid_response')
-            status = answer.get('choice') if answer.get('type') == 'choice' and confidence >= self.minimum_confidence else 'unknown'
-            if status not in {'none', extra_status, 'unknown'}:
-                raise VisualInventoryError('visual_decisions_invalid_response')
-            check = {'status': status, 'source': self.source,
-                     'observation_id': capture['observation_id'], 'confidence': confidence,
-                     'request_hash': evidence['request_hash'], 'component': 'decisions',
-                     'choice': answer.get('choice'), 'minimum_confidence': self.minimum_confidence,
-                     'diagnostic_checks': [deepcopy(item) for item in evidence.get('diagnostic_checks', [])
-                                           if item['name'] == closure_name]}
-            if status == extra_status:
-                raise VisualInventoryError('scene_unlisted_object', evidence={
-                    **evidence, 'answers': answers, 'demo_inventory_check': check})
-            base_body = {**body, 'answers': answers[:-1]}
-            group_evidence = {}
-            if identity_aliases:
-                base_body, derivations = expand_identity_answers(
-                    base_body, original_questions, identity_aliases, view_groups)
-                group_evidence = {
-                    'measured_view_identity_derivations': derivations,
-                    'current_measured_view_groups': deepcopy(view_groups),
-                    'original_decisions_answers': deepcopy(evidence.get('original_decisions_answers', answers))}
-            result = parse(base_body, {
-                **group_evidence,
-                **evidence, 'demo_inventory_check': check, 'generation': capture['generation'],
+        def parse_associations(body, evidence):
+            return parse(body, {**evidence, 'generation': capture['generation'],
                 **({'container_correspondence': context['container_correspondence']}
-                   if context.get('container_correspondence') else {}),
-                **({'completed_correspondence_request_hash': context['completed_correspondence_request_hash']}
-                   if context.get('completed_correspondence_request_hash') else {})})
-            result['demo_inventory_check'] = check
-            result['evidence']['answers'] = base_body['answers'] + [answer]
-            return result
-        from .demo_identity_presentation import ground_identity_locations
+                   if context.get('container_correspondence') else {})})
+        from .identity_correspondence import request_identity_correspondences
 
-        presented, proposals = scope_same_capture_identity(improve_identity_presentation(payload))
-        presented = ground_identity_locations(presented)
-        from .identity_comparison_images import same_capture_comparison_images
-
-        presented = same_capture_comparison_images(presented, proposals)
-
-        def with_identity_proposals(body, evidence):
-            if not proposals:
-                return with_demo_check(body, evidence)
-            resolved = resolve_identity_proposals(body, proposals, self.minimum_confidence)
-            return with_demo_check(resolved, {**evidence,
-                'original_decisions_answers': evidence.get('original_decisions_answers', deepcopy(body['answers'])),
-                'same_capture_identity_proposals': proposals,
-                'identity_derivation': 'positive_visual_predicate_required_not_numeric_identity_assignment'})
-
-        from .identity_correspondence import (
-            has_product_reference,
-            request_identity_correspondences,
-            scope_identity_clarification,
-        )
-
-        # Later observations use direct predicates. Initial same-capture binding
-        # retains scoped clarification: accepted CURRENT identities become new
-        # anchors for the remaining ambiguous subject, without new photography.
-        single_pass = not self.legacy_identity_protocol and not context.get('same_capture_reference')
-        if purpose in {'associate_inventory', 'verify_transfer'} and (
-                single_pass or has_product_reference(presented)):
-            return request_identity_correspondences(self, presented, capture, purpose, with_identity_proposals,
-                identity_subjects=identity_subjects, include_proposal_subjects=self.legacy_identity_protocol)
-        initial_error = None
-        try:
-            initial_result = super().request(presented, capture, purpose, with_identity_proposals)
-        except VisualInventoryError as error:
-            if str(error) != 'visual_identity_unknown':
-                raise
-            initial_error, initial_result = error, None
-        has_identity = any(q['name'].startswith('identity_') and q['type'] in {'choice', 'predicate'}
-                           for q in presented['questions'])
-        partial_unknown = (purpose in {'associate_inventory', 'verify_transfer'} and initial_result is not None
-                           and initial_result.get('missing_geometry_ids')
-                           and initial_result.get('unassociated_candidates'))
-        if not has_identity or (initial_error is None and not partial_unknown):
-            if initial_error is not None:
-                raise initial_error
-            return initial_result
-        # Partial success must not bypass the same bounded clarification used
-        # for a wholly unknown identity. No new capture or physical action.
-        initial_evidence = initial_error.evidence if initial_error is not None else initial_result['evidence']
-        clarification, retained = scope_identity_clarification(presented, initial_evidence, self.minimum_confidence)
-
-        def clarified(body, evidence):
-            answers = {answer['name']: answer for answer in body['answers']}
-            answers.update({name: record['answer'] for name, record in retained.items()})
-            merged = {**body, 'answers': [deepcopy(answers[question['name']]) for question in presented['questions']]}
-            return with_identity_proposals(merged, {**evidence,
-                'retained_identity_answers': deepcopy(list(retained.values())),
-                'clarifies_request_hash': initial_evidence.get('request_hash'),
-                'clarification_reason': 'categorical_identity_unknown'})
-        try:
-            return request_identity_correspondences(self, clarification, capture, purpose, clarified,
-                                                    identity_subjects=identity_subjects)
-        except VisualInventoryError as clarification_error:
-            if initial_error is not None:
-                clarification_error.evidence['initial_identity_failure'] = {
-                    'error': str(initial_error), 'evidence': deepcopy(initial_error.evidence)}
-                raise clarification_error from initial_error
-            if str(clarification_error) != 'visual_identity_unknown':
-                raise
-            initial_result['evidence']['identity_clarification'] = {
-                'error': str(clarification_error), 'evidence': clarification_error.evidence}
-            return initial_result
+        return request_identity_correspondences(self, payload, capture, purpose, parse_associations,
+                                                subjects=identity_subjects)
 
     def _groups(self, detections, names, entities, judgments, evidence, *, purpose=None, reference=None,
                 progress=None):
@@ -479,59 +154,25 @@ class DemoVisualInventory(VisualInventory):
         measured_containers = set(container_tracking.get('candidate_mapping', {}).values())
         accepted |= measured_containers
         required = {identifier for identifier, entity in entities.items()
-                    if entity.get('kind') not in {'table', 'marker'}}
+                    if entity.get('kind') not in {'table', 'marker'}
+                    and entity.get('status') not in {'removed', 'consumed'}}
         pending_verification = {identifier for identifier, record in (progress or {}).items()
                                 if record.get('release_feedback_id') and record.get('status') != 'completed'}
         if purpose == 'verify_transfer' and pending_verification:
             required = pending_verification
-        source_ids = set(source_inventory(reference)['source_object_ids'])
-        completed = {identifier for identifier, record in (progress or {}).items()
-                     if record.get('status') == 'completed'}
-        remaining_source_ids = source_ids & set(entities) - completed
-        source_covered = remaining_source_ids <= accepted
-        complete_union = bool(required) and required <= accepted
-        # These sets contain only identities already accepted by the shared
-        # confidence parser. They remain available when an unresolved view fails.
-        coverage = {'source': self.source, 'observation_id': evidence['observation_id'],
+        coverage = {'source': evidence['source'], 'observation_id': evidence['observation_id'],
             'request_hash': evidence['request_hash'], 'purpose': purpose,
             'minimum_confidence': self.minimum_confidence,
             'required_entity_ids': sorted(required), 'accepted_entity_ids': sorted(accepted),
-            'complete': required <= accepted,
-            'source_object_ids': sorted(source_ids),
-            'remaining_source_ids': sorted(remaining_source_ids)}
+            'complete': required <= accepted}
         if measured_containers:
             coverage.update(source='mixed_decisions_measured_container',
                 decisions_accepted_entity_ids=sorted(decisions_accepted),
                 measured_container_entity_ids=sorted(measured_containers),
                 container_correspondence_binding_hash=container_tracking['binding_hash'])
-        unassociated, retained = [], []
-        for index, detection in enumerate(detections):
-            identity = judgments['identity_' + str(index)]
-            supplementary = (purpose == 'verify_transfer' or (
-                purpose in {'initialize_inventory', 'associate_inventory'}
-                and source_covered))
-            if identity == 'unknown':
-                answer = evidence['answers'][index]
-                # Later captures may cover only part of the established inventory.
-                # Return its measured subset and missing IDs; the map ledger keeps
-                # unseen layers and rejects stale/missing geometry before motion.
-                visible_unconfirmed = {identifier for identifier in required - accepted
-                                       if judgments.get('visibility_' + identifier) == 'visible'}
-                frozen_inventory = (reference or {}).get('inventory_state', {}).get('inventory_finalized') is True
-                partial_association = (purpose == 'associate_inventory' and (
-                    frozen_inventory or source_covered and not visible_unconfirmed))
-                if not partial_association and (not complete_union or not supplementary):
-                    details = self._identity_failure_evidence(evidence, detection, names[index], answer)
-                    details.update(identity_coverage=coverage, missing_geometry_ids=sorted(required - accepted),
-                        unresolved_identity_candidates=self._unresolved_identity_candidates(
-                            detections, names, judgments, evidence))
-                    raise VisualInventoryError('visual_identity_unknown', evidence=details)
-                unassociated.append({'candidate': names[index], 'camera_id': detection['camera_id'],
-                    'status': 'unknown', 'choice': answer.get('choice'), 'confidence': answer.get('confidence'),
-                    'minimum_confidence': self.minimum_confidence, 'geometry_policy': 'discard_from_inventory_map',
-                    'reason': 'supplementary_identity_uncertain'})
-            else:
-                retained.append(index)
+        unassociated = self._unresolved_identity_candidates(detections, names, judgments, evidence)
+        retained = [index for index in range(len(detections))
+                    if judgments['identity_' + str(index)] != 'unknown']
         if purpose == 'verify_transfer' and pending_verification - accepted:
             raise VisualInventoryError('visual_verification_target_unconfirmed', evidence={
                 **evidence, 'missing_target_ids': sorted(pending_verification - accepted)})
@@ -552,31 +193,32 @@ class DemoVisualInventory(VisualInventory):
 
     def _unresolved_identity_candidates(self, detections, names, judgments, evidence):
         """Summarize existing verdicts without making another identity decision."""
-        correspondences = {row['name']: row for row in evidence.get('identity_correspondence', [])}
-        original_answers = evidence.get('original_decisions_answers', evidence['answers'])
+        original = evidence.get('original_decisions_answers', evidence['answers'])
+        answers = {row['name']: row for row in evidence['answers']}
         unresolved = []
         for index, detection in enumerate(detections):
             if judgments['identity_' + str(index)] != 'unknown':
                 continue
-            answer = evidence['answers'][index]
-            name = answer['name']
-            probabilities = correspondences.get(name, {}).get('probabilities', {})
-            positive = sorted(identifier for identifier, probability in probabilities.items()
-                              if probability >= self.minimum_confidence)
-            prefix = 'match_' + name.removeprefix('identity_') + '_'
+            name = 'identity_' + names[index].removeprefix('candidate-')
+            answer = answers[name]
+            raw = next((row for row in original if row['name'] == name
+                        and row.get('type') == answer.get('type')
+                        and row.get('probability') == answer.get('probability')), answer)
+            reason = ('model_refusal' if raw.get('type') == 'refusal' else
+                      'proposed_identity_rejected' if raw.get('type') == 'predicate'
+                      and raw['probability'] <= round(1 - self.minimum_confidence, 12) else
+                      'proposed_identity_unconfirmed' if raw.get('type') == 'predicate' else
+                      'model_selected_unknown' if raw.get('choice') == 'unknown' else
+                      'choice_confidence_below_threshold')
             unresolved.append({'candidate_id': names[index], 'camera_id': detection['camera_id'],
                 'source': self.source, 'observation_id': evidence['observation_id'],
                 'generation': evidence.get('generation'), 'request_hash': evidence['request_hash'],
-                'status': 'conflicting' if len(positive) > 1 else 'unknown',
-                'positive_entity_ids': positive, 'minimum_confidence': self.minimum_confidence,
-                'answer': deepcopy(answer), 'probabilities': deepcopy(probabilities),
-                'original_decisions_answers': [deepcopy(row) for row in original_answers
-                    if row['name'] == name or row['name'].startswith(prefix)]})
+                'status': 'unknown', 'reason': reason, 'minimum_confidence': self.minimum_confidence,
+                'answer': deepcopy(answer), 'original_decisions_answers': [deepcopy(raw)]})
         return unresolved
 
 
 class DemoPerception(Perception):
-    visual_plan_source = 'responses_program'
 
     def __init__(self, detector=None, *, robot_surface_classifier=None, visual_inventory=None, cad_resolver=None):
         self.demo_tables = None
@@ -628,8 +270,10 @@ class DemoPerception(Perception):
             mask = np.asarray(detection['silhouette_mask'], bool)
             duplicate = None
             for previous in unique:
-                if any(previous.get(key) != detection.get(key)
-                       for key in ('camera_id', 'kind', 'requested_color')):
+                if previous['camera_id'] != detection['camera_id']:
+                    continue
+                generic = detection['prompt'] == 'movable object' or previous['prompt'] == 'movable object'
+                if not generic and any(previous.get(key) != detection.get(key) for key in ('kind', 'requested_color')):
                     continue
                 other = np.asarray(previous['silhouette_mask'], bool)
                 if other.shape == mask.shape and np.count_nonzero(other & mask) / max(
@@ -643,15 +287,11 @@ class DemoPerception(Perception):
         return unique
 
     def _prepare_identity_detections(self, detections, views, capture, reference):
+        detections, robot_ownership = super()._prepare_identity_detections(detections, views, capture, reference)
         if not (reference or {}).get('inventory_state', {}).get('transformations'):
-            return detections
-        # Processing hands can occupy the image. Remove measured self returns
-        # before showing proposals to Decisions, not only after identity binding.
-        groups, _ = _remove_own_robot_surface([[entry] for entry in detections], views, capture,
-                                             self.robot_surface_classifier)
+            return detections, robot_ownership
         cleaned = []
-        for group in groups:
-            entry = group[0]
+        for entry in detections:
             points = np.asarray(entry['points'])
             keep = supported_surface_points(points)
             if np.count_nonzero(keep) < 30:
@@ -662,7 +302,8 @@ class DemoPerception(Perception):
             candidate = {**entry, 'mask': mask, 'silhouette_mask': mask.copy(),
                 'points': points[keep], 'pixels_rc': pixels, 'pixels': np.asarray(entry['pixels'])[keep],
                 'identity_proposal_filter': {'source': 'measured_robot_and_surface_support',
-                    'raw_point_count': len(points), 'retained_point_count': int(keep.sum()),
+                    'raw_point_count': entry['identity_proposal_filter']['raw_point_count'],
+                    'retained_point_count': int(keep.sum()),
                     'identity_assignment': False}}
             # Near-identical masks in the same camera are alternative SAM
             # descriptions of the same pixels, not new physical identities.
@@ -681,7 +322,7 @@ class DemoPerception(Perception):
                     candidate.get('prompt_proposals', [candidate['prompt']]))
             else:
                 cleaned.append(candidate)
-        return cleaned
+        return cleaned, robot_ownership
 
     def _filter_geometry_groups(self, groups, views, *, entities=None):
         for group in groups:
@@ -803,11 +444,7 @@ class DemoPerception(Perception):
                         supplemental_points(seed, normal, offset, seed_camera))
                 tables[identifier].update(measurement_observation_id=measurement['observation_id'],
                     foreground_exclusion_source='reference_rgb_boxes' if historical else 'current_sam3_masks')
-            task = (reference or {}).get('task_spec', {})
-            preferred = [task.get('work_area_ref'), task.get('destination_ref')]
-            primary = next((identifier for identifier in preferred if identifier in tables), None)
-            if primary is None and tables:
-                primary = next(iter(tables))
+            primary = next(iter(tables), None)
             if primary not in tables:
                 raise PerceptionError('demo_destination_table_unobservable')
             self.demo_tables = {'source_observation_id': reference_id, 'primary_table_id': primary, 'tables': tables}
@@ -819,20 +456,13 @@ class DemoPerception(Perception):
 
     def observe(self, capture, *, instruction='', checkpoint=None, source_hint=None):
         hint = deepcopy(source_hint or {})
-        if 'task_spec' in hint.get('visual_reference', {}) and not hint.get('scene_entities'):
-            raise PerceptionError('controller_scene_inventory_required')
         hint['camera_ids'] = ['1', '2', '3']
         observation = super().observe(capture, instruction=instruction, checkpoint=checkpoint, source_hint=hint)
         reference = observation['visual_reference']
-        if not reference or 'task_spec' not in reference:
-            raise PerceptionError('task_spec_required')
-        observation.update(task_spec=deepcopy(reference['task_spec']),
-                           policy_graph=deepcopy(reference.get('policy_graph', {})),
-                           inventory_state=deepcopy(reference.get('inventory_state', {})),
+        observation.update(inventory_state=deepcopy((reference or {}).get('inventory_state', {})),
                            demo_mapping=True, demo_tables=deepcopy(self.demo_tables))
-        observation['demo_inventory_check'] = observation['visual_inventory'].get('demo_inventory_check', {
-            'status': 'unknown', 'source': 'missing_decisions_check', 'observation_id': capture['observation_id']})
-        entities = current_inventory_entities(reference, observation['scene_entities'])
+        entities = {**current_inventory_entities(reference, observation['scene_entities']),
+                    **observation['visual_inventory'].get('registered_entities', {})}
         observation['scene_entities'] = entities
         observation['visual_reference'] = reference_with_container_tracks(observation, capture)
         retain_container_placement_regions(observation)

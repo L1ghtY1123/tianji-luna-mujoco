@@ -3,6 +3,109 @@ import hashlib
 
 import numpy as np
 
+from .cameras import deproject_view
+
+
+def projected_reference_surfaces(capture, detections, references):
+    """Historical measured surfaces projected into current masks; never assign identity."""
+    rows = []
+    for identifier, reference in references.items():
+        if reference.get('generation') != capture.get('generation'):
+            continue
+        for camera, view in capture['views'].items():
+            targets = [(index, item) for index, item in enumerate(detections) if item['camera_id'] == camera]
+            if not targets:
+                continue
+            points = [deproject_view(view, view['mask']) for view in reference.get('views', {}).values()]
+            if not points or not any(len(part) for part in points):
+                continue
+            points = np.concatenate(points)
+            transform = np.asarray(view['T_world_camera'])
+            optical = (points - transform[:3, 3]) @ transform[:3, :3]
+            optical = optical[np.isfinite(optical).all(axis=1) & (optical[:, 2] > 0)]
+            intrinsics = view['intrinsics']
+            pixels = np.rint(optical[:, :2] / optical[:, 2:3]
+                * [intrinsics['fx'], intrinsics['fy']] + [intrinsics['cx'], intrinsics['cy']])
+            height, width = view['depth_m'].shape
+            inside = (np.isfinite(pixels).all(axis=1) & (pixels[:, 0] >= 0) & (pixels[:, 0] < width)
+                & (pixels[:, 1] >= 0) & (pixels[:, 1] < height))
+            pixels, optical = pixels[inside].astype(np.int64), optical[inside]
+            order = np.argsort(optical[:, 2])
+            _, first = np.unique(pixels[order, 1] * width + pixels[order, 0], return_index=True)
+            chosen = order[first]
+            pixels, depths = pixels[chosen], optical[chosen, 2]
+            for index, target in targets:
+                mask = np.asarray(target['silhouette_mask'], dtype=bool)
+                overlap = mask[pixels[:, 1], pixels[:, 0]]
+                measured = view['depth_m'][pixels[:, 1], pixels[:, 0]]
+                valid = (view['valid_depth'][pixels[:, 1], pixels[:, 0]] & np.isfinite(measured)
+                    & (measured > 0) & overlap)
+                residual = depths[valid] - measured[valid]
+                intersection = int(overlap.sum())
+                union = len(pixels) + int(mask.sum()) - intersection
+                rows.append({'entity_id': identifier, 'target_candidate': 'candidate-' + str(index),
+                    'target_camera': camera, 'reference_observation_id': reference['observation_id'],
+                    'reference_time_s': reference.get('time'), 'observation_id': capture['observation_id'],
+                    'generation': capture['generation'], 'projected_pixels': len(pixels),
+                    'pixels_inside_target_mask': intersection, 'mask_iou': intersection / max(1, union),
+                    'target_mask_covered_fraction': intersection / max(1, int(mask.sum())),
+                    'overlap_valid_depth_pixels': int(valid.sum()),
+                    'projected_minus_current_depth_m_p10_p50_p90': (
+                        np.quantile(residual, [.1, .5, .9]).tolist() if len(residual) else None),
+                    'source': 'historical_masked_rgbd_projection', 'identity_assignment': False})
+    return rows
+
+
+def projected_surface_pairs(capture, detections):
+    """Project current measured surfaces into each mask's camera, without assigning IDs."""
+    rows = []
+    for source_index, source in enumerate(detections):
+        points = np.asarray(source.get('points', []), dtype=float)
+        if points.ndim != 2 or points.shape[1:] != (3,):
+            continue
+        points = points[np.isfinite(points).all(axis=1)]
+        if not len(points):
+            continue
+        for camera, view in capture['views'].items():
+            transform, intrinsics = np.asarray(view['T_world_camera']), view['intrinsics']
+            optical = (points - transform[:3, 3]) @ transform[:3, :3]
+            optical = optical[optical[:, 2] > 0]
+            pixels = optical[:, :2] / optical[:, 2:3]
+            pixels = pixels * [intrinsics['fx'], intrinsics['fy']] + [intrinsics['cx'], intrinsics['cy']]
+            height, width = view['depth_m'].shape
+            pixels = np.rint(pixels)
+            inside = (np.isfinite(pixels).all(axis=1) & (pixels[:, 0] >= 0) & (pixels[:, 0] < width)
+                      & (pixels[:, 1] >= 0) & (pixels[:, 1] < height))
+            pixels, optical = pixels[inside].astype(np.int64), optical[inside]
+            # One nearest measured surface sample per projected pixel.
+            order = np.argsort(optical[:, 2])
+            flat = pixels[order, 1] * width + pixels[order, 0]
+            _, first = np.unique(flat, return_index=True)
+            chosen = order[first]
+            pixels, depths = pixels[chosen], optical[chosen, 2]
+            for target_index, target in enumerate(detections):
+                if target['camera_id'] != camera or source_index == target_index:
+                    continue
+                mask = np.asarray(target['silhouette_mask'], dtype=bool)
+                overlap = mask[pixels[:, 1], pixels[:, 0]]
+                measured = view['depth_m'][pixels[:, 1], pixels[:, 0]]
+                valid = (view['valid_depth'][pixels[:, 1], pixels[:, 0]] & np.isfinite(measured)
+                         & (measured > 0) & overlap)
+                residual = depths[valid] - measured[valid]
+                rows.append({
+                    'source_candidate': 'candidate-' + str(source_index),
+                    'target_candidate': 'candidate-' + str(target_index),
+                    'source_camera': source['camera_id'], 'target_camera': camera,
+                    'observation_id': capture['observation_id'], 'generation': capture['generation'],
+                    'source_surface_points': len(points), 'projected_pixels': len(pixels),
+                    'pixels_inside_target_mask': int(overlap.sum()),
+                    'projected_samples_in_mask_fraction': float(overlap.mean()) if len(pixels) else None,
+                    'target_mask_covered_fraction': float(overlap.sum() / max(1, mask.sum())),
+                    'overlap_valid_depth_pixels': int(valid.sum()),
+                    'projected_minus_current_depth_m_p10_p50_p90': (
+                        np.quantile(residual, [.1, .5, .9]).tolist() if len(residual) else None)})
+    return rows
+
 
 def _bounds(points):
     points = np.asarray(points, dtype='<f8')

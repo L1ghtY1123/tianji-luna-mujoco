@@ -7,7 +7,7 @@ import numpy as np
 from .algorithms import AlgorithmError, determinate_grasp_failure
 from .geometry import TCP_FRAMES, TOOL_PROFILE
 
-GRASP_CANDIDATE_COUNTS = (256, 512, 1000)
+GRASP_CANDIDATE_COUNTS = (256, 512, 1000, 1000, 1000, 1000)
 MAX_SAMPLING_ROUNDS = len(GRASP_CANDIDATE_COUNTS)
 
 
@@ -58,7 +58,7 @@ def empty_pool_filter(grasps):
                 or {row['candidate_index'] for row in rows} != {row['index'] for row in generated}):
             raise AlgorithmError('empty grasp pool lacks complete direction filter evidence')
         return 'no_downward_candidate', 'grasp_no_downward_candidate', direction
-    filtered = grasps.get('fixed_slot_reach_filter', {})
+    filtered = grasps.get('placement_reach_filter', {})
     rows = filtered.get('candidate_evidence', [])
     if (filtered.get('applied') is not True
             or filtered.get('screening_scope') != 'nominal_transport_wrist_reach'
@@ -134,6 +134,10 @@ def round_evidence(grasps, evaluation, sampling_round):
             "tested_count": evaluation.get("tested_count", len(grasps["candidates"])),
             "valid_count": len(evaluation["valid_candidates"]),
             "batch_success_counts": [batch["success_count"] for batch in evaluation.get("batches", [])]}
+    result['source_ik_success_count'] = sum(result['batch_success_counts'])
+    result['candidate_filter_counts'] = dict(Counter(
+        row.get('reason', 'unknown') for batch in evaluation.get('batches', [])
+        for row in batch.get('candidate_filters', []) if row.get('accepted') is False))
     screen = evaluation.get('destination_screening', {})
     if screen.get('applied') is True:
         result['destination_screening'] = {key: deepcopy(screen.get(key)) for key in (

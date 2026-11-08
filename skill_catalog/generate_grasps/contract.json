@@ -1,6 +1,6 @@
 {
   "id": "generate_grasps",
-  "description": "Generate candidates for the bound target and selected arm. Known CAD loads that arm offline grasps in the source CAD frame and transforms them through the current FoundationPose pose; it does not call GraspGen. Unknown OBB objects use GraspGen online. Keep current observation/model/frame provenance. Generation does not prove IK, collision clearance, contact or path feasibility. A CAD/offline-library failure is explicit, not an automatic switch to GraspGen.",
+  "description": "Preserve the destination-bound release_mode in grasp candidate screening. Container release endpoints use the same rim and operator gap as later placement; support placement uses its support plane. Generate candidates for the bound target and selected arm. Known CAD loads that arm offline grasps in the source CAD frame and transforms them through the current FoundationPose pose; it does not call GraspGen. Unknown OBB objects use GraspGen online. Keep current observation/model/frame provenance. Generation does not prove IK, collision clearance, contact or path feasibility. A CAD/offline-library failure is explicit, not an automatic switch to GraspGen. Physical settings are owned by the operator/application, not Responses. This skill has no model tuning arguments. Unknown OBB GraspGen poses receive the configured local tool +Z insertion once before IK (default 0.01 m); preserve the executing arm orientation. CAD offline poses receive no insertion.",
   "requires": {
     "target_selected": true,
     "arm_selected": true,
@@ -34,10 +34,10 @@
     "container_placement_region_unavailable"
   ],
   "invalidates_observation": false,
-  "recovery_retry_safe": true,
   "planning_effects": {
     "plan_ready": false,
     "placement_resolved": false,
     "place_plan_ready": false
-  }
+  },
+  "retry_safe": true
 }

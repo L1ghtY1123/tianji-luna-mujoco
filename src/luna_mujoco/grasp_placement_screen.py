@@ -54,7 +54,8 @@ def fixed_gripper_spheres(arm):
     return values
 
 
-def placement_endpoint_poses(tcp, object_points, reference, settings, *, uncertainty_m):
+def placement_endpoint_poses(tcp, object_points, reference, settings, *, uncertainty_m,
+                             measured_reference_world_m=None):
     """Retain the grasp rotation and move the entire current model over the region."""
     transform = rigid_matrix(tcp)
     points = np.asarray(object_points, dtype=float)
@@ -69,26 +70,45 @@ def placement_endpoint_poses(tcp, object_points, reference, settings, *, uncerta
     # remain constant. No synthetic carrying binding or closure is needed.
     relative = points - transform[:3, 3]
     polygon = reference['region_polygon_world_xy_m']
-    xy = np.vstack([subdivision_cell_centers(polygon, offsets_world_xy_m=relative[:, :2], cell_count=count)
-                    for count in (4, 8, 16)])
+    fixed = reference.get('fixed_xy') is True or reference.get('precise_xy') is True
+    levels = [] if fixed else [4, 8, 16]
+    if fixed:
+        configured = np.asarray(reference.get('position_world_m'), dtype=float)
+        measured = np.asarray(measured_reference_world_m, dtype=float)
+        if (configured.shape != (3,) or measured.shape != (3,)
+                or not np.isfinite([configured, measured]).all()):
+            raise ValueError('fixed_grasp_placement_requires_measured_reference')
+        xy = (configured[:2] - (measured - transform[:3, 3])[:2])[None, :]
+    else:
+        xy = np.vstack([subdivision_cell_centers(polygon, offsets_world_xy_m=relative[:, :2], cell_count=count)
+                        for count in levels])
     hull = ConvexHull(polygon)
     extent = np.max(relative[:, :2] @ hull.equations[:, :2].T, axis=0)
     distances = xy @ hull.equations[:, :2].T + hull.equations[:, 2] + extent
-    xy = xy[np.all(distances <= -clearance - uncertainty_m + 1e-9, axis=1)]
+    if not fixed:
+        xy = xy[np.all(distances <= -clearance - uncertainty_m + 1e-9, axis=1)]
+    elif np.any(configured[:2] @ hull.equations[:, :2].T + hull.equations[:, 2] > 1e-9):
+        raise ValueError('fixed_grasp_placement_reference_outside_region')
     available = len(xy)
     gaps = np.arange(HEIGHT_STEP_M, maximum + 1e-10, HEIGHT_STEP_M)
     if maximum >= HEIGHT_STEP_M and (not len(gaps) or maximum - gaps[-1] > 1e-10):
         gaps = np.append(gaps, maximum)
+    if reference.get('release_mode') == 'container_release':
+        floor = float(reference['rim_z_m'])
+        gaps = np.array([settings['container_release_gap_m']])
     positions = np.empty((len(xy) * len(gaps), 3))
     positions[:, :2] = np.repeat(xy, len(gaps), axis=0)
     positions[:, 2] = floor - relative[:, 2].min() + np.tile(gaps, len(xy))
     poses = np.broadcast_to(transform, (len(positions), 4, 4)).copy()
     poses[:, :3, 3] = positions
     return poses, {'available_xy_sample_count': available, 'xy_sample_count': len(xy),
-        'sampled_pose_count': len(poses), 'object_floor_gaps_m': gaps.tolist(),
-        'floor_z_m': floor, 'maximum_object_floor_gap_m': maximum, 'xy_spacing_m': None,
-        'xy_subdivision_levels': [4, 8, 16],
-        'footprint_clearance_m': clearance + uncertainty_m,
+        'sampled_pose_count': len(poses), 'object_reference_plane_gaps_m': gaps.tolist(),
+        'release_mode': reference.get('release_mode'),
+        'height_reference': 'container_rim' if reference.get('release_mode') == 'container_release' else 'support',
+        'height_reference_z_m': floor, 'maximum_sampled_gap_m': float(gaps.max()) if len(gaps) else None, 'xy_spacing_m': None,
+        'xy_subdivision_levels': levels, 'fixed_xy': fixed,
+        'footprint_clearance_m': None if fixed else clearance + uncertainty_m,
+        'position_constraint': 'measured_object_reference_world_xy' if fixed else 'whole_footprint_in_region',
         'whole_destination_infeasible': False}
 
 
@@ -114,7 +134,7 @@ def _query_result(response, world, scene_token, clearance):
 
 
 def screen_grasp_placement(candidates, object_points, reference, spheres, query, *, scene_token,
-                           settings, uncertainty_m):
+                           settings, uncertainty_m, measured_reference_world_m=None):
     """Reject only within this finite endpoint budget; query receives world spheres."""
     spheres = np.asarray(spheres, dtype=float)
     if (spheres.ndim != 2 or spheres.shape[1:] != (4,) or not len(spheres)
@@ -150,7 +170,7 @@ def screen_grasp_placement(candidates, object_points, reference, spheres, query,
 
     for candidate in candidates:
         poses, sampling = placement_endpoint_poses(candidate['T_world_tcp'], object_points, reference, settings,
-            uncertainty_m=uncertainty_m)
+            uncertainty_m=uncertainty_m, measured_reference_world_m=measured_reference_world_m)
         row = {'candidate_index': candidate['candidate_index'], **sampling, 'accepted': False,
             'reason': ('fixed_gripper_collides_at_all_sampled_endpoints' if len(poses)
                 else 'no_sampled_endpoint_inside_current_region'),

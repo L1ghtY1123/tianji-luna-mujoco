@@ -1,6 +1,6 @@
 {
   "id": "execute_place",
-  "description": "Execute the current placement plan with the bound held object, open the gripper, detach and execute the verified open-hand retreat. Preserve actual feedback and partial-effect evidence on error. It neither chooses a new landing point nor marks the target delivered. verify_place separately checks the outcome.",
+  "description": "Execute only the phases of the bound release_mode. surface_setdown executes approach/place, opens and detaches, then executes the checked retreat. container_release executes the single carried place trajectory, stops, verifies actual complete-object bottom and opening footprint, opens and detaches; no automatic retreat or observation follows. Preserve release receipts and invalidate changed spatial geometry before any subsequent planning. verify_place judges the landing separately.  MotionPlanBinding binds target, destination, arm, generation, observation, scene and settings; execution checks it before physical commands.",
   "requires": {
     "needs_place": true,
     "grasp_held": true,
@@ -18,7 +18,7 @@
     "collision_scene",
     "placement_zone"
   ],
-  "capability": "Execute the current placement plan with the bound held object, open the gripper, detach and execute the verified open-hand retreat",
+  "capability": "Execute the bound placement/release mode and retain physical feedback",
   "outputs": [
     "place_execution_completed",
     "execution_or_evidence_record"
@@ -39,6 +39,7 @@
     "scene_ready": false,
     "observation_map_ready": false,
     "observed": false,
-    "at_initial_pose": false
+    "at_initial_pose": false,
+    "observation_pose_ready": false
   }
 }

@@ -1,6 +1,6 @@
 {
   "id": "plan_place",
-  "description": "Plan the current resolved placement using the official grasp-style approach and place phases with the post-lift attachment, then an open-gripper retreat after release. Preserve the selected XYZ/orientation and current world binding. Validate the phases with the configured hard collision clearance. No additional pose-selection strategy or cross-skill transport is inserted. It does not release or declare visual success.",
+  "description": "Plan the resolved pose with the bound release_mode. surface_setdown uses official approach/place phases and a checked open-hand retreat. container_release uses the existing public carried plan_pose path, preserving attachment collision checks, and returns only a place phase; no approach or retreat is fabricated. No automatic mode switch. Preserve the selected XYZ/orientation and current world binding. Validate the phases with the configured hard collision clearance. No additional pose-selection strategy or cross-skill transport is inserted. It does not release or declare visual success. On candidate exhaustion, details.placement_search preserves resolution_id, counts, failed phases and SDK status; completed is not a success flag. While holding, the graph may select a bounded retry of this retry_safe planner without replaying execution, changing the authorized goal or waiving checks. Empty-hand observation recovery remains unavailable. Each graph-selected invocation reruns numerical search after checking current prerequisites. Prior numerical failure is evidence, not a cached prohibition of another authored attempt; finite graph edges control retries. The skill does not retry itself or execute motion. MotionPlanBinding binds target, destination, arm, generation, observation, scene and settings; execution checks it before physical commands.",
   "requires": {
     "needs_place": true,
     "grasp_held": true,
@@ -25,7 +25,7 @@
     "planning_settings",
     "placement_resolution"
   ],
-  "capability": "Plan the current resolved placement using the official grasp-style approach and place phases with the post-lift attachment, then an open-gripper retreat after release",
+  "capability": "Plan a checked path for the bound surface-setdown or above-container release mode",
   "outputs": [
     "place_plan_ready",
     "execution_or_evidence_record",
@@ -45,5 +45,5 @@
     "placement_resolution_requires_held_ik"
   ],
   "invalidates_observation": false,
-  "recovery_retry_safe": true
+  "retry_safe": true
 }

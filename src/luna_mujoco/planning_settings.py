@@ -102,13 +102,13 @@ class PlanningSettings(BaseModel):
 
     holding_position_tolerance_fraction: float = setting(.02, "夹持位置容差", "相对空夹闭合位置的容差，占有效行程的比例。", "verification", ge=.001, le=.1, step=.005)
     holding_stable_window_s: float = setting(.2, "夹持稳定窗口", "只使用窗口内的夹爪位置判断稳定，不使用力或电流。", "verification", unit="s", ge=.05, le=1., step=.05)
-    gripper_stable_velocity_rad_s: float = setting(.015, "夹爪稳定速度上限", "驱动关节连续低于此速度并满足稳定窗口才返回；超时失败。", "verification", unit="rad/s", step=.005, gt=0, le=.2)
+    gripper_stable_velocity_rad_s: float = setting(.015, "夹爪窗口稳定速度上限", "完整稳定窗口内驱动关节速度的时间加权均方根不超过此值，且位置变化满足容差才返回；超时失败。", "verification", unit="rad/s", step=.005, gt=0, le=.2)
     gripper_timeout_s: float = setting(3., "夹爪稳定超时", "仿真时间上限；未稳定不能作为夹持成功。", "verification", unit="s", step=.1, gt=0, le=15)
     motion_position_tolerance_rad: float = setting(.005, "运动到位误差", "轨迹结束后关节位置误差上限；不改变沿途跟踪保护。", "execution", unit="°", scale=180 / math.pi, step=.1, gt=0, le=.02)
     motion_stable_velocity_rad_s: float = setting(.03, "运动到位速度上限", "末端关节速度连续满足要求才返回。", "execution", unit="rad/s", step=.01, gt=0, le=.2)
     motion_stable_window_s: float = setting(.08, "运动到位稳定窗口", "仿真时间；短暂到位后再次偏离会重新计时。", "execution", unit="s", step=.02, ge=.02, le=1)
     motion_settle_timeout_s: float = setting(3., "运动到位超时", "轨迹结束后的最大等待时间；超时失败。", "execution", unit="s", step=.1, gt=0, le=15)
-    grasp_insertion_m: float = setting(0., "抓姿局部 Z 补偿", "在 IK 前沿原抓姿局部 +Z 应用一次；零使用标定转换，不累计偏移。", "grasp", unit="mm", scale=1000, step=1, ge=-.02, le=.03)
+    grasp_insertion_m: float = setting(.01, "抓姿局部 Z 补偿", "未知 OBB 的 GraspGen 抓姿在 IK 前沿执行臂末端局部 +Z 应用一次；默认 10mm，仅工作台配置可修改，Responses 无覆盖权限。CAD 离线抓姿不应用。", "grasp", unit="mm", scale=1000, step=1, ge=-.02, le=.03)
     grasp_maximum_tilt_deg: float = setting(180., "抓姿最大倾角", "相对世界向下轴；180°不按倾角排除，最终由数值碰撞与 IK 判断。", "grasp", unit="°", step=5, ge=0, le=180)
     grasp_require_away_from_robot: bool = setting(False, "只保留背离机身的抓取方向", "可选方向约束；默认关闭，不能代替碰撞检查。", "grasp")
 
@@ -158,6 +158,7 @@ class PlanningSettings(BaseModel):
     place_retreat_offset_m: float = setting(.1, "Lift 偏移", "官方grasp_lift_offset语义；默认沿 world +Z 提升100 mm，不能为零。",
                                             "place", unit="mm", scale=1000, ge=-.5, le=.5)
     place_retreat_in_tool_frame: bool = setting(False, "Lift 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
+    container_release_gap_m: float = setting(.01, "盒沿上方释放间隙", "物体完整几何最低点高于已发布容器上沿的名义间隙；不是 TCP 高度。仅 container_release 使用，不自动抬高重试。", "place", unit="mm", scale=1000, step=1, gt=0, le=.1)
     place_release_height_m: float = setting(0., "额外释放间隙下限", "默认0，不另加释放高度；从hard clearance允许的最低高度开始，检查夹爪、持物球和当前碰撞场。非零值仅用于显式指定更大的间隙。",
                                        "place", unit="mm", scale=1000, step=1, ge=0, le=.502)
     place_max_release_gap_m: float = setting(.05, "选位允许的最大物体离面高度", "resolve_placement 拒绝物体几何底部高于支撑面此距离的候选，避免把障碍上方悬空位置作为放置点。",

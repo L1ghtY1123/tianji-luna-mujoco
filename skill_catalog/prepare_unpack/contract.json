@@ -1,6 +1,6 @@
 {
   "id": "prepare_unpack",
-  "description": "Plan and execute both arms to the configured vla_unpack starting joints using the current measured collision scene. Both arm goals belong to that capability configuration. This does not process the object, verify a product, choose an arm for other transfers or force an observation return afterward.",
+  "description": "Plan and execute both arms to the configured vla_unpack starting joints using the current measured collision scene. Both arm goals belong to that capability configuration. This does not process the object, verify a product, choose an arm for other transfers or force an observation return afterward. The verified release must belong to the current input and configured VLA work area. This skill consumes that receipt; it cannot recreate a receipt cleared by identify_target or identify_destination. Bind the intended work area before its transfer. Geometry refresh alone does not require rebinding an unchanged target.",
   "inputs": [
     "verified_table_release",
     "current_robot_feedback",
@@ -21,7 +21,6 @@
     "execution_or_evidence_record"
   ],
   "errors": [
-    "processing_requires_post_delivery_observation",
     "unknown_or_unbound_entity",
     "stale_generation_or_observation",
     "precondition_not_satisfied",

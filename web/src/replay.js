@@ -6,6 +6,7 @@ import { taskProgressSummary } from './run-evidence.js';
 import { createObjectList } from './object-list.js';
 import { createReplayEvidence, extractReplayEvidence } from './replay-evidence.js';
 import { createReplayPolicy } from './replay-policy.js';
+import { SKILL_LABELS } from './replay-labels.js';
 import { groupObservationFrames, modelCallInfo, inventorySnapshots, renderReplayStages, renderInventorySnapshot, observationImageSource, observationImageSections } from './replay-story.js';
 
 export function clampReplayTime(value, duration = Infinity) {
@@ -53,12 +54,6 @@ export function artifactReferences(value) {
 const CAMERA_NAMES = { 2: '左腕 A · 相机 2', 3: '头部 · 相机 3', 1: '右腕 B · 相机 1' };
 const ANALYSIS_NAMES = { analyzed: '识别结果版本', responses_proposal: 'Responses 初始参考框（未核验提议）', unprocessed: '原始 RGB（无身份叠加）', unknown: '标注状态未记录' };
 const REPLAY_VIEWS = ['graph', 'inventory', 'video', 'observations', 'collision', 'data'];
-const SKILL_LABELS = { observe_scene: '三视角观测与识别',
-  identify_target: '选择当前物体', identify_destination: '确定目标区域', choose_arm: '确定执行臂',
-  build_scene: '建立碰撞场景', generate_grasps: 'GraspGen 候选与预处理', plan_grasp: 'Batched IK 与抓取规划',
-  execute_grasp: '执行三段抓取', verify_grasp: '夹爪反馈核验', plan_place: '规划放置',
-  execute_place: '放置、松爪与撤离', verify_place: '确认放置', prepare_unpack: '移动到 VLA 位姿',
-  vla_unpack: 'VLA 拆包（仿真）', verify_unpack: '确认拆包结果', move_to_observe: '双臂返回观测位姿' };
 
 export function archivedObservations(events = []) {
   const records = new Map(events.filter(event => event.kind === 'observation_recorded' && event.data?.observation_id)
@@ -410,11 +405,27 @@ export function mountReplayPage(document) {
     }
   }
 
-  function showInventory() {
-    renderInventorySnapshot(byId('inventory-board'), state.inventory.find(snapshot => String(snapshot.event.id) === state.inventoryId), event => {
-      if (validFilePath(event.artifact)) { setView('data'); previewFile(event.artifact).catch(showError); }
-      else { setView('graph'); showNode({ title: '清单记录', events: [event], startTime: event.t_s }, event); }
-    });
+  async function showInventory() {
+    const runId = state.runId;
+    const selectedId = state.inventoryId;
+    const board = byId('inventory-board');
+    let snapshot = state.inventory.find(item => String(item.event.id) === selectedId);
+    try {
+      if (snapshot && validFilePath(snapshot.event.artifact)) {
+        board.textContent = '正在读取时间记忆数据库快照…';
+        const data = await request(fileUrl(runId, snapshot.event.artifact));
+        snapshot = inventorySnapshots([{ ...snapshot.event, data }])[0];
+      }
+      if (runId !== state.runId || selectedId !== state.inventoryId) return;
+      renderInventorySnapshot(board, snapshot, event => {
+        if (validFilePath(event.artifact)) { setView('data'); previewFile(event.artifact).catch(showError); }
+        else { setView('graph'); showNode({ title: '时间记忆记录', events: [event], startTime: event.t_s }, event); }
+      });
+    } catch (error) {
+      if (runId === state.runId && selectedId === state.inventoryId) {
+        board.textContent = `时间记忆快照读取失败，${error.message}`;
+      }
+    }
   }
 
   function openModelEvent(event) {
@@ -743,7 +754,7 @@ export function mountReplayPage(document) {
       byId('node-artifacts').append(button);
     }
     if (!event && node.phase === 'observe') {
-      const inventory = element('button', 'button primary', '查看物体清单与工序状态');
+      const inventory = element('button', 'button primary', '查看时间记忆数据库');
       inventory.addEventListener('click', () => setView('inventory'));
       byId('node-artifacts').append(inventory);
     }

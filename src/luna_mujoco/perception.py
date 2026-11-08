@@ -17,7 +17,7 @@ import httpx
 import msgpack
 import numpy as np
 from PIL import Image
-from scipy.ndimage import binary_erosion
+from scipy.ndimage import binary_erosion, label
 from scipy.spatial import cKDTree
 
 from .cameras import deproject_view
@@ -32,6 +32,14 @@ SAM3_MODEL_IDENTITY = {
 }
 MAX_RESPONSE_BYTES = 96 * 1024 * 1024
 MAX_ARRAY_ITEMS = 16_777_216
+
+
+def appearance_fallback_prompt(kind, color, prompt):
+    if kind in {'table', 'marker'} or color.strip().lower() in {'', 'any', 'unknown', 'none'}:
+        return None
+    appearance = color.strip() + (' box' if kind == 'bin' else ' object')
+    alternate = color.strip() + (' container' if kind == 'bin' else ' shape')
+    return alternate if prompt == appearance else appearance
 
 
 class PerceptionError(RuntimeError):
@@ -350,6 +358,22 @@ def _estimate_object(group, table, *, observation_provenance=None):
     from .object_obb import observed_object_obb
 
     result['obb'] = observed_object_obb(result)
+    # Count retained samples before voxel deduplication, which can assign a
+    # shared surface voxel to only one of several contributing cameras.
+    counts = {camera: 0 for camera in ('1', '2', '3')}
+    for entry in group:
+        values = np.asarray(entry['points'])
+        if kind != 'bin':
+            values = values[np.abs(values[:, 2] - table['surface_height_m']) > table_band_m]
+        counts[entry['camera_id']] += len(values)
+    result['obb']['fusion'] = {
+        'acquired_camera_ids': list(provenance.get('acquired_camera_ids', ())),
+        'analyzed_camera_ids': list(provenance.get('analyzed_camera_ids', ())),
+        'point_count_by_camera': counts,
+        'missing_camera_ids': [camera for camera, count in counts.items() if count == 0],
+        'observation_id': provenance.get('observation_id'),
+        'generation': provenance.get('generation'),
+        'frame': 'world'}
     identity_evidence = [item for entry in group for item in entry.get('identity_evidence', [])]
     if identity_evidence:
         sources = {item['source'] for item in identity_evidence}
@@ -422,18 +446,12 @@ def _remove_own_robot_surface(groups, views, capture, classifier):
         for entry in group:
             camera = entry["camera_id"]
             images[camera]["instance_masks"][index] = entry["mask"]
-            if entry["kind"] != "bin":
-                union[camera] |= entry["mask"]
+            union[camera] |= entry["mask"]
     evidence = classifier(capture, union)
     masks = evidence.pop("masks")
     observation = {"views": images}
     rebuilt, removed_count, ambiguous_count, contact_count = [], 0, 0, 0
     for index, group in enumerate(groups):
-        # Only graspable source geometry enters attachment. Bin obstacle
-        # returns keep their existing scene robot-removal path.
-        if group[0]["kind"] == "bin":
-            rebuilt.append(group)
-            continue
         entries = []
         for entry in group:
             camera, view = entry["camera_id"], views[entry["camera_id"]]
@@ -470,7 +488,7 @@ def _remove_own_robot_surface(groups, views, capture, classifier):
 
 
 def _source_geometry_interiors(groups, views):
-    """Exclude mixed silhouette depth after identity association; keep raw depth."""
+    """Exclude silhouette boundaries and undersized islands; preserve raw depth."""
     rebuilt, removed_count = [], 0
     for group in groups:
         if group[0]["kind"] == "bin":
@@ -483,6 +501,11 @@ def _source_geometry_interiors(groups, views):
             # holes must not remove additional neighboring object samples.
             interior = binary_erosion(entry["silhouette_mask"], structure=np.ones((3, 3), dtype=bool))
             mask = entry["mask"] & interior
+            # Apply the existing 30-pixel candidate minimum to each disconnected
+            # component, so a large object cannot admit a separate tiny island.
+            components, _ = label(mask, structure=np.ones((3, 3), dtype=bool))
+            sizes = np.bincount(components.ravel())
+            mask &= sizes[components] >= 30
             removed_count += int(np.count_nonzero(entry["mask"] & ~mask))
             valid = mask & view["valid_depth"] & np.isfinite(view["depth_m"]) & (view["depth_m"] > 0)
             entries.append(entry | {"mask": mask, "points": deproject_view(view, mask),
@@ -493,19 +516,14 @@ def _source_geometry_interiors(groups, views):
 
 class Perception:
     """Detector injection bounds network I/O; all fusion uses actual captured data."""
-    visual_plan_source = 'responses_program'
-
     def __init__(self, detector=None, *, robot_surface_classifier=None, visual_inventory=None, cad_resolver=None):
         self.detector = detector if detector is not None else Sam3Client()
         self.visual_inventory = visual_inventory if visual_inventory is not None else VisualInventory.from_environment()
         self.segmentation_cache = OrderedDict()
         self.segmentation_evidence = []
         self.cad_resolver = cad_resolver
-        # Inventory CAD/OBB geometry does not need the legacy CPU robot-mesh
-        # ray classifier. SAM subjects stay intact; robot collision remains in cuRobo.
-        self.robot_surface_classifier = robot_surface_classifier
-        if robot_surface_classifier is None and cad_resolver is None:
-            self.robot_surface_classifier = own_robot_surface_pixels
+        self.robot_surface_classifier = (own_robot_surface_pixels if robot_surface_classifier is None
+                                         else robot_surface_classifier)
 
     def table_robot_surface_classifier(self, capture, masks):
         if self.robot_surface_classifier is None:
@@ -514,15 +532,85 @@ class Perception:
             return self.robot_surface_classifier(capture, masks, mask_only=True)
         return self.robot_surface_classifier(capture, masks)
 
+    def _segment_cached(self, capture, camera_id, prompt, fallback_for=None):
+        view = capture['views'][camera_id]
+        timestamp_us = round(capture['time'] * 1_000_000)
+        key = (capture['generation'], capture['observation_id'], camera_id, prompt,
+               view['calibration_id'], timestamp_us)
+        evidence = {'component': 'sam3', 'stage': 'segment_text',
+            'observation_id': capture['observation_id'], 'camera_id': camera_id,
+            'prompt': prompt, 'cache_hit': key in self.segmentation_cache, 'status': 'pending',
+            'unknowns': ['sam3_internal_filter_threshold', 'sam3_internal_rejection_reason']}
+        if fallback_for is not None:
+            evidence.update(fallback_for=fallback_for, fallback_reason='no_sam3_match')
+        self.segmentation_evidence.append(evidence)
+        if key not in self.segmentation_cache:
+            try:
+                self.segmentation_cache[key] = deepcopy(self.detector.segment(view['rgb'], prompt, timestamp_us))
+            except PerceptionError as error:
+                evidence.update({**(error.details or {}), 'status': 'error', 'error': str(error)})
+                error.details = {**evidence, **(error.details or {})}
+                raise
+            if len(self.segmentation_cache) > 128:
+                self.segmentation_cache.popitem(last=False)
+        self.segmentation_cache.move_to_end(key)
+        proposals = self.segmentation_cache[key]
+        self._record_segmentation_attempt(evidence, view, proposals)
+        return proposals
+
+    def prepare_proposal_observations(self, capture, proposals):
+        """Locate proposed subjects with the shared SAM cache before identity registration."""
+        from .demo_identity_presentation import box_overlap
+        from .visual_inventory import mask_box
+
+        _validate_capture(capture)
+        self.segmentation_evidence = []
+        detections = []
+        for proposal in proposals:
+            camera = proposal['reference_camera_id']
+            view = capture['views'][camera]
+            candidates = []
+            prompts = list(dict.fromkeys([proposal['segmentation_prompt'], *proposal.get('segmentation_aliases', [])[:2]]))
+            queued = set(prompts)
+            for prompt in prompts:
+                detected_items = self._segment_cached(capture, camera, prompt)
+                fallback = appearance_fallback_prompt(proposal['kind'], proposal['color'], prompt)
+                if not detected_items and fallback and fallback not in queued:
+                    prompts.append(fallback)
+                    queued.add(fallback)
+                for detected in detected_items:
+                    mask = detected['mask']
+                    overlap = box_overlap(proposal['bbox'], mask_box(mask))
+                    valid = mask & view['valid_depth'] & np.isfinite(view['depth_m']) & (view['depth_m'] > 0)
+                    if overlap > 0 and np.count_nonzero(valid) >= 30:
+                        candidates.append((overlap, {'proposal_ref': proposal['ref'], 'mask': valid,
+                            'silhouette_mask': mask, 'points': deproject_view(view, valid),
+                            'pixels': view['rgb'][valid], 'pixels_rc': np.column_stack(np.nonzero(valid)),
+                            'kind': proposal['kind'], 'camera_id': camera, 'prompt': prompt,
+                            'score': detected['score']}))
+            if candidates:
+                detections.append(max(candidates, key=lambda row: row[0])[1])
+        views = {camera: dict(view) for camera, view in capture['views'].items()}
+        prepared, ownership = self._prepare_identity_detections(detections, views, capture, None)
+        subjects = {}
+        for subject in prepared:
+            points = subject['points']
+            subjects[subject['proposal_ref']] = {**subject, 'geometry': {
+                'source': 'current_sam3_mask_and_registered_depth', 'status': 'measured',
+                'observation_id': capture['observation_id'], 'generation': capture['generation'],
+                'camera_id': subject['camera_id'], 'point_count': len(points),
+                'centroid_world_m': points.mean(axis=0).tolist(),
+                'bounds_world_m': [points.min(axis=0).tolist(), points.max(axis=0).tolist()],
+                'identity_assignment': False}}
+        return {'observation_id': capture['observation_id'], 'generation': capture['generation'],
+                'subjects': subjects, 'robot_surface_filter': ownership,
+                'sam3_queries': deepcopy(self.segmentation_evidence)}
+
     def observe(self, capture, *, instruction="", checkpoint=None, source_hint=None):
         """Capture-scoped target and environment segmentation from measured RGBD."""
         _validate_capture(capture)
         self.segmentation_evidence = []
         hint = source_hint or {"kind": "cube", "color": "any"}
-        selection = hint.get('visual_decision', {})
-        if selection.get('source') != self.visual_plan_source or selection.get('purpose') not in {
-                'initialize_inventory', 'associate_inventory', 'verify_transfer'}:
-            raise PerceptionError('visual_decisions_selection_required')
         entities = hint.get('scene_entities')
         reference = hint.get('visual_reference')
         if not entities or not reference:
@@ -532,7 +620,7 @@ class Perception:
         except PerceptionError as error:
             error.sam3_queries = deepcopy(self.segmentation_evidence)
             error.details = {'observation_id': capture['observation_id'],
-                'purpose': selection['purpose'], **(error.details or {}),
+                'purpose': 'associate_inventory', **(error.details or {}),
                 'sam3_queries': [{key: deepcopy(value) for key, value in query.items() if key != 'proposals'}
                                  for query in self.segmentation_evidence]}
             raise
@@ -541,10 +629,12 @@ class Perception:
         # Deduplicate prompts, not physical instances. SAM3 receives no entity IDs.
         timings = {}
         stage_started = time.monotonic()
-        fixed_queries = self._segmentation_queries(entities)
+        historical = reference.get('inventory_state', {}).get('entities', reference.get('entities', {}))
+        fixed_queries = self._segmentation_queries({**historical, **entities})
         provenance = {"observation_id": capture["observation_id"], "generation": capture["generation"],
-                      "capture_time": capture["time"], "checkpoint": checkpoint}
-        timestamp_us = round(capture["time"] * 1_000_000)
+                      "capture_time": capture["time"], "checkpoint": checkpoint,
+                      'acquired_camera_ids': sorted(capture['views']),
+                      'analyzed_camera_ids': sorted(hint.get('camera_ids', ('1', '2', '3')))}
         detections, views, table_points, queries = [], {}, [], []
         self.segmentation_evidence = queries
         for camera_id in ("3", "2", "1"):
@@ -556,43 +646,18 @@ class Perception:
             queued_prompts = {entry[2] for entry in prompts}
             occupied = np.zeros(view["depth_m"].shape, bool)
             for kind, color, prompt, fallback_for in prompts:
-                key = (capture['generation'], capture['observation_id'], camera_id, prompt,
-                       view['calibration_id'], timestamp_us)
-                cached = key in self.segmentation_cache
-                query_evidence = {'component': 'sam3', 'stage': 'segment_text',
-                    'observation_id': capture['observation_id'], 'camera_id': camera_id,
-                    'prompt': prompt, 'cache_hit': cached, 'status': 'pending',
-                    'unknowns': ['sam3_internal_filter_threshold', 'sam3_internal_rejection_reason']}
-                if fallback_for is not None:
-                    query_evidence.update(fallback_for=fallback_for, fallback_reason='no_sam3_match')
-                queries.append(query_evidence)
-                if not cached:
-                    try:
-                        self.segmentation_cache[key] = deepcopy(self.detector.segment(view['rgb'], prompt, timestamp_us))
-                    except PerceptionError as error:
-                        query_evidence.update({**(error.details or {}), 'status': 'error', 'error': str(error)})
-                        error.details = {**query_evidence, **(error.details or {})}
-                        raise
-                    if len(self.segmentation_cache) > 128:
-                        self.segmentation_cache.popitem(last=False)
-                self.segmentation_cache.move_to_end(key)
-                self._record_segmentation_attempt(query_evidence, view, self.segmentation_cache[key])
+                proposals = self._segment_cached(capture, camera_id, prompt, fallback_for)
                 # Task nouns (e.g. package) can miss an otherwise visible object.
                 # This only adds measured proposals; Decisions still owns identity.
-                if (not self.segmentation_cache[key]
-                        and kind not in {'table', 'marker'}
-                        and color.strip().lower() not in {'', 'any', 'unknown', 'none'}):
+                fallback_prompt = appearance_fallback_prompt(kind, color, prompt)
+                if not proposals and fallback_prompt:
                     # Small visible fragments can match an appearance shape even
                     # when the model does not recognize a whole object. These are
                     # still proposals: identity and registered depth are required.
-                    appearance_prompt = color.strip() + (' box' if kind == 'bin' else ' object')
-                    alternate_prompt = color.strip() + (' container' if kind == 'bin' else ' shape')
-                    fallback_prompt = (alternate_prompt if prompt == appearance_prompt
-                                       else appearance_prompt)
                     if fallback_prompt not in queued_prompts:
                         prompts.append((kind, color, fallback_prompt, fallback_for or prompt))
                         queued_prompts.add(fallback_prompt)
-                for detection in self.segmentation_cache[key]:
+                for detection in proposals:
                     mask = np.asarray(detection["mask"], dtype=bool)
                     score = float(detection["score"])
                     if mask.shape != occupied.shape or not np.isfinite(score) or not 0 <= score <= 1:
@@ -652,7 +717,7 @@ class Perception:
                             if camera in hint.get('camera_ids', ('3', '2', '1'))}}
         if self.cad_resolver is not None:
             selected_capture['confirmed_cad_models'] = self.cad_resolver.identity_constraints(capture['generation'])
-        filtered = self._prepare_identity_detections(filtered, views, capture, reference)
+        filtered, robot_ownership = self._prepare_identity_detections(filtered, views, capture, reference)
         timings['identity_preparation'] = time.monotonic() - stage_started
         identity_api_started = time.monotonic()
         identity_cpu_started = time.thread_time()
@@ -662,11 +727,12 @@ class Perception:
                 progress=hint.get('visual_progress'), landmarks=[{key: obj[key] for key in
                     ('id', 'kind', 'color', 'position') if key in obj} for obj in markers],
                 table_scope=table, placement_regions=hint.get('placement_regions', ()),
-                purpose=hint['visual_decision']['purpose'])
+                purpose='associate_inventory', association_scope=hint.get('association_scope'))
         except VisualInventoryError as error:
             raise PerceptionError(str(error), details=error.evidence) from error
         if not isinstance(visual_result, dict) or not isinstance(visual_result.get('groups'), list):
             raise PerceptionError('visual_inventory_result_required')
+        entities.update(visual_result.get('registered_entities', {}))
         timings["identity_resolution"] = time.monotonic() - stage_started
         timings['identity_pipeline_wall'] = time.monotonic() - identity_api_started
         timings['identity_pipeline_thread_cpu'] = time.thread_time() - identity_cpu_started
@@ -675,10 +741,10 @@ class Perception:
         geometry_cpu_started = time.thread_time()
         filter_started = time.monotonic()
         groups = visual_result['groups']
-        groups, robot_ownership = _remove_own_robot_surface(groups, views, capture, self.robot_surface_classifier)
         groups, boundary_count = _source_geometry_interiors(groups, views)
         groups = self._filter_geometry_groups(groups, views, entities=entities)
-        robot_ownership.update(source_silhouette_band_px=1, source_silhouette_removed_pixels=boundary_count)
+        robot_ownership.update(source_silhouette_band_px=1, source_component_minimum_pixels=30,
+                               source_geometry_removed_pixels=boundary_count)
         geometry_timing['filters_wall_s'] = time.monotonic() - filter_started
         geometry_timing['filters_thread_cpu_s'] = time.thread_time() - geometry_cpu_started
         objects = list(markers)
@@ -712,7 +778,7 @@ class Perception:
                     try:
                         cad_started, cad_cpu_started = time.monotonic(), time.thread_time()
                         instance = self.cad_resolver.resolve(
-                            {**capture, 'cad_motion_context': hint.get('visual_progress')},
+                            {**capture, 'cad_motion_context': hint.get('cad_motion_context')},
                             group, instance, instruction=instruction)
                         object_timing.update(cad_resolution_wall_s=time.monotonic() - cad_started,
                             cad_resolution_thread_cpu_s=time.thread_time() - cad_cpu_started)
@@ -749,7 +815,6 @@ class Perception:
                 "mapping_unresolved": [{'previous_id': identifier,
                     'status': 'unseen', 'candidates': [],
                     'reason': 'fixed_collision_entity_not_observed'} for identifier in missing],
-                "declared_environment": [],
                 "robot_surface_ownership": robot_ownership, "detector_model": deepcopy(SAM3_MODEL_IDENTITY)}
 
     @staticmethod
@@ -758,13 +823,19 @@ class Perception:
         for entity in entities.values():
             query = entity.get('segmentation_query')
             if not query:
-                continue
+                kind, color = entity.get('kind', 'object'), entity.get('color') or 'unknown'
+                prompt = appearance_fallback_prompt(kind, color, '')
+                if prompt is None:
+                    continue
+                query = {'kind': kind, 'color': color, 'prompt': prompt}
             for prompt in (query['prompt'], *query.get('aliases', [])[:2]):
                 prompt = ' '.join(prompt.strip().split())
                 if not prompt or len(prompt) > 256:
                     raise PerceptionError('invalid_segmentation_alias')
                 key = (query['kind'], query['color'], prompt.casefold())
                 queries.setdefault(key, {**query, 'prompt': prompt})
+        queries.setdefault(('object', 'any', 'movable object'),
+                           {'kind': 'object', 'color': 'any', 'prompt': 'movable object'})
         return list(queries.values())
 
     def _table_for_entities(self, capture, hint, entities, reference, detections, *, background_points=()):
@@ -795,7 +866,18 @@ class Perception:
         return detections
 
     def _prepare_identity_detections(self, detections, views, capture, reference):
-        return detections
+        groups, evidence = _remove_own_robot_surface(
+            [[entry] for entry in detections], views, capture, self.robot_surface_classifier)
+        prepared = []
+        for original, group in zip(detections, groups, strict=True):
+            entry = group[0]
+            if len(entry['points']) < 30:
+                continue
+            prepared.append({**entry,
+                'identity_proposal_filter': {
+                    'source': evidence['source'], 'raw_point_count': len(original['points']),
+                    'retained_point_count': len(entry['points']), 'identity_assignment': False}})
+        return prepared, evidence
 
     def _filter_geometry_groups(self, groups, views, *, entities=None):
         return groups
@@ -814,7 +896,7 @@ def public_observation(observation):
     result["arms"] = _robot_feedback(observation["arms"])
     result["table"] = {key: deepcopy(value) for key, value in observation["table"].items()
                        if key in {"position", "size", "surface_height_m", "uncertainty_m", "estimated", "source"}}
-    object_keys = {"id", "display_id", "kind", "color", "position", "visible_centroid_world", "estimated",
+    object_keys = {"id", "kind", "color", "position", "visible_centroid_world", "estimated",
                    "confidence", "uncertainty_m", "source"}
     result["objects"] = []
     for instance in observation["objects"]:

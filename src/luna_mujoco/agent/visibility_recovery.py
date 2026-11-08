@@ -1,29 +1,41 @@
 """A visual limitation is evidence; selecting a recovery motion is a proposal."""
-from .decisions import JudgmentRequest
-
-VISIBILITY_FIELDS = {'recovery_not_visible': 'not_visible', 'recovery_cropped': 'cropped',
-                     'recovery_occluded': 'occluded'}
+from ..core.decisions import JudgmentRequest
 
 
-def visibility_requests():
+def visibility_requests(subject=None, *, failed_skill=None, required_judgment=None):
+    subject = subject or {}
+    label = 'the subject required by the failed operation'
+    if subject.get('id'):
+        appearance = ' '.join(str(subject[key]) for key in ('color', 'kind') if subject.get(key))
+        label = 'the ' + (appearance or 'object') + ' with permanent instance ID ' + subject['id']
+    requirement = 'the required visual judgment'
+    if required_judgment:
+        requirement = 'evaluating this failed factual question: "' + required_judgment + '"'
+    if failed_skill in {'generate_grasps', 'plan_grasp'}:
+        requirement = ('estimating the target extent and exposed contact surfaces needed for grasp planning '
+            'from the current observations')
     scope = ('Use ALL three CURRENT RGB views for the failed operation. One adequate view is sufficient. '
         'Judge missing visual information only; low confidence, CAD mismatch, API or planning errors alone '
-        'do not establish a visual limitation. These limitations may overlap and are independent.')
-    wording = {
-        'recovery_not_visible': 'The subject required by the failed operation is absent from every current image, preventing that visual judgment.',
-        'recovery_cropped': 'Image boundaries cut off visual information required by the failed operation, and no other current view supplies it.',
-        'recovery_occluded': 'The robot or another object hides visual information required by the failed operation, and no other current view supplies it.'}
-    return [JudgmentRequest(name=name, instructions=text + ' ' + scope) for name, text in wording.items()]
+        'do not establish a visual limitation. '
+        'Use dated references when supplied to identify the subject; determine current visibility from CURRENT RGB only. '
+        'Do not substitute another similar-looking object or robot part.')
+    wording = (
+            'None of the CURRENT RGB views gives an adequate view of ' + label + ' for '
+            + requirement + ', because it is outside the frame, cut off, or hidden. '
+            'If ANY current view already shows enough of this subject to make that judgment, answer false. '
+            'Judge visibility from the images, not from the fact that an operation failed. '
+            'The exact cause of a visible information gap may be uncertain. Do not demand hidden surfaces '
+            'or a complete silhouette when the judgment does not need them.')
+    return [JudgmentRequest(name='recovery_view_limited', instructions=wording + ' ' + scope)]
 
 
 def visibility_assessment(judgments):
-    diagnostics = {name: judgments.get(name, {'status': 'unknown'}) for name in VISIBILITY_FIELDS}
-    causes = [cause for name, cause in VISIBILITY_FIELDS.items() if diagnostics[name].get('status') == 'yes']
-    sufficient = all(answer.get('status') == 'no' for answer in diagnostics.values())
-    return {'status': 'known' if causes or sufficient else 'unknown',
-            'value': causes[0] if causes else 'sufficient' if sufficient else 'unknown',
-            'causes': causes, 'diagnostics': diagnostics}
+    eligibility = judgments.get('recovery_view_limited', {'status': 'unknown'})
+    # Gate the required visual fact directly, not confidence in its exact cause.
+    value = {'yes': 'view_limited', 'no': 'sufficient'}.get(eligibility.get('status'), 'unknown')
+    return {'status': 'unknown' if value == 'unknown' else 'known', 'value': value,
+            'eligibility': eligibility}
 
 
 def visibility_allows_motion(answer):
-    return answer.get('status') == 'known' and answer.get('value') in {'not_visible', 'cropped', 'occluded'}
+    return answer.get('status') == 'known' and answer.get('value') == 'view_limited'

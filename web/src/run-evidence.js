@@ -55,7 +55,7 @@ export function runEvidence(run) {
     task_progress: isTaskInventory(run.task_progress) ? {
       ...pick(run.task_progress, ['selected_input_ids', 'completed_input_ids', 'product_ids', 'retired_entity_ids']),
       completed_count: progressCount(run.task_progress.completed_input_ids),
-      entities: inventoryEntities(run.task_progress).map(item => pick(item, ['id', 'display_id', 'kind', 'description', 'status', 'current_region', 'processing_history'])),
+      entities: inventoryEntities(run.task_progress).map(item => pick(item, ['id', 'kind', 'description', 'status', 'current_region', 'processing_history'])),
       objects: (run.task_progress.objects ?? []).map(item => ({
         ...pick(item, ['id', 'status', 'current_region', 'processing_history']),
         transfers: (item.transfers ?? []).map(transfer => ({ ...scalars(transfer), evidence: scalars(transfer.evidence) })),

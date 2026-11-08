@@ -4,13 +4,14 @@ from copy import deepcopy
 
 import numpy as np
 
-from ..agent.decisions import ChoiceRequest
 from ..agent.placement import placement_region_questions, select_placement_candidates
 from ..algorithms import AlgorithmError
+from ..core.decisions import ChoiceRequest
 from ..object_obb import held_geometry_points
 from ..placement import observed_object
 from ..robot_skills.placement_resolution import digest, project_placement_candidates
 from ..robot_skills.placement_zone import perceive_placement_zone, placement_frames
+from .decision_inputs import destination_reference_evidence
 
 
 def invalidate_placement(controller, context, *, zone=False):
@@ -23,28 +24,19 @@ def invalidate_placement(controller, context, *, zone=False):
         context.pop(key, None)
 
 
-def confirmed_destination_binding(controller, observation, target, destination_id, local_task):
-    """Reuse a confirmed task relation, never a proposed graph role or old pose."""
+def declared_destination_binding(controller, observation, target, destination_id, local_task):
+    """Reuse the compiled task relation and the current measured instance binding."""
     record = controller.task_progress.records[target]
     root = record.get('root_input_id', target)
-    proof = controller.state.get('object_task_binding_evidence', {}).get(root)
-    if proof is None and not controller.object_tasks:
-        proof = controller.state.get('task_binding_evidence')
-    if not proof:
-        return None
-    scope, evidence = proof.get('confirmed_task_scope', {}), proof.get('evidence', {})
     coverage = observation.get('visual_inventory', {}).get('identity_coverage', {})
-    if (not controller.run_id or scope.get('owner_id') != controller.run_id
-            or scope.get('generation') != observation.get('generation')
-            or scope.get('task_sha256') != digest(local_task)
-            or root not in scope.get('input_ids', [])
-            or destination_id != local_task.get('destination_ref')
-            or scope.get('destination_ref') != destination_id
-            or record.get('destination_ref') != destination_id
-            or evidence.get('source') != 'openai_decisions'
-            or not evidence.get('request_hash') or scope.get('request_hash') != evidence['request_hash']
-            or proof.get('judgments', {}).get('destination_requirement_matches', {}).get('status') != 'yes'
-            or coverage.get('observation_id') != observation.get('observation_id')
+    destination = observed_object(observation, destination_id)
+    role = ('final_destination' if destination_id == local_task.get('destination_ref') else
+            'declared_work_area' if destination_id == local_task.get('work_area_ref') else None)
+    if (role is None or root not in controller.task_progress.input_ids
+            or record.get('destination_ref') != destination_id):
+        return None
+    if destination.get('kind') not in {'table', 'marker'} and (
+            coverage.get('observation_id') != observation.get('observation_id')
             or destination_id not in coverage.get('accepted_entity_ids', [])):
         return None
     # Confirmed products inherit their input's destination, but not an unperformed
@@ -63,14 +55,32 @@ def confirmed_destination_binding(controller, observation, target, destination_i
             return None
         current = child
     actual, required = Counter(record.get('processing_history', [])), Counter(local_task.get('processing', []))
-    if any(actual[name] < count for name, count in required.items()):
+    if role == 'final_destination' and any(actual[name] < count for name, count in required.items()):
         return None
-    return {'source': 'confirmed_task_destination_and_current_permanent_identity',
-        'confirmed_task_scope': deepcopy(scope), 'original_evidence': deepcopy(evidence),
+    return {'source': 'compiled_task_requirement_and_current_identity',
+        'task_sha256': digest(local_task), 'transfer_role': role,
         'root_input_id': root, 'target_id': target, 'destination_id': destination_id,
         'current_identity_observation_id': observation['observation_id'],
         'current_identity_coverage': deepcopy(coverage), 'historical_relation_reused': True,
         'current_pose_or_completion_claimed': False}
+
+
+def accepted_intermediate_binding(context, target, destination, task):
+    """Reuse permission for this exact transfer; do not rejudge it as final delivery."""
+    permission = context.get('destination_permission', {})
+    evidence = permission.get('evidence', {})
+    if (permission.get('target_id') != target
+            or permission.get('destination_id') != destination['id']
+            or permission.get('reference_id') != destination.get('reference_id', destination['id'])
+            or permission.get('task_sha256') != digest(task)
+            or permission.get('observation_id') != context['observation']['observation_id']
+            or permission.get('region_sha256') != digest(destination.get('placement_reference', {}))
+            or evidence.get('judgments', {}).get('intermediate_destination_allowed', {}).get('status') != 'yes'
+            or not evidence.get('evidence', {}).get('request_hash')):
+        return None
+    return {'source': 'accepted_intermediate_destination_permission',
+            'transfer_role': 'permitted_intermediate', **deepcopy(permission),
+            'current_pose_or_completion_claimed': False}
 
 
 async def perceive_for_controller(controller, context):
@@ -84,10 +94,14 @@ async def perceive_for_controller(controller, context):
         # This is the measured destination's physical mode, not a language parse.
         zone = perceive_placement_zone(observation, destination_id,
             {'relation': 'inside' if destination['kind'] == 'bin' else 'on',
+             'release_mode': record['release_mode'],
              'preference': record.get('placement_preference', 'clearance')})
     except ValueError as error:
         return {'status': 'unknown', 'reason': str(error),
-            'placement_geometry_issue': deepcopy(destination.get('placement_geometry_issue')),
+            'target_id': target, 'destination_id': destination_id,
+            'observation_id': observation['observation_id'], 'generation': observation.get('generation'),
+            'details': {'component': 'placement_geometry', 'stage': 'perceive_placement_zone',
+                'placement_geometry_issue': deepcopy(destination.get('placement_geometry_issue'))},
             'required_evidence': 'Current identified support/reference geometry and unambiguous language; '
                                  'the graph may choose an observation capability. No fallback region was selected.'}
     requirement = controller.task_spec.model_dump(mode='json')
@@ -101,25 +115,43 @@ async def perceive_for_controller(controller, context):
         'work_area_ref': work, 'scope': 'final_destination' if bound == final else
         'declared_work_area' if bound == work else 'other_transfer_requires_semantic_permission'}
     zone['semantic_frames'] = placement_frames(context['latest_capture'])
-    confirmed = confirmed_destination_binding(controller, observation, target, destination_id, local)
+    confirmed = declared_destination_binding(controller, observation, target, destination_id, local)
+    if confirmed is None:
+        confirmed = accepted_intermediate_binding(context, target, context.get('destination', destination), local)
+    if confirmed and confirmed['transfer_role'] == 'permitted_intermediate':
+        zone['current_transfer']['scope'] = 'permitted_intermediate'
     questions = placement_region_questions(configured=reference.get('source') == 'configured_xy_measured_support')
     if confirmed:
         questions = [question for question in questions if question.name != 'placement_destination_matches']
-    grounding = await controller._judge(context, questions, extra={
-        'verification_scope': 'placement_region_scope', 'original_requirement': requirement,
-        'active_object_requirement': zone['active_object_requirement'],
-        'target_id': target, 'destination_id': destination_id,
-        'bound_destination_ref': zone['bound_destination_ref'],
-        'current_transfer': zone['current_transfer'],
-        'measured_region': {key: value for key, value in zone.items() if key != 'measured_support_xy_m'},
-        'configured_region_constraints': {key: reference[key] for key in (
-            'source', 'precise_xy', 'position_world_m', 'xy_tolerance_m', 'support_entity_id',
-            'region_polygon_world_xy_m', 'floor_z_m', 'required_robot_configurations') if key in reference}})
+    semantic_key = digest({'task': local, 'destination_id': destination_id,
+        'transfer_scope': zone['current_transfer']['scope'], 'configured': reference.get('source') == 'configured_xy_measured_support'})
+    cache = context.setdefault('placement_semantics', {})
+    if confirmed and semantic_key in cache:
+        grounding = deepcopy(cache[semantic_key])
+        grounding['language_scope_reused'] = True
+    else:
+        grounding = await controller._judge(context, questions, extra={
+            'verification_scope': 'placement_region_scope', 'original_requirement': requirement,
+            'active_object_requirement': zone['active_object_requirement'],
+            'target_id': target, 'destination_id': destination_id,
+            'bound_destination_ref': zone['bound_destination_ref'],
+            'current_transfer': zone['current_transfer'],
+            'declared_destination_references': destination_reference_evidence(
+                observation, controller.compiler.configured_regions, active or controller.task_spec),
+            'measured_region': {key: value for key, value in zone.items() if key != 'measured_support_xy_m'},
+            'configured_region_constraints': {key: reference[key] for key in (
+                'source', 'precise_xy', 'position_world_m', 'xy_tolerance_m', 'support_entity_id',
+                'region_polygon_world_xy_m', 'floor_z_m', 'required_robot_configurations') if key in reference}})
+        if confirmed:
+            cache[semantic_key] = deepcopy(grounding)
     judgments = grounding.get('judgments', {})
     destination_match = 'yes' if confirmed else judgments.get('placement_destination_matches', {}).get('status')
     if confirmed:
         grounding['reused_destination_binding'] = confirmed
     additional = judgments.get('placement_additional_spatial_constraint', {}).get('status')
+    if destination_match == 'no':
+        return {'status': 'failure', 'reason': 'placement_destination_mismatch',
+                'evidence': grounding, 'current_transfer': zone['current_transfer']}
     if destination_match != 'yes' or additional not in ('yes', 'no'):
         return {'status': 'unknown', 'reason': 'placement_region_semantics_unknown',
                 'evidence': grounding, 'current_transfer': zone['current_transfer'],
@@ -134,8 +166,7 @@ async def perceive_for_controller(controller, context):
             'semantic_scope': zone['semantic_scope'], 'evidence': grounding}
 
 
-def _candidate_view_binding(context, zone, capture, epoch):
-    scene = context.get('scene', {})
+def _candidate_view_binding(scene, zone, capture, epoch):
     if (not scene.get('scene_token') or scene.get('observation_id') != zone.get('observation_id')
             or scene.get('generation') != zone.get('generation')
             or capture.get('generation') != zone.get('generation')):
@@ -149,7 +180,7 @@ def _candidate_view_binding(context, zone, capture, epoch):
 async def capture_candidate_view(controller, context, zone):
     """Called only for the model-selected fresh argument, after verify_scene."""
     capture = await controller.capture_observation(context)
-    binding = _candidate_view_binding(context, zone, capture, controller.observation_epoch)
+    binding = _candidate_view_binding(controller.spatial_memory.scene, zone, capture, controller.observation_epoch)
     if binding is None:
         return {'status': 'unknown', 'reason': 'placement_support_geometry_stale'}
     context['placement_candidate_view'] = binding
@@ -163,7 +194,7 @@ def candidate_capture_rejection(controller, context, zone):
         return None
     capture = context.get('latest_capture', {})
     binding = context.get('placement_candidate_view')
-    expected = (_candidate_view_binding(context, zone, capture, controller.observation_epoch)
+    expected = (_candidate_view_binding(controller.spatial_memory.scene, zone, capture, controller.observation_epoch)
                 if capture.get('observation_id') else None)
     distinct_bound_capture = binding is not None and binding == expected
     if (not capture.get('observation_id')
@@ -250,16 +281,35 @@ async def resolve_xy_then_z(controller, context, observation, request):
     precise = request.get('precise_xy') or not request.get('free_placement')
     levels = (4,) if precise else (4, 8, 16)
     attempts = []
+    searches, deferred = [], []
     for level in levels:
         try:
             requests, evidence = controller.algorithms.placement_xy_candidates(observation, controller.state['target_id'], holding,
-                request, zone, context['planning_settings'], scene=context['scene'], subdivision_cells=level)
+                request, zone, context['planning_settings'], scene=controller.spatial_memory.scene, subdivision_cells=level)
         except AlgorithmError as error:
             if error.code != 'placement_no_candidate':
                 raise
             attempts.append({'subdivision_cells': level, 'reason': error.code, 'details': error.details})
             continue
         remaining = list(range(len(requests)))
+        ranking = evidence.get('ranking') or {}
+        gaps = {tuple(row['position_world_xy_m']): row['measured_obstacle_gap_m']
+                for row in ranking.get('candidates', [])}
+        desired = ranking.get('desired_clearance_m')
+        if (not precise and ranking.get('preference') == 'clearance' and desired is not None
+                and any(gap is not None for gap in gaps.values())):
+            preferred = [i for i in remaining
+                if gaps.get(tuple(requests[i]['selected_reference_world_xy_m'])) is not None
+                and gaps[tuple(requests[i]['selected_reference_world_xy_m'])] >= desired]
+            for index in remaining:
+                if index not in preferred:
+                    gap = gaps.get(tuple(requests[index]['selected_reference_world_xy_m']))
+                    deferred.append((gap if gap is not None else -1., level, requests, evidence, [index]))
+            remaining = preferred
+        searches.append((level, requests, evidence, remaining))
+    deferred.sort(key=lambda item: item[0], reverse=True)
+    searches.extend(item[1:] for item in deferred)
+    for level, requests, evidence, remaining in searches:
         while remaining:
             if precise:
                 selection = {'status': 'success', 'scope': 'configured_xy',
@@ -268,6 +318,9 @@ async def resolve_xy_then_z(controller, context, observation, request):
                 choices = tuple('placement-' + str(i) for i in remaining)
                 region, failures = xy_proposal_context(zone, attempts)
                 current_xy = np.asarray(observation['arms'][controller.state['arm']]['tcp'], float)[:2, 3]
+                ranking = evidence.get('ranking') or {}
+                gaps = {tuple(row['position_world_xy_m']): row['measured_obstacle_gap_m']
+                        for row in ranking.get('candidates', [])}
                 judgment = await controller._judge(context, [ChoiceRequest(name='placement_xy',
                     choices=(*choices, 'unknown'), selection_mode='proposal', instructions=(
                         'Select one proposed XY within the region already authorized by perceive_placement_zone. '
@@ -276,20 +329,25 @@ async def resolve_xy_then_z(controller, context, observation, request):
                         'The skill will check collision, workspace and held IK after your selection. '
                         'This is an operation proposal, not proof of free space or completed placement. '
                         'The whole region is already authorized. Several equally suitable candidates are normal; '
-                        'choose any one, preferring shorter travel when language gives no further preference. '
+                        'For placement_preference=clearance, prefer greater measured_obstacle_gap_m up to '
+                        'desired_clearance_m, then shorter travel. This helps separate successive placements. '
+                        'For preference=reach, prefer shorter travel. A null gap supplies no separation evidence. '
                         'A failed candidate says nothing about the other positions. Use unknown only if the '
                         'supplied region or candidates conflict with the location requirement or cannot be interpreted, '
                         'not because collision or IK has not yet been tested.'))],
                     include_task=False, extra={'verification_scope': 'placement_xy_proposal',
-                        'scene_token': context['scene']['scene_token'],
+                        'scene_token': controller.spatial_memory.scene['scene_token'],
                         'target_id': controller.state['target_id'],
                         'region_authorization': {'source': 'perceive_placement_zone', 'scope': 'entire_region',
                             'judgments': zone['semantic_evidence'].get('judgments', {}),
                             'request_hash': zone['semantic_evidence'].get('evidence', {}).get('request_hash')},
                         'current_transfer': zone.get('current_transfer'),
                         'placement_zone': region, 'subdivision_cells': level,
+                        'placement_preference': request.get('placement_preference', zone['intent']['preference']),
+                        'desired_clearance_m': ranking.get('desired_clearance_m'),
                         'xy_candidates': [{'candidate_id': name,
                             'tcp_world_xy_m': requests[i]['selected_reference_world_xy_m'],
+                            'measured_obstacle_gap_m': gaps.get(tuple(requests[i]['selected_reference_world_xy_m'])),
                             'travel_xy_m': float(np.linalg.norm(
                                 np.asarray(requests[i]['selected_reference_world_xy_m']) - current_xy))}
                             for i, name in zip(remaining, choices, strict=True)],
@@ -319,7 +377,7 @@ async def resolve_xy_then_z(controller, context, observation, request):
             indices = [i for i in remaining if 'placement-' + str(i) in selection['candidate_ids']]
             try:
                 result = await controller.call_algorithm(controller.algorithms.resolve_placement,
-                    observation, controller.state['target_id'], controller.state['arm'], context['scene'],
+                    observation, controller.state['target_id'], controller.state['arm'], controller.spatial_memory.scene,
                     holding, controller.state['destination_id'], placement_request=request,
                     placement_zone=zone, planning_settings=context['planning_settings'],
                     subdivision_cells=level, candidate_indices=indices, report_progress=True)
@@ -334,7 +392,8 @@ async def resolve_xy_then_z(controller, context, observation, request):
                 raise ValueError('placement_numerical_result_changed_selected_xy')
             result['semantic_selection'] = selection
             result['selection_evidence'].update(search_order='decisions_xy_then_numeric_z',
-                subdivision_levels=[4, 8, 16] if not precise else [], previous_attempts=attempts)
+                subdivision_levels=[4, 8, 16] if not precise else [],
+                maximum_xy_candidates=1 if precise else 28, previous_attempts=attempts)
             result.pop('resolution_id', None)
             result['resolution_id'] = digest(result)
             context['placement_resolution'] = result

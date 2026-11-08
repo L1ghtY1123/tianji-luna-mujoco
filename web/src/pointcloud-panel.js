@@ -1,8 +1,10 @@
 import * as THREE from 'three';
+import {createCollisionColors} from './collision-colors.js';
+const defaultCollisionColor = createCollisionColors();
 import {addObbLayers, obbRows, obbStates, validateObbPreview} from './obb-layer.js';
 
 const rawColor = new THREE.Color('#a7b3c4');
-const modes = [['raw', '原始 RGBD 点云'], ['collision', '碰撞场景']];
+const modes = [['raw', '原始 RGBD 点云'], ['collision', '空间记忆']];
 
 function vector(value, count) {
   return Array.isArray(value) && value.length === count && value.every(Number.isFinite);
@@ -74,7 +76,7 @@ function collisionDescription(scene) {
   }
   if (scene?.cuboid_layers?.some(layer => layer.role === 'bin_shell_completion')) colors.push('蓝色：盒壁补全');
   colors.push('灰色：已排除几何', '粉色：桌面碰撞体', '黄色：实测支撑范围');
-  return {title: `${types.length ? types.join(' / ') : '桌面'} 碰撞场景`,
+  return {title: `${types.length ? types.join(' / ') : '桌面'} 空间记忆`,
     legend: `${colors.join(' · ')}。`, diagnostic: evidence.join(' ') || '显示实测桌面对应的碰撞体；桌下延伸与边界扩展属于模型假设。'};
 }
 
@@ -120,7 +122,7 @@ export function validatePointcloudPreview(payload) {
   const scene = payload.collision_scene;
   if (scene?.status === 'available') {
     if (scene.frame !== 'world' || scene.units !== 'm' || ['generation', 'scene_token', 'observation_id'].some(key => scene[key] !== payload[key])) {
-      throw new Error('碰撞场景与当前点云快照不一致。');
+      throw new Error('空间记忆与当前点云快照不一致。');
     }
     if (!Array.isArray(scene.voxel_layers) || scene.voxel_layers.some(layer =>
       !vector(layer.pose_wxyz, 7) || !vector(layer.dims_m, 3) || layer.dims_m.some(value => value <= 0) ||
@@ -128,7 +130,7 @@ export function validatePointcloudPreview(payload) {
       !Array.isArray(layer.surface_centers_world_m) || layer.surface_centers_world_m.length > 15000 ||
       layer.surface_centers_world_m.some(point => !vector(point, 3))) ||
       !vector(scene.table?.model?.pose, 7) || !vector(scene.table?.model?.dims, 3) ||
-      scene.table.provenance !== 'inferred_ransac_support_completion') throw new Error('碰撞场景网格或推断桌体无效。');
+      scene.table.provenance !== 'inferred_ransac_support_completion') throw new Error('空间记忆网格或推断桌体无效。');
     if (scene.cuboid_layers !== undefined && (!Array.isArray(scene.cuboid_layers) ||
         scene.cuboid_layers.some(layer => !validCuboid(layer, payload)))) {
       throw new Error('碰撞体或盒壁补全的几何、角色与观测来源无效。');
@@ -145,7 +147,7 @@ function poseObject(object, pose) {
   object.quaternion.set(pose[4], pose[5], pose[6], pose[3]);
 }
 
-export function addCollisionLayers(object, scene) {
+export function addCollisionLayers(object, scene, colorFor = defaultCollisionColor) {
   for (const layer of scene.voxel_layers) {
     const color = layer.enabled ? (layer.role === 'background' ? '#4bdcca' : '#ffb05c') : '#8a92a3';
     const voxels = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1),
@@ -169,64 +171,40 @@ export function addCollisionLayers(object, scene) {
     poseObject(bounds, layer.pose_wxyz);
     object.add(bounds);
   }
+  function addShape(geometry, layer, pose) {
+    const color = colorFor(layer);
+    if (layer.enabled) {
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+        color, side: THREE.DoubleSide, toneMapped: false, transparent: true,
+        opacity: layer.role === 'measured_table' ? .18 : .48, depthWrite: false}));
+      mesh.name = layer.name;
+      mesh.userData = {geometrySource: layer.geometry_source ?? layer.role,
+        instanceId: layer.instance_id, assetId: layer.asset_id, enabled: true,
+        observationId: layer.observation_id, generation: layer.generation};
+      poseObject(mesh, pose); object.add(mesh);
+    }
+    const outline = new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 24),
+      layer.enabled ? new THREE.LineBasicMaterial({color, transparent: true, opacity: .8})
+        : new THREE.LineDashedMaterial({color, dashSize: .012, gapSize: .006, depthTest: false}));
+    outline.name = `${layer.name}:outline`;
+    outline.userData.enabled = layer.enabled;
+    outline.computeLineDistances(); poseObject(outline, pose); object.add(outline);
+    if (!layer.enabled) geometry.dispose();
+  }
   for (const layer of Object.values(scene.mesh_layers ?? {})) {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(layer.vertices_local_m.flat(), 3));
     geometry.setIndex(layer.faces.flat());
-    const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-      color: layer.enabled ? '#4bdcca' : '#8a92a3', transparent: true, opacity: layer.enabled ? .6 : .15,
-      side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
-    mesh.name = layer.name;
-    mesh.userData = {geometrySource: layer.geometry_source, instanceId: layer.instance_id,
-      assetId: layer.asset_id, observationId: layer.observation_id, generation: layer.generation,
-      sourceSha256: layer.source_sha256, meshSha256: layer.mesh_sha256, enabled: layer.enabled};
-    poseObject(mesh, layer.pose_wxyz);
-    object.add(mesh);
+    addShape(geometry, layer, layer.pose_wxyz);
   }
   for (const layer of scene.cuboid_layers ?? []) {
-    const color = layer.enabled ? (layer.role === 'measured_table' ? '#f597ce' :
-      layer.geometry_source === 'observed_obb' ? '#70de9a' : '#78b6ff') : '#8a92a3';
-    const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshBasicMaterial({color, transparent: true,
-        opacity: layer.enabled ? .35 : .1, depthWrite: false}));
-    box.name = layer.name;
-    box.userData = {provenance: layer.provenance, instanceId: layer.instance_id, enabled: layer.enabled,
-      geometrySource: layer.geometry_source ?? layer.role, observationId: layer.observation_id,
-      geometryObservationIds: layer.geometry_observation_ids, generation: layer.generation};
-    poseObject(box, layer.model.pose);
-    box.scale.set(...layer.model.dims);
-    object.add(box);
+    addShape(new THREE.BoxGeometry(...layer.model.dims), layer, layer.model.pose);
   }
   const table = scene.table;
   const tableAlreadyRendered = scene.cuboid_layers?.some(layer => layer.role === 'measured_table' &&
     ['pose', 'dims'].every(key => layer.model[key].every((value, index) => value === table.model[key][index])));
   if (!tableAlreadyRendered) {
-    const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshBasicMaterial({ color: table.enabled ? '#f597ce' : '#8a92a3', transparent: true,
-        opacity: table.enabled ? .25 : .1, depthWrite: false }));
-    box.name = table.name;
-    box.userData.provenance = table.provenance;
-    poseObject(box, table.model.pose);
-    box.scale.set(...table.model.dims);
-    object.add(box);
-  }
-  if (Number.isFinite(table.height_m) && table.normal_xyz?.[2] > 0) {
-    const [cx, cy] = table.model.pose;
-    const [width, depth] = table.model.dims;
-    const normal = table.normal_xyz;
-    const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
-      const x = cx + sx * width / 2;
-      const y = cy + sy * depth / 2;
-      return [x, y, table.height_m - (normal[0] * x + normal[1] * y) / normal[2]];
-    });
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(corners.flat(), 3));
-    geometry.setIndex([0, 1, 2, 0, 2, 3]);
-    const fitted = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-      color: '#ffd36b', transparent: true, opacity: .22, side: THREE.DoubleSide, depthWrite: false }));
-    fitted.name = 'ransac-fitted-plane';
-    fitted.userData.provenance = 'fitted_plane_displayed_within_completion_bounds';
-    object.add(fitted);
+    addShape(new THREE.BoxGeometry(...table.model.dims), {...table, role: 'measured_table'}, table.model.pose);
   }
   const plane = table.support_plane;
   if (plane?.observed_polygon_xy_m?.length >= 3) {
@@ -259,7 +237,7 @@ export function createPointcloudLayer(ownerDocument) {
       validatePointcloudPreview(payload);
       if (!modes.some(([value]) => value === mode)) throw new Error('点云显示模式无效。');
       if (mode === 'collision') {
-        if (payload.collision_scene?.status !== 'available') throw new Error('当前快照没有实际碰撞场景，请重新建图。');
+        if (payload.collision_scene?.status !== 'available') throw new Error('当前快照没有实际空间记忆，请重新建图。');
         clear();
         addCollisionLayers(object, payload.collision_scene);
         if (showObbs) addObbLayers(object, obbRows(payload, mode), ownerDocument);
@@ -362,7 +340,7 @@ export function createPointcloudPanel(container, status, {
     mode.disabled = true;
     visibilityButton.disabled = true;
     collisionOption.disabled = true;
-    collisionOption.textContent = '碰撞场景';
+    collisionOption.textContent = '空间记忆';
   }
 
   function renderOverlay() {
@@ -376,8 +354,8 @@ export function createPointcloudPanel(container, status, {
     obbEvidence.replaceChildren();
     const boxes = obbRows(payload, mode.value);
     obbEvidence.append(element('p', 'helper-text', payload.object_obbs
-      ? `${mode.value === 'collision' ? '地图关联' : '本次观测'} OBB 线框：${boxes.length} 个。绿实线：本次观测；紫虚线：历史保留；红虚线：已失效。线框用于查看观测来源，具体碰撞几何见碰撞场景；包络不证明隐藏表面已测量。`
-      : '当前快照未导出独立 OBB 线框；碰撞场景显示已发布的几何。'));
+      ? `${mode.value === 'collision' ? '地图关联' : '本次观测'} OBB 线框：${boxes.length} 个。绿实线：本次观测；紫虚线：历史保留；红虚线：已失效。线框用于查看观测来源，具体碰撞几何见空间记忆；包络不证明隐藏表面已测量。`
+      : '当前快照未导出独立 OBB 线框；空间记忆显示已发布的几何。'));
     for (const row of boxes) {
       const dimensions = row.obb.half_extents_m.map(value => (value * 2000).toFixed(1)).join(' × ');
       obbEvidence.append(element('p', 'helper-text', `${row.instance_id} · ${obbStates[row.status].label} · ${dimensions} mm · 来源 ${row.observation_id}`));
@@ -418,7 +396,7 @@ export function createPointcloudPanel(container, status, {
         visibilityButton.disabled = false;
         const scene = payload.collision_scene;
         collisionOption.disabled = scene?.status !== 'available';
-        collisionOption.textContent = collisionOption.disabled ? '碰撞场景' : collisionDescription(scene).title;
+        collisionOption.textContent = collisionOption.disabled ? '空间记忆' : collisionDescription(scene).title;
         if (mode.value === 'collision' && collisionOption.disabled) mode.value = 'raw';
         mapEvidence.replaceChildren();
         for (const [camera, evidence] of Object.entries(payload.cameras ?? {})) {

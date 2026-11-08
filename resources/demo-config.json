@@ -21,7 +21,7 @@
     "single_object_offset_xy_m": [0.0, -0.03],
     "row_start_offset_xy_m": [-0.10, -0.03],
     "row_step_xy_m": [0.10, 0.0],
-    "two_object_offsets_xy_m": [[-0.08, 0.0], [0.08, 0.0]],
+    "two_object_offsets_xy_m": [[-0.10, -0.05], [0.04, -0.05]],
     "four_object_grid": {
       "x_offsets_from_bin_center_m": [-0.08, 0.08],
       "y_offsets_from_bin_center_m": [-0.05, 0.05]

@@ -54,7 +54,6 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
         from .demo_scene import demo_observation_poses, demo_scene
         from .simulation import Simulation
         simulation = Simulation(scene=demo_scene(), initial_joints=demo_observation_poses())
-    default_visual_inventory = algorithms is None
     if algorithms is None:
         from .demo_algorithms import DemoAlgorithms
         from .demo_perception import DemoPerception
@@ -67,8 +66,6 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
         {**settings.model_dump(), "observation": demo_observation_poses(),
          "attachment": {**settings.attachment.model_dump(),
                         **({"sphere_budget": 24} if not settings_path.exists() else {})}})
-    from .visual_assistance import VisualAssistance
-    visual_assistance = None if default_visual_inventory else VisualAssistance.from_environment()
     experiment_root = experiment_dir or os.environ.get("LUNA_EXPERIMENT_DIR") or (
         Path(data_dir) / "experiments" if data_dir is not None else
         ROOT / "data" / "experiments")
@@ -78,7 +75,7 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
         conditions_path = ROOT / 'resources/workcell_assumptions.json'
         environment_assumptions = json.loads(conditions_path.read_text(encoding='utf-8')) if conditions_path.is_file() else {}
     runner = PolicyController(simulation, algorithms, decisions_factory, run_directory,
-                    planning_settings=settings, visual_assistance=visual_assistance, experiments=experiments,
+                    planning_settings=settings, experiments=experiments,
                     environment_assumptions=environment_assumptions)
     operations = asyncio.Lock()
     health_cache = {"at": 0., "value": {}}
@@ -106,6 +103,18 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
     app.state.runner = runner
     app.state.experiments = experiments
     app.include_router(experiment_router(experiments))
+
+    @app.get('/api/objects')
+    async def object_memory():
+        world_key = runner.world_namespace + ':' + str(simulation.robot_snapshot()['generation'])
+        return {'objects': await asyncio.to_thread(runner.world_inventory.entities, world_key=world_key)}
+
+    @app.get('/api/objects/{identifier}/history')
+    async def object_history(identifier: str):
+        try:
+            return await asyncio.to_thread(runner.world_inventory.get, identifier)
+        except ValueError as error:
+            raise HTTPException(404, str(error)) from error
 
     def state(event_start=0):
         run = {**copy.deepcopy(runner.state), "algorithm_pending": runner.algorithm_pending,

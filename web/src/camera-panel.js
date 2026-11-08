@@ -106,7 +106,7 @@ export function createCameraPanel(container, status, {
           const overlay = element('div', 'object-camera-overlay');
           for (const item of labelsForFrame(payload.object_labels, identifier, payload.generation, id)) {
             const badge = element('span', `object-camera-label object-camera-${item.role ?? 'target'}`,
-              item.label ?? `#${item.display_id} · ID ${item.id}`);
+              item.label ?? `ID ${item.id}`);
             badge.title = item.label ?? item.id;
             badge.style.cssText = `left:${Math.max(0, Math.min(.65, item.x)) * 100}%;top:${Math.max(0, Math.min(.85, item.y)) * 100}%;`;
             overlay.append(badge);

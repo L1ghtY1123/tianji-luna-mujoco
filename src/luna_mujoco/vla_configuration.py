@@ -4,6 +4,10 @@ import math
 from pathlib import Path
 
 
+def vla_processing_effect():
+    return json.loads((Path(__file__).resolve().parents[2] / 'resources/vla_unpack.json').read_text())['effect']
+
+
 def default_vla_input_xy():
     from .demo_scene import demo_region
     return demo_region()['center_world_xy_m']
@@ -38,6 +42,7 @@ def vla_unpack_configuration(settings=None):
         required_robot_configurations=[{'id': 'vla_unpack_preparation',
             'scope': 'specified_arms', 'joints_deg': preparation, 'gripper_positions_rad': {'A': 0., 'B': 0.}}])
     return {'required_arms': ['A', 'B'], 'input_xy_m': xy,
+        'effect': capability['effect'],
         'input_position_constraint': 'object_within_configured_square',
         'input_orientation_tolerance_rad': .05,
         'input_region_id': 'vla-unpack-input', 'input_region': region,

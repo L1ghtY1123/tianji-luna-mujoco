@@ -681,8 +681,8 @@ def check_command_path(runtime, planner, payload, binding):
     from tianji_curobo.grasp_lift_compute import collision_verdict
 
     from .grasp_contact import (
-        combine_closure_costs,
         combine_grasp_costs,
+        grasp_contact_links,
         gripping_pad_links,
         target_disabled_for_environment,
     )
@@ -751,8 +751,6 @@ def check_command_path(runtime, planner, payload, binding):
     admission = inventory_admission(getattr(runtime, 'geometry_scene', None) or {})
     for angle, exact, envelope in variants:
         checker = make_checker(exact, cache=True)
-        physical_checker = (command_checker(runtime, planner, exact, payload['scene_token'], clearance_m=0.)
-                            if contact_policy and phase == 'grasp' else None)
         world_checker = checker if envelope is None else make_checker(envelope, cache=False)
         driver_names = ['gripL_finger_joint', 'gripR_finger_joint']
         check_names = all_names + driver_names
@@ -837,11 +835,7 @@ def check_command_path(runtime, planner, payload, binding):
                 if contact_policy:
                     with target_disabled_for_environment(runtime, planner):
                         environment = checker.get_collision_distance(world_spheres).detach().cpu().numpy().copy()
-                    if phase == 'grasp':
-                        physical = physical_checker.get_collision_distance(state.robot_spheres).detach().cpu().numpy().copy()
-                        world = combine_grasp_costs(world, environment, physical, sphere_links, payload['arm'])
-                    else:
-                        world = combine_closure_costs(world, environment, sphere_links, payload['arm'])
+                    world = combine_grasp_costs(world, environment, sphere_links, payload['arm'])
                     contact_queries += 1
                 world = np.where((world >= 0) & (world <= CLEARANCE_COST_EPSILON), 0., world)
                 if first_world_collision is None and np.any(world > 0):
@@ -855,6 +849,8 @@ def check_command_path(runtime, planner, payload, binding):
                         balls = world_state.robot_spheres.detach().cpu().numpy().reshape(len(chunk), -1, 4)
                         first_world_collision.update(sphere_index=index, link=sphere_links.get(index),
                                                      sphere_world_m=balls[sample, index].tolist())
+                        if closure_padding is not None:
+                            first_world_collision['continuous_sweep_padding_m'] = float(padding[index])
                 self_cost = checker.get_self_collision_distance(state.robot_spheres).detach().cpu().numpy()
                 bounds = checker.get_bound(q).detach().cpu().numpy()
                 valid[offset:offset + len(chunk)] &= collision_verdict(world, self_cost, bounds, len(chunk))
@@ -919,8 +915,8 @@ def check_command_path(runtime, planner, payload, binding):
                 'driver_samples_rad': closure_angles.tolist(), 'continuous_world_sweep_checked': True,
                 'safe_driver_limit_rad': safe_closure_prefix(closure_angles, valid),
                 'self_collision_scope': 'sampled_driver_positions',
-                'selected_target_policy': 'opposing_pad_contact_only',
-                'nonpad_target_clearance_checked': True,
+                'selected_target_policy': 'executing_link3_link4_target_contact',
+                'other_links_target_clearance_checked': True,
                 'target_nonpenetration_claimed': False,
                 'scope': 'possible_closure_range_static_environment'},
             **({"gripper_endpoints": sweep} if sweep is not None else {}),
@@ -929,7 +925,9 @@ def check_command_path(runtime, planner, payload, binding):
             "grasp_contact_policy": {'enabled': contact_policy,
                 'target_id': runtime.geometry_scene.get('target_id') if contact_policy else None,
                 'pad_links': sorted(gripping_pad_links(payload['arm'])) if contact_policy else [],
-                'target_physical_nonpenetration_checked': contact_queries > 0 and phase == 'grasp',
+                'contact_links': sorted(grasp_contact_links(payload['arm'])) if contact_policy else [],
+                'target_contact_exemption_applied': contact_queries > 0,
+                'target_physical_nonpenetration_checked': False,
                 'environment_clearance_m': runtime.planning_settings.trajectory_collision_clearance_m,
                 'other_links_target_clearance_m': runtime.planning_settings.trajectory_collision_clearance_m},
             "checked_point_count": checked_count, "command_point_count": len(positions),

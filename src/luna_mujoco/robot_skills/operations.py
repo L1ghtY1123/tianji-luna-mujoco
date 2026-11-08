@@ -64,7 +64,6 @@ def configured_destination(observation, region, *, identifier=DESTINATION_ID, su
 
 
 class RobotOperations(ProcessingSkills, Runner):
-    visual_plan_source = "responses_program"
 
     def __init__(self, *args, region=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -124,17 +123,18 @@ class RobotOperations(ProcessingSkills, Runner):
         self.require_grasp_view(context, snapshot)
         capture_id = context.get('observation_pose_capture_id')
         if not capture_id or any(frame.get('observation_id') != capture_id
-                for frame in (snapshot, context.get('observation', {}), context.get('scene', {}))):
+                for frame in (snapshot, context.get('observation', {}), self.spatial_memory.scene)):
             raise ValueError('grasp_requires_current_observation_scene')
-        planning_snapshot = dict(snapshot, completed_target_ids=list(self.task_progress.completed_ids))
-        result = await super().plan_grasp(planning_snapshot, target, arm, context)
+        result = await super().plan_grasp(snapshot, target, arm, context)
         return {**result, "sampling_evidence": copy.deepcopy(context["sampling_evidence"])}
 
     async def plan_grasp_candidates(self, snapshot, target, arm, context):
-        # IK and trajectory exhaustion share the same three bounded candidate pools.
+        # IK and trajectory exhaustion share the configured bounded candidate pools.
+        snapshot = copy.deepcopy(snapshot)
+        scene = self.spatial_memory.scene
         settings = copy.deepcopy(context["planning_settings"])
         placement = copy.deepcopy(context.get("grasp_placement_request"))
-        token = context["scene"]["scene_token"]
+        token = scene["scene_token"]
         destination = self.state["destination_id"]
         initial_grasps = copy.deepcopy(context["grasps"])
         maximum_rounds = 1 if initial_grasps.get('source') == 'cad_offline_library' else MAX_SAMPLING_ROUNDS
@@ -145,7 +145,7 @@ class RobotOperations(ProcessingSkills, Runner):
 
         def check_current():
             self.check_generation()
-            if (context["scene"]["scene_token"] != token or context["planning_settings"] != settings
+            if (self.spatial_memory.scene["scene_token"] != token or context["planning_settings"] != settings
                     or context.get("grasp_placement_request") != placement
                     or self.state["arm"] != arm or self.state["target_id"] != target
                     or self.state["destination_id"] != destination):
@@ -185,18 +185,16 @@ class RobotOperations(ProcessingSkills, Runner):
                         code=error_code, details=context['sampling_evidence'])
                 continue
             check_current()
-            if sampling_round == 1:
-                evaluations = await super().evaluate_grasp_candidates(snapshot, target, arm, context)
-            else:
-                evaluations = await self.call_algorithm(self.algorithms.evaluate_arms, snapshot, target,
-                    context["grasps"], context["scene"], requested_arm=arm,
+            evaluations = await self.call_algorithm(self.algorithms.evaluate_arms, snapshot, target,
+                    context["grasps"], scene, requested_arm=arm,
+                    placement_request=placement,
                     **({"destination_id": destination} if destination else {}),
                     planning_settings=settings, report_progress=True)
             check_current()
             evaluation = evaluations.get(arm, {})
             if not isinstance(evaluation.get("valid_candidates"), list):
                 raise AlgorithmError("source IK outcome is unknown", code="invalid_source_ik_evaluation")
-            validate_sampling_evaluation(evaluation, snapshot, target, arm, context["scene"],
+            validate_sampling_evaluation(evaluation, snapshot, target, arm, scene,
                                          settings, destination, context["grasps"])
             rounds.append(round_evidence(context["grasps"], evaluation, sampling_round))
             evidence = {"rounds": copy.deepcopy(rounds), "maximum_sampling_rounds": maximum_rounds,
@@ -211,7 +209,7 @@ class RobotOperations(ProcessingSkills, Runner):
                 evaluation["sampling_evidence"] = evidence
                 try:
                     result = await self.call_algorithm(self.algorithms.plan_grasp,
-                        snapshot, target, arm, evaluations, context["scene"],
+                        snapshot, target, arm, evaluations, scene,
                         planning_settings=settings, report_progress=True,
                         **({"destination_id": destination} if destination else {}))
                 except AlgorithmError as error:
@@ -230,7 +228,7 @@ class RobotOperations(ProcessingSkills, Runner):
                 rounds[-1]['outcome'] = ('no_sampled_destination_endpoint'
                     if screen.get('applied') is True and screen.get('input_count', 0) > 0
                     else 'no_eligible_source_ik')
-            validate_sampling_evaluation(evaluation, snapshot, target, arm, context["scene"],
+            validate_sampling_evaluation(evaluation, snapshot, target, arm, scene,
                                          settings, destination, context["grasps"])
             evidence.update(trajectory_attempt_count=trajectory_attempt_count, rounds=copy.deepcopy(rounds))
             if identity is None:
@@ -251,8 +249,11 @@ class RobotOperations(ProcessingSkills, Runner):
                     raise AlgorithmError('source IK succeeded but bounded destination endpoint screening was exhausted',
                         code='grasp_destination_samples_exhausted', details={**evidence,
                             'trajectory_attempt_count': 0, 'whole_destination_infeasible': False})
+                code = ('grasp_candidate_preconditions_rejected'
+                    if any(row.get('source_ik_success_count', 0) for row in rounds)
+                    else 'no_collision_free_source_ik')
                 raise AlgorithmError("no eligible source grasp target in the bounded candidate pools",
-                    code="no_collision_free_source_ik", details={**evidence, "trajectory_attempt_count": 0})
+                    code=code, details={**evidence, "trajectory_attempt_count": 0})
 
 
     async def capture_scene_observation(self, context, arguments):
@@ -264,6 +265,9 @@ class RobotOperations(ProcessingSkills, Runner):
         return await self.capture_observation(context, capture=capture)
 
     async def execute(self, skill, context, arguments=None):
+        if skill == 'recover_failed_grasp':
+            from .grasp_recovery import recover_failed_grasp
+            return await recover_failed_grasp(self, context)
         if skill == 'prepare_unpack':
             return await self._prepare_unpack(context)
         if skill == 'vla_unpack':
@@ -274,7 +278,7 @@ class RobotOperations(ProcessingSkills, Runner):
             if skill == 'return_to_initial_pose':
                 from .return_pose import return_to_initial_pose
                 return await return_to_initial_pose(self, context)
-            prepare_empty_hand_motion_scene(context)
+            prepare_empty_hand_motion_scene(context, collision=self.spatial_memory.collision_snapshot())
             from ..observation_motion import observation_viewpoint_poses
 
             viewpoint = (arguments or {}).get('viewpoint', 'configured')
@@ -296,7 +300,6 @@ class RobotOperations(ProcessingSkills, Runner):
             context["observation_pose_reference"] = {
                 key: copy.deepcopy(result[key]) for key in ("observation_id", "time", "arms")}
             self._check_source_view(result)
-            self._require_visible_inventory(result)
             return result
         if skill == "build_scene":
             source = observed_object(context["observation"], self.state["target_id"])
@@ -314,7 +317,8 @@ class RobotOperations(ProcessingSkills, Runner):
             destination = observed_object(observation, self.state['destination_id'])
             if destination.get('kind') == 'bin':
                 context['grasp_placement_request'] = {'object_id': self.state['target_id'],
-                    'transport_region': container_transport_region(destination, context['scene'], observation)}
+                    'release_mode': self.task_progress.records[self.state['target_id']]['release_mode'],
+                    'transport_region': container_transport_region(destination, self.spatial_memory.scene, observation)}
             else:
                 context['grasp_placement_request'] = copy.deepcopy(self._bind_region(observation))
             context["grasps"] = await self.call_algorithm(self.algorithms.generate_grasps,
@@ -326,12 +330,24 @@ class RobotOperations(ProcessingSkills, Runner):
         if skill == "execute_place":
             result = await super().execute(skill, context, arguments)
             context["demo_place_execution"] = copy.deepcopy(result)
-            context['release_execution_evidence'] = freeze_release_execution(self.state, context, self.run_id)
+            context['release_execution_evidence'] = freeze_release_execution(
+                self.state, context, self.run_id, scene=self.spatial_memory.scene)
             self.holding_state = None
             context.pop('holding', None)
             return result
         if skill == "verify_place":
             target = self.state["target_id"]
+            declared_mode = (arguments or {}).get('release_mode', 'bound')
+            actual_mode = context.get('release_execution_evidence', {}).get('release_reference', {}).get('release_mode')
+            if declared_mode != 'bound' and declared_mode != actual_mode:
+                raise ValueError('release_verification_mode_mismatch')
+            completed = context.get('place_verification', {})
+            receipt = completed.get('container_entry', {})
+            if completed.get('success') is True and receipt.get('target_id') == target:
+                release_execution_context(self.state, context, self.run_id)
+                if receipt.get('destination_id') != self.state['destination_id']:
+                    raise ValueError('container_entry_receipt_binding_changed')
+                return copy.deepcopy(completed)
             previous = context.get('release_verification_attempt')
             if previous and previous['target_id'] == target:
                 carried = copy.deepcopy(previous['carried'])
@@ -349,8 +365,10 @@ class RobotOperations(ProcessingSkills, Runner):
             # Rechecks retain the original physical release. A view change
             # cannot create a new release or erase the held/attachment proof.
             context['holding'] = carried
-            binding = build_release_binding(self.state, context, self.task_progress, self.run_id, result)
-            self.emit("release_verification_binding", "放置结果核验的执行链与槽位", binding)
+            binding = build_release_binding(self.state, context,
+                self.task_progress.release_snapshot(target, self.state['destination_id']),
+                self.run_id, result, scene=self.spatial_memory.scene)
+            self.emit("release_verification_binding", "放置结果核验的执行链与目标区域", binding)
             self.holding_state = None
             context.pop("holding", None)
             from .observation import reusable_release_capture
@@ -366,6 +384,34 @@ class RobotOperations(ProcessingSkills, Runner):
             context.update(post_place_capture=capture, latest_capture=capture)
             self.record_observation(capture, "post_place")
             self.sync_result_evidence(context, "post_place")
+            zone = binding.get('placement_zone', {})
+            if (zone.get('intent', {}).get('release_mode') == 'container_release'
+                    and zone.get('semantic_scope') == 'entire_region'):
+                from ..demo_transfer_verification import container_entry_receipt
+
+                reference = context['release_execution_evidence']['release_reference']
+                receipt = container_entry_receipt(binding, reference, capture)
+                context['container_entry_receipt'] = copy.deepcopy(receipt)
+                previous_scene = self.spatial_memory.scene
+                if not released_target_map_is_current(context, target, collision=self.spatial_memory.collision_snapshot()):
+                    updated_scene = await self.call_algorithm(
+                        self.algorithms.publish_container_occupancy, previous_scene, receipt)
+                    self.check_generation()
+                    self.spatial_memory.accept_container_occupancy(updated_scene, receipt,
+                        previous_scene_token=previous_scene['scene_token'])
+                confirmed = self.task_progress.confirm_container_transfer(target, receipt)
+                if not confirmed:
+                    raise ValueError('container_entry_receipt_binding_changed')
+                result.update(success=True, status='confirmed', verification_scope='operator_container_entry_rule',
+                              container_entry=receipt, reason=None)
+                context['pending_transfer']['verified'] = True
+                context['place_verification'] = result
+                context['verified_release_reference'] = copy.deepcopy(reference)
+                self.state['facts']['table_release_verified'] = False
+                self.state['facts']['scene_available'] = not self.spatial_memory.refresh_required
+                self.emit('container_entry_confirmed', '按用户规则登记入盒并发布容器占据范围', receipt)
+                self.sync_inventory(context)
+                return result
             after = await self.call_algorithm(self.algorithms.verify_release, capture, binding,
                 context["visual_inventory_reference"], self.state["instruction"])
             if after.get('observation_assessment', {}).get('needs_observation'):
@@ -374,7 +420,8 @@ class RobotOperations(ProcessingSkills, Runner):
                 after['observation_assessment']['retry_owner'] = 'policy_graph'
             self.check_generation()
             current = build_release_binding(self.state, {**context, "holding": carried},
-                                            self.task_progress, self.run_id, result)
+                self.task_progress.release_snapshot(target, self.state['destination_id']),
+                self.run_id, result, scene=self.spatial_memory.scene)
             if current != binding or after.get("binding_id") != binding["binding_id"]:
                 raise ValueError("release_verification_binding_changed")
             evidence = after["visual_evidence"]
@@ -389,7 +436,11 @@ class RobotOperations(ProcessingSkills, Runner):
                     or evidence.get("source") != "openai_decisions"):
                 raise ValueError("visual_inventory_progress_frame_mismatch")
             confidence = evidence.get("confidence")
-            if (type(confidence) not in (int, float) or not 0. <= confidence <= 1.
+            refused = any(answer.get('type') == 'refusal'
+                and answer.get('name') in evidence.get('primary_required_checks', [])
+                for answer in evidence.get('answers', []))
+            missing_probability = confidence is None and refused and evidence.get('status') != 'at_destination'
+            if not missing_probability and (type(confidence) not in (int, float) or not 0. <= confidence <= 1.
                     or evidence.get("status") == "at_destination" and confidence < .8):
                 raise ValueError("release_verification_result_confidence")
             context["post_place_result"] = after
@@ -401,12 +452,6 @@ class RobotOperations(ProcessingSkills, Runner):
             self.sync_result_evidence(context, "post_place")
             self.emit("visual_transfer_result", "Decisions 放置结果核验", after)
             confirmed = self.task_progress.confirm_visual_transfer(target, evidence)
-            if confirmed:
-                from ..demo_completed_tracking import confirmed_capture_record
-
-                self.task_progress.records[target]["completed_identity_track"] = {
-                    "binding": copy.deepcopy(binding), "visual_evidence": copy.deepcopy(evidence),
-                    "capture": confirmed_capture_record(capture)}
             outside = evidence.get('measured_object_position', {}).get('status') == 'outside'
             rejected = evidence.get('status') == 'rejected'
             result.update(success=confirmed, status="confirmed" if confirmed else "failure" if outside or rejected else "unknown",
@@ -429,23 +474,22 @@ class RobotOperations(ProcessingSkills, Runner):
                 self.sync_inventory(context)
                 if not carried:
                     raise ValueError("release_geometry_missing")
-                if not released_target_map_is_current(context, target):
-                    if context['scene']['scene_token'] == binding['scene_token']:
-                        context["scene"] = await self.call_algorithm(
-                            self.algorithms.publish_released_object, context["scene"], target,
+                if not released_target_map_is_current(context, target, collision=self.spatial_memory.collision_snapshot()):
+                    previous_scene = self.spatial_memory.scene
+                    if previous_scene['scene_token'] == binding['scene_token']:
+                        updated_scene = await self.call_algorithm(
+                            self.algorithms.publish_released_object, previous_scene, target,
                             carried["grasp_support_reference"]["T_world_tcp_at_grasp"],
                             binding['release_tcp'], capture["observation_id"],
                             support_floor_z_m=context["destination"]["placement_reference"]["floor_z_m"])
                     else:
-                        context['scene'] = await self.call_algorithm(self.algorithms.invalidate_scene_entity,
-                            context['scene'], target, result['feedback_id'], source='verified_release_action')
-                    context['scene_refresh_required'] = True
-                    lifecycle = context.setdefault('mapping_lifecycle', {})
-                    lifecycle['invalidated_entity_ids'] = sorted(
-                        set(lifecycle.get('invalidated_entity_ids', ())) | {target})
+                        updated_scene = await self.call_algorithm(self.algorithms.invalidate_scene_entity,
+                            previous_scene, target, result['feedback_id'], source='verified_release_action')
+                    self.spatial_memory.replace_geometry(updated_scene, previous_scene_token=previous_scene['scene_token'])
+                    self.spatial_memory.invalidate([target])
                     self.state['facts'].update(scene_available=False, scene_ready=False, observation_map_ready=False)
                     self.emit("retained_scene_invalidated", "释放后几何失效，等待模型选择实测建图", {
-                        "scene_token": context["scene"]["scene_token"], "target_id": target,
+                        "scene_token": self.spatial_memory.scene["scene_token"], "target_id": target,
                         "source": "verified_release_action", "rgbd_remapped": False})
             return result
         return await super().execute(skill, context, arguments)

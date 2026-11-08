@@ -10,7 +10,6 @@ from typing import Literal, TypedDict
 import numpy as np
 import trimesh
 from PIL import Image, ImageDraw, ImageOps
-
 from tianji_foundationpose.contracts import validate_pose
 
 from .cad_paths import cad_resource_root
@@ -416,8 +415,8 @@ class CadGeometryResolver:
             'eligible_camera_ids': [entry['camera_id'] for entry in eligible],
             'selected_camera_id': None, 'attempts': []}
         seed = saved.get('pose_seed') if saved else None
-        progress = capture.get('cad_motion_context')
-        motion_context = deepcopy(progress.get(target['id'], {})) if isinstance(progress, dict) else None
+        motion_history = capture.get('cad_motion_context')
+        motion_context = deepcopy(motion_history.get(target['id'])) if isinstance(motion_history, dict) else None
         tracking_seed = None
         if (seed and motion_context is not None
                 and seed.get('motion_context') == motion_context

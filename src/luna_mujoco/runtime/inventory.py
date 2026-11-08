@@ -1,7 +1,8 @@
-"""Permanent entity identities, verified transfers and capability effects."""
+"""Task-local obligations, verified transfers and processing receipts."""
 from collections import Counter
 from copy import deepcopy
 
+from ..core.placement import ReleaseLedgerSnapshot
 from ..task_progress import TaskProgress
 
 
@@ -13,14 +14,26 @@ class PolicyTaskProgress(TaskProgress):
         self.input_ids = []
         self.task_spec = None
         self.object_tasks = {}
-        self.transformations = {}
-        self.initial_entities = {}
 
     def configure_task(self, task_spec, selected_ids, *, object_tasks=None):
         self.task_spec = task_spec
+        self.selection_order = 'inventory' if task_spec.selection_order in {'inventory', 'nearest'} else 'explicit'
         self.object_tasks = dict(object_tasks or {})
         self.input_ids = list(selected_ids)
-        self.initial_entities = deepcopy(self.scene_entities)
+
+    def claim_input(self, identifier):
+        """Record responsibility for an input only when the graph selects it."""
+        record = self.records[identifier]
+        root = record.get('root_input_id', identifier)
+        if root in self.input_ids:
+            return
+        if self.task_spec.scope == 'ids' and root not in self.task_spec.target_refs:
+            raise ValueError('target_outside_requested_ids:' + root)
+        if self.task_spec.quantity is not None and len(self.input_ids) >= self.task_spec.quantity:
+            raise ValueError('requested_quantity_already_selected')
+        self.input_ids.append(root)
+        record['root_input_id'] = root
+        self.ledger_revision += 1
 
     def assess_observed_membership(self, judgments):
         """Keep sensing proposals separate from the graph's task confirmation."""
@@ -47,6 +60,13 @@ class PolicyTaskProgress(TaskProgress):
     def bound_arm(self):
         return self.records.get(self.current_id, {}).get('execution_arm')
 
+    def release_snapshot(self, target_id, destination_id):
+        return ReleaseLedgerSnapshot(target_id=target_id, current_id=self.current_id,
+            completed_ids=tuple(self.completed_ids), record={key: deepcopy(self.records[target_id].get(key))
+                for key in ('id', 'status', 'release_feedback_id')},
+            bound_arm=self.bound_arm(), placement_request=deepcopy(self.placement_request(destination_id)),
+            visual_progress=deepcopy(self.visual_progress()[target_id]), transfer_index=self.transfer_index(target_id))
+
     def select(self, source, destination_id=None):
         identifier = source['id']
         record = self.records.get(identifier)
@@ -54,36 +74,35 @@ class PolicyTaskProgress(TaskProgress):
             raise ValueError('target_not_in_task_inventory')
         if record.get('status') in {'consumed', 'completed', 'deferred'}:
             raise ValueError('target_not_pending:' + identifier)
-        if self.selection_order == 'inventory':
-            completed = self.completed_input_ids()
-            first = next((key for key in self.input_ids if key not in completed), None)
-            if first is not None and record.get('root_input_id', identifier) != first:
-                raise ValueError('target_violates_inventory_order')
+        self.claim_input(identifier)
         record.pop('execution_arm', None)
         # A new transfer has a new destination and action index. Old release
         # correspondence remains historical; it must not constrain the new one.
-        record.pop('completed_identity_track', None)
         record.update(status='selected', destination_id=destination_id,
                       transfer_index=len(record.get('transfers', [])),
                       source_observation_id=self.observation_id)
         self.current_id = identifier
         self.ledger_revision += 1
 
-    def complete(self, identifier, *, observation_id=None, feedback_id=None):
+    def complete(self, identifier, *, observation_id=None, feedback_id=None, container_entry=None):
         if not observation_id:
             raise ValueError('completion_requires_visual_destination_evidence')
         record = self.records[identifier]
         transfers = record.setdefault('transfers', [])
         if any(row['observation_id'] == observation_id for row in transfers):
             return
-        transfers.append({'destination_id': record['destination_id'],
+        transfer = {'destination_id': record['destination_id'],
                           'destination_ref': record.get('destination_ref', record['destination_id']),
                           'transfer_index': self.transfer_index(identifier), 'arm': record.get('execution_arm'),
-                          'observation_id': observation_id, 'release_feedback_id': record.get('release_feedback_id')})
-        record.update(current_region=record.get('destination_ref', record['destination_id']), status='observed',
-                      confirmed_observation_id=observation_id)
-        if identifier in self.scene_entities:
-            self.scene_entities[identifier]['current_region'] = record['current_region']
+                          'observation_id': observation_id, 'release_feedback_id': record.get('release_feedback_id')}
+        if container_entry is not None:
+            transfer.update(source=container_entry['source'], receipt_id=container_entry['receipt_id'])
+            record['container_entry'] = deepcopy(container_entry)
+            record['confirmed_observation_id'] = None
+        else:
+            record['confirmed_observation_id'] = observation_id
+        transfers.append(transfer)
+        record.update(current_region=record.get('destination_ref', record['destination_id']), status='observed')
         if self._entity_goal_satisfied(identifier):
             record['status'] = 'completed'
             if identifier not in self.completed_ids:
@@ -91,6 +110,25 @@ class PolicyTaskProgress(TaskProgress):
         self.current_id = None
         self.failure = None
         self.ledger_revision += 1
+
+    def confirm_container_transfer(self, identifier, evidence):
+        """Accept the operator's entry rule after the bound numerical release checks."""
+        from ..demo_transfer_verification import valid_container_entry
+
+        record = self.records[identifier]
+        if not valid_container_entry(evidence, identifier, record.get('destination_id'),
+                                     record.get('release_feedback_id')):
+            return False
+        previous = record.get('container_entry')
+        if previous and previous.get('release_feedback_id') == evidence['release_feedback_id']:
+            return previous == evidence
+        release = record.get('visual_release', {})
+        if (release.get('transfer_index') != self.transfer_index(identifier)
+                or release.get('destination_id') != record.get('destination_id')):
+            return False
+        self.complete(identifier, observation_id=evidence['observation_id'], container_entry=evidence)
+        record['transport_status'] = 'assumed_inside'
+        return True
 
     def _entity_goal_satisfied(self, identifier):
         if self.task_spec is None:
@@ -100,7 +138,7 @@ class PolicyTaskProgress(TaskProgress):
         task = self.object_tasks.get(record.get('root_input_id', identifier), self.task_spec)
         required = Counter(task.processing)
         return (record.get('current_region') == task.destination_ref
-                and bool(record.get('confirmed_observation_id'))
+                and bool(record.get('confirmed_observation_id') or record.get('container_entry'))
                 and all(actual[name] >= count for name, count in required.items()))
 
     def completed_input_ids(self):
@@ -135,37 +173,21 @@ class PolicyTaskProgress(TaskProgress):
             raise ValueError('product_requires_confirmed_creation_evidence')
         skill = product['processing_skill']
         self.records[identifier] = {**deepcopy(product), 'status': 'observed',
-            'display_id': self.next_display_id,
-            'execution_rank': source.get('execution_rank', source.get('display_id')),
+            'execution_rank': source.get('execution_rank'),
             'root_input_id': source.get('root_input_id', source_id),
-            'current_region': source.get('current_region'),
+            'current_region': product.get('current_region') or product.get('observed_support', {}).get('support_entity_id'),
             'processing_history': [*source.get('processing_history', []), skill],
             'initial_source': {'identity_source': 'confirmed_process_output',
                                'measurement_observation_id': evidence['observation_id']}}
-        self.next_display_id += 1
-        self.scene_entities[identifier] = deepcopy(self.records[identifier])
-        self.scene_entities[identifier].update(roles=['product', 'collision'], visual_membership='required')
         source.update(status='consumed', output_entity_id=identifier)
-        self.scene_entities[source_id].update(geometry_status='historical_consumed', roles=['process_input'],
-                                              visual_membership='excluded')
-        self.scene_entities[source_id].pop('segmentation_query', None)
         self.membership[source_id] = 'excluded'
         self.membership[identifier] = 'required'
-        self.transformations[product['process_id']] = {
-            'id': product['process_id'], 'skill': skill, 'input_entity_id': source_id,
-            'output_entity_id': identifier, 'evidence': deepcopy(evidence)}
         self.current_id = None
         self.ledger_revision += 1
 
-    def inventory_state(self):
-        return {'inventory_finalized': self.inventory_finalized,
-            'entities': deepcopy(self.scene_entities),
-            'retired_entity_ids': [key for key, row in self.records.items() if row.get('status') == 'consumed'],
-            'transformations': deepcopy(self.transformations)}
-
     def snapshot(self):
         result = super().snapshot()
-        result.update(self.inventory_state(), initial_entities=deepcopy(self.initial_entities),
+        result.update(
             object_tasks={key: value.model_dump(mode='json') for key, value in self.object_tasks.items()},
             completed_input_ids=sorted(self.completed_input_ids()), selected_input_ids=list(self.input_ids),
             objects=deepcopy(list(self.records.values())),
