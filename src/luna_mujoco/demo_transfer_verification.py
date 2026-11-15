@@ -256,15 +256,15 @@ def release_identity_confirmed(binding):
 
 
 def release_result_question(has_reference_image=True, placement_intent=None, *, target_id=None,
-                            support_id=None, region_required=False):
+                            support_id=None):
     reference = f'target ID {target_id}' if target_id is not None else 'described target'
     container = (placement_intent or {}).get('relation') == 'inside'
     relation = 'inside the destination container' if container else 'on the destination support'
-    region = (' The target must end in the requested table region, shown by the cyan PLACEMENT_REGION outline. '
-              'Account for object height and perspective.' if region_required else
-              ' A target resting anywhere inside the named container satisfies delivery. '
-              'The configured release square constrains the robot release position and does not constrain '
-              'the object resting position inside the container.')
+    region = (' The configured release square constrains the robot release position for both table and '
+              'container placements; do not require the resting object to fit within that square. '
+              'Judge whether delivery to the named support or container succeeded. '
+              'For container delivery, do not require identifying which of several identical contents '
+              'is the newly delivered object. The bound execution chain supports inferred_success.')
     reference_rule = (f'Historical boxes labelled {target_id} identify the target appearance. '
                       f'Boxes labelled {support_id} identify the destination support/container. '
                       if has_reference_image else 'Use the supplied target and destination descriptions. ')
@@ -278,34 +278,14 @@ def release_result_question(has_reference_image=True, placement_intent=None, *, 
         'Inspect visible surroundings and the before/after change. Visible contrary evidence takes precedence '
         'over planned or measured release location. Missing required execution evidence requires unknown. '
         'A clearly visible target outside the destination acceptance scope or still carried is failure.', [
-            {'value': 'direct_success', 'description': '直接确认目标已进入目的地；入盒任务以进入指定盒子为准。'},
+            {'value': 'direct_success', 'description': '直接看到目标已放在指定桌面支撑或进入指定盒子。'},
             {'value': 'inferred_success', 'description': '执行证据确认持有目标、到达释放 XYZ 并释放，当前空爪，未发现交付失败的反证。'},
             {'value': 'failure', 'description': '目标在目的地外或仍被携带等明确失败证据。'},
             {'value': 'unknown', 'description': '证据不足。无法满足直接确认或推测成功条件，也缺少明确失败证据。'}])
 
 
-def release_region_projections(capture, binding):
-    from .observation_labels import project_placement_regions
-
-    layout = binding['placement_region']
-    region = {'region_id': 'PLACEMENT_REGION', 'layout_revision': binding['layout_revision'], 'layout': {
-        'center_world_xy_m': layout['center_world_xy_m'],
-        'region_polygon_world_xy_m': layout['polygon_world_xy_m'], 'floor_z_m': layout['floor_z_m'],
-        'support_entity_id': binding.get('placement_zone', {}).get('support_entity_id', binding['destination_id']),
-        'source': 'bound_requested_region', 'observation_id': binding['observation_id']}}
-    result = {}
-    for projected in project_placement_regions(capture, [region], require_visible_support=False):
-        polygon = np.asarray(projected['polygon'])
-        if np.any(polygon.max(axis=0) < 0) or np.any(polygon.min(axis=0) > 1):
-            continue
-        projected.update(binding_region_id=binding['region_id'], projection_observation_id=capture['observation_id'],
-                         meaning='Requested support-plane region projected with CURRENT camera calibration.')
-        result[projected['camera_id']] = [projected]
-    return result
-
-
 def release_position_check(binding):
-    """Check release XY using actual robot feedback, never a simulator object pose."""
+    """Check measured release XYZ and configured XY region, never simulator object truth."""
     endpoint = binding.get('evidence', {}).get('release_endpoint', {})
     try:
         actual = np.asarray(binding['release_tcp'], float)
@@ -346,9 +326,6 @@ def release_result_payload(capture, binding, reference, instruction="", *, empty
     zone = binding.get('placement_zone', {})
     support_id = zone.get('support_entity_id', binding['destination_id'])
     destination = reference.get('entities', {}).get(support_id, {})
-    # Configured XY constrains release. It does not narrow container delivery.
-    region_required = zone.get('intent', {}).get('relation') != 'inside'
-    regions = release_region_projections(capture, binding) if region_required else {}
     release_position = release_position_check(binding)
     context = {'observation_id': capture['observation_id'], 'target_id': target,
         'executing_arm': binding['arm'],
@@ -358,10 +335,8 @@ def release_result_payload(capture, binding, reference, instruction="", *, empty
         'destination_support_id': support_id, 'destination_kind': destination.get('kind'),
         'destination_description': destination.get('description'),
         'placement_intent': zone.get('intent'),
-        'placement_scope': 'projected_region' if region_required else 'entire_destination',
+        'placement_scope': 'named_support_or_container',
         'configured_release_region_role': 'robot_release_position_only',
-        'region_label': 'PLACEMENT_REGION' if region_required else None,
-        'region_projection_camera_ids': list(regions),
         'reference_labels': {'target': target, 'destination_support_or_container': support_id},
         'execution_evidence': {
             'target_id': target, 'binding_id': binding['binding_id'],
@@ -370,20 +345,20 @@ def release_result_payload(capture, binding, reference, instruction="", *, empty
             'pre_release_target_confirmed': binding.get('evidence', {}).get('held', {}).get('success') is True
                 and binding.get('evidence', {}).get('held', {}).get('status') == 'held',
             'held_target_identity': deepcopy(binding.get('evidence', {}).get('held', {}).get('identity_binding')),
-            'held_target_identity_interpretation': 'Held presence was judged visually. Target identity was inherited '
+            'held_target_identity_interpretation': 'Held presence was verified using measured gripper position or RGB. Target identity was inherited '
                 'from the confirmed pregrasp target and its bound completed grasp, not re-identified after grasp.',
             'release_inside_requested_region': release_position['reference_inside_region'],
             'actual_release_xyz_check': release_position,
             'current_empty_gripper_confirmed': empty_gripper_confirmed},
         'rules': 'Judge CURRENT placement from the supplied RGB. BEFORE and reference frames are dated. '
             'Use target descriptions and labelled references for identity; former locations belong to those historical frames. '
-            'Cyan region outlines are configured-area projections using the current camera calibration. '
-            'Occluded and excluded image areas remain unobserved even when an outline crosses them. '
+            'Configured release XYZ is checked from actual robot feedback for both table and container placement. '
+            'The configured release square is not a visual boundary for the final resting object. '
             'Choose direct_success for clearly visible correct placement. Use inferred_success for '
             'delivery supported by actual release XYZ, the bound execution chain and current empty gripper, with '
             'no visible outside-drop evidence. Preserve failure or unknown when their conditions apply.'}
     content = [{'type': 'input_text', 'text': json.dumps(context, default=lambda v: v.tolist())}]
-    content.extend(capture_content(capture, modalities=('rgb',), regions=regions))
+    content.extend(capture_content(capture, modalities=('rgb',)))
     baseline = capture.get('release_baseline')
     if baseline:
         content.extend(capture_content(baseline, modalities=('rgb',), role='before_release'))
@@ -392,7 +367,7 @@ def release_result_payload(capture, binding, reference, instruction="", *, empty
         if identifier in {target, support_id}}}
     content.extend(reference_content(relevant))
     question = release_result_question(target in relevant['identity_references'], zone.get('intent'),
-        target_id=target, support_id=support_id, region_required=region_required)
+        target_id=target, support_id=support_id)
     return {'model': 'gpt-6-luna', 'input': [{'role': 'user', 'content': content}],
             'questions': [question]}
 
@@ -427,18 +402,25 @@ def gripper_release_payload(capture, arm, *, modalities=('rgb',), evidence=None)
 
 def verify_release_result(objects, capture, binding, reference, instruction="", *, gripper_evidence=None):
     from .observation_requirements import assessment
+    from .robot_skills.grasp_verification import holding_from_feedback
 
     validate_release_capture(capture, binding)
     release_position_check(binding)
-    release_payload = gripper_release_payload(capture, binding['arm'], evidence=gripper_evidence)
-    requests = [release_payload]
+    measured = holding_from_feedback(capture, binding['arm'])
+    requests = []
+    if measured['requires_visual']:
+        requests.append(gripper_release_payload(capture, binding['arm'], evidence=gripper_evidence))
+    elif measured['status'] == 'no':
+        requests.append(release_result_payload(capture, binding, reference, instruction,
+                                              empty_gripper_confirmed=True))
     support_id = binding.get('placement_zone', {}).get('support_entity_id', binding['destination_id'])
-    questions = list(release_payload['questions'])
+    questions = [question for request in requests for question in request['questions']]
 
     def parse(body, evidence):
         visual_judgments, answers = parse_answers(body, questions[:len(body['answers'])])
         inverse = {'yes': 'no', 'no': 'yes', 'unknown': 'unknown'}
-        holding = visual_judgments['object_held']
+        holding = visual_judgments.get('object_held', measured['status'])
+        holding_source = 'openai_decisions' if measured['requires_visual'] else measured['source']
         placement_outcome = visual_judgments.get('place_result', 'unknown')
         inference_chain_confirmed = release_identity_confirmed(binding) and holding == 'no'
         if placement_outcome == 'inferred_success' and not inference_chain_confirmed:
@@ -457,22 +439,24 @@ def verify_release_result(objects, capture, binding, reference, instruction="", 
                                  capture['observation_id'])
         if observation and observation['status'] != 'confirmed':
             status = 'rejected' if observation['status'] == 'rejected' else 'unknown'
-        visual = {"source": "openai_decisions", "identity_source": "execution_chain",
+        visual = {"source": evidence['source'], "identity_source": "execution_chain",
             "support_entity_id": support_id, "generation": binding['generation'],
             "diagnostic_checks": deepcopy(evidence.get('diagnostic_checks', [])),
             "observation_id": capture["observation_id"], "status": status, "confidence": confidence,
             "confidence_rule": 'placement_choice_confidence_archive_only',
             "placement_outcome": placement_outcome,
             "inference_chain_confirmed": inference_chain_confirmed,
-            "view_scope": "wrist_empty_then_destination_views",
+            "view_scope": "measured_gripper_then_destination_views",
             "camera_ids": list(evidence['camera_ids']),
             "primary_required_checks": list(required),
-            "completion_semantics": 'visual_empty_gripper_then_four_way_placement',
+            "completion_semantics": 'measured_gripper_then_four_way_placement',
             "not_requested_checks": [name for name in required
-                if ('object_held' if name == 'target_released' else name) not in by_name],
-            "holding_presence": {'status': holding, 'rule': 'decisions_only'},
+                if name == 'place_result' and name not in by_name],
+            "holding_presence": {'status': holding, 'source': holding_source,
+                'rule': 'measured_position_then_closed_gripper_vision', 'feedback': measured['feedback']},
             "visual_judgments": visual_judgments,
-            "derived_judgments": {'target_released': {'source_question': 'object_held',
+            "derived_judgments": {'target_released': {'source': holding_source,
+                **({'source_question': 'object_held'} if measured['requires_visual'] else {}),
                 'operation': 'logical_not', 'source_status': holding, 'status': inverse[holding]}},
             "post_release_metric_pose_measured": False,
             'release_position_check': release_position_check(binding),
@@ -483,7 +467,7 @@ def verify_release_result(objects, capture, binding, reference, instruction="", 
             "layout_revision": binding["layout_revision"], "binding_id": binding["binding_id"],
             "release_feedback_id": binding["release_feedback_id"], "request_hash": evidence["request_hash"],
             **({'observation_assessment': observation} if observation else {})}
-        check = {"source": "openai_decisions", "observation_id": capture["observation_id"],
+        check = {"source": evidence['source'], "observation_id": capture["observation_id"],
                  "request_hash": evidence["request_hash"], "status": "not_requested"}
         return {"visual_evidence": visual, "demo_objects_check": check,
                 "binding_id": binding["binding_id"], "observation_id": capture["observation_id"],
@@ -508,5 +492,8 @@ def verify_release_result(objects, capture, binding, reference, instruction="", 
                                                        empty_gripper_confirmed=True)
             questions.extend(placement_payload['questions'])
             requests.append(placement_payload)
-    return parse({'model': release_payload['model'], 'answers': answers},
-                 merge_decision_evidence(records, capture, 'verify_release_result'))
+    evidence = merge_decision_evidence(records, capture, 'verify_release_result')
+    if not records:
+        evidence.update(source=measured['source'], component='gripper_feedback', request_hash=None)
+    evidence['gripper_feedback'] = measured['feedback']
+    return parse({'answers': answers}, evidence)

@@ -64,20 +64,22 @@ retain the user's requirements but are not a list of automatic extra Decisions r
 DECISIONS IS FOR VISION
 Visual questions use scoped RGB and optional depth. Labelled boxes from SAM3 or dated instance masks
 locate the queried subjects. Identity compares real appearance and physical history across views.
-verify_grasp uses Decisions alone to judge holding after Lift from the current native-resolution finger-contact RGB
-and same-capture gripper feedback. Holding questions do not include historical wrist images.
-A visual yes establishes holding, a visual no establishes empty grasp, and unresolved visual evidence remains unknown.
+verify_grasp reads actual joint position after Lift: fully open means empty, intermediate means holding.
+Only fully closed hands require Decisions from current native-resolution finger-contact RGB and same-capture
+feedback. Commands never substitute for measured position. Holding questions do not include historical wrist images.
 After confirmed holding, the program inherits the pregrasp target ID from the completed, uninterrupted
 grasp bound to that target, arm, run, generation and source observation. This is execution-chain identity
 inference, not another visual identity confirmation. It authorizes attachment after Lift without another
 Decisions or SAM3 call. A broken binding preserves held presence and unresolved identity and stops this
 transfer. Confirmed empty grasp authorizes the explicit empty-grasp recovery.
 Foam may deform until fingers nearly close. The approach/grasp/Lift sequence uses detached robot geometry.
-verify_place uses the same current contact RGB and feedback to confirm an empty gripper.
+verify_place inherits verified holding through transport; do not add in-transit holding or identity checks.
+After release it uses the same measured-position rule, calling Decisions for holding only if fully closed.
 It then uses current scene views, before-release views and dated identity references to select
 direct_success, inferred_success, failure or unknown for the bound target and destination.
-Container delivery succeeds anywhere inside the named container; configured XY constrains robot release only.
-Table-region delivery still requires the requested table region. Direct success requires clear current placement.
+Table and container placement use the same acceptance: configured XYZ constrains measured robot release.
+Direct success means clearly visible placement on the named support or inside the named container;
+the final resting object is not required to fit within the configured release square.
 Inferred success requires verified target holding, actual arrival at configured release XYZ within tolerance,
 release, current confirmed empty gripper and no visible evidence contradicting delivery. Occlusion is allowed, not required.
 Both success categories complete delivery and retain their evidence grade in the database.
@@ -137,8 +139,8 @@ unlocalized remaining input is unknown. Final posture is executed explicitly and
 For final completion_pose=observation, follow the transfer template's post-map with move_to_observe
 and verify_task_completion. For completion_pose=initial use return_to_initial_pose and verify_task_completion.
 Reserve return_observe_v1 for continuing work or observation recovery that needs a new scene analysis.
-Completed container contents with valid entry receipts retain membership while
-occluded; later observation focuses on the container and remaining task inputs.
+Completed container contents with valid direct or inferred entry receipts retain membership without
+individual reassociation or CAD registration; later observation focuses on the container and remaining task inputs.
 
 RECOVERY AND PHYSICAL EFFECTS
 Use the frozen skill requires/provides/planning_effects/failure_effects/result_bindings/argument_rules.

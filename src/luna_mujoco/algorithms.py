@@ -101,11 +101,6 @@ def determinate_grasp_failure(failure):
             and type(index) is int and type(count) is int and 0 <= index < count
             and type(checked) is int and checked > 0 and bool(proof.get('scene_token'))
             and isinstance(digest, str) and len(digest) == 64 and all(c in '0123456789abcdef' for c in digest))
-    if (isinstance(failure, dict) and failure.get('stage') == 'command_validation'
-            and failure.get('code') == 'planning_bounded_contact_unreachable'):
-        from .grasp_contact_prediction import is_proven_contact_shortfall
-
-        return is_proven_contact_shortfall(failure.get('details'))
     if (not isinstance(failure, dict) or failure.get("stage") != "planner"
             or failure.get("error") is not None):
         return False
@@ -728,7 +723,7 @@ class Algorithms:
 
     def validate_execution(self, observation, arm, scene, phase, command, binding=None, *,
                            planning_settings=None, gripper_end_position_rad=None,
-                           contact_goal_pose_world=None, previous_check=None, closure_driver_limit_rad=None):
+                           contact_goal_pose_world=None, previous_check=None):
         self._binding(observation, scene["target_id"], scene)
         settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
         peer = "B" if arm == "A" else "A"
@@ -744,8 +739,6 @@ class Algorithms:
             else "actual")
         if binding is not None:
             payload["carrying_binding"] = binding
-        if closure_driver_limit_rad is not None:
-            payload['closure_driver_limit_rad'] = closure_driver_limit_rad
         if contact_goal_pose_world is not None:
             payload["contact_goal_pose_world"] = rigid_matrix(contact_goal_pose_world).tolist()
         if phase in ("close", "open", "open_grasp"):
@@ -1012,42 +1005,11 @@ class Algorithms:
                         checking["arms"][arm]["joints_rad"] = points[-1].tolist()
                         if name == 'grasp':
                             close_command = {'positions_rad': [points[-1].tolist()], 'dt': command['dt']}
-                            try:
-                                checks['closure'] = self.validate_execution(checking, arm, scene, 'grasp_closure',
-                                    close_command, planning_settings=settings)
-                            except AlgorithmError as error:
-                                prefix = (error.details or {}).get('grasp_closure_preflight') or {}
-                                limit = prefix.get('safe_driver_limit_rad')
-                                samples = prefix.get('driver_samples_rad', [])
-                                if error.code != 'execution_collision' or limit is None or len(samples) < 2:
-                                    raise
-                                # Keep two feedback tolerances before the last proven
-                                # position. Revalidate the exact bounded command.
-                                reserve = 2 * settings['holding_position_tolerance_fraction'] * (samples[-1] - samples[0])
-                                limit -= reserve
-                                if limit <= samples[0] + reserve:
-                                    raise
-                                checks['closure'] = self.validate_execution(checking, arm, scene, 'grasp_closure',
-                                    close_command, planning_settings=settings, closure_driver_limit_rad=limit)
-                                checks['closure']['full_range_rejection'] = {
-                                    'first_world_collision': error.details.get('first_world_collision'),
-                                    'safe_driver_limit_rad': prefix['safe_driver_limit_rad'],
-                                    'command_reserve_rad': reserve}
-                                from .grasp_contact_prediction import bounded_contact_prediction
-
-                                contact = bounded_contact_prediction(
-                                    self._target(snapshot, target_id)['points_world_m'],
-                                    goal_evidence.get('grasp_endpoint_fk', {}).get('T_world_tcp', candidate['T_world_tcp']),
-                                    arm, limit, settings['holding_position_tolerance_fraction'])
-                                checks['closure']['bounded_contact_prediction'] = contact
-                                if not contact['opposing_contact_predicted']:
-                                    raise AlgorithmError('bounded closure cannot reach observed opposing pad contacts',
-                                        code='planning_bounded_contact_unreachable', details={
-                                            **contact, 'closure_collision': checks['closure']['full_range_rejection']})
+                            checks['closure'] = self.validate_execution(checking, arm, scene, 'grasp_closure',
+                                close_command, planning_settings=settings)
                 except AlgorithmError as error:
                     check_cancelled()
                     if error.code not in {"planning_phase_start_changed", "execution_collision",
-                                          "planning_bounded_contact_unreachable",
                                           "execution_observation_coverage_insufficient"}:
                         raise
                     batch_failures.append({"candidate_index": candidate["candidate_index"],

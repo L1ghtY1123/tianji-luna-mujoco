@@ -5,7 +5,7 @@ from functools import lru_cache
 from importlib.util import find_spec
 from pathlib import Path
 
-DECISION_INPUT_VERSION = 'contact-view-object-height-v4'
+DECISION_INPUT_VERSION = 'depth-unified-placement-v10'
 
 
 def evidence_digest(value):

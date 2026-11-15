@@ -9,7 +9,8 @@ def observation_inputs(context):
     entity_fields = ('id', 'kind', 'color', 'description', 'appearance_keywords', 'initial_parent_id',
         'roles', 'segmentation_query', 'reference_camera_id', 'reference_observation_id', 'bbox',
         'identity_request_hash', 'current_identity_proposal', 'last_position_measurement',
-        'asset_id', 'asset_source', 'geometry_policy', 'geometry_policy_instruction')
+        'asset_id', 'asset_source', 'geometry_policy', 'geometry_policy_instruction',
+        'last_motion_receipt', 'current_region', 'visual_release', 'container_entry')
     entities = reference.get('object_memory_snapshot', {}).get('entities', reference.get('entities', {}))
     return {
         'capture_version': {key: capture.get(key) for key in ('generation', 'manifest_revision', 'command_revision')},
@@ -31,7 +32,7 @@ def observation_inputs(context):
 
 
 def observation_identity_scope(object_memory, spatial_memory, task_progress, task_spec, *, target_id=None):
-    """Defer completed container contents from their bound physical entry history."""
+    """Completed container deliveries retain history; current contents use anonymous TSDF."""
     from ..container_occupancy import published_container_occupancy
 
     completed = task_progress.completed_input_ids() if task_progress is not None else set()
@@ -46,7 +47,8 @@ def observation_identity_scope(object_memory, spatial_memory, task_progress, tas
     occupancies = []
     for identifier in sorted(completed - focus):
         entity = entities.get(identifier, {})
-        container_id = (entity.get('container_entry') or {}).get('destination_id')
+        entry = entity.get('container_entry') or {}
+        container_id = entry.get('destination_id')
         if not container_id or container_id in focus:
             continue
         occupied = published_container_occupancy(entity, entities.get(container_id, {}), scene, invalidated)

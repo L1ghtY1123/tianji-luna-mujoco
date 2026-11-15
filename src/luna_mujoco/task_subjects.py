@@ -3,10 +3,11 @@ import json
 
 import numpy as np
 
+from .association_depth import DEPTH_INSTRUCTIONS, association_depth_state
 from .decision_conditions import parse_answers
 from .raw_visual_input import capture_content, reference_content, subject_description
 from .visual_api import VisualAPI, VisualDecisionError
-from .visual_identity import choice, mask_box
+from .visual_identity import candidate_query_terms, choice, mask_box
 
 
 def candidate_side_evidence(candidate, side):
@@ -44,9 +45,7 @@ def select_task_subject(client, capture, detections, identifier, entity, *, refe
          stored_query.get('prompt', ''), *stored_query.get('aliases', [])] if query}
     # A fallback mask still belongs to its original retrieval query. Matching
     # only the phrase SAM3 actually used silently discards valid fallback masks.
-    candidate_queries = [{str(query).strip().casefold() for query in
-        [row.get('prompt', ''), *row.get('query_prompts', []), *row.get('prompt_proposals', [])] if query}
-        for row in detections]
+    candidate_queries = [candidate_query_terms(row) for row in detections]
     required_side = entity.get('robot_relative_side') if not reference else None
     side_evidence = {f'C{index}': candidate_side_evidence(row, required_side)
                      for index, row in enumerate(detections)} if required_side else {}
@@ -57,7 +56,12 @@ def select_task_subject(client, capture, detections, identifier, entity, *, refe
                      if (camera is None or row['camera_id'] == camera) and index not in excluded
                      and (not retrieval_queries or retrieval_queries & candidate_queries[index])
                      and (not required_side or side_evidence[f'C{index}']['eligible'])}
-        if not available:
+        depth_state = association_depth_state(capture, {label: detections[index] for label, index in visible.items()},
+                                              {identifier: entity} if reference else None, reference)
+        spatial_excluded = [label for label, relations in depth_state.get('candidate_history_relations', {}).items()
+                            if label in available and relations.get(identifier, {}).get('same_capture_conflict')]
+        available = {label: index for label, index in available.items() if label not in spatial_excluded}
+        if not available and not spatial_excluded:
             continue
         labels = {}
         for label, index in visible.items():
@@ -69,7 +73,7 @@ def select_task_subject(client, capture, detections, identifier, entity, *, refe
             'A container and its contents are different objects, even when their boxes overlap. '
             'Select no_match if the requested object has no offered mask; never substitute a nearby object. '
             'Select unknown if evidence cannot distinguish them. Locations in dated references are historical. '
-            'Current multi-camera groups establish physical correspondence, not semantic identity.',
+            'Current multi-camera groups establish physical correspondence, not semantic identity. ' + DEPTH_INSTRUCTIONS,
             [{'value': label, 'description': subject_description(label, detections[index]['camera_id'],
                 mask_box(detections[index]['silhouette_mask'])) + ' SAM3 query hint '
                 + str(detections[index].get('prompt', 'object')) + '.'} for label, index in available.items()] + [
@@ -90,6 +94,7 @@ def select_task_subject(client, capture, detections, identifier, entity, *, refe
                                        if camera is None or detections[index]['camera_id'] == camera},
             'excluded_candidate_labels': [label for label, index in visible.items() if index in excluded],
             'reference_instance_ids': list((reference or {}).get('identity_references', {}))}
+        state.update(depth_state, same_capture_spatial_excluded_labels=spatial_excluded)
         if review:
             state['confirmed_current_camera_groups'] = [[f'C{index}' for index in group]
                                                        for group in current_groups]
@@ -121,6 +126,10 @@ def select_task_subject(client, capture, detections, identifier, entity, *, refe
         record['established_mask_owners'] = state['established_mask_owners']
         record['excluded_candidate_labels'] = state['excluded_candidate_labels']
         record['candidate_side_evidence'] = state['candidate_side_evidence']
+        record['candidate_depth_evidence'] = state['candidate_depth_evidence']
+        record['historical_spatial_evidence'] = state.get('historical_spatial_evidence', {})
+        record['candidate_history_relations'] = state.get('candidate_history_relations', {})
+        record['same_capture_spatial_excluded_labels'] = spatial_excluded
         records.append(record)
         if selected in available:
             return available[selected], records

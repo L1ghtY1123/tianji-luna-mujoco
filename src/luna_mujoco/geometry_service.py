@@ -864,7 +864,7 @@ class GeometryRuntime(CuroboRuntime):
             existing = (self.geometry_scene or {}).get('object_layers', {}).get('entities', {}).get(payload.get('target_id'), {})
             if (payload.get('operation') == 'container_entry' and payload.get('source') == 'visual_container_entry'
                     and payload.get('generation') == (self.geometry_scene or {}).get('generation')
-                    and existing.get('source') in {'container_contents_pending', 'container_contents_tsdf'}
+                    and existing.get('source') == 'container_contents_pending'
                     and existing.get('entry_receipt_id') == payload.get('receipt_id')
                     and existing.get('release_binding_id') == payload.get('binding_id')
                     and existing.get('container_id') == payload.get('container_id')):

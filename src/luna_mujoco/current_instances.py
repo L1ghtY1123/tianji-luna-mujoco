@@ -2,27 +2,27 @@
 import json
 from itertools import combinations
 
-import numpy as np
-
+from .association_depth import DEPTH_INSTRUCTIONS, association_depth_state, candidate_depth_evidence, spatial_relation
 from .decision_conditions import parse_answers
-from .initial_correspondence import projection_evidence
 from .raw_visual_input import capture_content, subject_description
 from .visual_api import VisualAPI, VisualDecisionError
-from .visual_identity import choice, mask_box
+from .visual_identity import candidate_query_terms, choice, mask_box
 
 
 def _correspondence(client, capture, subject, candidates, *, review=None, review_subjects=(),
                     confirmed_subjects=(), established=()):
-    geometry = projection_evidence(subject, candidates, capture, confirmed_subjects=confirmed_subjects)
-    excluded = [row['candidate_id'] for row in geometry['comparisons'] if row['status'] == 'conflict']
-    eligible = [row for row in candidates if row['candidate_id'] not in excluded]
+    confirmed_labels = list(dict.fromkeys(row['candidate_id'] for row in [subject, *confirmed_subjects]))
+    source_queries = candidate_query_terms(subject)
+    offered = [row for row in candidates if not source_queries or not candidate_query_terms(row)
+               or source_queries & candidate_query_terms(row)]
+    offered_labels = {row['candidate_id'] for row in offered}
     labels = [{'value': row['candidate_id'], 'description':
         subject_description(row['candidate_id'], row['camera_id'], mask_box(row['silhouette_mask']))
-        + ' SAM3 query hint ' + str(row.get('prompt', 'object')) + '.'} for row in eligible]
+        + ' SAM3 query hint ' + str(row.get('prompt', 'object')) + '.'} for row in offered]
     question = choice('camera_' + subject['candidate_id'] + '_to_' + candidates[0]['camera_id']
                       + ('_review' if review else ''),
         'Which offered mask is the SAME physical object as ' + subject['candidate_id']
-        + ' in camera ' + subject['camera_id'] + '? Compare current views, mask surfaces and world-coordinate evidence. '
+        + ' in camera ' + subject['camera_id'] + '? Compare the labelled surfaces in the CURRENT RGB views. '
         'Similar-looking boxes on opposite robot sides are different objects. Select no_match if no candidate '
         'is the same physical object, or unknown if uncertain.',
         labels + [
@@ -32,17 +32,25 @@ def _correspondence(client, capture, subject, candidates, *, review=None, review
     state = {'observation_id': capture['observation_id'], 'generation': capture.get('generation'),
         'source_candidate_id': subject['candidate_id'], 'source_camera_id': subject['camera_id'],
         'source_annotation': subject_description(subject['candidate_id'], subject['camera_id'], mask_box(subject['silhouette_mask'])),
-        'candidate_labels': [row['candidate_id'] for row in eligible],
-        'excluded_geometric_conflicts': excluded,
+        'candidate_labels': [row['candidate_id'] for row in offered],
+        'source_retrieval_queries': sorted(source_queries),
+        'retrieval_excluded_candidate_ids': [row['candidate_id'] for row in candidates
+                                            if row['candidate_id'] not in offered_labels],
+        'retrieval_interpretation': 'Only masks retrieved for the source query or its aliases are offered. '
+            'Other labelled surfaces remain context. Query membership does not prove identity.',
         'label_scope': 'C labels identify masks in this capture. SAM3 query text is a search hint. '
             'Use the labelled mask contour to identify the subject surface. Boxes enclose that contour and may include other objects.',
-        'destination_camera_id': candidates[0]['camera_id'], 'geometry_correspondence': geometry}
-    state['confirmed_same_object_labels'] = geometry['confirmed_subject_ids']
+        'destination_camera_id': candidates[0]['camera_id']}
+    state['confirmed_same_object_labels'] = confirmed_labels
     state['established_correspondences'] = list(established)
     question['instructions'] += (
         ' confirmed_same_object_labels are already confirmed views of the source object in this capture. '
-        'Their contours are drawn in the corresponding images. Use these views together, including the '
-        'bidirectional geometric evidence. A candidate excluded by any confirmed view cannot be selected.')
+        'Their contours are drawn in the corresponding images. Compare these views together. '
+        'A box, its contents and its supporting table are distinct physical objects. '
+        'Nearby coordinates and not_separated are neutral: they never prove identity. '
+        'Compare the outlined surfaces themselves; choose no_match when offered masks omit the source object. '
+        'Spatially separated same-capture surfaces cannot be the same object. '
+        'Choose no_match if all offered candidates are separated from the source. ' + DEPTH_INSTRUCTIONS)
     if review:
         state['established_or_competing_correspondences'] = review
         question['instructions'] += (
@@ -52,9 +60,12 @@ def _correspondence(client, capture, subject, candidates, *, review=None, review
     visible = {row['candidate_id']: row for row in [*review_subjects, *confirmed_subjects, subject, *candidates]}
     state['labelled_candidates'] = {label: {
         'camera_id': row['camera_id'], 'sam3_query': row.get('prompt'), 'bbox': mask_box(row['silhouette_mask']),
-        'visible_surface_centroid_world_m': row['geometry']['centroid_world_m'],
-        'visible_surface_extent_world_m': np.ptp(row['points'], axis=0).tolist(),
     } for label, row in visible.items()}
+    state.update(association_depth_state(capture, visible))
+    depth = state['candidate_depth_evidence']
+    state['candidate_spatial_relations'] = {row['candidate_id']: {
+        label: spatial_relation(depth[label], depth[row['candidate_id']])
+        for label in confirmed_labels} for row in offered}
     masks = {}
     for row in visible.values():
         masks.setdefault(row['camera_id'], {})[row['candidate_id']] = row['silhouette_mask']
@@ -66,12 +77,23 @@ def _correspondence(client, capture, subject, candidates, *, review=None, review
                                       lambda body, evidence: (body, evidence))
     parsed, answers = parse_answers(body, [question])
     selected = parsed[question['name']]
+    model_selected = selected
+    contradictions = [label for label, relation in state['candidate_spatial_relations'].get(selected, {}).items()
+                      if relation['status'] == 'separated']
+    if contradictions:
+        selected = 'unknown'
     record = {**evidence, 'source': 'openai_decisions', 'answers': answers,
         'source_candidate_id': subject['candidate_id'], 'destination_camera_id': candidates[0]['camera_id'],
-        'selected_candidate_id': selected, 'geometry_correspondence': geometry,
-        'confirmed_same_object_labels': geometry['confirmed_subject_ids'],
+        'selected_candidate_id': selected,
+        'model_selected_candidate_id': model_selected,
+        'candidate_depth_evidence': depth,
+        'candidate_spatial_relations': state['candidate_spatial_relations'],
+        'source_retrieval_queries': state['source_retrieval_queries'],
+        'retrieval_excluded_candidate_ids': state['retrieval_excluded_candidate_ids'],
+        'spatial_acceptance': {'accepted': not contradictions, 'contradicting_source_labels': contradictions,
+                               'reason': 'same_capture_spatial_separation' if contradictions else None},
+        'confirmed_same_object_labels': confirmed_labels,
         'established_correspondences': list(established),
-        'excluded_geometric_conflicts': excluded,
         'conflict_review': bool(review)}
     return selected, record
 
@@ -93,15 +115,16 @@ def _groups_and_conflicts(subjects, relations):
         group_cameras = [cameras[label] for label in group]
         if len(group_cameras) != len(set(group_cameras)):
             conflicts.update(group)
+        measurements = {row['candidate_id']: row.get('depth_evidence', {}) for row in subjects}
+        if any(spatial_relation(measurements[a], measurements[b])['status'] == 'separated'
+               for a, b in combinations(group, 2)):
+            conflicts.update(group)
     for relation in relations:
         group = next(group for group in groups if relation['source'] in group)
         expected = {label for label in group if cameras[label] == relation['destination_camera']}
         selected = relation['selected']
         if selected == 'no_match' and expected:
             conflicts.update(group)
-        for comparison in relation['record']['geometry_correspondence']['comparisons']:
-            if comparison['candidate_id'] == selected and comparison['status'] == 'conflict':
-                conflicts.update(group)
     return groups, conflicts
 
 
@@ -119,11 +142,8 @@ def _unresolved_relations(subjects, groups, relations):
         source_cameras = {cameras[label] for label in source_group}
         established = [label for label in source_group if cameras[label] == relation['destination_camera']]
         possible = []
-        excluded_labels = set(relation['record'].get('excluded_geometric_conflicts', []))
         for group in groups:
             if group is source_group or not any(cameras[label] == relation['destination_camera'] for label in group):
-                continue
-            if any(label in excluded_labels for label in group):
                 continue
             group_cameras = {cameras[label] for label in group}
             if source_cameras & group_cameras:
@@ -150,9 +170,8 @@ def _unresolved_relations(subjects, groups, relations):
 def current_instance_groups(client, capture, detections, *, seed_indices=None):
     subjects = []
     for index, detection in enumerate(detections):
-        points = np.asarray(detection['points'])
         subjects.append({**detection, 'candidate_id': 'C' + str(index), 'source_index': index,
-            'geometry': {**detection.get('geometry', {}), 'centroid_world_m': points.mean(axis=0).tolist()}})
+                         'depth_evidence': candidate_depth_evidence(capture, detection)})
     cameras = [camera for camera in ('3', '2', '1') if camera in capture['views']]
     cameras.sort(key=lambda camera: -sum(row['camera_id'] == camera for row in subjects))
     relations, records, implied_relations = [], [], []
@@ -170,7 +189,7 @@ def current_instance_groups(client, capture, detections, *, seed_indices=None):
             groups, conflicts = _groups_and_conflicts(subjects, relations)
             implied = {'source': subject['candidate_id'], 'destination_camera': destination_camera,
                        'selected': 'unknown', 'derived_only': True,
-                       'record': {'geometry_correspondence': {'comparisons': []}}}
+                       'record': {}}
             if not conflicts:
                 unresolved = _unresolved_relations(subjects, groups, [*relations, implied])
                 if implied not in unresolved:
@@ -200,10 +219,7 @@ def current_instance_groups(client, capture, detections, *, seed_indices=None):
         for pair, pair_relations in pairs.items():
             targets = [row['selected'] for row in pair_relations
                        if row['selected'] not in {'no_match', 'unknown', 'segmentation_error'}]
-            geometric_conflict = any(comparison['candidate_id'] == row['selected']
-                and comparison['status'] == 'conflict' for row in pair_relations
-                for comparison in row['record']['geometry_correspondence']['comparisons'])
-            if len(targets) != len(set(targets)) or geometric_conflict:
+            if len(targets) != len(set(targets)):
                 review_pairs.add(pair)
         if not review_pairs:
             review_pairs = {pair for pair, rows in pairs.items()

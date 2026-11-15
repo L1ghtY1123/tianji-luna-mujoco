@@ -2,6 +2,7 @@
 import json
 from copy import deepcopy
 
+from .association_depth import DEPTH_INSTRUCTIONS, association_depth_state
 from .current_instances import current_instance_groups
 from .decision_conditions import parse_answers
 from .raw_visual_input import capture_content, reference_content
@@ -17,7 +18,7 @@ def _review_owner(client, capture, detections, group, owners, entities, records,
         'Compare all competing descriptions and their labelled dated references together. Earlier choices '
         'are tentative and may be wrong; selection order gives no priority. A container and its contents '
         'are distinct objects. Choose reject if none owns this object, or unknown if the conflict cannot '
-        'be resolved from the supplied evidence. Do not choose by elimination without positive evidence.',
+        'be resolved from the supplied evidence. Do not choose by elimination without positive evidence. ' + DEPTH_INSTRUCTIONS,
         [{'value': owner, 'description': owner + ': ' + entities[owner].get('description', '')}
          for owner in owners] + [
             {'value': 'reject', 'description': 'None of the competing subjects owns this physical object.'},
@@ -34,15 +35,26 @@ def _review_owner(client, capture, detections, group, owners, entities, records,
     for index in group:
         row = detections[index]
         masks.setdefault(row['camera_id'], {})['C' + str(index)] = row['silhouette_mask']
-    content = [{'type': 'input_text', 'text': json.dumps(state, ensure_ascii=False, sort_keys=True)}]
-    content.extend(capture_content(capture, masks=masks, modalities=('rgb',)))
+    visual_reference = {}
     if reference:
         refs = {key: value for key, value in reference.get('identity_references', {}).items() if key in owners}
         # If a proposal relied on an older view, the conflict review must see it.
         if any(set(records[owner][-1].get('reference_observation_ids', []))
                - {refs.get(owner, {}).get('observation_id')} for owner in owners):
-            refs.update(client.load_identity_archive({key: entities[key] for key in owners})['identity_references'])
-        content.extend(reference_content({'identity_references': refs}, current_capture=capture,
+            archived = client.load_identity_archive({key: entities[key] for key in owners})
+            refs.update(archived['identity_references'])
+            visual_reference['archive_owners'] = archived.get('archive_owners', {})
+        visual_reference['identity_references'] = refs
+    state.update(association_depth_state(capture, {'C' + str(index): detections[index] for index in group},
+                                        {owner: entities[owner] for owner in owners}, visual_reference))
+    spatial_excluded = {owner for relations in state.get('candidate_history_relations', {}).values()
+                        for owner, comparison in relations.items() if comparison['same_capture_conflict']}
+    question['choices'] = [option for option in question['choices'] if option['value'] not in spatial_excluded]
+    state['same_capture_spatial_excluded_permanent_ids'] = sorted(spatial_excluded)
+    content = [{'type': 'input_text', 'text': json.dumps(state, ensure_ascii=False, sort_keys=True)}]
+    content.extend(capture_content(capture, masks=masks, modalities=('rgb',)))
+    if reference:
+        content.extend(reference_content(visual_reference, current_capture=capture,
                                          modalities=('rgb',), labelled_only=True))
     payload = {'model': 'gpt-6-luna', 'input': [{'role': 'user', 'content': content}], 'questions': [question]}
     body, evidence = VisualAPI.request(client, payload, capture, 'subject_ownership_review',

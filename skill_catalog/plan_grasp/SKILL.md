@@ -1,6 +1,6 @@
 # plan_grasp
 
-Use official cuRoboV2-Fast plan_grasp with at most the configured grasp_goalset_size ranked candidates per request. Approach, grasp and Lift use the detached grasp-planning robot and open-gripper model. Check closure separately. Validate the robot, selected-target contact links, environment, peer arm and self-collision. Remove numerically rejected candidates and continue within the frozen pool. Stop at the first fully validated grasp. Attachment is created by verify_grasp after Lift and target-held confirmation. Command checking stops at a proven invalid chunk and requires complete checking for success.
+Use official cuRoboV2-Fast plan_grasp with at most the configured grasp_goalset_size ranked candidates per request. Approach, grasp and Lift use the detached grasp-planning robot and open-gripper model. Check the full authored closure range separately. Commands only request full open or full close; reject colliding candidates without a bounded partial-close fallback. Validate the robot, selected-target contact links, environment, peer arm and self-collision. Remove numerically rejected candidates and continue within the frozen pool. Stop at the first fully validated grasp. Attachment is created by verify_grasp after Lift and target-held confirmation. Command checking stops at a proven invalid chunk and requires complete checking for success.
 
 参数、前提、效果、绑定和结果以同目录 contract.json 为准。所有跨技能恢复显式出现在 graph 中。
 

@@ -475,10 +475,6 @@ def validate_phase_request(payload):
         target_contact_samples(np.eye(4)[None], payload.get("contact_goal_pose_world"))
     if phase == 'grasp_closure' and (len(payload.get('positions_rad', [])) != 1 or mode != 'fixed_open'):
         raise ValueError('closure preflight requires one stationary open-hand pose')
-    if 'closure_driver_limit_rad' in payload:
-        limit = payload['closure_driver_limit_rad']
-        if phase != 'grasp_closure' or type(limit) not in (int, float) or not np.isfinite(limit):
-            raise ValueError('closure limit requires a finite stationary closure request')
     if "current_joints_rad" in payload:
         current = np.asarray(payload["current_joints_rad"], dtype=float)
         positions = np.asarray(payload.get("positions_rad"), dtype=float)
@@ -731,8 +727,7 @@ def check_command_path(runtime, planner, payload, binding):
     closure_angles, closure_padding = None, None
     if phase == 'grasp_closure':
         from .gripper_sweep import grasp_closure_samples
-        closure_angles, closure_padding = grasp_closure_samples(robot, payload['arm'], runtime._urdf_path,
-                                                               payload.get('closure_driver_limit_rad'))
+        closure_angles, closure_padding = grasp_closure_samples(robot, payload['arm'], runtime._urdf_path)
         samples = np.repeat(samples[:1], len(closure_angles), axis=0)
         source_indices = np.zeros(len(samples), dtype=int)
     both = samples
@@ -908,7 +903,6 @@ def check_command_path(runtime, planner, payload, binding):
                 break
     invalid = next((index for index, free in enumerate(valid) if not free), None)
     evaluation_complete = checked_count == len(samples) * len(variants)
-    from .gripper_sweep import safe_closure_prefix
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, allow_nan=False, separators=(",", ":")).encode()).hexdigest()
     world_source = runtime.geometry_scene.get('collision_world_source')
     hybrid_world = world_source == 'objects_cad_meshes_tsdf_esdf_and_measured_table_cuboids'
@@ -916,7 +910,6 @@ def check_command_path(runtime, planner, payload, binding):
             'lift_carried_collision_checked': False,
             "grasp_closure_preflight": None if closure_angles is None else {
                 'driver_samples_rad': closure_angles.tolist(), 'continuous_world_sweep_checked': evaluation_complete,
-                'safe_driver_limit_rad': safe_closure_prefix(closure_angles, valid),
                 'self_collision_scope': 'sampled_driver_positions',
                 'selected_target_policy': 'executing_link3_link4_target_contact',
                 'other_links_target_clearance_checked': True,

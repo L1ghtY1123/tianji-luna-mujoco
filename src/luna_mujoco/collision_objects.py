@@ -110,7 +110,7 @@ def reconcile_objects(previous, identity, grids, model, *, required_entity_ids=(
                         invalidated_entity_ids=(), retired_entity_ids=(), workspace_bounds=None,
                         max_retained_voxel_bytes=DEFAULT_MAX_RETAINED_VOXEL_BYTES,
                         requested_scope=None, strategy_source=None, scope_reason=None):
-    """Publish only current geometry, retaining container receipts as identity metadata."""
+    """Publish current geometry; delivery receipts stay in the object database."""
     require_native_objects_geometry(model)
     identity, model, grids = deepcopy(identity), deepcopy(model), list(grids)
     strategy = mapping_strategy(requested_scope, strategy_source, scope_reason)
@@ -139,17 +139,6 @@ def reconcile_objects(previous, identity, grids, model, *, required_entity_ids=(
                        'layer_names': [name for layers in model.values() for name in layers
                                        if layer_entity(name) == entity]}
                for entity in observed}
-    # A delivery receipt identifies container membership, not an individually
-    # measured pose. No previous mesh, voxel grid or occupied cell is copied.
-    if previous is not None and 'workspace_environment' in model.get('voxel', {}):
-        for entity, record in previous[0].get('object_layers', {}).get('entities', {}).items():
-            if (entity not in retired | observed
-                    and record.get('source') in {'container_contents_pending', 'container_contents_tsdf'}
-                    and record.get('container_id') in observed):
-                records[entity] = {**deepcopy(record), 'status': 'retained',
-                    'source': 'container_contents_tsdf', 'object_pose_measured': False,
-                    'last_observation_id': identity['observation_id'], 'last_generation': identity['generation'],
-                    'layer_names': ['workspace_environment']}
     published_bytes = voxel_bytes(grids)
     if published_bytes > max_retained_voxel_bytes:
         raise ValueError('objects_voxel_byte_budget_exceeded')

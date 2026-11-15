@@ -70,7 +70,7 @@ async def observe_after_failure(runner, context):
             **gripper_evidence_context(capture, evidence)})
     answer = result['judgments']['failure_gripper_holds']['status']
     context['failure_gripper_evidence'] = result
-    result['holding_presence'] = {'status': answer, 'rule': 'decisions_only'}
+    result['holding_presence'] = {'status': answer, 'rule': 'measured_position_then_closed_gripper_vision'}
     if answer != 'no':
         mode = return_mode(runner, context)
         if answer == 'yes' and mode == 'held':

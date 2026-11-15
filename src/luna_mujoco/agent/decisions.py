@@ -1,4 +1,4 @@
-"""Typed semantic/visual predicate judgments, always using the Decisions endpoint."""
+"""Typed judgments: measured gripper states first, unresolved visual facts via Decisions."""
 import json
 import math
 from copy import deepcopy
@@ -31,11 +31,23 @@ class DecisionsJudgments(VisualAPI):
         from ..raw_visual_input import capture_content, gripper_detail_content, reference_content
 
         context = deepcopy(context)
+        position_checks = {}
         if requests[0].name in {'object_held', 'failure_gripper_holds'}:
-            from ..robot_skills.grasp_verification import gripper_feedback_state
+            from ..robot_skills.grasp_verification import holding_from_feedback
 
             arms = ('A', 'B') if requests[0].name == 'failure_gripper_holds' else (context['selected_arm'],)
-            context['gripper_feedback'] = [gripper_feedback_state(capture, arm) for arm in arms]
+            position_checks = {arm: holding_from_feedback(capture, arm) for arm in arms}
+            context['gripper_feedback'] = [check['feedback'] for check in position_checks.values()]
+            arms = tuple(arm for arm, check in position_checks.items() if check['requires_visual'])
+            held = any(check['status'] == 'yes' for check in position_checks.values())
+            empty = all(check['status'] == 'no' for check in position_checks.values())
+            if held or empty or not arms:
+                status = 'yes' if held else 'no' if empty else 'unknown'
+                return {'judgments': {requests[0].name: {'status': status,
+                    'source': 'measured_gripper_position', 'per_arm': position_checks}},
+                    'evidence': {'source': 'measured_gripper_position',
+                        'observation_id': capture['observation_id'], 'generation': capture.get('generation'),
+                        'gripper_feedback': context['gripper_feedback'], 'questions': [], 'answers': []}}
         query = DecisionQuery.model_validate_json(json.dumps({
             'observation_id': capture['observation_id'], 'generation': capture.get('generation'),
             'question': requests[0].model_dump(mode='json'),
@@ -133,6 +145,9 @@ class DecisionsJudgments(VisualAPI):
                                               'value': value if known else 'unknown', 'confidence': probability}
                     continue
                 status = predicate_status(probability)
+                if status == 'no' and any(check['status'] == 'unknown' and not check['requires_visual']
+                                          for check in position_checks.values()):
+                    status = 'unknown'
                 judgments[request.name] = {'status': status, 'probability': probability}
             for check in evidence.get('diagnostic_checks', []):
                 if check['name'] in judgments:

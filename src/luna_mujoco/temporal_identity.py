@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import numpy as np
 
+from .association_depth import DEPTH_INSTRUCTIONS, association_depth_state
 from .decision_conditions import parse_answers
 from .raw_visual_input import capture_content, reference_content, subject_description
 from .visual_api import VisualAPI
@@ -56,9 +57,19 @@ def choose_identity(client, capture, members, entities, reference, name, *, arch
     records = []
 
     def ask(stage, instructions, choices, visual_reference, extra=None):
-        question = choice(name + '_' + stage, instructions, choices)
+        question = choice(name + '_' + stage, instructions + ' ' + DEPTH_INSTRUCTIONS, choices)
         modalities = ('rgb',)
-        content = [{'type': 'input_text', 'text': json.dumps({**state, **(extra or {})}, ensure_ascii=False)}]
+        owners = (extra or {}).get('archive_owners') or {
+            label: {'entity_id': identifier} for label, identifier in observations.items()}
+        depth = association_depth_state(capture,
+            {name + '_camera_' + row['camera_id']: row for row in members}, entities,
+            {**visual_reference, 'archive_owners': owners})
+        spatial_excluded = {identifier for relations in depth.get('candidate_history_relations', {}).values()
+                            for identifier, comparison in relations.items() if comparison['same_capture_conflict']}
+        question['choices'] = [option for option in question['choices']
+            if owners.get(option['value'], {}).get('entity_id', option['value']) not in spatial_excluded]
+        depth['same_capture_spatial_excluded_permanent_ids'] = sorted(spatial_excluded)
+        content = [{'type': 'input_text', 'text': json.dumps({**state, **(extra or {}), **depth}, ensure_ascii=False)}]
         content.extend(capture_content(capture, masks=masks, modalities=modalities,
             camera_order=subject_cameras))
         content.extend(reference_content(visual_reference, current_capture=capture,
@@ -70,6 +81,7 @@ def choose_identity(client, capture, members, entities, reference, name, *, arch
         records.append({**evidence, 'answers': answers, 'identity_stage': stage,
             'compared_instance_ids': list(entities), 'current_instance_label': name,
             'current_group': state['current_group'],
+            **depth,
             'excluded_permanent_ids': list(excluded_ids),
             'established_current_associations': deepcopy(list(established)),
             **{key: deepcopy(value) for key, value in (extra or {}).items()

@@ -143,8 +143,7 @@ class SpatialMemory:
         remaining = [identifier for identifier in self._lifecycle.invalidated_entity_ids
                      if identifier not in self._lifecycle.retired_entity_ids
                      and identifier not in measured_tables
-                     and records.get(identifier, {}).get('status') != 'observed'
-                     and records.get(identifier, {}).get('source') != 'container_contents_tsdf']
+                     and records.get(identifier, {}).get('status') != 'observed']
         if (scene.get('object_layers', {}).get('rebuild_policy') == 'replace_from_current_observation'
                 and scene.get('coverage', {}).get('objects_complete') is True):
             remaining = []

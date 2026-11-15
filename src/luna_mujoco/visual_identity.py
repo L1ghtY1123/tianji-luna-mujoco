@@ -10,6 +10,12 @@ from .core.decisions import choice_value
 from .visual_api import VisualAPI, VisualDecisionError
 
 
+def candidate_query_terms(candidate):
+    """Original retrieval membership survives SAM3 fallback and merged proposals."""
+    return {str(query).strip().casefold() for query in [candidate.get('prompt', ''),
+        *candidate.get('query_prompts', []), *candidate.get('prompt_proposals', [])] if query}
+
+
 def choice(name, instructions, values):
     meanings = {
         'new_instance': 'A distinct physical object whose permanent identity has not yet been registered.',

@@ -1,6 +1,6 @@
 # execute_grasp
 
-Execute the bound approach, grasp, closure and Lift sequence with the detached grasp-planning robot and open-gripper model. Validate the actual sequence, closure limits, selected-target contact links, environment, peer arm and self-collision. Retain provisional holding evidence after Lift. verify_grasp confirms holding, inherits the target ID from the bound continuous execution, and creates attachment for transport and placement.
+Execute the bound approach, grasp, closure and Lift sequence with the detached grasp-planning robot and open-gripper model. Command full close at grasp. Validate the actual sequence, full closure range, selected-target contact links, environment, peer arm and self-collision. Retain provisional holding evidence after Lift. verify_grasp confirms holding, inherits the target ID from the bound continuous execution, and creates attachment for transport and placement.
 
 参数、前提、效果、绑定和结果以同目录 contract.json 为准。所有跨技能恢复显式出现在 graph 中。
 

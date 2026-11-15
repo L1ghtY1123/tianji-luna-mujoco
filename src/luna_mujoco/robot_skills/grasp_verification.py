@@ -1,4 +1,4 @@
-"""Visual holding and identity inherited from a bound, completed grasp."""
+"""Measured gripper state, closed-hand vision and inherited target identity."""
 
 import math
 
@@ -9,21 +9,20 @@ WRIST_CAMERAS = {'A': '2', 'B': '1'}
 GRIPPER_ENDPOINT_TOLERANCE_FRACTION = 0.02
 
 HOLDING_POSITION_RULE = (
-    '按当前实际位置依次判断：完全张开（fully_open）为未持物；'
-    '动作结束后既未全开又未全闭（partially_closed）为持物；'
+    '程序按当前实测关节位置判定：完全张开（fully_open）为未持物；'
+    '动作结束后既未全开又未全闭（partially_closed）为持物，不调用视觉模型；'
     '完全闭合（fully_closed）不能单凭位置判断，须看 CURRENT 图中两指之间是否有物体材料。'
     '全闭时薄物或受压变形的材料仍可能被夹住，也可能为空爪。'
-    '使用同次实测位置，不把张开或闭合命令当成实际位置；实测位置不可用时依据 CURRENT 图像判断。'
+    '仅完全闭合时调用 Decisions。使用同次实测位置，不把开合命令当成实测位置；反馈不可用时保留 unknown。'
 )
 
 HOLDING_VISUAL_CRITERIA = {
     'jaw_state': HOLDING_POSITION_RULE,
-    'held': '动作结束后实际未全开且未全闭；或全闭时 CURRENT 图中两指之间可见被夹持的物体材料。',
-    'empty': '实际完全张开；或全闭时 CURRENT 图中两指之间清晰可见且没有物体材料。',
+    'held': '完全闭合时，CURRENT 图中两指之间可见被夹持的物体材料。',
+    'empty': '完全闭合时，CURRENT 图中两指之间清晰可见且没有物体材料。',
     'deformation': '全闭不等于空爪。柔软物体可被压薄、压扁或折叠，不要求保持抓取前厚度或轮廓。',
     'visibility': '结合指腹附近的轮廓和遮挡关系观察夹持处。远处桌面或盒内的物体属于背景。'
-                  '深色或黑色物体也属于有效视觉证据。实际全开已确认时判为未持物。'
-                  '已确认未全开且未全闭时判为持物。全闭或反馈不可用且夹持处不可见时，保留不确定性。',
+                  '深色或黑色物体也属于有效视觉证据。夹持处不可见时保留不确定性。',
     'annotations': '当前夹持局部 RGB 不带实例标签。直接观察两指夹持处的材料，持物判断不依赖 SAM3 检出。',
     'comparison': '持物题只使用 CURRENT 夹持接触区及同次实测反馈，不用不同姿态和尺度的历史图推断当前夹持。',
 }
@@ -87,8 +86,17 @@ def gripper_feedback_state(capture, arm):
     commanded = feedback.get('gripper_closed_command')
     if type(commanded) is bool:
         result['command'] = {'full_close_requested': commanded,
-            'meaning': '是否下发到机械全闭端的目标。false 也可能是部分闭合命令，仅说明动作意图。'}
+            'meaning': '是否下发到机械全闭端的目标。命令只说明动作意图，持物判断使用实测位置。'}
     return result
+
+
+def holding_from_feedback(capture, arm):
+    """Open and partial closure are measured facts; only full closure needs vision."""
+    feedback = gripper_feedback_state(capture, arm)
+    position = feedback['measured'].get('position_state')
+    return {'status': {'fully_open': 'no', 'partially_closed': 'yes'}.get(position, 'unknown'),
+            'requires_visual': position == 'fully_closed', 'source': 'measured_gripper_position',
+            'reason': position or 'gripper_feedback_unavailable', 'feedback': feedback}
 
 
 def gripper_evidence_context(capture, evidence):
@@ -106,5 +114,5 @@ def grasp_visual_context(capture, holding):
 
 def object_held_question(arm):
     return JudgmentRequest(name='object_held',
-        instructions=f'执行臂 {arm} 当前夹持着物体。全开时本命题为假，未全开且未全闭时为真。'
-            + HOLDING_POSITION_RULE)
+        instructions=f'执行臂 {arm} 已实测完全闭合。CURRENT 图中两指之间仍夹持着物体材料。'
+            '薄物或受压变形材料也算持物；清晰可见且无材料为否，夹持处不可见时保留未知。')

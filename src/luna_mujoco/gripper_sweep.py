@@ -8,14 +8,7 @@ import numpy as np
 CLOSURE_SAMPLE_STEP_RAD = .00025
 
 
-def safe_closure_prefix(angles, valid):
-    """Only the contiguous collision-free prefix can authorize a close command."""
-    failed = np.flatnonzero(~np.asarray(valid, dtype=bool))
-    end = int(failed[0]) - 1 if len(failed) else len(angles) - 1
-    return None if end <= 0 else float(angles[end])
-
-
-def grasp_closure_samples(robot_config, arm, urdf_path, maximum_driver_rad=None, *, sample_step_rad=CLOSURE_SAMPLE_STEP_RAD):
+def grasp_closure_samples(robot_config, arm, urdf_path, *, sample_step_rad=CLOSURE_SAMPLE_STEP_RAD):
     """Possible stopping positions before object contact, from authored limits."""
     if arm not in {'A', 'B'}:
         raise ValueError('closure preflight requires one arm')
@@ -25,11 +18,6 @@ def grasp_closure_samples(robot_config, arm, urdf_path, maximum_driver_rad=None,
     lower, upper = float(limit.get('lower')), float(limit.get('upper'))
     if not np.isfinite([lower, upper]).all() or lower >= upper:
         raise ValueError('closure preflight requires finite authored limits')
-    if maximum_driver_rad is not None:
-        if (type(maximum_driver_rad) not in (int, float) or not np.isfinite(maximum_driver_rad)
-                or not lower < maximum_driver_rad <= upper):
-            raise ValueError('closure limit must be inside authored limits')
-        upper = float(maximum_driver_rad)
     if not np.isfinite(sample_step_rad) or sample_step_rad <= 0:
         raise ValueError('gripper sample step must be positive')
     angles = np.linspace(lower, upper, int(np.ceil((upper - lower) / sample_step_rad)) + 1)

@@ -398,7 +398,7 @@ class Simulation:
             while command.gripper_events and elapsed >= command.gripper_events[0]['time_s']:
                 event = command.gripper_events.pop(0)
                 lower, upper = self._model.joint(GRIP_DRIVERS[arm]).range
-                self._desired_grip[arm] = float(event.get('maximum_position_rad', upper) if event['closed'] else lower)
+                self._desired_grip[arm] = float(upper if event['closed'] else lower)
                 self._command_revision += 1
                 command.event_receipts.append({**event, 'feedback': self._robot_snapshot()})
             if elapsed < duration:
@@ -814,11 +814,6 @@ class Simulation:
             raise ValueError('invalid_sequence_gripper_events')
         with self._motion_locks[arm], self._condition:
             self._check_generation(generation)
-            lower_grip, upper_grip = self._model.joint(GRIP_DRIVERS[arm]).range
-            for event in events:
-                limit = event.get('maximum_position_rad', upper_grip)
-                if not np.isfinite(limit) or not lower_grip < limit <= upper_grip:
-                    raise ValueError('sequence_gripper_target_outside_limits')
             if np.max(np.abs(self._data.qpos[self._arm_q[arm]] - positions[0])) > np.deg2rad(.05):
                 raise ValueError("trajectory_start_changed_after_collision_check")
             for index, name in enumerate(ARM_JOINTS[arm]):
@@ -927,7 +922,7 @@ class Simulation:
         lower, upper = self._model.joint(GRIP_DRIVERS[arm]).range
         return float(np.clip((self._data.qpos[self._grip_q[arm]] - lower) / (upper - lower), 0, 1))
 
-    def set_gripper(self, arm, closed, generation, *, maximum_position_rad=None, execution_settings=None):
+    def set_gripper(self, arm, closed, generation, *, execution_settings=None):
         from .planning_settings import PlanningSettings
         from .verification import GRIPPER_LIMIT_NOISE_TOLERANCE_RAD, gripper_settling_evidence
 
@@ -938,11 +933,6 @@ class Simulation:
         with self._motion_locks[arm], self._condition:
             self._check_generation(generation)
             lower, upper = self._model.joint(GRIP_DRIVERS[arm]).range
-            if maximum_position_rad is not None:
-                if (closed is not True or type(maximum_position_rad) not in (int, float)
-                        or not np.isfinite(maximum_position_rad) or not lower < maximum_position_rad <= upper):
-                    raise ValueError('bounded close requires a target inside the gripper limits')
-                upper = maximum_position_rad
             self._command_revision += 1
             self._desired_grip[arm] = float(upper if closed else lower)
             start_time = float(self._data.time)

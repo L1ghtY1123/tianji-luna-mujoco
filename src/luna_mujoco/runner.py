@@ -1003,7 +1003,8 @@ class Runner:
                 'judgments': {'object_held': {'status': 'unknown', 'reason': 'visual_request_failed'}},
                 'evidence': {**copy.deepcopy(error.evidence), 'error': str(error)}}
         presence = holding_judgment['judgments']['object_held']['status']
-        presence_evidence = {'status': presence, 'rule': 'decisions_only',
+        presence_evidence = {'status': presence, 'rule': 'measured_position_then_closed_gripper_vision',
+            'source': holding_judgment.get('evidence', {}).get('source', 'openai_decisions'),
             'observation_id': capture['observation_id']}
         identity_binding = None
         state = 'empty' if presence == 'no' else 'unknown'
@@ -1018,8 +1019,8 @@ class Runner:
                                     'reason': str(error), 'visual_identity_verified': False}
         answer = {'held': 'yes', 'empty': 'no'}.get(state, 'unknown')
         result = {'success': answer == 'yes', 'status': 'held' if answer == 'yes' else answer,
-            'source': 'visual_holding_and_execution_identity',
-            'visual_evidence': {'source': 'visual_holding', 'observation_id': capture['observation_id'],
+            'source': 'gripper_holding_and_execution_identity',
+            'visual_evidence': {'source': presence_evidence['source'], 'observation_id': capture['observation_id'],
                 'generation': capture['generation'], 'image_input': 'strict_workspace_rgb',
                 'grasp_execution': copy.deepcopy(context['grasp_execution'])},
             'reason': None if answer == 'yes' else (identity_binding or {}).get('reason', 'visual_grasp_' + state),
@@ -1152,21 +1153,14 @@ class Runner:
                 measured_observation=checking, contact_goal_pose_world=plan['T_world_tcp'],
                 previous_check=plan.get('command_checks', {}).get(phase))
             checking['arms'][arm]['joints_rad'] = phases[phase]['positions_rad'][-1]
-        close_limit = plan.get('command_checks', {}).get('closure', {}).get(
-            'grasp_closure_preflight', {}).get('safe_driver_limit_rad')
-        if close_limit is not None:
-            close_limit = min(close_limit, feedback['arms'][arm]['gripper_limits_rad'][1])
         checks['closure'] = await self.validate_motion(context, 'grasp_closure',
             {'positions_rad': [checking['arms'][arm]['joints_rad']], 'dt': .02},
-            measured_observation=checking, closure_driver_limit_rad=close_limit)
+            measured_observation=checking)
         checks['lift'] = await self.validate_motion(context, 'grasp_lift', phases['lift'],
             measured_observation=checking,
             previous_check=plan.get('command_checks', {}).get('lift'))
-        closing = {'closed': True}
-        if close_limit is not None:
-            closing['maximum_position_rad'] = close_limit
         sequence = build_sequence(phases, ('approach', 'grasp', 'lift'),
-            gripper_events={'grasp': closing}, gripper_transition_s=settings['gripper_transition_s'])
+            gripper_events={'grasp': {'closed': True}}, gripper_transition_s=settings['gripper_transition_s'])
         self.holding_state = {'owner_id': self.run_id, 'generation': self.state['generation'],
             'arm': arm, 'instance_id': self.state['target_id'], 'state': 'provisional',
             'verified': False, 'attached': False, 'reason': 'continuous_grasp_in_progress'}
@@ -1182,7 +1176,7 @@ class Runner:
             'lift_carried_collision_checked': checks['lift'].get('lift_carried_collision_checked', False),
             'lift_gripper_geometry': checks['lift']['gripper_configuration_source'],
             'attachment_stage': 'after_lift_and_holding_verification',
-            'visual_verification_required': True}
+            'holding_verification_required': True}
         completed = self.simulation.robot_snapshot()
         context['grasp_execution'] = {'arm': arm, 'completed': True, 'target_id': self.state['target_id'],
             'owner_id': self.run_id, 'motion_epoch': self.motion_epoch, 'action_epoch': self.observation_epoch,

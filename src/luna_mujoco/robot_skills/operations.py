@@ -435,7 +435,7 @@ class RobotOperations(ProcessingSkills, Runner):
                     or evidence.get("destination_id") != binding["destination_id"]
                     or evidence.get("layout_revision") != binding["layout_revision"]
                     or evidence.get("identity_source") != "execution_chain"
-                    or evidence.get("source") != "openai_decisions"):
+                    or evidence.get("source") not in {"openai_decisions", "measured_gripper_position"}):
                 raise ValueError("visual_identity_progress_frame_mismatch")
             confidence = evidence.get("confidence")
             if confidence is not None and (type(confidence) not in (int, float) or not 0. <= confidence <= 1.):
@@ -458,7 +458,7 @@ class RobotOperations(ProcessingSkills, Runner):
                 "observation_id": capture["observation_id"],
                 "visual_observation_id": evidence["observation_id"], "binding_id": binding["binding_id"]}
             self.sync_result_evidence(context, "post_place")
-            self.emit("visual_transfer_result", "Decisions 放置结果核验", after)
+            self.emit("visual_transfer_result", "放置结果核验", after)
             zone = binding.get('placement_zone', {})
             if (zone.get('intent', {}).get('release_mode') == 'container_release'
                     and zone.get('semantic_scope') == 'entire_region'
@@ -489,13 +489,11 @@ class RobotOperations(ProcessingSkills, Runner):
                 self.sync_memory(context)
                 return result
             confirmed = self.task_progress.confirm_visual_transfer(target, evidence)
-            outside = evidence.get('measured_object_position', {}).get('status') == 'outside'
             rejected = evidence.get('status') == 'rejected'
-            result.update(success=confirmed, status="confirmed" if confirmed else "failure" if outside or rejected else "unknown",
+            result.update(success=confirmed, status="confirmed" if confirmed else "failure" if rejected else "unknown",
                 placement_outcome=evidence['placement_outcome'],
                 verification_scope="release_and_visual_destination", visual_evidence=evidence,
-                reason=None if confirmed else "measured_object_outside_placement_region" if outside
-                else "visual_placement_rejected" if rejected
+                reason=None if confirmed else "visual_placement_rejected" if rejected
                 else "visual_destination_unconfirmed")
             result['observation_assessment'] = copy.deepcopy(after.get('observation_assessment', {}))
             if 'pending_transfer' in context:
