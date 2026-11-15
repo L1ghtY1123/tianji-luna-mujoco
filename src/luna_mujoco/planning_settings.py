@@ -11,7 +11,21 @@ from pydantic import BaseModel, ConfigDict, Field, StrictFloat, model_validator
 from .observation_motion import observation_joint_limits, observation_poses
 from .vla_configuration import default_vla_input_size
 
-RELEASE_ENDPOINT_POSITION_TOLERANCE_M = .002
+CUROBO_DEFAULTS = {
+    'ik_num_seeds': 32, 'ik_seed_solver_num_seeds': 32,
+    'ik_position_threshold_m': .005, 'ik_rotation_threshold_rad': .05,
+    'random_seed': 123, 'self_collision_check': True,
+    'trajectory_collision_clearance_m': 0., 'optimizer_collision_activation_distance_m': .01,
+    'trajopt_num_seeds': 4, 'plan_max_attempts': 20, 'finetune_attempts': 1,
+    'finetune_dt_scale': .6, 'freq_hz': 40,
+    'approach_axis': 'z', 'approach_offset_m': -.15, 'approach_in_tool_frame': True,
+    'place_approach_axis': 'z', 'place_approach_offset_m': -.15, 'place_approach_in_tool_frame': True,
+    'place_retreat_axis': 'z', 'place_retreat_offset_m': -.15, 'place_retreat_in_tool_frame': True,
+}
+
+GRASP_LIFT_POLICY = {'lift_axis': 'z', 'lift_offset_m': .15, 'lift_in_tool_frame': False}
+
+RELEASE_ENDPOINT_POSITION_TOLERANCE_M = .005
 
 
 def setting(default, title, description, group, *, unit="", scale=1, step=1, **limits):
@@ -100,19 +114,21 @@ class PlanningSettings(BaseModel):
         "filter")
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
-    holding_position_tolerance_fraction: float = setting(.02, "夹持位置容差", "相对空夹闭合位置的容差，占有效行程的比例。", "verification", ge=.001, le=.1, step=.005)
-    holding_stable_window_s: float = setting(.2, "夹持稳定窗口", "只使用窗口内的夹爪位置判断稳定，不使用力或电流。", "verification", unit="s", ge=.05, le=1., step=.05)
+    holding_position_tolerance_fraction: float = setting(.02, "夹爪稳定位置容差", "执行稳定窗口内允许的位置变化，占有效行程的比例。", "verification", ge=.001, le=.1, step=.005)
+    holding_stable_window_s: float = setting(.2, "夹爪稳定窗口", "用于独立夹爪执行命令的稳定性诊断。", "verification", unit="s", ge=.05, le=1., step=.05)
     gripper_stable_velocity_rad_s: float = setting(.015, "夹爪窗口稳定速度上限", "完整稳定窗口内驱动关节速度的时间加权均方根不超过此值，且位置变化满足容差才返回；超时失败。", "verification", unit="rad/s", step=.005, gt=0, le=.2)
-    gripper_timeout_s: float = setting(3., "夹爪稳定超时", "仿真时间上限；未稳定不能作为夹持成功。", "verification", unit="s", step=.1, gt=0, le=15)
+    gripper_timeout_s: float = setting(3., "夹爪稳定超时", "独立夹爪命令的仿真等待上限。视觉节点负责夹持结果。", "verification", unit="s", step=.1, gt=0, le=15)
     motion_position_tolerance_rad: float = setting(.005, "运动到位误差", "轨迹结束后关节位置误差上限；不改变沿途跟踪保护。", "execution", unit="°", scale=180 / math.pi, step=.1, gt=0, le=.02)
     motion_stable_velocity_rad_s: float = setting(.03, "运动到位速度上限", "末端关节速度连续满足要求才返回。", "execution", unit="rad/s", step=.01, gt=0, le=.2)
     motion_stable_window_s: float = setting(.08, "运动到位稳定窗口", "仿真时间；短暂到位后再次偏离会重新计时。", "execution", unit="s", step=.02, ge=.02, le=1)
     motion_settle_timeout_s: float = setting(3., "运动到位超时", "轨迹结束后的最大等待时间；超时失败。", "execution", unit="s", step=.1, gt=0, le=15)
-    grasp_insertion_m: float = setting(.01, "抓姿局部 Z 补偿", "未知 OBB 的 GraspGen 抓姿在 IK 前沿执行臂末端局部 +Z 应用一次；默认 10mm，仅工作台配置可修改，Responses 无覆盖权限。CAD 离线抓姿不应用。", "grasp", unit="mm", scale=1000, step=1, ge=-.02, le=.03)
+    grasp_goalset_size: int = setting(32, "抓取候选批大小", "每次 goalset 请求的候选上限，通过完整数值检查的首条轨迹结束搜索。", "grasp", ge=1, le=128, strict=True)
+    cad_grasp_insertion_m: float = setting(0., "CAD 抓取伸入深度", "CAD 离线库已设定抓取深度，默认额外伸入 0mm。工作台显式调整后，沿执行臂末端局部 +Z 在 IK 前应用一次。仅工作台配置可修改，Responses 无覆盖权限。", "grasp", unit="mm", scale=1000, step=1, ge=-.02, le=.03)
     grasp_maximum_tilt_deg: float = setting(180., "抓姿最大倾角", "相对世界向下轴；180°不按倾角排除，最终由数值碰撞与 IK 判断。", "grasp", unit="°", step=5, ge=0, le=180)
     grasp_require_away_from_robot: bool = setting(False, "只保留背离机身的抓取方向", "可选方向约束；默认关闭，不能代替碰撞检查。", "grasp")
+    grasp_maximum_lateral_angle_deg: float = setting(30., "抓姿最大左右偏角", "GraspGen 末端 +Z 限于世界 +X 前方至 −Z 下方扇区，此项限制偏离世界 XZ 平面的角度。CAD 离线抓姿使用已设定方向。", "grasp", unit="°", step=1, ge=0, le=45)
 
-    ik_num_seeds: int = setting(16, "IK 优化 seeds", "每目标 IK 优化起点数；16 为锁定 cuRobo batch planner 默认，两处 IK 显式对齐。",
+    ik_num_seeds: int = setting(32, "IK 优化 seeds", "官方 plan_grasp 内部 goalset IK 的优化起点数。",
                                "shared", ge=1, le=64, strict=True)
     ik_seed_solver_num_seeds: int = setting(32, "IK 初始解 seeds（LM）", "LM 初始解搜索数；官方默认 32。项目要求 ≥ IK seeds，避免 SDK 自动扩大搜索数。",
                                            "shared", ge=1, le=128, strict=True)
@@ -123,64 +139,52 @@ class PlanningSettings(BaseModel):
     random_seed: int = setting(123, "random seed", "两处 IK 和 TrajOpt 使用相同随机数种子；GPU 计算不保证逐位复现。",
                               "shared", ge=0, le=2147483647, strict=True)
     self_collision_check: bool = setting(True, "自碰撞检查", "启用机器人自身碰撞检查；关闭会降低规划约束。", "shared")
-    trajectory_collision_clearance_m: float = setting(.005, "碰撞间距（hard clearance）",
+    trajectory_collision_clearance_m: float = setting(0., "碰撞间距（hard clearance）",
         "普通环境及非接触链接的硬净距。指腹目标接触及已测支撑接触单独处理；不是全局禁止接触距离。",
         "shared", unit="mm", scale=1000, ge=0, le=.5)
 
-    optimizer_collision_activation_distance_m: float = setting(.03, "碰撞代价激活距离（soft activation）",
+    optimizer_collision_activation_distance_m: float = setting(.01, "碰撞代价激活距离（soft activation）",
         "TrajOpt 在该距离内产生避障代价，不等于 hard clearance；必须不小于 hard clearance。",
         "planner", unit="mm", scale=1000, ge=0, le=.5)
     trajopt_num_seeds: int = setting(4, "TrajOpt seeds", "每目标轨迹优化起点数；本项目采用4，以提高包含抓取目标时的路径求解覆盖。锁定官方batch默认2。要求 ≤ IK seeds，避免 SDK 自动上调。",
                                     "planner", ge=1, le=8, strict=True)
-    plan_max_attempts: int = setting(2, "最大规划 attempts", "普通plan_pose/plan_cspace的公开尝试预算。plan_grasp内部阶段采用官方默认，公共接口未暴露此参数。",
-                                     "planner", ge=1, le=10, strict=True)
+    plan_max_attempts: int = setting(20, "最大规划 attempts", "普通plan_pose/plan_cspace的公开尝试预算。plan_grasp内部阶段采用官方默认，公共接口未暴露此参数。",
+                                     "planner", ge=1, le=100, strict=True)
     finetune_attempts: int = setting(1, "finetune attempts", "仅批量普通plan_pose公开支持；单臂plan_pose及plan_grasp内部阶段不覆盖。",
                                     "planner", ge=1, le=10, strict=True)
-    finetune_dt_scale: float = setting(.55, "finetune dt scale", "仅批量普通plan_pose公开支持；plan_grasp内部用官方默认。独立于执行time_scale。",
+    finetune_dt_scale: float = setting(.6, "finetune dt scale", "仅批量普通plan_pose公开支持；plan_grasp内部用官方默认。独立于执行time_scale。",
                                        "planner", step=.05, gt=0, le=1)
-    freq_hz: int = setting(50, "SDK 轨迹采样频率", "实际映射 cuRobo interpolation_dt=1/frequency；不是 MuJoCo 物理步频。",
+    freq_hz: int = setting(40, "SDK 轨迹采样频率", "实际映射 cuRobo interpolation_dt=1/frequency；不是 MuJoCo 物理步频。",
                            "planner", unit="Hz", ge=20, le=100, strict=True)
 
     approach_axis: Literal["x", "y", "z"] = setting("z", "Approach 轴", "生成接近位姿的坐标轴。", "grasp")
-    approach_offset_m: float = setting(-.1, "Approach 偏移", "沿指定坐标轴相对抓取位姿偏移；不能为零。",
+    approach_offset_m: float = setting(-.15, "Approach 偏移", "沿指定坐标轴相对抓取位姿偏移；不能为零。",
                                        "grasp", unit="mm", scale=1000, ge=-.5, le=.5)
     approach_in_tool_frame: bool = setting(True, "Approach 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "grasp")
-    lift_axis: Literal["x", "y", "z"] = setting("z", "Lift 轴", "生成提升位姿的坐标轴。", "grasp")
-    lift_offset_m: float = setting(.1, "Lift 偏移", "默认 world +Z 100 mm；demo按实测源盒/邻件占据边界与完整持物球包络推导离箱高度，至少保留此值并归档有效值。不能为零。",
-                                   "grasp", unit="mm", scale=1000, ge=-.5, le=.5)
-    lift_in_tool_frame: bool = setting(False, "Lift 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "grasp")
+    lift_axis: Literal["x", "y", "z"] = setting("z", "Lift 轴", "抓取提升固定使用世界 Z 轴。", "grasp")
+    lift_offset_m: float = setting(.15, "Lift 偏移", "抓取后沿世界 +Z 提升 150 mm。",
+                                   "grasp", unit="mm", scale=1000, gt=0, le=.5)
+    lift_in_tool_frame: bool = setting(False, "Lift 使用 tool frame", "抓取提升使用世界坐标系。", "grasp")
 
-    place_approach_axis: Literal["x", "y", "z"] = setting("z", "Approach 轴", "官方grasp_approach_axis；放置接近段使用。", "place")
-    place_approach_offset_m: float = setting(.1, "Approach 偏移", "官方grasp_approach_offset；默认在放置位姿上方 world +Z 100 mm，不能为零。",
-                                             "place", unit="mm", scale=1000, ge=-.5, le=.5)
-    place_approach_in_tool_frame: bool = setting(False, "Approach 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
-    place_retreat_axis: Literal["x", "y", "z"] = setting("z", "Lift 轴", "官方grasp_lift_axis语义；开爪detach后的提升段使用。", "place")
-    place_retreat_offset_m: float = setting(.1, "Lift 偏移", "官方grasp_lift_offset语义；默认沿 world +Z 提升100 mm，不能为零。",
-                                            "place", unit="mm", scale=1000, ge=-.5, le=.5)
-    place_retreat_in_tool_frame: bool = setting(False, "Lift 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "place")
-    container_release_gap_m: float = setting(.01, "盒沿上方释放间隙", "物体完整几何最低点高于已发布容器上沿的名义间隙；不是 TCP 高度。仅 container_release 使用，不自动抬高重试。", "place", unit="mm", scale=1000, step=1, gt=0, le=.1)
-    place_release_height_m: float = setting(0., "额外释放间隙下限", "默认0，不另加释放高度；从hard clearance允许的最低高度开始，检查夹爪、持物球和当前碰撞场。非零值仅用于显式指定更大的间隙。",
-                                       "place", unit="mm", scale=1000, step=1, ge=0, le=.502)
-    place_max_release_gap_m: float = setting(.05, "选位允许的最大物体离面高度", "resolve_placement 拒绝物体几何底部高于支撑面此距离的候选，避免把障碍上方悬空位置作为放置点。",
-                                          "place", unit="mm", scale=1000, step=1, ge=0, le=.502)
+    place_approach_axis: Literal['x', 'y', 'z'] = setting('z', '放置接近轴', '官方默认', 'place')
+    place_approach_offset_m: float = setting(-.15, '放置接近偏移', '官方默认', 'place', unit='mm', scale=1000)
+    place_approach_in_tool_frame: bool = setting(True, '接近使用末端坐标', '官方默认', 'place')
+    place_retreat_axis: Literal['x', 'y', 'z'] = setting('z', '撤离轴', '官方默认', 'place')
+    place_retreat_offset_m: float = setting(-.15, '撤离偏移', '官方默认', 'place', unit='mm', scale=1000)
+    place_retreat_in_tool_frame: bool = setting(True, '撤离使用末端坐标', '官方默认', 'place')
 
-    time_scale: float = setting(2., "时间伸长／补点倍率（三段共用）", "cuRobo 完成后用 q/v/a 做五次 Hermite 补点；默认 2 倍，执行点间隔保持 SDK dt。",
+    container_release_bottom_clearance_m: float = setting(.02, "容器释放高度余量", "末端 Z = 实测盒口最高点 + 物体高度 + 余量；默认20mm，含为保守附着包络增加的10mm。", "place", unit="mm", scale=1000, step=1, ge=0, le=1)
+    container_release_fixed_xy: bool = setting(True, "容器使用配置释放区域", "container_release 使用下方配置的固定 XY，目标盒必须包含此区域。", "place")
+    container_release_x_m: float = setting(.430, "容器释放 X", "机器人基坐标系中的固定物体参考点 X。", "place", unit="mm", scale=1000, step=1, ge=-2, le=2)
+    container_release_y_m: float = setting(-.560, "容器释放 Y", "机器人基坐标系中的固定物体参考点 Y。", "place", unit="mm", scale=1000, step=1, ge=-2, le=2)
+    container_release_region_size_m: float = setting(.12, "容器释放区域边长", "以配置 XY 为中心的正方形区域，保留实测容器边界和碰撞检查。", "place", unit="mm", scale=1000, step=1, gt=0, le=1)
+    place_bottom_clearance_m: float = setting(.02, "桌面释放高度余量", "末端 Z = 实测桌面 Z + 物体高度 + 余量；默认20mm，含为保守附着包络增加的10mm。",
+                                       "place", unit="mm", scale=1000, step=1, ge=0, le=1)
+
+
+    gripper_transition_s: float = setting(.4, "连续动作夹爪开合时长", "三段轨迹中预留的夹爪驱动时间，不等待夹持反馈或视觉判断。", "execution", unit="s", step=.05, gt=0, le=3)
+    time_scale: float = setting(3., "时间伸长／补点倍率（三段共用）", "使用五次 Hermite 插值伸长执行时间，默认 3 倍。",
                                 "execution", unit="倍", step=.1, ge=1, le=10)
-    dwell_approach_s: float = setting(0., "Approach 后额外停留", "到位反馈通过后的可选停留；不乘时间伸长倍率。",
-                                     "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_grasp_s: float = setting(0., "夹爪闭合后额外停留", "夹爪稳定反馈通过后的可选停留，不替代夹持判定。",
-                                  "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_lift_s: float = setting(0., "Lift 后额外停留", "携物抬升到位后的可选停留，不替代持物判定。",
-                                 "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_place_approach_s: float = setting(0., "放置 approach 后额外停留", "到位反馈通过后的可选停留。",
-                                           "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_place_s: float = setting(0., "放置后开爪前额外停留", "到位反馈通过后的可选停留。",
-                                   "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_release_s: float = setting(0., "释放后额外稳定等待", "开爪稳定并 detach 后可选等待；物体落稳及位置由后续当前观测核验。",
-                                     "execution", unit="s", step=.1, ge=0, le=30)
-    dwell_retreat_s: float = setting(0., "撤离后额外停留", "撤离到位后的可选等待，不自动添加观测。",
-                                     "execution", unit="s", step=.1, ge=0, le=30)
-
     pointcloud_filter: PointcloudFilterSettings = Field(default_factory=PointcloudFilterSettings)
     observation: ObservationSettings = Field(default_factory=ObservationSettings)
     attachment: AttachmentSettings = Field(default_factory=AttachmentSettings)
@@ -192,11 +196,28 @@ class PlanningSettings(BaseModel):
         if not isinstance(values, dict):
             return values
         migrated = dict(values)
+        # GraspGen already returns its contact TCP. Align it with the actual
+        # arm's front TCP; a saved legacy insertion must never move it again.
+        migrated.pop('grasp_insertion_m', None)
         # The fixed-open pregrasp place preflight was removed. Retire its
         # saved option instead of exposing an advanced setting with no effect.
         migrated.pop("place_max_candidates", None)
+        migrated.pop("place_max_release_gap_m", None)
+        for retired in ('dwell_approach_s', 'dwell_grasp_s', 'dwell_lift_s', 'dwell_place_approach_s',
+                        'dwell_place_s', 'dwell_release_s', 'dwell_retreat_s'):
+            migrated.pop(retired, None)
         for legacy_name in ("release_margin_m", "place_release_margin_m", "plan_timeout_s", "place_timeout_s"):
             migrated.pop(legacy_name, None)
+        migrated.update(CUROBO_DEFAULTS)
+        migrated.update(GRASP_LIFT_POLICY)
+        migrated.pop('container_release_gap_m', None)
+        migrated.pop('place_release_height_m', None)
+        migrated.pop('place_tcp_z_m', None)
+        migrated.pop('container_release_tcp_z_m', None)
+        # Old values described TCP height, not object-bottom clearance.
+        migrated.pop('place_tcp_height_m', None)
+        migrated.pop('container_release_tcp_height_m', None)
+        migrated.update(container_release_fixed_xy=True)
         return migrated
 
     @model_validator(mode="after")
@@ -213,9 +234,20 @@ class PlanningSettings(BaseModel):
             raise ValueError("soft activation 必须不小于 hard clearance")
         if self.approach_offset_m == 0 or self.lift_offset_m == 0:
             raise ValueError("Approach / Lift 偏移不能为零")
-        if self.place_approach_offset_m == 0 or self.place_retreat_offset_m == 0:
-            raise ValueError("Place approach / retreat 偏移不能为零")
         return self
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs):
+        schema = super().model_json_schema(*args, **kwargs)
+        for name in CUROBO_DEFAULTS:
+            schema['properties'][name]['readOnly'] = True
+            schema['properties'][name]['official_default'] = True
+            schema['properties'][name]['description'] = 'cuRobo v0.9.0 official default'
+        for name in ('container_release_fixed_xy',):
+            schema['properties'][name]['readOnly'] = True
+        for name in GRASP_LIFT_POLICY:
+            schema['properties'][name]['readOnly'] = True
+        return schema
 
     def revision(self):
         return hashlib.sha256(self.model_dump_json().encode()).hexdigest()[:16]

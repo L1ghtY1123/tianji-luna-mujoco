@@ -27,7 +27,10 @@ TCP_BODIES = {"A": "TCP_Link_L", "B": "TCP_Link_R"}
 # arms. A frozen loaded closure saturated the authored 18 Nm wrist capacity.
 # Keep finite simulator capacity and position-angle ctrl; grippers still use
 # their actual URDF effort. No task code commands forces or overwrites qpos.
-ARM_POSITION_STIFFNESS = 240000.
+# At 50 Hz, excessive position stiffness turns each sampled target into a
+# contact impulse. This gain retains the checked 0.03 rad tracking envelope
+# while reducing object slip in the loaded transport replay.
+ARM_POSITION_STIFFNESS = 60000.
 ARM_POSITION_DAMPING = 600.
 ARM_POSITION_EFFORT_MULTIPLIER = 10.
 COLORS = {
@@ -372,6 +375,17 @@ class ModelBuilder:
             if geom.contype or geom.conaffinity:
                 geom.group = 3
                 geom.contype, geom.conaffinity = 1, 0
+        for body in spec.bodies:
+            if body.name in ("gripL_Link3_L", "gripL_Link3_R", "gripR_Link3_L", "gripR_Link3_R"):
+                for geom in body.geoms:
+                    if geom.contype:
+                        # Equivalent rubber contact material on authored finger
+                        # geometry. Priority keeps object defaults from overriding it.
+                        geom.priority = 2
+                        geom.condim = 6
+                        geom.friction = [1.5, .01, .001]
+                        geom.solref = [.003, 1]
+                        geom.solimp = [.95, .99, .001, .5, 2]
         # The stand/base's convex hull encloses the tabletop workspace. Its
         # authored visual remains, while articulated links retain all contacts.
         for body in spec.bodies:

@@ -1,0 +1,1601 @@
+{
+  "version": 1,
+  "source_demo": "demo-2-requested-all",
+  "source_run_id": "1681a9c6b1634502bd54ce05d54acc7c",
+  "templates": {
+    "observe_map_v1": {
+      "description": "Fresh three-camera instance observation followed by global observation-map publication.",
+      "arguments": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "requires": {
+        "grasp_held": false,
+        "recovery_needed": false
+      },
+      "success": {
+        "observed": true,
+        "observation_motion_scene_ready": true
+      },
+      "failure": "Return failure with the last skill result and its physical effects; do not replay completed effects.",
+      "unknown": "Return unknown with existing evidence; no automatic retry or motion.",
+      "body": {
+        "id": "body",
+        "input_id": null,
+        "task": null,
+        "nodes": [
+          {
+            "type": "skill",
+            "id": "step_0_observe_scene",
+            "skill": "observe_scene",
+            "arguments": {
+              "capture_mode": "fresh"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "step_1_build_scene",
+            "skill": "build_scene",
+            "arguments": {
+              "exclusion_state": "observation",
+              "reason": "Refresh measured observation-motion collision scene"
+            }
+          },
+          {
+            "type": "end",
+            "id": "success",
+            "status": "success",
+            "reason": "Scope success"
+          },
+          {
+            "type": "end",
+            "id": "failure",
+            "status": "failure",
+            "reason": "Scope failure"
+          },
+          {
+            "type": "end",
+            "id": "unknown",
+            "status": "unknown",
+            "reason": "Scope unknown"
+          }
+        ],
+        "entry": "step_0_observe_scene",
+        "on_failure": {
+          "target": "failure",
+          "max_traversals": 1
+        },
+        "on_unknown": {
+          "target": "unknown",
+          "max_traversals": 1
+        },
+        "edges": [
+          {
+            "sources": [
+              "step_0_observe_scene"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "step_1_build_scene",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "step_1_build_scene"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "success",
+            "max_traversals": 1
+          }
+        ]
+      },
+      "dependencies": []
+    },
+    "return_observe_v1": {
+      "description": "From existing measured empty-hand evidence, publish an observation-motion map, return to configured pose, acquire fresh RGBD and remap. No target or destination rebinding.",
+      "arguments": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "requires": {
+        "observed": true,
+        "grasp_held": false,
+        "recovery_needed": false
+      },
+      "success": {
+        "observed": true,
+        "observation_pose_ready": true,
+        "observation_motion_scene_ready": true
+      },
+      "failure": "Return failure with the last skill result and its physical effects; do not replay completed effects.",
+      "unknown": "Return unknown with existing evidence; no automatic retry or motion.",
+      "body": {
+        "id": "body",
+        "input_id": null,
+        "task": null,
+        "nodes": [
+          {
+            "type": "skill",
+            "id": "step_0_build_scene",
+            "skill": "build_scene",
+            "arguments": {
+              "exclusion_state": "observation",
+              "reason": "Refresh measured observation-motion collision scene"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "step_1_move_to_observe",
+            "skill": "move_to_observe",
+            "arguments": {
+              "viewpoint": "configured"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "step_2_observe_scene",
+            "skill": "observe_scene",
+            "arguments": {
+              "capture_mode": "fresh"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "step_3_build_scene",
+            "skill": "build_scene",
+            "arguments": {
+              "exclusion_state": "observation",
+              "reason": "Refresh measured observation-motion collision scene"
+            }
+          },
+          {
+            "type": "end",
+            "id": "success",
+            "status": "success",
+            "reason": "Scope success"
+          },
+          {
+            "type": "end",
+            "id": "failure",
+            "status": "failure",
+            "reason": "Scope failure"
+          },
+          {
+            "type": "end",
+            "id": "unknown",
+            "status": "unknown",
+            "reason": "Scope unknown"
+          }
+        ],
+        "entry": "step_0_build_scene",
+        "on_failure": {
+          "target": "failure",
+          "max_traversals": 1
+        },
+        "on_unknown": {
+          "target": "unknown",
+          "max_traversals": 1
+        },
+        "edges": [
+          {
+            "sources": [
+              "step_0_build_scene"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "step_1_move_to_observe",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "step_1_move_to_observe"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "step_2_observe_scene",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "step_2_observe_scene"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "step_3_build_scene",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "step_3_build_scene"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "success",
+            "max_traversals": 1
+          }
+        ]
+      },
+      "dependencies": []
+    },
+    "empty_grasp_recovery_v1": {
+      "description": "Clear one confirmed empty grasp and acquire fresh RGBD at the actual current joints. No return motion or hidden regrasp; caller restores current geometry and the same execution arm.",
+      "arguments": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "requires": {
+        "recovery_needed": true,
+        "arm_selected": true
+      },
+      "success": {
+        "grasp_held": false,
+        "recovery_needed": false,
+        "observed": true
+      },
+      "failure": "Return failure with the last skill result and its physical effects; do not replay completed effects.",
+      "unknown": "Return unknown with existing evidence; no automatic retry or motion.",
+      "body": {
+        "id": "body",
+        "input_id": null,
+        "task": null,
+        "entry": "reconcile",
+        "nodes": [
+          {
+            "type": "skill",
+            "id": "reconcile",
+            "skill": "recover_failed_grasp",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "observe_here",
+            "skill": "observe_scene",
+            "arguments": {
+              "capture_mode": "fresh"
+            }
+          },
+          {
+            "type": "end",
+            "id": "success",
+            "status": "success",
+            "reason": "Scope success"
+          },
+          {
+            "type": "end",
+            "id": "failure",
+            "status": "failure",
+            "reason": "Scope failure"
+          },
+          {
+            "type": "end",
+            "id": "unknown",
+            "status": "unknown",
+            "reason": "Scope unknown"
+          }
+        ],
+        "edges": [
+          {
+            "sources": [
+              "reconcile"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "observe_here",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "observe_here"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "success",
+            "max_traversals": 1
+          }
+        ],
+        "on_failure": {
+          "target": "failure",
+          "max_traversals": 1
+        },
+        "on_unknown": {
+          "target": "unknown",
+          "max_traversals": 1
+        }
+      },
+      "dependencies": []
+    },
+    "single_arm_transfer_v1": {
+      "description": "Single-arm object grasp/place with an explicit entry observe_scene node using reuse_current. The observation skill reuses a valid current capture or acquires a fresh capture through its normal version and feedback checks. Admit only an arm whose workspace contains BOTH the measured source and fixed release TCP; no handover or arm switch. Regenerate and replan once on the same arm. Empty grasp and placement uncertainty first use a fresh observation in place; return motion requires an explicit program evidence check. All effects and bounded recovery stay visible. Support regions use surface_setdown. Open containers use container_release at the configured TCP height above the measured rim. Gentle placement on a container floor is unsupported. For one specifically identified object use TaskSpec scope=ids and its exact target ref. For all/count, including count=1, call only after select_target and bind target_id=$selected; the template does not select a collection member.",
+      "arguments": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "target_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "destination_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "destination_kind": {
+                "type": "string",
+                "const": "support_region"
+              },
+              "release_mode": {
+                "type": "string",
+                "const": "surface_setdown"
+              }
+            },
+            "required": [
+              "target_id",
+              "destination_id",
+              "destination_kind",
+              "release_mode"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "target_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "destination_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "destination_kind": {
+                "type": "string",
+                "const": "container"
+              },
+              "release_mode": {
+                "type": "string",
+                "const": "container_release"
+              }
+            },
+            "required": [
+              "target_id",
+              "destination_id",
+              "destination_kind",
+              "release_mode"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "requires": {
+        "grasp_held": false,
+        "recovery_needed": false,
+        "needs_place": true
+      },
+      "success": {
+        "released": true,
+        "place_verification_completed": true,
+        "observed": true,
+        "observation_motion_scene_ready": true
+      },
+      "failure": "Return failure with the last skill result and its physical effects; do not replay completed effects.",
+      "unknown": "Return unknown with existing evidence; no automatic retry or motion.",
+      "body": {
+        "id": "body",
+        "input_id": null,
+        "task": null,
+        "entry": "entry_observe",
+        "nodes": [
+          {
+            "type": "skill",
+            "id": "entry_observe",
+            "skill": "observe_scene",
+            "arguments": {
+              "capture_mode": "reuse_current"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "identify",
+            "skill": "identify_target",
+            "arguments": {
+              "target_id": {
+                "$parameter": "target_id"
+              }
+            }
+          },
+          {
+            "type": "skill",
+            "id": "dest",
+            "skill": "identify_destination",
+            "arguments": {
+              "destination_id": {
+                "$parameter": "destination_id"
+              },
+              "destination_kind": {
+                "$parameter": "destination_kind"
+              },
+              "release_mode": {
+                "$parameter": "release_mode"
+              },
+              "placement_mode": "configured_xy",
+              "placement_preference": "clearance",
+              "orientation_mode": "preserve"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "map_selected",
+            "skill": "build_scene",
+            "arguments": {
+              "exclusion_state": "selected",
+              "reason": "Synchronize current database geometry"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "zone",
+            "skill": "perceive_placement_zone",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "choose",
+            "skill": "choose_arm",
+            "arguments": {
+              "arm": "auto"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "grasps",
+            "skill": "generate_grasps",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "plan",
+            "skill": "plan_grasp",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "recompute",
+            "skill": "generate_grasps",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "plan_retry",
+            "skill": "plan_grasp",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "execute",
+            "skill": "execute_grasp",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "verify_grasp",
+            "skill": "verify_grasp",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "identify_observe_here",
+            "skill": "observe_scene",
+            "arguments": {
+              "capture_mode": "fresh"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "identify_here",
+            "skill": "identify_target",
+            "arguments": {
+              "target_id": {
+                "$parameter": "target_id"
+              }
+            }
+          },
+          {
+            "type": "skill",
+            "id": "dest_here",
+            "skill": "identify_destination",
+            "arguments": {
+              "destination_id": {
+                "$parameter": "destination_id"
+              },
+              "destination_kind": {
+                "$parameter": "destination_kind"
+              },
+              "release_mode": {
+                "$parameter": "release_mode"
+              },
+              "placement_mode": "configured_xy",
+              "placement_preference": "clearance",
+              "orientation_mode": "preserve"
+            }
+          },
+          {
+            "type": "router",
+            "id": "identity_view_choice",
+            "condition": "Return to configured observation pose only when current evidence is missing and movement is legal",
+            "rule": "observation_recovery",
+            "choices": [
+              "return",
+              "stop",
+              "unknown"
+            ]
+          },
+          {
+            "type": "skill",
+            "id": "repair_map",
+            "skill": "build_scene",
+            "arguments": {
+              "exclusion_state": "observation",
+              "reason": "Synchronize current database geometry"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "repair_move",
+            "skill": "move_to_observe",
+            "arguments": {
+              "viewpoint": "configured"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "repair_observe",
+            "skill": "observe_scene",
+            "arguments": {
+              "capture_mode": "fresh"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "identify_after_move",
+            "skill": "identify_target",
+            "arguments": {
+              "target_id": {
+                "$parameter": "target_id"
+              }
+            }
+          },
+          {
+            "type": "skill",
+            "id": "dest_after_move",
+            "skill": "identify_destination",
+            "arguments": {
+              "destination_id": {
+                "$parameter": "destination_id"
+              },
+              "destination_kind": {
+                "$parameter": "destination_kind"
+              },
+              "release_mode": {
+                "$parameter": "release_mode"
+              },
+              "placement_mode": "configured_xy",
+              "placement_preference": "clearance",
+              "orientation_mode": "preserve"
+            }
+          },
+          {
+            "type": "subgraph",
+            "id": "grasp_recovery",
+            "subgraph_id": "empty_recovery"
+          },
+          {
+            "type": "skill",
+            "id": "restore_target",
+            "skill": "identify_target",
+            "arguments": {
+              "target_id": {
+                "$parameter": "target_id"
+              }
+            }
+          },
+          {
+            "type": "skill",
+            "id": "restore_destination",
+            "skill": "identify_destination",
+            "arguments": {
+              "destination_id": {
+                "$parameter": "destination_id"
+              },
+              "destination_kind": {
+                "$parameter": "destination_kind"
+              },
+              "release_mode": {
+                "$parameter": "release_mode"
+              },
+              "placement_mode": "configured_xy",
+              "placement_preference": "clearance",
+              "orientation_mode": "preserve"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "restore_map",
+            "skill": "build_scene",
+            "arguments": {
+              "exclusion_state": "selected",
+              "reason": "Synchronize current database geometry"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "restore_zone",
+            "skill": "perceive_placement_zone",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "restore_arm",
+            "skill": "choose_arm",
+            "arguments": {
+              "arm": "auto"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "restore_grasps",
+            "skill": "generate_grasps",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "restore_plan",
+            "skill": "plan_grasp",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "restore_recompute",
+            "skill": "generate_grasps",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "restore_plan_retry",
+            "skill": "plan_grasp",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "execute_retry",
+            "skill": "execute_grasp",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "verify_grasp_retry",
+            "skill": "verify_grasp",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "plan_place",
+            "skill": "plan_place",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "execute_place",
+            "skill": "execute_place",
+            "arguments": {}
+          },
+          {
+            "type": "skill",
+            "id": "verify_place",
+            "skill": "verify_place",
+            "arguments": {
+              "release_mode": {
+                "$parameter": "release_mode"
+              }
+            }
+          },
+          {
+            "type": "skill",
+            "id": "release_observe_here",
+            "skill": "observe_scene",
+            "arguments": {
+              "capture_mode": "fresh"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "verify_place_here",
+            "skill": "verify_place",
+            "arguments": {
+              "release_mode": {
+                "$parameter": "release_mode"
+              }
+            }
+          },
+          {
+            "type": "router",
+            "id": "release_view_choice",
+            "condition": "Return to configured observation pose only when current evidence is missing and movement is legal",
+            "rule": "observation_recovery",
+            "choices": [
+              "return",
+              "stop",
+              "unknown"
+            ]
+          },
+          {
+            "type": "skill",
+            "id": "release_map",
+            "skill": "build_scene",
+            "arguments": {
+              "exclusion_state": "observation",
+              "reason": "Synchronize current database geometry"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "release_move",
+            "skill": "move_to_observe",
+            "arguments": {
+              "viewpoint": "configured"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "release_observe_after_move",
+            "skill": "observe_scene",
+            "arguments": {
+              "capture_mode": "fresh"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "verify_place_after_move",
+            "skill": "verify_place",
+            "arguments": {
+              "release_mode": {
+                "$parameter": "release_mode"
+              }
+            }
+          },
+          {
+            "type": "skill",
+            "id": "post_observe",
+            "skill": "observe_scene",
+            "arguments": {
+              "capture_mode": "fresh"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "post_map",
+            "skill": "build_scene",
+            "arguments": {
+              "exclusion_state": "observation",
+              "reason": "Synchronize current database geometry"
+            }
+          },
+          {
+            "type": "router",
+            "id": "empty_view_choice",
+            "condition": "Return to configured observation pose only when current evidence is missing and movement is legal",
+            "rule": "observation_recovery",
+            "choices": [
+              "return",
+              "stop",
+              "unknown"
+            ]
+          },
+          {
+            "type": "skill",
+            "id": "empty_map",
+            "skill": "build_scene",
+            "arguments": {
+              "exclusion_state": "observation",
+              "reason": "Synchronize current database geometry"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "empty_move",
+            "skill": "move_to_observe",
+            "arguments": {
+              "viewpoint": "configured"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "empty_observe",
+            "skill": "observe_scene",
+            "arguments": {
+              "capture_mode": "fresh"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "empty_identify",
+            "skill": "identify_target",
+            "arguments": {
+              "target_id": {
+                "$parameter": "target_id"
+              }
+            }
+          },
+          {
+            "type": "skill",
+            "id": "empty_dest",
+            "skill": "identify_destination",
+            "arguments": {
+              "destination_id": {
+                "$parameter": "destination_id"
+              },
+              "destination_kind": {
+                "$parameter": "destination_kind"
+              },
+              "release_mode": {
+                "$parameter": "release_mode"
+              },
+              "placement_mode": "configured_xy",
+              "placement_preference": "clearance",
+              "orientation_mode": "preserve"
+            }
+          },
+          {
+            "type": "end",
+            "id": "success",
+            "status": "success",
+            "reason": "Scope success"
+          },
+          {
+            "type": "end",
+            "id": "failure",
+            "status": "failure",
+            "reason": "Scope failure"
+          },
+          {
+            "type": "end",
+            "id": "unknown",
+            "status": "unknown",
+            "reason": "Scope unknown"
+          }
+        ],
+        "edges": [
+          {
+            "sources": [
+              "entry_observe"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "identify",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "identify"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "dest",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "dest"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "map_selected",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "map_selected"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "zone",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "zone"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "choose",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "choose"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "grasps",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "grasps"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "plan",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "plan"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "execute",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "execute"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "verify_grasp",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "verify_grasp"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "plan_place",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "plan_place"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "execute_place",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "execute_place"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "verify_place",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "verify_place"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "post_observe",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "post_observe"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "post_map",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "post_map"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "success",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "recompute"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "plan_retry",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "plan_retry"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "execute",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "identify_observe_here"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "identify_here",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "identify_here"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "dest_here",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "dest_here"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "map_selected",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "repair_map"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "repair_move",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "repair_move"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "repair_observe",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "repair_observe"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "identify_after_move",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "identify_after_move"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "dest_after_move",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "dest_after_move"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "map_selected",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "grasp_recovery"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "restore_target",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_target"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "restore_destination",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_destination"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "restore_map",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_map"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "restore_zone",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_zone"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "restore_arm",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_arm"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "restore_grasps",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_grasps"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "restore_plan",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_plan"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "execute_retry",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "execute_retry"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "verify_grasp_retry",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "verify_grasp_retry"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "plan_place",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_recompute"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "restore_plan_retry",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_plan_retry"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "execute_retry",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "release_observe_here"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "verify_place_here",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "verify_place_here"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "post_observe",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "release_map"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "release_move",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "release_move"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "release_observe_after_move",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "release_observe_after_move"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "verify_place_after_move",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "verify_place_after_move"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "post_observe",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "plan"
+            ],
+            "outcomes": [
+              "failure"
+            ],
+            "target": "recompute",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "plan"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "recompute",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_plan"
+            ],
+            "outcomes": [
+              "failure"
+            ],
+            "target": "restore_recompute",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_plan"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "restore_recompute",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "identify"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "identify_observe_here",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "dest"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "identify_observe_here",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "identify_here"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "identity_view_choice",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "dest_here"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "identity_view_choice",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_target"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "empty_view_choice",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "restore_destination"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "empty_view_choice",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "empty_map"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "empty_move",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "empty_move"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "empty_observe",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "empty_observe"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "empty_identify",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "empty_identify"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "empty_dest",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "empty_dest"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "restore_map",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "verify_grasp"
+            ],
+            "outcomes": [
+              "failure"
+            ],
+            "target": "grasp_recovery",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "verify_place"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "release_observe_here",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "verify_place_here"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "release_view_choice",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "identity_view_choice"
+            ],
+            "outcomes": [
+              "return"
+            ],
+            "target": "repair_map",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "identity_view_choice"
+            ],
+            "outcomes": [
+              "stop"
+            ],
+            "target": "failure",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "identity_view_choice"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "unknown",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "empty_view_choice"
+            ],
+            "outcomes": [
+              "return"
+            ],
+            "target": "empty_map",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "empty_view_choice"
+            ],
+            "outcomes": [
+              "stop"
+            ],
+            "target": "failure",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "empty_view_choice"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "unknown",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "release_view_choice"
+            ],
+            "outcomes": [
+              "return"
+            ],
+            "target": "release_map",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "release_view_choice"
+            ],
+            "outcomes": [
+              "stop"
+            ],
+            "target": "failure",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "release_view_choice"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "unknown",
+            "max_traversals": 1
+          }
+        ],
+        "on_failure": {
+          "target": "failure",
+          "max_traversals": 1
+        },
+        "on_unknown": {
+          "target": "unknown",
+          "max_traversals": 1
+        }
+      },
+      "dependencies": [
+        {
+          "id": "empty_recovery",
+          "template": "empty_grasp_recovery_v1",
+          "arguments": {}
+        }
+      ]
+    }
+  }
+}

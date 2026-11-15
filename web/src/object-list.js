@@ -1,4 +1,4 @@
-import { isTaskInventory, renderTaskInventory } from './task-inventory.js';
+import { isTaskLedger, renderTaskObjects } from './task-ledger.js';
 import { renderPolicyGraph } from './replay-policy.js';
 import { fitGraphCanvas } from './replay-graph.js';
 
@@ -17,16 +17,16 @@ export function createObjectList(container, {document: ownerDocument = globalThi
     const scale = previousCanvas?.dataset.scale;
     const scroll = [previousCanvas?.scrollLeft ?? 0, previousCanvas?.scrollTop ?? 0];
     graphDetails = null;
-    if (isTaskInventory(progress)) {
+    if (isTaskLedger(progress)) {
       container.replaceChildren();
       container.hidden = false;
-      renderTaskInventory(container, progress, bindings);
+      renderTaskObjects(container, progress, bindings);
       if (policyGraph) {
         const details = ownerDocument.createElement('details');
         details.open = graphOpen;
         graphDetails = details;
         const title = ownerDocument.createElement('summary');
-        title.textContent = 'Responses 完整任务图';
+        title.textContent = policyGraph.id === 'terminal_failure_return' ? '失败回位收尾图' : '完整任务图（含失败收尾）';
         const tree = ownerDocument.createElement('div');
         tree.className = 'policy-tree';
         const versionStart = executionEvents.findLastIndex(event => ['skill_program', 'policy_revised'].includes(event.kind));

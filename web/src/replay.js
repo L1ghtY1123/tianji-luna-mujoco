@@ -4,10 +4,10 @@ import { createTraceList } from './trace.js';
 import { buildExecutionGraph } from './execution-graph.js';
 import { taskProgressSummary } from './run-evidence.js';
 import { createObjectList } from './object-list.js';
-import { createReplayEvidence, extractReplayEvidence } from './replay-evidence.js';
+import { createReplayEvidence } from './replay-evidence.js';
 import { createReplayPolicy } from './replay-policy.js';
 import { SKILL_LABELS } from './replay-labels.js';
-import { groupObservationFrames, modelCallInfo, inventorySnapshots, renderReplayStages, renderInventorySnapshot, observationImageSource, observationImageSections } from './replay-story.js';
+import { modelCallInfo, objectsSnapshots, renderReplayStages, renderObjectMemorySnapshot } from './replay-story.js';
 
 export function clampReplayTime(value, duration = Infinity) {
   const time = Number(value);
@@ -51,36 +51,23 @@ export function artifactReferences(value) {
   return [...paths];
 }
 
-const CAMERA_NAMES = { 2: '左腕 A · 相机 2', 3: '头部 · 相机 3', 1: '右腕 B · 相机 1' };
-const ANALYSIS_NAMES = { analyzed: '识别结果版本', responses_proposal: 'Responses 初始参考框（未核验提议）', unprocessed: '原始 RGB（无身份叠加）', unknown: '标注状态未记录' };
-const REPLAY_VIEWS = ['graph', 'inventory', 'video', 'observations', 'collision', 'data'];
+const REPLAY_VIEWS = ['graph', 'video', 'observations', 'visual', 'collision', 'data'];
 
-export function archivedObservations(events = []) {
-  const records = new Map(events.filter(event => event.kind === 'observation_recorded' && event.data?.observation_id)
-    .map(event => [event.data.observation_id, event.data]));
-  const observations = [];
-  for (const [index, event] of events.entries()) {
-    if (event.kind !== 'observation_annotated' || !event.data?.observation_id) continue;
-    const data = event.data;
-    const labels = data.object_labels ?? {};
-    if (labels.observation_id && labels.observation_id !== data.observation_id) continue;
-    const cameras = Object.entries(data.annotated_rgb ?? {})
-      .filter(([, path]) => validFilePath(path) && /\.(svg|png|jpe?g)$/i.test(path))
-      .map(([id, path]) => ({ id, path, label: CAMERA_NAMES[id] ?? `相机 ${id}` }));
-    const cameraOrder = { 2: 0, 3: 1, 1: 2 };
-    cameras.sort((a, b) => (cameraOrder[a.id] ?? 3) - (cameraOrder[b.id] ?? 3));
-    if (!cameras.length) continue;
-    const record = records.get(data.observation_id);
-    observations.push({ id: String(event.id ?? `annotation-${index}`), observationId: data.observation_id,
-      checkpoint: record?.checkpoint ?? null, artifact: record?.observation_artifact ?? null,
-      status: labels.analysis_status ?? 'unknown', time: event.t_s, event, cameras });
+export function decisionObservations(events = []) {
+  const records = new Map(events.filter(event => event.kind === 'observation_recorded')
+    .map(event => [event.data?.observation_id, event]));
+  const observations = new Map();
+  for (const event of events) {
+    if (event.kind !== 'visual_decisions_call' || event.data?.endpoint !== '/v1/decisions'
+        || !validFilePath(event.data.artifact)) continue;
+    const id = event.data.observation_id ?? `request-${event.id}`;
+    if (!observations.has(id)) {
+      const record = records.get(id);
+      observations.set(id, {id, time: record?.t_s ?? event.t_s, calls: []});
+    }
+    observations.get(id).calls.push(event);
   }
-  return observations;
-}
-
-// Archive SVGs embed the original RGB as a PNG. Do not execute SVG or resolve external URLs.
-export function embeddedRawRgb(svg) {
-  return /<image\b[^>]*\bhref=["'](data:image\/png;base64,[A-Za-z0-9+/=]+)["']/i.exec(svg)?.[1] ?? null;
+  return [...observations.values()];
 }
 
 const RESULT_NAMES = { running: '执行中', completed: '完成', complete: '完成', succeeded: '成功', success: '成功', partial_success: '部分完成', needs_attention: '结果待确认', failed: '失败', error: '失败', cancelled: '已取消', canceled: '已取消', interrupted: '记录已中断', stopped: '已停止', unknown: '结果待确认' };
@@ -116,8 +103,8 @@ export function mountReplayPage(document) {
     view: REPLAY_VIEWS.includes(initialUrl.searchParams.get('view')) ? initialUrl.searchParams.get('view') : 'graph',
     time: 0, duration: 0, playing: false, master: null, selectedNode: null,
     operation: 0, fileOperation: 0, listOperation: 0, poll: null, mutating: false,
-    observations: [], observationFrames: [], observationId: null, imageOperation: 0, image: null, imageZoom: 1,
-    inventory: [], inventoryId: null, rawImages: new Map(), modelInputArchives: new Map(),
+    observations: [], observationId: null, decisionCallId: null,
+    objects: [], objectsId: null,
   };
   const tracks = [
     { name: 'scene', path: 'videos/scene.mp4', label: '主场景' },
@@ -128,6 +115,7 @@ export function mountReplayPage(document) {
     document, request, fileUrl, onFile: path => { setView('data'); previewFile(path).catch(showError); },
   });
   const fileEvidence = createReplayEvidence(byId('file-evidence'), { document, request, fileUrl });
+  const observationEvidence = createReplayEvidence(byId('observation-model-evidence'), { document, request, fileUrl });
   const policy = createReplayPolicy(byId('policy-plan'), { request, fileUrl });
   let collisionReplay = null, collisionOperation = 0;
   async function showCollision() {
@@ -382,22 +370,22 @@ export function mountReplayPage(document) {
     return name.length > 42 && name === manifest.instruction ? '机器人任务实验' : name;
   }
 
-  function renderInventory() {
-    state.inventory = inventorySnapshots(state.events);
-    const select = byId('inventory-snapshot');
+  function renderObjectMemory() {
+    state.objects = objectsSnapshots(state.events);
+    const select = byId('objects-snapshot');
     select.replaceChildren();
-    select.disabled = !state.inventory.length;
-    for (const snapshot of state.inventory) {
+    select.disabled = !state.objects.length;
+    for (const snapshot of state.objects) {
       const option = element('option', '', `${snapshot.title} · 事件 #${snapshot.event.id}`);
       option.value = String(snapshot.event.id);
       select.append(option);
     }
-    if (!state.inventory.some(snapshot => String(snapshot.event.id) === state.inventoryId)) state.inventoryId = String(state.inventory.at(-1)?.event.id ?? '');
-    select.value = state.inventoryId;
-    showInventory();
-    const origin = byId('inventory-origin');
+    if (!state.objects.some(snapshot => String(snapshot.event.id) === state.objectsId)) state.objectsId = String(state.objects.at(-1)?.event.id ?? '');
+    select.value = state.objectsId;
+    showObjects();
+    const origin = byId('objects-origin');
     origin.replaceChildren();
-    for (const event of state.events.filter(item => item.kind === 'visual_decisions_call' && item.data?.purpose === 'initialize_inventory')) {
+    for (const event of state.events.filter(item => item.kind === 'visual_decisions_call' && item.data?.purpose === 'initialize_objects')) {
       const info = modelCallInfo(event);
       const button = element('button', 'button', `${info.type} · ${info.purpose}`);
       button.addEventListener('click', () => openModelEvent(event));
@@ -405,24 +393,24 @@ export function mountReplayPage(document) {
     }
   }
 
-  async function showInventory() {
+  async function showObjects() {
     const runId = state.runId;
-    const selectedId = state.inventoryId;
-    const board = byId('inventory-board');
-    let snapshot = state.inventory.find(item => String(item.event.id) === selectedId);
+    const selectedId = state.objectsId;
+    const board = byId('objects-board');
+    let snapshot = state.objects.find(item => String(item.event.id) === selectedId);
     try {
       if (snapshot && validFilePath(snapshot.event.artifact)) {
         board.textContent = '正在读取时间记忆数据库快照…';
         const data = await request(fileUrl(runId, snapshot.event.artifact));
-        snapshot = inventorySnapshots([{ ...snapshot.event, data }])[0];
+        snapshot = objectsSnapshots([{ ...snapshot.event, data }])[0];
       }
-      if (runId !== state.runId || selectedId !== state.inventoryId) return;
-      renderInventorySnapshot(board, snapshot, event => {
+      if (runId !== state.runId || selectedId !== state.objectsId) return;
+      renderObjectMemorySnapshot(board, snapshot, event => {
         if (validFilePath(event.artifact)) { setView('data'); previewFile(event.artifact).catch(showError); }
         else { setView('graph'); showNode({ title: '时间记忆记录', events: [event], startTime: event.t_s }, event); }
       });
     } catch (error) {
-      if (runId === state.runId && selectedId === state.inventoryId) {
+      if (runId === state.runId && selectedId === state.objectsId) {
         board.textContent = `时间记忆快照读取失败，${error.message}`;
       }
     }
@@ -441,275 +429,54 @@ export function mountReplayPage(document) {
     parent.append(link);
   }
 
-  function observationDescription(observation) {
-    const frame = state.observationFrames.find(item => item.id === observation.observationId);
-    return `${frame?.title ?? '观测'} · ${observation.observationId} · ${ANALYSIS_NAMES[observation.status] ?? observation.status}`;
-  }
-
   function renderObservations() {
-    const reference = state.events.find(event => event.data?.object_labels?.analysis_status === 'responses_proposal');
-    byId('responses-reference').disabled = !reference;
-    byId('responses-reference').title = reference ? '查看初始 Responses 输出的框，独立于 SAM3 结果' : '该实验没有独立归档 Responses 初始框图';
-    state.observations = archivedObservations(state.events);
-    state.observationFrames = groupObservationFrames(state.observations, state.events);
+    state.observations = decisionObservations(state.events);
     const select = byId('observation-select');
     select.replaceChildren();
-    const frames = new Set(state.observations.map(item => item.observationId)).size;
-    byId('observation-count').textContent = `${frames} 次采集 · ${state.observations.length} 个图像版本`;
+    const count = state.observations.reduce((sum, observation) => sum + observation.calls.length, 0);
+    byId('observation-count').textContent = `${state.observations.length} 次观测 · ${count} 次请求`;
     select.disabled = !state.observations.length;
-    byId('observation-seek').disabled = true;
-    for (const [index, frame] of state.observationFrames.entries()) {
-      const option = element('option', '', `第 ${index + 1} 次采集 · ${frame.title} · ${Number.isFinite(frame.captureTime) ? formatReplayTime(frame.captureTime) : '拍摄时间未归档'}`);
-      option.value = frame.id;
+    for (const [index, observation] of state.observations.entries()) {
+      const option = element('option', '', `第 ${index + 1} 次观测 · ${formatReplayTime(observation.time)} · ${observation.calls.length} 次 Decisions`);
+      option.value = observation.id;
       select.append(option);
     }
     if (!state.observations.some(item => item.id === state.observationId)) {
-      const first = state.observations[0];
-      state.observationId = state.observations.find(item => item.observationId === first?.observationId && item.status === 'analyzed')?.id ?? first?.id ?? null;
+      state.observationId = state.observations[0]?.id ?? null;
     }
     showObservation(state.observationId);
   }
 
   function showObservation(id) {
+    observationEvidence.clear();
+    const select = byId('observation-model-call');
+    select.replaceChildren();
     const observation = state.observations.find(item => item.id === id);
-    byId('observation-cameras').replaceChildren();
-    byId('observation-artifacts').replaceChildren();
-    byId('observation-revision').replaceChildren();
-    byId('observation-reuse-note').hidden = true;
-    byId('observation-source').textContent = '';
-    byId('observation-analysis').textContent = '';
+    select.disabled = !observation;
+    byId('observation-seek').disabled = !Number.isFinite(observation?.time);
     if (!observation) {
-      byId('observation-meta').textContent = '本次实验未保存观测标注图。旧记录的 RGBD 数组可在数据页下载。';
+      byId('observation-meta').textContent = '本次实验没有归档 Decisions 请求。';
+      select.onchange = null;
       return;
     }
-    state.observationId = observation.id;
-    const frame = state.observationFrames.find(item => item.id === observation.observationId);
-    const revision = frame.revisions.find(item => item.id === id);
-    byId('observation-select').value = frame.id;
-    for (const item of frame.revisions) {
-      const option = element('option', '', `#${item.event.id} · ${item.revisionTitle}`);
-      option.value = item.id;
-      byId('observation-revision').append(option);
-    }
-    byId('observation-revision').value = id;
-    byId('observation-meta').textContent = `${frame.title} · 拍摄于 ${Number.isFinite(frame.captureTime) ? formatReplayTime(frame.captureTime) : '时间未归档'} · ${frame.revisions.length} 个图像版本`;
-    byId('observation-source').textContent = frame.source;
-    byId('observation-analysis').textContent = frame.analysisSummary;
-    byId('observation-reuse-note').hidden = !revision.reusesCapture;
-    byId('observation-reuse-note').textContent = `这是旧拍摄帧上的状态更新（事件 #${observation.event.id}，${formatReplayTime(observation.time)}），没有重新拍照。${revision.revisionTitle.includes('夹爪') ? '“夹持中”来自夹爪反馈，不是这张图的视觉判断。' : '像素沿用同次观测，仅目标标注变化。'}`;
-    byId('observation-seek').disabled = !Number.isFinite(frame.captureTime);
-    for (const camera of observation.cameras) {
-      const card = element('figure', 'observation-card');
-      card.append(element('figcaption', '', camera.label));
-      const open = element('button', 'observation-thumbnail');
-      open.type = 'button';
-      open.setAttribute('aria-label', `放大 ${camera.label} · ${observation.observationId}`);
-      const image = element('img');
-      const url = fileUrl(state.runId, camera.path);
-      image.alt = `${camera.label} · ${observationDescription(observation)}`;
-      image.loading = 'lazy';
-      image.src = url;
-      const rows = (observation.event.data?.object_labels?.items ?? []).filter(item => item.camera_id === camera.id);
-      const proposal = observation.status === 'responses_proposal';
-      const status = element('p', 'muted', rows.length
-        ? `${proposal ? 'Responses 初始提议（未核验）' : '当前版本的识别结果'} · ${rows.length} 个框与 ID · 点击放大，可切换原始 RGB`
-        : proposal ? 'Responses 未在此视角给出参考框；保留原始画面。'
-          : '本版本在此相机没有身份框 · 原始画面保留；候选框请查看下方模型输入');
-      image.addEventListener('error', () => { status.textContent = '图片读取失败：归档可能尚未写入或文件缺失。'; });
-      open.append(image);
-      open.addEventListener('click', () => openObservationImage(observation, camera));
-      card.append(open, status);
-      const provenance = element('details', 'camera-provenance');
-      provenance.append(element('summary', '', '图像来源与去向'));
-      for (const paragraph of observationImageSections(observation, frame, camera.id)) {
-        provenance.append(element('p', 'muted', paragraph));
-      }
-      card.append(provenance);
-      if (rows.length) {
-        const details = element('details');
-        details.append(element('summary', '', '逐框来源与身份依据'));
-        for (const item of rows) details.append(element('p', 'muted', `${item.name ?? '实体'} · ID ${item.id} · 框：${item.box_source ?? '旧归档未记录'} · 身份：${item.identity_source ?? '旧归档未记录'} · 名称：${item.name_source ?? '旧归档未记录'} · 几何：${item.geometry_status ?? '旧归档未记录'}${Number.isFinite(item.point_count) ? ` · ${item.point_count} 个可见表面点` : ''}。碰撞发布状态请查看 build_scene 事件。`));
-        card.append(details);
-      }
-      addDownload(card, camera.path, '下载程序叠加图（不是模型输入）');
-      byId('observation-cameras').append(card);
-      addCameraModelInputs(card, observation, camera);
-    }
-    const artifacts = byId('observation-artifacts');
-    if (validFilePath(observation.artifact)) {
-      const button = element('button', 'button', '查看原始 RGBD / 标定引用');
-      button.addEventListener('click', () => { setView('data'); previewFile(observation.artifact).catch(showError); });
-      artifacts.append(button);
-      addDownload(artifacts, observation.artifact, '下载 RGBD 引用 JSON');
-    }
-    addObservationModelLinks(artifacts, observation);
-  }
-
-  async function addCameraModelInputs(card, observation, camera) {
-    const runId = state.runId;
-    const panel = element('details', 'camera-model-inputs');
-    panel.append(element('summary', '', '实际模型输入：Responses 参考框 / SAM3 候选框'));
-    const note = element('p', 'muted', '正在读取实际请求归档…');
-    panel.append(note);
-    card.append(panel);
-    const matchingCalls = state.events.filter(event => event.kind === 'visual_decisions_call'
-      && event.id <= observation.event.id && event.data?.observation_id === observation.observationId
-      && validFilePath(event.data.artifact));
-    const associations = matchingCalls.filter(event => ['associate_inventory', 'verify_transfer'].includes(event.data.purpose));
-    const calls = (associations.length ? associations : matchingCalls).slice(-1);
-    const selected = [];
-    const failures = [];
-    for (const event of calls) {
-      try {
-        const archiveUrl = fileUrl(runId, event.data.artifact);
-        if (!state.modelInputArchives.has(archiveUrl)) {
-          state.modelInputArchives.set(archiveUrl, request(archiveUrl).catch(error => {
-            state.modelInputArchives.delete(archiveUrl); throw error;
-          }));
-        }
-        const archive = await state.modelInputArchives.get(archiveUrl);
-        if (state.runId !== runId || !card.isConnected) return;
-        const images = extractReplayEvidence(archive).images.filter(item => item.cameraId === camera.id
-          && ['initial_reference_annotations', 'current_annotations'].includes(item.imageRole));
-        for (const image of images) {
-          const existing = selected.find(item => item.image.path === image.path && item.image.imageRole === image.imageRole);
-          if (existing) existing.events.push(event);
-          else selected.push({ image, events: [event], archive });
-        }
-      } catch (error) { failures.push(`#${event.id}：${error.message}`); }
-    }
-    if (state.runId !== runId || !card.isConnected) return;
-    note.textContent = selected.length
-      ? '最近一次身份判断的实际输入。Responses 参考框表示初始身份提议；SAM3 候选框来自当前掩码，尚不等于确认的 ID。'
-      : '此相机没有归档到这两类带框模型输入；不能据此认定物体不可见或分割失败。';
-    for (const { image, events, archive } of selected) {
-      const figure = element('figure');
-      figure.style.margin = '12px 0';
-      const reference = image.imageRole === 'initial_reference_annotations';
-      figure.append(element('figcaption', '', `${reference ? 'R：Responses 参考提议' : 'C：SAM3 分割候选'} · ${image.annotationItems.length} 个框`));
-      const link = element('a');
-      link.href = fileUrl(runId, image.path);
-      link.target = '_blank';
-      link.rel = 'noopener';
-      const thumbnail = element('img');
-      thumbnail.src = link.href;
-      thumbnail.alt = `${camera.label} · ${reference ? 'Responses 参考框' : 'SAM3 候选框'} · 实际模型输入`;
-      thumbnail.style.width = '100%';
-      thumbnail.style.aspectRatio = '4 / 3';
-      thumbnail.style.objectFit = 'contain';
-      link.append(thumbnail);
-      figure.append(link, element('p', 'muted', `来源：${image.source}`));
-      if (!reference) {
-        const answers = archive.response?.answers ?? [];
-        for (const item of image.annotationItems) {
-          const number = item.id?.replace(/^candidate-/, '');
-          const matching = Array.isArray(answers) ? answers.filter(answer =>
-            answer.name === `identity_${number}` || answer.name?.startsWith(`match_${number}_`)) : [];
-          for (const answer of matching) {
-            const description = answer.type === 'predicate'
-              ? `${answer.name}：同一物体判断概率 ${answer.probability}`
-              : `${answer.name}：候选选择 ${answer.choice}，置信度 ${answer.confidence}`;
-            figure.append(element('p', 'muted', `${item.display_label ?? item.id} · ${description}。原始模型回答；是否接受以身份结果为准。`));
-          }
-        }
-      }
-      for (const event of events) {
-        const info = modelCallInfo(event);
-        const button = element('button', 'button', `去向：${info.type} · #${event.id} · 查看问题与判断`);
-        button.addEventListener('click', () => openModelEvent(event));
-        figure.append(button);
-      }
-      panel.append(figure);
-    }
-    if (failures.length) panel.append(element('p', 'muted', `部分请求读取失败：${failures.join('；')}`));
-  }
-
-  function addObservationModelLinks(container, observation, closeImage = false) {
-    for (const event of state.events.filter(item => item.kind === 'visual_decisions_call' && item.data?.observation_id === observation.observationId)) {
-      if (!validFilePath(event.data.artifact)) continue;
+    state.observationId = id;
+    byId('observation-select').value = id;
+    byId('observation-meta').textContent = `${id} · ${observation.calls.length} 次 Decisions 请求`;
+    for (const event of observation.calls) {
       const info = modelCallInfo(event);
-      const button = element('button', 'button', `模型输入 · ${info.type} · ${info.purpose} · 事件 #${event.id}`);
-      button.addEventListener('click', () => {
-        if (closeImage) byId('observation-dialog').close();
-        openModelEvent(event);
-      });
-      container.append(button);
+      const option = element('option', '', `#${event.id} · Decisions · ${info.purpose}`);
+      option.value = String(event.id);
+      select.append(option);
     }
-  }
-
-  function originalRgb(url, path) {
-    if (!path.endsWith('.svg')) return Promise.resolve(url);
-    if (!state.rawImages.has(url)) {
-      const pending = fetch(url).then(async response => {
-        if (!response.ok) throw new Error('归档图片读取失败');
-        const raw = embeddedRawRgb(await response.text());
-        if (!raw) throw new Error('此归档没有内嵌原始 RGB，可下载 RGBD 数组查看');
-        return raw;
-      }).catch(error => { state.rawImages.delete(url); throw error; });
-      state.rawImages.set(url, pending);
-    }
-    return state.rawImages.get(url);
-  }
-
-  function imageZoom(factor = 1, reset = false) {
-    state.imageZoom = reset ? 1 : Math.min(4, Math.max(0.5, state.imageZoom * factor));
-    byId('observation-image').style.width = `${state.imageZoom * 100}%`;
-    byId('observation-zoom-label').textContent = `${Math.round(state.imageZoom * 100)}%`;
-  }
-
-  function showAnnotatedImage() {
-    state.imageOperation += 1;
-    if (!state.image) return;
-    byId('observation-image').src = state.image.url;
-    byId('observation-image-status').textContent = '程序身份结果叠加／旧版状态叠加 · 不是实际模型输入；请核对上方拍摄与标注时间。';
-    byId('observation-annotated').setAttribute('aria-pressed', 'true');
-    byId('observation-raw').setAttribute('aria-pressed', 'false');
-    byId('observation-raw').disabled = !state.image.camera.path.endsWith('.svg');
-  }
-
-  function openObservationImage(observation, camera) {
-    const url = fileUrl(state.runId, camera.path);
-    state.image = { url, camera, raw: null };
-    byId('observation-image-title').textContent = `${camera.label} · ${observation.observationId}`;
-    const frame = state.observationFrames.find(item => item.id === observation.observationId);
-    byId('observation-image-meta').textContent = observationImageSource(observation, frame, camera.id);
-    byId('observation-image-models').replaceChildren();
-    addObservationModelLinks(byId('observation-image-models'), observation, true);
-    byId('observation-image').alt = `${camera.label} · ${observation.observationId}`;
-    byId('observation-open-file').href = url;
-    imageZoom(1, true);
-    byId('observation-image').removeAttribute('src');
-    showAnnotatedImage();
-    byId('observation-dialog').showModal();
-  }
-
-  async function showRawImage() {
-    const image = state.image;
-    if (!image) return;
-    const operation = ++state.imageOperation;
-    byId('observation-image-status').textContent = '正在读取归档中的原始 RGB…';
-    byId('observation-raw').disabled = true;
-    try {
-      if (!image.raw) {
-        image.raw = await originalRgb(image.url, image.camera.path);
-      }
-      if (operation !== state.imageOperation) return;
-      if (!image.raw) throw new Error('此归档没有内嵌原始 RGB，可下载 RGBD 数组查看');
-      byId('observation-image').src = image.raw;
-      byId('observation-image-status').textContent = image.camera.path.endsWith('.svg') ? '原始 RGB · 来自同一归档采集，不含标注；不是重新渲染。' : '旧归档图片 · 未单独记录原始 RGB，可能含标注';
-      byId('observation-annotated').setAttribute('aria-pressed', 'false');
-      byId('observation-raw').setAttribute('aria-pressed', 'true');
-    } catch (error) {
-      if (operation === state.imageOperation) byId('observation-image-status').textContent = error.message;
-    } finally {
-      if (operation === state.imageOperation) byId('observation-raw').disabled = false;
-    }
-  }
-
-  function clearObservationImage() {
-    state.imageOperation += 1;
-    state.image = null;
-    byId('observation-image').removeAttribute('src');
+    const preferred = observation.calls.find(event => String(event.id) === state.decisionCallId) ?? observation.calls[0];
+    select.value = String(preferred.id);
+    const show = () => {
+      const event = observation.calls.find(item => String(item.id) === select.value);
+      state.decisionCallId = select.value;
+      void observationEvidence.show(state.runId, [event]);
+    };
+    select.onchange = show;
+    show();
   }
 
   function showNode(node, event = null) {
@@ -754,9 +521,9 @@ export function mountReplayPage(document) {
       byId('node-artifacts').append(button);
     }
     if (!event && node.phase === 'observe') {
-      const inventory = element('button', 'button primary', '查看时间记忆数据库');
-      inventory.addEventListener('click', () => setView('inventory'));
-      byId('node-artifacts').append(inventory);
+      const objects = element('button', 'button primary', '查看时间记忆数据库');
+      objects.addEventListener('click', () => setView('visual'));
+      byId('node-artifacts').append(objects);
     }
     const inspect = element('button', 'button primary', '查看图片、SAM3 与抓取候选');
     inspect.addEventListener('click', () => {
@@ -782,11 +549,14 @@ export function mountReplayPage(document) {
         addDownload(wrapper, path, '下载 RGBD 引用 JSON');
         byId('node-files').append(wrapper);
       }
-      const observation = state.observations.find(record => record.event === item);
-      if (observation && !events.some(previous => previous !== item && previous.id < item.id && previous.kind === 'observation_annotated' && previous.data?.observation_id === observation.observationId)) {
-        const frame = state.observationFrames.find(item => item.id === observation.observationId);
-        const button = element('button', 'button', `查看观测图像版本 · ${frame?.title ?? '归档图'}`);
-        button.addEventListener('click', () => { showObservation(observation.id); setView('observations'); });
+      const observation = state.observations.find(record => record.calls.some(call => call.id === item.id));
+      if (observation) {
+        const button = element('button', 'button', '查看 Decisions 输入');
+        button.addEventListener('click', () => {
+          state.decisionCallId = String(item.id);
+          showObservation(observation.id);
+          setView('observations');
+        });
         byId('node-artifacts').append(button);
       }
     }
@@ -877,7 +647,7 @@ export function mountReplayPage(document) {
     renderList();
     renderFiles();
     renderObservations();
-    renderInventory();
+    renderObjectMemory();
     renderGraph();
     loadVideos();
     scheduleRefresh();
@@ -901,15 +671,14 @@ export function mountReplayPage(document) {
     state.fileOperation += 1;
     evidence.clear();
     fileEvidence.clear();
+    observationEvidence.clear();
     policy.clear();
     state.runId = runId;
-    state.rawImages.clear();
     state.manifest = null;
     state.selectedNode = null;
     state.observationId = null;
-    state.inventoryId = null;
-    clearObservationImage();
-    if (byId('observation-dialog').open) byId('observation-dialog').close();
+    state.decisionCallId = null;
+    state.objectsId = null;
     state.time = time;
     state.master = null;
     byId('experiment-content').hidden = true;
@@ -942,7 +711,7 @@ export function mountReplayPage(document) {
       renderGraph();
       renderFiles();
       renderObservations();
-      renderInventory();
+      renderObjectMemory();
       loadVideos();
       seek(time);
       setView(state.view);
@@ -1001,9 +770,8 @@ export function mountReplayPage(document) {
     state.selectedNode = null;
     evidence.clear();
     fileEvidence.clear();
+    observationEvidence.clear();
     policy.clear();
-    clearObservationImage();
-    if (byId('observation-dialog').open) byId('observation-dialog').close();
     byId('experiment-content').hidden = true;
     byId('empty-selection').hidden = false;
     byId('empty-selection').replaceChildren(element('h2', '', '选择一条实验记录'));
@@ -1191,28 +959,12 @@ export function mountReplayPage(document) {
   byId('graph-zoom-out').addEventListener('click', () => policy.zoom(0.8));
   byId('graph-fit').addEventListener('click', () => policy.fit());
   byId('graph-reset').addEventListener('click', () => policy.reset());
-  byId('inventory-snapshot').addEventListener('change', () => { state.inventoryId = byId('inventory-snapshot').value; showInventory(); });
-  byId('observation-select').addEventListener('change', () => {
-    const frame = state.observationFrames.find(item => item.id === byId('observation-select').value);
-    if (frame) showObservation(frame.preferredId);
-  });
-  byId('observation-revision').addEventListener('change', () => showObservation(byId('observation-revision').value));
-  byId('responses-reference').addEventListener('click', () => {
-    const reference = state.observations.find(item => item.status === 'responses_proposal');
-    if (reference) showObservation(reference.id);
-  });
+  byId('objects-snapshot').addEventListener('change', () => { state.objectsId = byId('objects-snapshot').value; showObjects(); });
+  byId('observation-select').addEventListener('change', () => showObservation(byId('observation-select').value));
   byId('observation-seek').addEventListener('click', () => {
-    const frame = state.observationFrames.find(item => item.revisions.some(revision => revision.id === state.observationId));
-    if (frame && Number.isFinite(frame.captureTime)) { stopPlayback(); setView('video'); seek(frame.captureTime); }
+    const observation = state.observations.find(item => item.id === state.observationId);
+    if (Number.isFinite(observation?.time)) { stopPlayback(); setView('video'); seek(observation.time); }
   });
-  byId('observation-zoom-in').addEventListener('click', () => imageZoom(1.25));
-  byId('observation-zoom-out').addEventListener('click', () => imageZoom(0.8));
-  byId('observation-zoom-fit').addEventListener('click', () => imageZoom(1, true));
-  byId('observation-annotated').addEventListener('click', showAnnotatedImage);
-  byId('observation-raw').addEventListener('click', showRawImage);
-  byId('observation-close').addEventListener('click', () => byId('observation-dialog').close());
-  byId('observation-dialog').addEventListener('close', clearObservationImage);
-  byId('observation-image').addEventListener('error', () => { byId('observation-image-status').textContent = '图片加载失败，请检查归档文件。'; });
   byId('standalone-graph').addEventListener('click', updateUrl);
   window.addEventListener('pagehide', () => { stopPlayback(); window.clearTimeout(state.poll); });
   loadList().then(() => {

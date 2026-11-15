@@ -1,13 +1,13 @@
 {
   "id": "perceive_placement_zone",
-  "description": "Preserve the destination-bound release_mode in the placement intent. The interior/support plane remains its measured floor; it is never relabeled as the rim. Obtain the current destination support region and interpret only this transfer location clause. Use an accepted CAD interior-floor/surface definition or a measured support plane; do not demand visible depth for a registered CAD floor. Reuse an already confirmed destination relation when its binding is valid. Decide whether the language authorizes the entire region or adds a relative position/subregion/orientation constraint. Selecting a container on the left/right does not itself constrain a point within that container. CAD selection, grasp method, later processing, return posture and task completion are outside these questions. Unknown geometry or language returns an explicit reason; the graph chooses any legal recovery movement, observation and retry. Reuse a positive identify_destination intermediate permission only for the identical target, destination/reference, task, capture and region configuration. This permission does not certify final delivery. Ask separately about any additional within-region language constraint.",
-  "capability": "Obtain the current destination support region and interpret only this transfer location clause",
+  "description": "Read the compiled task destination permission and current measured support/container. Establish the fixed configured placement zone and release mode without any Decisions question. Unsupported placement constraints are rejected during compilation. Do not search XY or project candidate footprints for a visual approval. Preserve numerical bounds, region version, action and observation bindings.",
+  "capability": "Read the compiled task destination permission and current measured support/container",
   "inputs": [
     "original_instruction",
     "active_object_task",
     "current_rgb",
     "current_observation",
-    "permanent_inventory_ids",
+    "permanent_objects_ids",
     "destination_id"
   ],
   "requires": {
@@ -29,7 +29,6 @@
     "required_evidence"
   ],
   "planning_effects": {
-    "placement_resolved": false,
     "place_plan_ready": false
   },
   "errors": [
@@ -42,5 +41,6 @@
     "placement_destination_mismatch"
   ],
   "invalidates_observation": false,
-  "retry_safe": true
+  "retry_safe": true,
+  "captures_observation": false
 }

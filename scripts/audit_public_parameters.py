@@ -31,6 +31,8 @@ def audit():
 
     def motion_config(**kwargs):
         check('MotionPlannerCfg.create', MotionPlannerCfg.create, kwargs)
+        assert kwargs['graph_planner_algorithm'] == 'rrt'
+        assert kwargs['enable_timeopt'] is True
         return SimpleNamespace()
 
     create_solver_configs(PlanningSettings(), robot={}, scene_model={}, collision_cache={}, batch_size=4,

@@ -1,6 +1,8 @@
 """Execution adapters for typed memory inputs and detached presentation snapshots."""
 from copy import deepcopy
 
+import numpy as np
+
 from ..memory_contracts import (
     GeometryMeasurement,
     GeometryObservation,
@@ -18,7 +20,7 @@ def release_memory_changes(entity, execution, attempt, result):
     if (target != execution.get('target_id') or target != attempt.get('target_id')
             or not physical.get('feedback_id') or not execution.get('destination_id')
             or not all(physical.get(key) is True for key in
-                       ('success', 'open_confirmed', 'released', 'execution_completed'))):
+                       ('success', 'release_commanded', 'released', 'execution_completed'))):
         return {}
     feedback = physical['feedback_id']
     from ..demo_transfer_verification import valid_container_entry
@@ -34,11 +36,12 @@ def release_memory_changes(entity, execution, attempt, result):
             return {}
         return {'container_entry': deepcopy(entry), 'current_region': destination_ref,
             'confirmed_observation_id': None, 'observed_support': None,
-            'transport_status': 'assumed_inside', 'transfers': ({
+            'transport_status': entry['placement_outcome'], 'transfers': ({
                 'destination_id': execution['destination_id'], 'destination_ref': destination_ref,
                 'transfer_index': len(entity.get('transfers', [])), 'arm': execution['arm'],
                 'observation_id': entry['observation_id'], 'release_feedback_id': feedback,
-                'source': entry['source'], 'receipt_id': entry['receipt_id']},)}
+                'source': entry['source'], 'receipt_id': entry['receipt_id'],
+                'placement_outcome': entry['placement_outcome']},)}
     previous = entity.get('visual_release') or {}
     same_release = previous.get('action_id') == feedback
     release = deepcopy(previous) if same_release else {
@@ -55,15 +58,16 @@ def release_memory_changes(entity, execution, attempt, result):
             changes.update(current_region=None, confirmed_observation_id=None, observed_support=None)
         release['assessment'] = {key: deepcopy(visual[key]) for key in (
             'observation_id', 'generation', 'request_hash', 'judgments', 'diagnostic_checks',
-            'support_entity_id') if key in visual}
+            'support_entity_id', 'placement_outcome') if key in visual}
         judgments = visual.get('judgments', {})
         support = visual.get('support_entity_id')
-        if support and judgments.get('place_result') == 'yes':
+        if (support and visual.get('placement_outcome') == 'direct_success'
+                and judgments.get('place_result') == 'yes' and judgments.get('target_released') == 'yes'):
             changes['observed_support'] = {
                 'support_entity_id': support, 'observation_id': visual['observation_id'],
                 'generation': visual.get('generation'), 'request_hash': visual['request_hash'],
                 'source': 'openai_decisions', 'judgments': {
-                    'place_result': 'yes'},
+                    'place_result': 'yes', 'target_released': 'yes'},
                 'scope': 'support_only_not_requested_subregion_completion'}
     confirmed = result.get('success') is True and visual.get('status') == 'at_destination' and bound_visual
     if confirmed and not release.get('confirmed_observation_id'):
@@ -84,6 +88,18 @@ def release_memory_changes(entity, execution, attempt, result):
     return changes
 
 
+def measurement_reference(measured, observation):
+    """Persist the pose/source fingerprint; raw RGBD and masks stay in their database tables."""
+    import hashlib
+    import json
+
+    points = np.asarray(measured.get('points_world_m', []), dtype=np.float64)
+    reference = {'observation_id': observation['observation_id'], 'generation': observation['generation'],
+                 'points_sha256': hashlib.sha256(points.tobytes()).hexdigest(),
+                 'point_count': len(points), 'cad': measured.get('cad')}
+    return json.loads(json.dumps(reference, default=lambda value: value.tolist(), allow_nan=False))
+
+
 def observation_update(observation, existing):
     entities = deepcopy(existing)
     for identifier, entity in observation.get('scene_entities', {}).items():
@@ -96,7 +112,9 @@ def observation_update(observation, existing):
         if not identifier.isascii() or not identifier.isdecimal():
             continue  # Configured regions have their own spatial configuration.
         entity = entities.get(identifier, {})
-        entity.update({key: deepcopy(obj[key]) for key in ('id', 'kind', 'color') if key in obj})
+        for key in ('id', 'kind', 'color'):
+            if key in obj:
+                entity.setdefault(key, deepcopy(obj[key]))
         if 'roles' not in entity:
             entity['roles'] = ['container', 'collision'] if obj['kind'] == 'bin' else ['collision']
         if 'segmentation_query' not in entity and obj.get('segmentation_prompt'):
@@ -139,17 +157,17 @@ def merge_geometry_measurements(previous, update: GeometryObservation):
 def freeze_scene_observation(observation):
     """Keep the sensor input bound to a collision publication in execution state."""
     result = deepcopy({key: value for key, value in observation.items()
-                       if key not in {'inventory_state', 'scene_entities', 'visual_reference'}})
+                       if key not in {'object_memory_snapshot', 'scene_entities', 'visual_reference'}})
     for key in ('registered_entities', 'membership', 'progress'):
-        result.get('visual_inventory', {}).pop(key, None)
+        result.get('visual_identity', {}).pop(key, None)
     return result
 
 
 def planning_observation(observation, object_memory, planning_regions):
     """Join current instance metadata to the map's frozen measurement for one skill call."""
     result = deepcopy(observation)
-    result['inventory_state'] = object_memory.snapshot()
-    result['scene_entities'] = deepcopy(result['inventory_state']['entities'])
+    result['object_memory_snapshot'] = object_memory.snapshot()
+    result['scene_entities'] = deepcopy(result['object_memory_snapshot']['entities'])
     result['scene_entities'].update(deepcopy(planning_regions))
     return result
 
@@ -173,4 +191,4 @@ def execution_snapshot(task_progress, object_memory, geometry_measurements, plan
                       for key, entity in entities.items()}
     scene_entities.update(deepcopy(planning_regions))
     return {**task_progress.snapshot(), **memory, 'scene_entities': scene_entities,
-            'scene_inventory_observation_id': object_memory.observation_id}
+            'scene_objects_observation_id': object_memory.observation_id}

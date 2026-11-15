@@ -1,6 +1,6 @@
 {
   "id": "verify_unpack",
-  "description": "Acquire current three-camera RGBD inside this skill and compare it with the bound pre-processing appearance. The skill supplies its own verification images. Call it to establish the process result and product ID before requesting general inventory geometry for that output. Check the configured processing result and disappearance of the input wrapper; do not require a future delivery or return posture. A successful result creates a distinct permanent product ID with input/output lineage and dated current support evidence, then retires the consumed input. Keep that verified support evidence instead of immediately asking the same table relation again. Workspace checks are reported separately from visual processing success. No movement or collision-map publication occurs; observe_scene may reuse the resulting capture. Product presence and bound-wrapper disappearance each use one Decisions request sharing all three before/current camera views. Different cameras may witness the two facts. Both facts must be confirmed before product registration. A definite negative criterion returns rejected and follows failure. Missing evidence returns unknown. The product current_region comes from its own verified support or explicit product location. It never inherits the input processing region. Compare the entire measured tabletop: the configured processing capability may relocate the product away from the former wrapper location. A before/current appearance change does not require both objects at the same position. Bind the uniquely measured new tabletop component to the registered product using the same capture and generation. Persist its reference camera, mask, box and measured position together with product registration and lineage. This gives later Decisions correspondence a localized reference and projected RGBD evidence. Archive the creation predicate and BEFORE/after RGB. Use the located reference once available; a later candidate still requires its own identity correspondence. The configured effect accepts a pink wrapped input and expects a distinct black product; its shared effect definition is supplied to initial Responses and processing Decisions. Only confirmed disappearance and output appearance retire the input and register its product. For previously delivered black objects without current individual geometry, read a valid entry-receipt-bound published container occupancy. Preserve its container ID, scene token and receipt provenance, and mark object_pose_measured=false. Product localization excludes surfaces wholly covered by that occupied range and records excluded_container_occupancies, without assigning those surfaces an individual identity. Partial overlap remains uncertain. Invalidated or unbound occupancy still requires current geometry. Retired history is excluded from active-product localization.",
+  "description": "Use original full before/current camera RGB to visually verify the new separate product and removal of the bound wrapper. Do not crop, overlay, project or add a meta-sufficiency question. Retain separately bound visual outcomes and action receipts before registering an independent product ID and retiring the input. Subsequent numerical SAM3/RGBD localization and graph observation establish product geometry for planning.",
   "inputs": [
     "confirmed_work_area_release_rgb_reference",
     "processing_action",
@@ -13,7 +13,7 @@
   "provides": [
     "unpack_verified"
   ],
-  "capability": "Compare the bound pre-processing appearance with current three-camera RGB and registered depth",
+  "capability": "Use original full before/current camera RGB to visually verify the new separate product and removal of the bound wrapper",
   "outputs": [
     "unpack_verified",
     "product_id",
@@ -52,5 +52,6 @@
     "drop_completed": false,
     "scene_available": false,
     "needs_place": true
-  }
+  },
+  "captures_observation": true
 }

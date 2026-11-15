@@ -57,12 +57,8 @@ class PublicPlanner:
 
     @measured('public_plan_pose')
     def plan_pose(self, goal_tool_poses, current_state, *args, **kwargs):
-        kwargs.setdefault('max_attempts', self.planning_settings.plan_max_attempts)
-        if self.batch:
-            kwargs.setdefault('finetune_attempts', self.planning_settings.finetune_attempts)
-            kwargs.setdefault('finetune_dt_scale', self.planning_settings.finetune_dt_scale)
         with self.optimizer_scene():
-            self.last_pose_result = self.sdk.plan_pose(goal_tool_poses, current_state, *args, **kwargs)
+            self.last_pose_result = self.sdk.plan_pose(goal_tool_poses, current_state)
         return self.last_pose_result
 
     @measured('public_plan_grasp')

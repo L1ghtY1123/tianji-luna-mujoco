@@ -1,6 +1,6 @@
 {
   "id": "observe_scene",
-  "description": "Observe current external objects using all three calibrated RGBD cameras. SAM3 proposes masks from remembered appearance queries and a general movable-object query. Remove robot self-surface returns using registered geometry, camera calibration and captured joint/gripper feedback. Decisions associates candidates with permanent instances using current RGB, displayed mask contours, depth-derived surface positions, dated references and operation history. Every request asks one question. Each correspondence request compares one current masked candidate with one permanent physical instance. Locating proposals and remembered appearance queries order hypotheses without accepting identity. A confident match binds that ID. An unresolved comparison is never retried on identical evidence. Only confidently negative comparisons against every remembered alternative permit a separate new-external-object predicate and registration. A confirmed new external object receives a permanent ID. Retain accepted partial associations and explicit unresolved candidates. Task membership is handled by select_target. This skill runs without a TaskSpec or graph input and makes no Responses calls. Each camera candidate is associated independently; accepted candidates sharing a permanent ID supply its fused geometry. There is no separate cross-camera Decisions matching stage. An unresolved candidate does not discard other accepted associations. Confirmed container RGBD correspondence can be reused within its valid scope. Measure unknown objects with fused OBB, known models with SAM3/FoundationPose CAD poses and tables with measured cuboids. CAD tracking uses runtime-projected object operation history and spatial invalidation through cad_motion_context, not graph progress; an unchanged physical context permits initialization from the previous pose while still estimating from current RGBD. Every camera contributes its available depth, possibly zero points. Apply no OBB size-change anomaly gate. Preserve current measurement provenance and dated unseen history. A selected operation still needs its own target/destination geometry. This skill neither moves nor publishes a collision scene. Its success establishes observed=true for the analyzed capture. Unchanged capture and unchanged identity inputs reuse their existing result. Explicit changed-view recovery remains in the graph. Placement and task visual verification can use their own current RGB without this geometry analysis. For an already accepted same-capture instance, project its measured 3D surface samples into the queried camera and supply exact candidate-mask overlap and signed depth residuals to the one correspondence question. Partial-surface projection supports Decisions; it is not full-object silhouette IoU, an automatic ID assignment, or a historical pose assumed current. Preserve the actual accepted creation predicate, answer, request hash and bound BEFORE/after RGB until a new product has a localized identity reference. These support a candidate correspondence, never automatically accept it. Stop sending creation comparison images once its located identity reference is confirmed. Missing visibility is not retirement. Identity queries and scene requirements exclude both removed and consumed instances. Retain their history and retirement reason without automatic re-identification. Temporary invisibility does not retire an active instance. A later candidate that cannot match active memory requires independent novelty confirmation before a new ID is registered. Preserve physical release and individual post-release judgments independently of whole-task success. Persist accepted per-instance masks with their original RGBD and calibration. Project dated measured surfaces into current masks and provide overlap, coverage and depth residuals to Decisions; overlap orders hypotheses but never assigns or excludes identity on its own. A successful analysis invalidates source_support_current for grasp planning; permanent target identity and prior operation receipts remain history. Before a subsequent plan_grasp, explicitly bind the target with identify_target using the current capture. Reuse of the same capture does not require another support judgment when its proof is already current. Reuse deduplicated appearance segmentation queries from this scene history, including retired records, to discover additional physical instances of those appearances. Identity hypotheses use active instances. A new instance requires its own Decisions confirmation and permanent ID. Runtime projects focus_entity_ids, deferred_entity_ids and receipt-bound container_occupancies into association_scope. Pending inputs and their products remain association priorities. Completed container contents are compared only when needed. A current SAM3 surface wholly inside an enabled published occupancy envelope may defer individual correspondence when the container has current registered-RGBD correspondence and passes the existing stationary-container depth checks, the entry receipt and scene bindings agree, and this container is outside the current source/work area and pending-object supports. Record deferred_candidates with measured bounds and occupancy provenance, without assigning an ID or claiming a measured individual pose. A candidate outside that coverage retains all active historical identity alternatives before novelty registration. Scope changes invalidate analysis reuse. Each identity predicate limits historical evidence to the queried permanent reference and retains accepted current subjects to distinguish similar instances. Novelty follows confidently negative comparisons against every remembered alternative and includes current accepted subjects for duplicate checks. Apply image limits to the final single-question request. Full-scene candidate discovery and collision retention continue independently. Association scope includes destination collision geometry while an input or product remains in progress, and throughout direct-transfer tasks. Those destination contents receive normal individual association and current geometry, so a conservative occupied-container envelope can be replaced before attachment-aware placement. Acquire destination contents geometry before processing preparation or holding can occlude it. Between-item observations can retain the envelope.",
+  "description": "Acquire an authorized RGBD capture. Associate only task-involved objects. For each known task identity, Decisions selects a current mask using confirmed dated reference images, then links that subject across other cameras. Enforce mask ownership and bidirectional calibrated geometry conflicts through all already-confirmed same-object views. Include those labelled views and established correspondences in the current Decisions request. Exclude masks already selected for other subjects from subsequent choices while keeping their ownership visible. Match container and content contours separately and include only labelled identity reference views. Inherit the confirmed permanent ID. Older confirmed references support recovery when recent evidence is insufficient. Discover and register additional matching task inputs for all/count tasks. Other visible objects supply visual context. Collision geometry covers task instances and required supports. Completed container contents with valid entry and occupied-range receipts defer individual reassociation. Preserve original identity masks and commit accepted observations transactionally. CAD 模型绑定采用 resources/cad_subject_policy.json 中的用户场景声明。已确认身份的 black/object 绑定黑色工件 CAD，blue/bin 绑定蓝盒 CAD，其余身份使用 TSDF。程序按该声明绑定模型并保留来源，FoundationPose 使用当前 SAM3 掩码和 RGBD 估计位姿。 Subject ownership proposals are tentative until cross-camera and competing-owner checks finish. Joint conflict adjudication allows at most one loser reselection; unresolved conflicts never commit. Dated archive fallback selects at most three confirmed captures per permanent ID.",
   "inputs": [
     "scene_entities",
     "visual_reference",
@@ -13,13 +13,13 @@
   },
   "provides": [
     "observed",
-    "inventory_ready",
+    "objects_ready",
     "grasp_view_ready"
   ],
-  "capability": "Associate current SAM3 subjects across three calibrated RGBD views with permanent inventory IDs",
+  "capability": "Acquire or reuse an authorized RGBD capture",
   "outputs": [
     "observed",
-    "inventory_ready",
+    "objects_ready",
     "grasp_view_ready",
     "execution_or_evidence_record"
   ],
@@ -30,7 +30,7 @@
     "missing_measurement_or_evidence",
     "service_or_execution_failure",
     "cad_pose_estimation_failed",
-    "cad_retrieval_uncertain",
+    "user_declared_cad_binding_ambiguous",
     "observation_unchanged_since_failed_analysis",
     "instance_registration_unconfirmed"
   ],
@@ -40,13 +40,14 @@
     "scene_ready": false,
     "observation_motion_scene_ready": false,
     "observation_map_ready": false,
-    "placement_resolved": false,
     "place_plan_ready": false,
-    "placement_zone_ready": false
+    "placement_zone_ready": false,
+    "same_arm_transfer_ready": false
   },
   "failure_effects": {
     "source_support_current": false,
     "scene_ready": false
   },
-  "retry_safe": true
+  "retry_safe": true,
+  "captures_observation": true
 }

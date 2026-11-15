@@ -71,7 +71,10 @@ def _configuration_spheres(joints_deg, grippers_rad, required_arms):
         rotation = data.xmat[body].reshape(3, 3)
         for sphere in kin['collision_spheres'][link]:
             center = data.xpos[body] + rotation @ np.asarray(sphere['center'])
-            radius = float(sphere['radius']) + kin['collision_sphere_buffer'].get(link, 0.)
+            buffer = kin['collision_sphere_buffer']
+            if isinstance(buffer, dict):
+                buffer = buffer.get(link, 0.)
+            radius = float(sphere['radius']) + buffer
             if radius > 0:
                 spheres.append((*center.tolist(), radius))
                 links.append(link)
@@ -113,14 +116,11 @@ def release_configuration_clearance(goal, holding, configurations, *, surface_vo
             'minimum_sphere_separation_m': gap, 'required_clearance_m': required,
             'surface_cell_reserve_m': reserve, 'settling_drop_bound_m': drop,
             'closest_robot_link': links[index[1]], 'attachment_sphere_index': int(index[0])})
-    source = 'measured_carried_surface_and_own_robot_kinematics'
-    assumption = 'observed_surface_only'
+    source = 'tsdf_surface_voxels_and_own_robot_kinematics'
+    assumption = 'observed_tsdf_surface_voxels'
     if holding.get('cad_tool') is not None:
         source = 'registered_cad_carried_volume_and_own_robot_kinematics'
         assumption = 'registered_cad_model_and_validated_pose'
-    elif holding.get('obb_tool') is not None:
-        source = 'observed_obb_carried_volume_and_own_robot_kinematics'
-        assumption = 'observed_obb_solid_approximation'
     return {'compatible': all(row['compatible'] for row in rows), 'configurations': rows,
         'source': source,
         'scope': 'destination_configuration_screening', 'motion_collision_certified': False,

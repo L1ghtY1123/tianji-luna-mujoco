@@ -80,8 +80,8 @@ function errorMessage(error) {
     skill_selection_budget_exhausted: '连续无效 skill 调用已达上限，任务等待处理；物理动作未因这些调用重复执行。',
     no_reachable_arm: '源与目的未同时命中可用机械臂工作空间。展开选臂记录查看证据。',
     arm_already_attempted: '该机械臂本轮已尝试规划，任务已停止。展开选臂与规划记录查看失败证据。',
-    grasp_verification_failed: '抓取未通过相机与夹爪反馈验证。展开运行事实查看失败证据。',
-    place_verification_failed: '放置未通过相机与夹爪反馈验证。展开运行事实查看目标分离与可见放置区域的观测证据。',
+    grasp_verification_failed: '抓取未通过视觉验证。展开运行事实查看失败证据。',
+    place_verification_failed: '放置未通过视觉验证。展开运行事实查看目标分离与可见放置区域的观测证据。',
     holding_state_reset_required: '当前仍有持物或待确认释放记录，请先完成放置或 Reset 后编辑/确认场景。',
     algorithm_cleanup_failed_reset_to_retry: '算法状态清理失败。请 Reset 后重试，清理成功前不会开始新任务。',
     release_clearance_conflict: '当前物体离盒底高度与携物表面球或碰撞间距冲突，任务已停止。请检查放置高度和实际可见点云。',
@@ -297,6 +297,7 @@ function renderControls() {
   byId('confirm').disabled = controls.confirmDisabled;
   byId('start').disabled = controls.startDisabled || Boolean(state.run.algorithm_pending || state.run.algorithm_cleanup_error) || state.planningLoading || !planningEditor.ready || planningEditor.dirty;
   byId('reset').disabled = controls.resetDisabled;
+  byId('stop-task').disabled = !state.connected || state.run.status !== 'running';
   byId('instruction').disabled = controls.editDisabled;
   if (byId('demo-preset')) byId('demo-preset').disabled = controls.editDisabled;
   if (byId('demo-count')) byId('demo-count').disabled = controls.editDisabled;
@@ -320,7 +321,7 @@ function renderControls() {
   byId('scene-badge').textContent = !state.connected ? '待连接' : state.dirty ? '有未应用修改' : confirmed ? '已确认' : '待确认';
   byId('scene-badge').classList.toggle('confirmed', Boolean(confirmed));
   byId('scene-note').textContent = state.dirty ? '位置、yaw、尺寸与已应用物料盒的壁厚即时预览。类型、颜色和新增物体在点击「应用场景修改」后显示；完成后等待重力稳定并确认。' : confirmed ? '初始场景已确认。Reset 将恢复此物理基线。' : '拖动和数值修改都需先应用，再等待重力稳定并确认场景。类型、颜色和新增物体在应用后显示。';
-  byId('start-hint').textContent = state.dragging ? '松手后请应用场景修改。' : state.busy ? '请求处理中…' : state.run.status === 'running' ? '任务运行中；Reset 可取消。' : state.run.algorithm_pending ? '等待后台算法返回，仍可 Reset。' : state.run.algorithm_cleanup_error ? '算法清理失败，请 Reset 重试。' : !planningEditor.ready || state.planningLoading ? '等待算法参数加载。' : planningEditor.dirty ? '参数草稿未应用，请打开参数设置。' : state.dirty ? '请应用修改并重新确认场景。' : !state.snapshot?.confirmed ? '先确认场景，再开始任务。' : '场景就绪 · 放置需已验证持物。';
+  byId('start-hint').textContent = state.dragging ? '松手后请应用场景修改。' : state.busy ? '请求处理中…' : state.run.status === 'running' ? '任务运行中，可点击停止任务。' : state.run.algorithm_pending ? '等待后台算法返回，仍可 Reset。' : state.run.algorithm_cleanup_error ? '算法清理失败，请 Reset 重试。' : !planningEditor.ready || state.planningLoading ? '等待算法参数加载。' : planningEditor.dirty ? '参数草稿未应用，请打开参数设置。' : state.dirty ? '请应用修改并重新确认场景。' : !state.snapshot?.confirmed ? '先确认场景，再开始任务。' : '场景就绪 · 放置需已验证持物。';
   byId('open-planning').classList.toggle('has-draft', planningEditor.dirty);
 }
 
@@ -391,7 +392,7 @@ function renderRunDetails() {
   const candidates = ikStep ? `候选 ${candidateCount(step.candidate_indices) ?? '—'} 个`
     : `候选编号 ${(step?.candidate_indices ?? []).join(', ')}`;
   byId('run-candidate').textContent = Number.isFinite(step?.batch_index)
-    ? `${ikStep ? 'Batched IK 批次' : '规划批次'} ${step.batch_index} / ${step.batch_count ?? '—'} · ${candidates} · Arm ${step.arm ?? '—'}${Number.isFinite(step.success_count) ? ` · 成功 ${step.success_count} 个` : ''}` : '';
+    ? `${ikStep ? 'Batched IK 批次' : '规划请求'} ${step.request_index ?? step.batch_index} · ${candidates} · Arm ${step.arm ?? '—'}${Number.isFinite(step.success_count) ? ` · ${ikStep ? '通过' : '完整执行检查通过'} ${step.success_count} 个` : ''}` : '';
   byId('run-last-error').hidden = !running || !step?.last_error;
   byId('run-last-error').textContent = step?.last_error ? `上一批次结果：${step.last_error}` : '';
   renderFailureReport(byId('run-failure'), state.run, state.events, { document,
@@ -472,7 +473,8 @@ function applyState(payload) {
   renderTaskClock();
   if (state.events !== previousEvents) renderTrace(state.events);
   const facts = state.run.facts;
-  objectList.render(state.run.task_progress, state.run.task_inventory, state.run.policy_graph, state.events, state.run.run_id);
+  objectList.render(state.run.task_progress, state.run.task_bindings,
+    state.run.terminal_recovery_graph ?? state.run.policy_graph, state.events, state.run.run_id);
   const metrics = state.run.metrics;
   byId('performance-summary').hidden = !metrics;
   if (metrics) {
@@ -584,7 +586,10 @@ function connectSocket() {
   const socket = new WebSocket(`${protocol}//${location.host}/ws`);
   socket.addEventListener('open', () => { setConnection(true); });
   socket.addEventListener('message', event => {
-    try { applyState(JSON.parse(event.data)); } catch (error) { showError(`实时数据处理失败：${error.message}`); }
+    try { applyState(JSON.parse(event.data)); } catch (error) {
+      console.error('实时状态渲染失败', error);
+      showError(`实时状态显示异常。后台任务状态请以任务结果和实验记录核对。\n${error.stack ?? error.message}`, { recorded: true });
+    }
   });
   socket.addEventListener('close', () => { setConnection(false); setTimeout(connectSocket, 2000); });
   socket.addEventListener('error', () => socket.close());
@@ -612,10 +617,10 @@ for (const name of ['scene', 'cameras', 'pointcloud']) {
 }
 byId('open-planning').addEventListener('click', () => byId('planning-dialog').showModal());
 byId('close-planning').addEventListener('click', () => byId('planning-dialog').close());
-for (const category of ['common', 'experimental', 'system']) {
+for (const category of ['common', 'experimental']) {
   byId(`planning-tab-${category}`).addEventListener('click', () => {
     planningEditor.setCategory(category);
-    for (const name of ['common', 'experimental', 'system']) byId(`planning-tab-${name}`).ariaPressed = String(name === category);
+    for (const name of ['common', 'experimental']) byId(`planning-tab-${name}`).ariaPressed = String(name === category);
   });
 }
 selectView('scene');
@@ -671,6 +676,7 @@ byId('cancel-scene').addEventListener('click', () => {
 byId('demo-preset')?.addEventListener('click', () => void perform('/api/demo/preset', { object_count: Number(byId('demo-count').value) }, { refreshDraft: true, manifest: true }));
 byId('settle').addEventListener('click', () => void perform('/api/settle', {}, { refreshDraft: true }));
 byId('confirm').addEventListener('click', () => void perform('/api/confirm', {}, { refreshDraft: true }));
+byId('stop-task').addEventListener('click', () => void perform('/api/stop'));
 byId('reset').addEventListener('click', () => {
   view?.cancelInteraction();
   void perform('/api/reset', {}, { refreshDraft: true, manifest: true, afterSuccess: () => { taskClock.reset(); renderTaskClock(); } });

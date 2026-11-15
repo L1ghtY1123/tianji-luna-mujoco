@@ -34,5 +34,6 @@
     "observed": false,
     "at_initial_pose": false,
     "observation_pose_ready": false
-  }
+  },
+  "captures_observation": false
 }

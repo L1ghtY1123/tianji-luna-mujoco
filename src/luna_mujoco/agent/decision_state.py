@@ -1,60 +1,39 @@
-"""Build the context sent with a single semantic question."""
+"""Small typed visual question context, with sensor images carried separately."""
 from copy import deepcopy
 
-from ..core.outcome_evidence import outcome_state, scalar_fields
-
-TASK_FIELDS = {'task', 'object_task', 'environment_assumptions', 'target_id', 'destination_id'}
 SCOPE_FIELDS = {
-    'current_support': {'subject', 'support_candidates', 'current_measured_geometry', 'support_memory',
-                        'support_hypothesis', 'rejected_support_hypothesis', 'interpretation'},
-    'instance_registration': {'proposal', 'subject_geometry', 'reference_projection'},
-    'input_membership': TASK_FIELDS | {'subject', 'subject_history'},
-    'next_input_selection': TASK_FIELDS | {'selection_candidates', 'selection_support_geometry'},
-    'mapping_update': TASK_FIELDS | {'mapping_evidence'},
-    'intermediate_destination': TASK_FIELDS | {
-        'intermediate_destination_id', 'destination_kind', 'final_destination_id', 'destination_evidence',
-        'intermediate_placement_mode', 'declared_destination_references'},
-    'execution_arm': TASK_FIELDS | {'feasible_arms', 'workspace_evaluations', 'robot_arm_names',
-                                   'current_measured_entities', 'previous_same_target_failure'},
-    'graph_recovery': {'failed_result', 'failed_node', 'subject', 'required_judgment'},
-    'policy_condition': TASK_FIELDS | {'policy_bindings', 'last_result', 'last_failure', 'declared_branches',
-        'declared_subgraphs', 'declared_continuations', 'current_facts', 'skill_contracts', 'selected_arm', 'arm_evaluations',
-        'edge_selection_only', 'verified_obligations'},
-    'task_completion': TASK_FIELDS | {'verified_obligations', 'verified_robot_pose'},
-    'placement_region_scope': TASK_FIELDS | {'original_requirement', 'active_object_requirement',
-        'bound_destination_ref', 'current_transfer', 'measured_region', 'configured_region_constraints',
-        'declared_destination_references'},
-    'placement_candidates': TASK_FIELDS | {'original_requirement', 'active_object_requirement',
-        'bound_destination_ref', 'current_transfer', 'semantic_frames', 'physical_relation',
-        'current_inventory_entities', 'occupancy_evidence', 'placement_candidates'},
-    'placement_xy_proposal': {'scene_token', 'target_id', 'region_authorization', 'current_transfer',
-        'placement_zone', 'subdivision_cells', 'xy_candidates', 'previous_candidate_failures', 'image_evidence_scope',
-        'placement_preference', 'desired_clearance_m'},
+    'current_support': {'subject', 'support_candidates', 'support_hypothesis'},
+    'grasp_result': {'target_id', 'selected_arm', 'primary_wrist_camera_id', 'camera_roles', 'visual_camera_ids',
+                     'holding_presence', 'visual_modalities', 'holding_segmentation'},
+    'instance_registration': {'proposal', 'reference_states', 'current_measurement',
+        'candidate', 'current_instances', 'description_ref', 'description', 'description_camera_id',
+        'geometry_correspondence'},
+    'input_membership': {'task', 'subject', 'subject_history'},
+    'target_selection': {'task', 'candidate_objects'},
+    'graph_recovery': {'subject', 'required_judgment'},
+    'policy_condition': {'task', 'object_task', 'policy_bindings'},
+    'task_completion': {'task', 'object_task'},
 }
 
 
 def judgment_state(context, question):
-    """Supply the evidence for this question, with no write access to its producers."""
     scope = context.get('verification_scope')
     if scope not in SCOPE_FIELDS:
-        raise ValueError('decision_scope_not_declared:' + str(scope))
-    fields = SCOPE_FIELDS[scope]
-    if scope == 'task_completion' and question.name == 'source_has_remaining_input':
-        fields = {'task'}
-    elif scope == 'placement_region_scope' and question.name == 'placement_additional_spatial_constraint':
-        fields = {'original_requirement', 'active_object_requirement', 'current_transfer', 'configured_region_constraints'}
-    state = {'verification_scope': scope, **{key: deepcopy(value) for key, value in context.items() if key in fields}}
-    if scope == 'instance_registration':
-        state['proposal'] = {key: value for key, value in state['proposal'].items() if key in {
-            'ref', 'existing_id', 'kind', 'color', 'description', 'appearance_keywords',
-            'reference_camera_id', 'bbox'}}
-    if scope == 'task_completion' and question.name == 'source_has_remaining_input':
-        state['task'] = {key: value for key, value in state['task'].items()
-                         if key in {'instruction', 'source_ref', 'target_selector'}}
-    for key in ('last_result', 'last_failure', 'failed_result', 'previous_same_target_failure'):
-        if key in state:
-            state[key] = outcome_state(state[key])
-    if isinstance(state.get('arm_evaluations'), dict):
-        state['arm_evaluations'] = {arm: scalar_fields(evaluation)
-                                    for arm, evaluation in state['arm_evaluations'].items()}
-    return state
+        raise ValueError('nonvisual_decision_scope_removed:' + str(scope))
+    result = {'verification_scope': scope}
+    if scope == 'grasp_result' and question.name in {'object_held', 'failure_gripper_holds'}:
+        from ..robot_skills.grasp_verification import HOLDING_VISUAL_CRITERIA
+
+        result['holding_visual_criteria'] = deepcopy(HOLDING_VISUAL_CRITERIA)
+        if 'gripper_feedback' in context:
+            result['gripper_feedback'] = deepcopy(context['gripper_feedback'])
+    subject = context.get('condition_subjects', {}).get(question.name)
+    if scope == 'task_completion' and subject is not None:
+        result['condition_subject'] = deepcopy(subject)
+    for key in SCOPE_FIELDS[scope]:
+        if key in context:
+            value = deepcopy(context[key])
+            if key == 'subject':
+                value = {k: v for k, v in value.items() if k in {'id', 'kind', 'color', 'description', 'bbox', 'reference_camera_id'}}
+            result[key] = value
+    return result

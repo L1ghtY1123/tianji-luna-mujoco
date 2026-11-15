@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 
-from ..core.graph import Edge, Graph, Identifier, Node, StrictModel, Subgraph, TaskSpec
+from ..core.graph import Graph, StrictModel, TaskSpec
 
 
 class EntityProposal(StrictModel):
@@ -22,43 +22,60 @@ class EntityProposal(StrictModel):
         'reference_camera_id. Name that camera when using image-left/right/upper/lower. '
         'For similar objects, specify their separate positions relative to visible neighbors. '
         'Do not use only one object/another object, task role, or a future destination as identification.'))
-    bbox: list[float] = Field(min_length=4, max_length=4, description=(
-        'Visible subject box [x_min, y_min, x_max, y_max], normalized to [0,1] in the named camera. '
-        'Both extents must be positive. Configured unmarked regions are referenced directly, not entities.'))
+    bbox: list[float] | None = Field(default=None, min_length=4, max_length=4, description=(
+        'SAM3-measured subject box populated after compilation, normalized to [0,1].'))
     reference_camera_id: Literal['1', '2', '3'] = Field(description=(
         'Choose the initial camera that shows this individual largest and most clearly separated from '
         'similar neighbors. Prefer a complete view over a clipped or occluded fragment when available. '
-        'Use this same camera for bbox and the appearance description.'))
+        'This is a description anchor only. SAM3 segments every appearance class in ALL three cameras.'))
+    robot_relative_side: Literal['left', 'right'] | None = Field(default=None, description=(
+        'Initial robot-relative location explicitly specified by the user for THIS subject. '
+        'Copy the requested left/right meaning, never infer it from image-left/right. '
+        'The calibrated world frame has +X forward, +Y robot-left, -Y robot-right. '
+        'Null when the user does not specify a robot-relative side. This initial selection constraint '
+        'does not restrict the future position of a permanent identity.'))
     parent_ref: str | None
     membership: Literal['required', 'excluded', 'unknown']
+    mentioned_in_task: bool = Field(default=False, description=(
+        'True only when this physical instance is involved in the requested TASK as a target, source, '
+        'destination, processing object or required support. Objects mentioned only in a SCENE '
+        'DESCRIPTION remain false. Scene context does not authorize instance tracking.'))
     segmentation_prompt: str = Field(description=(
         'Short English visual noun phrase for SAM3, even when the user task is Chinese. '
-        'For example green block or blue box. Human descriptions may remain Chinese.'))
+        'Reuse one class-wide primary phrase for instances sharing kind and color, covering all of them. '
+        'For example green block or blue box. Keep individual locations in description.'))
     appearance_keywords: tuple[str, ...] = Field(default=(), max_length=8, description=(
         'Visible appearance descriptors: color, shape, texture, pattern or material when observable. '
         'Proposals, not verified identity; do not invent hidden properties or task roles.'))
     segmentation_aliases: tuple[str, ...] = Field(default=(), max_length=2, description=(
         'Up to two distinct short English visual noun phrases, e.g. pink rectangular block, pink package. '
-        'Complement segmentation_prompt; omit location, task relations and unsupported properties.'))
+        'Backup phrases only. Try in order only after the preceding phrase returned no masks, '
+        'and stop at the first result. Omit location, task relations and unsupported properties.'))
     asset_id: str | None = Field(default=None, description=(
         'Optional model identity from the configured known_assets catalog. Null when unrecognized. '
         'An asset identifies declared dimensions, never current position or orientation.'))
-    geometry_policy: Literal['auto', 'unknown_obb'] = Field(default='auto', description=(
-        'unknown_obb only when the USER explicitly declares this subject unknown/unmodeled/no CAD. '
+    geometry_policy: Literal['auto', 'unknown_tsdf'] = Field(default='auto', description=(
+        'unknown_tsdf only when the USER explicitly declares this subject unknown/unmodeled/no CAD. '
         'Otherwise auto uses runtime Decisions CAD retrieval. An unrecognized appearance alone is not such a declaration.'))
     geometry_policy_instruction: str | None = Field(default=None, description=(
-        'Exact nonempty quote from the user instruction supporting unknown_obb; null for auto. '
+        'Exact nonempty quote from the user instruction supporting unknown_tsdf; null for auto. '
         'This is a representation requirement, not visual identity or a CAD match.'))
+
+    @field_validator('geometry_policy', mode='before')
+    @classmethod
+    def stored_geometry_policy(cls, value):
+        return 'unknown_tsdf' if value == 'unknown_obb' else value
 
     @model_validator(mode='after')
     def valid_box(self):
-        if self.geometry_policy == 'unknown_obb' and (
+        if self.geometry_policy == 'unknown_tsdf' and (
                 not self.geometry_policy_instruction or not self.geometry_policy_instruction.strip()
                 or self.asset_id is not None):
             raise ValueError('unknown_geometry_requires_instruction_and_no_asset')
-        x1, y1, x2, y2 = self.bbox
-        if not 0 <= x1 < x2 <= 1 or not 0 <= y1 < y2 <= 1:
-            raise ValueError('invalid_rgb_box')
+        if self.bbox is not None:
+            x1, y1, x2, y2 = self.bbox
+            if not 0 <= x1 < x2 <= 1 or not 0 <= y1 < y2 <= 1:
+                raise ValueError('invalid_rgb_box')
         if self.kind not in {'table', 'marker'} and not self.segmentation_prompt.strip():
             raise ValueError('missing_segmentation_prompt')
         if any(not value.strip() or len(value) > 256
@@ -98,6 +115,11 @@ def validate_batch_policy(graph, task):
 
 class InitialPlan(StrictModel):
     entities: list[EntityProposal] = Field(min_length=1, max_length=1024)
+    support_table_refs: list[str] = Field(description=(
+        'Refs of the visible TABLE entities needed for workspace collision geometry and requested '
+        'source/destination support measurements. Declare each as kind=table in entities, including '
+        'when destination_ref is a configured unmarked region. Supported manipulation requires at '
+        'least one measured table. A configured region ID cannot substitute for a table entity.'))
     task: TaskSpec
     graph: Graph
 
@@ -106,7 +128,7 @@ class InitialPlan(StrictModel):
     def graph_owners_match_task(cls, graph: Graph, info: ValidationInfo):
         task = info.data.get('task')
         if task is not None and not set(object_task_specs(graph)) <= set(task.target_refs):
-            raise ValueError('object_task_outside_candidate_inventory')
+            raise ValueError('object_task_outside_candidate_objects')
         return graph
 
     @model_validator(mode='after')
@@ -114,6 +136,11 @@ class InitialPlan(StrictModel):
         refs = {entity.ref for entity in self.entities}
         if len(refs) != len(self.entities):
             raise ValueError('duplicate_scene_reference')
+        tables = {entity.ref for entity in self.entities if entity.kind == 'table'}
+        if (self.task.supported and not self.support_table_refs
+                or len(set(self.support_table_refs)) != len(self.support_table_refs)
+                or not set(self.support_table_refs) <= tables):
+            raise ValueError('declared_support_table_required')
         for entity in self.entities:
             if entity.parent_ref is not None and (entity.parent_ref not in refs or entity.parent_ref == entity.ref):
                 raise ValueError('invalid_parent_reference')
@@ -125,60 +152,11 @@ class InitialPlan(StrictModel):
         return self
 
 
-class RootGraphRevision(StrictModel):
-    id: Identifier
-    nodes: list[Node] = Field(min_length=1, max_length=512)
-    entry: Identifier
-    edges: list[Edge] = Field(max_length=1536)
-
-
-class GraphRevision(StrictModel):
-    """Explicit scope replacements preserve all unedited model-authored control flow."""
-    root: RootGraphRevision | None = Field(description=(
-        'Null preserves the root scope. Otherwise supply its complete id, nodes, entry and edges. '
-        'Subgraph bodies are edited separately.'))
-    subgraphs: list[Subgraph] = Field(max_length=1024, description=(
-        'Complete bodies of only the subgraphs to replace or add, matched by id. '
-        'Every omitted subgraph keeps its current definition. Include all nodes and edges of each edited body.'))
-    remove_subgraph_ids: tuple[Identifier, ...] = Field(max_length=1024, description=(
-        'Explicitly remove these existing subgraph definitions. Update every affected caller. '
-        'Omitting a body from subgraphs never deletes it.'))
-
-    @model_validator(mode='after')
-    def distinct_edits(self):
-        identifiers = [scope.id for scope in self.subgraphs]
-        if (len(set(identifiers)) != len(identifiers)
-                or len(set(self.remove_subgraph_ids)) != len(self.remove_subgraph_ids)
-                or set(identifiers) & set(self.remove_subgraph_ids)):
-            raise ValueError('graph_revision_conflicting_scope_edits')
-        return self
-
-    def apply_to(self, graph):
-        result = deepcopy(graph)
-        existing = {scope['id'] for scope in result['subgraphs']}
-        if not set(self.remove_subgraph_ids) <= existing:
-            raise ValueError('graph_revision_remove_unknown_scope')
-        if self.root is not None:
-            result.update(self.root.model_dump(mode='json'))
-        replacements = {scope.id: scope.model_dump(mode='json') for scope in self.subgraphs}
-        updated, scopes = set(), []
-        for scope in result['subgraphs']:
-            identifier = scope['id']
-            if identifier in self.remove_subgraph_ids:
-                continue
-            if identifier in replacements:
-                if identifier not in updated:
-                    scopes.append(replacements[identifier])
-                    updated.add(identifier)
-            else:
-                scopes.append(scope)
-        scopes.extend(scope for identifier, scope in replacements.items() if identifier not in updated)
-        result['subgraphs'] = scopes
-        return result
-
-
 def skill_catalog(registry):
-    return registry.describe() if hasattr(registry, 'describe') else deepcopy(registry)
+    from ..core.failure_policy import TERMINAL_SKILLS
+
+    catalog = registry.describe() if hasattr(registry, 'describe') else deepcopy(registry)
+    return {name: contract for name, contract in catalog.items() if name not in TERMINAL_SKILLS}
 
 
 def argument_schema(contract):
@@ -204,6 +182,7 @@ def response_schema(model, catalog):
 
     schema = model.model_json_schema()
     definitions = schema.get('$defs', {})
+    definitions['RouterNode']['properties']['rule']['enum'] = ['visual', 'observation_recovery']
     definitions['Edge'] = RouteGroup.model_json_schema()
     definitions['Edge']['description'] = (
         'One explicit route group. The compiler creates an edge for each sources × outcomes pair, '
@@ -213,8 +192,7 @@ def response_schema(model, catalog):
     # declarations precede entry/edge references in every scope.
     for name, fields in (
             ('Graph', ('version', 'id', 'nodes', 'subgraphs', 'entry', 'edges')),
-            ('Subgraph', ('id', 'input_id', 'task', 'nodes', 'entry', 'edges')),
-            ('RootGraphRevision', ('id', 'nodes', 'entry', 'edges'))):
+            ('Subgraph', ('id', 'input_id', 'task', 'nodes', 'entry', 'edges'))):
         if name in definitions:
             properties = definitions[name]['properties']
             definitions[name]['properties'] = {key: properties[key] for key in fields}
@@ -223,7 +201,9 @@ def response_schema(model, catalog):
                 properties['on_' + outcome] = {'anyOf': [ScopeFailureRoute.model_json_schema(), {'type': 'null'}],
                     'description': 'Explicit common ' + outcome + ' route for skill and subgraph-call nodes '
                         'in this scope. An explicit route for a source/outcome overrides this declaration. '
-                        'Null declares no default. Routers and ends always need their own explicit routes. '
+                        'Null declares no default. Routers need explicit routes for their declared outcomes. '
+                        'Failure/unknown end nodes have no outgoing routes. A success end may have only '
+                        'an optional unknown receipt-failure route. Never add terminal self-loops. '
                         'Choose a declared local node. Prefer a shared failure exit or compatible recovery entry.'}
             properties['edges']['description'] = (
                 'Explicit local route groups for normal control and exceptions to on_failure/on_unknown. '
@@ -252,6 +232,8 @@ def response_schema(model, catalog):
         'Shared scope without an object task. Its skills retain their own declared prerequisites; '
         'it may establish shared facts before an object-owned scope is called.')
     definitions['Subgraph'] = {'anyOf': [owned, shared]}
+    from .subgraph_library import template_schemas
+    definitions['Subgraph']['anyOf'].extend(template_schemas(skill_catalog(catalog)))
     definitions['SubgraphNode']['properties']['subgraph_id']['description'] = (
         'Every call receives CURRENT caller facts and returns its changed facts. The next object does '
         'not restart initial_facts. A preceding object may have invalidated observed or scene_ready; '
@@ -278,6 +260,14 @@ def response_schema(model, catalog):
             mode = variant['properties']['arguments']['properties']['release_mode']
             mode['enum'] = ['surface_setdown', 'container_release']
             mode.pop('default', None)
+        if name == 'identify_destination':
+            destination_variants = []
+            for kind, mode in (('support_region', 'surface_setdown'), ('container', 'container_release')):
+                destination_arguments = deepcopy(variant['properties']['arguments'])
+                destination_arguments['properties']['destination_kind'] = {'type': 'string', 'const': kind}
+                destination_arguments['properties']['release_mode'] = {'type': 'string', 'const': mode}
+                destination_variants.append(destination_arguments)
+            variant['properties']['arguments'] = {'anyOf': destination_variants}
         variants.append(variant)
     if not variants:
         raise ValueError('empty_skill_catalog')

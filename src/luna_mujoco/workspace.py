@@ -26,6 +26,42 @@ class WorkspaceAtlas:
         self.maps = {}
         self.surface_preview = None
 
+    def contains(self, positions):
+        """Vectorized union of the two offline workspace volumes in Link_Base."""
+        points = np.asarray(positions, dtype=float).reshape(-1, 3)
+        inside = np.zeros(len(points), dtype=bool)
+        for arm in ('A', 'B'):
+            _, grid, origin, resolution = self._load(arm)
+            indices = np.floor((points - origin) / resolution + .5).astype(np.int64)
+            bounded = np.all((indices >= 0) & (indices < grid.shape), axis=1)
+            inside[bounded] |= grid[tuple(indices[bounded].T)]
+        return inside
+
+    def mask_capture(self, capture):
+        """Project the reusable workspace volume using each frame's calibrated pose."""
+        from .cameras import deproject_view
+
+        capture['raw_views'] = {camera: dict(view) for camera, view in capture['views'].items()}
+        for view in capture['views'].values():
+            depth = np.asarray(view['depth_m'])
+            valid = np.asarray(view['valid_depth']) & np.isfinite(depth) & (depth > 0)
+            mask = np.zeros(depth.shape, dtype=bool)
+            mask[valid] = self.contains(deproject_view(view))
+            rgb = np.asarray(view['rgb']).copy()
+            rgb[~mask] = 0
+            depth = depth.copy()
+            depth[~mask] = 0
+            for key, value in (('rgb', rgb), ('depth_m', depth), ('valid_depth', mask),
+                               ('workspace_mask', mask), ('effective_mask', mask)):
+                value.setflags(write=False)
+                view[key] = value
+        capture['workspace_filter'] = {
+            'source': 'offline_arm_workspace_union', 'frame': 'Link_Base',
+            'model_fingerprint': self._load('A')[0]['model_fingerprint'],
+            'outside_rgb': 0, 'outside_depth_m': 0,
+            'camera_pose_source': 'current_capture_calibration'}
+        return capture
+
     def _load(self, arm):
         if arm in self.maps:
             return self.maps[arm]
@@ -90,3 +126,32 @@ class WorkspaceAtlas:
                 'status': 'inside_sampled_workspace' if reachable else 'outside_sampled_workspace',
                 'limitation': 'finite_grid_position_prefilter_not_a_pose_or_path_guarantee'})
         return results
+
+
+def retain_instance_masks(capture, masks_by_camera):
+    """Register current masks within the immutable workspace pixel boundary."""
+    if not capture.get('raw_views'):
+        return capture
+    registered = capture.setdefault('registered_instance_masks', {})
+    for camera, masks in masks_by_camera.items():
+        view = capture['views'][camera]
+        target = registered.setdefault(camera, {})
+        for identifier, mask in masks.items():
+            mask = np.asarray(mask, dtype=bool)
+            if mask.shape != view['workspace_mask'].shape:
+                raise ValueError('registered_instance_mask_shape_mismatch')
+            target[identifier] = (np.asarray(target.get(identifier, np.zeros_like(mask))) | mask) & view['workspace_mask']
+    for camera, view in capture['views'].items():
+        raw = capture['raw_views'][camera]
+        keep = np.array(view['workspace_mask'], dtype=bool, copy=True)
+        valid = keep & raw['valid_depth'] & np.isfinite(raw['depth_m']) & (raw['depth_m'] > 0)
+        for name, value in (('rgb', np.where(keep[..., None], raw['rgb'], 0)),
+                            ('depth_m', np.where(valid, raw['depth_m'], 0)),
+                            ('valid_depth', valid), ('effective_mask', keep)):
+            value.setflags(write=False)
+            view[name] = value
+    capture.setdefault('workspace_filter', {}).update(
+        source='offline_arm_workspace_union',
+        registered_entity_ids=sorted({identifier for masks in registered.values() for identifier in masks}),
+        identity_assigned=True, mask_observation_id=capture['observation_id'])
+    return capture

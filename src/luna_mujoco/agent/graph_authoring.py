@@ -1,4 +1,5 @@
 """Expand explicitly authored route groups into the runtime's ordinary edges."""
+import json
 from copy import deepcopy
 
 from pydantic import Field, ValidationError, model_validator
@@ -33,14 +34,14 @@ class ScopeFailureRoute(StrictModel):
 def expand_scope_routes(scope, *, catalog=None):
     """Compile route declarations and retain already-expanded edges in revision bases."""
     if not isinstance(scope, dict) or not isinstance(scope.get('edges', []), list):
-        raise ValueError('graph_route_invalid:scope_requires_object_and_edge_array')
+        raise ValueError('graph_route_invalid:scope_requires_object_and_edge_array')  # noqa: TRY004 - authoring validation
     result = deepcopy(scope)
     defaults = {outcome: result.pop('on_' + outcome, None) for outcome in ('failure', 'unknown')}
     edges = []
     for index, declaration in enumerate(scope.get('edges', [])):
         try:
             if not isinstance(declaration, dict):
-                raise ValueError('route_requires_object')
+                raise ValueError('route_requires_object')  # noqa: TRY004 - authoring validation
             if 'sources' in declaration or 'outcomes' in declaration:
                 group = RouteGroup.model_validate(declaration)
                 if len(edges) + len(group.sources) * len(group.outcomes) > 1536:
@@ -79,9 +80,21 @@ def expand_scope_routes(scope, *, catalog=None):
     return result
 
 
+def expand_subgraph_routes(scopes, *, catalog=None):
+    """Collapse identical repeated definitions while preserving conflicting bodies."""
+    if not isinstance(scopes, list):
+        raise ValueError('graph_route_invalid:subgraphs_requires_array')  # noqa: TRY004 - authoring validation
+    from .subgraph_library import expand_templates
+
+    definitions = {}
+    for scope in expand_templates(scopes, catalog=catalog):
+        expanded = expand_scope_routes(scope, catalog=catalog)
+        signature = json.dumps(expanded, sort_keys=True, separators=(',', ':'), allow_nan=False)
+        definitions.setdefault(signature, expanded)
+    return list(definitions.values())
+
+
 def expand_graph_routes(graph, *, catalog=None):
     result = expand_scope_routes(graph, catalog=catalog)
-    if not isinstance(graph.get('subgraphs', []), list):
-        raise ValueError('graph_route_invalid:subgraphs_requires_array')
-    result['subgraphs'] = [expand_scope_routes(scope, catalog=catalog) for scope in graph.get('subgraphs', [])]
+    result['subgraphs'] = expand_subgraph_routes(graph.get('subgraphs', []), catalog=catalog)
     return result

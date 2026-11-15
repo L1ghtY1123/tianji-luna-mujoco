@@ -1,5 +1,4 @@
-"""Registered CAD meshes and observed OBBs composed through public scene inputs."""
-import re
+"""Registered CAD, measured table cuboids and unknown TSDF/ESDF through public scene inputs."""
 import struct
 import time
 from copy import deepcopy
@@ -51,8 +50,9 @@ def build_geometry_model(rows, observation_id, generation, *, catalog=None):
                      and identifier not in identifiers and isinstance(row.get("kind"), str)
                      and bool(row["kind"]) and row["kind"] not in ("table", "marker"))
             identifiers.add(identifier)
-            has_cad, has_obb = row.get("cad") is not None, row.get("obb") is not None
-            _require(has_cad != has_obb, "geometry_object_requires_one_geometry")
+            has_cad = row.get("cad") is not None
+            unknown = row.get("geometry_type") == "tsdf_esdf"
+            _require(has_cad != unknown, "geometry_object_requires_cad_or_tsdf_esdf")
             metadata = {"instance_id": identifier, "observation_id": observation_id, "generation": generation}
             name = "semantic_instance::" + identifier
             if has_cad:
@@ -78,25 +78,13 @@ def build_geometry_model(rows, observation_id, generation, *, catalog=None):
                 model["mesh"][name] = {"file_path": str(geometry["path"]), "pose": _pose(canonical),
                     **metadata, "geometry_source": "registered_cad", "asset_id": cad["asset_id"],
                     "source_sha256": geometry["source_sha256"], "mesh_sha256": geometry["mesh_sha256"]}
-            else:
-                obb = row["obb"]
-                _current(obb["observation_provenance"], observation_id, generation)
-                half = np.asarray(obb["half_extents_m"], dtype=float)
-                _require(obb["frame"] == "world" and obb["instance_id"] == identifier
-                         and obb["source"] == "observed_points_obb_approximation"
-                         and isinstance(obb["points_sha256"], str)
-                         and re.fullmatch(r"[0-9a-f]{64}", obb["points_sha256"]) is not None
-                         and type(obb["measured_point_count"]) is int and obb["measured_point_count"] > 0
-                         and half.shape == (3,) and np.isfinite(half).all() and np.all(half > 0))
-                model["cuboid"][name] = {"pose": _pose(obb["T_frame_obb"]), "dims": (2 * half).tolist(),
-                                         **metadata, "geometry_source": "observed_obb"}
     except (KeyError, TypeError, OverflowError) as error:
         raise ValueError("geometry_object_invalid") from error
     return model
 
 
 class HybridGeometryMapper:
-    """Reuse robot-filtered registered depth and table evidence without a grid mapper."""
+    """Compose per-instance unknown ESDF grids with registered CAD and measured table cuboids."""
 
     def __init__(self, segmenter_boundary, *, scene_type=None, catalog=None):
         if scene_type is None:
@@ -107,11 +95,21 @@ class HybridGeometryMapper:
         self.table_cache = MeasuredTableCache()
         self.scene_type = scene_type
         self.catalog = catalog
+        from .instance_mapping import InstanceMapper
+
+        self.instance_mapper = InstanceMapper(self.capture_segmenter)
+        from .workspace_mapping import WorkspaceMapper
+
+        self.workspace_mapper = WorkspaceMapper(self.capture_segmenter)
+        self.tsdf_surfaces = {}
         self.diagnostics = {}
 
     def reset(self):
         self.capture_segmenter.begin_capture(None)
         self.table_cache.reset()
+        self.instance_mapper.cache.clear()
+        self.workspace_mapper.reset()
+        self.tsdf_surfaces = {}
         self.diagnostics = {}
 
     def update_segmenter(self, segmenter_boundary, *, scene_type=None):
@@ -163,7 +161,7 @@ class HybridGeometryMapper:
                 "filtered_point_count": int(view.filtered_point_count),
                 "background_point_count": int(view.background_point_count),
                 "removed_robot_point_count": int(view.removed_point_count),
-                "removed_unclassified_background_point_count": int(view.background_point_count)}
+                "removed_unclassified_background_point_count": 0}
         timings = {"depth_filter_projection": (time.perf_counter() - started) * 1000}
         stage = time.perf_counter()
         spheres = np.concatenate(robots, axis=0)
@@ -183,31 +181,55 @@ class HybridGeometryMapper:
             prepared = [crop_instance_samples(view, crop) for view in prepared]
         timings["table"] = (time.perf_counter() - stage) * 1000
         metrics = {}
-        for row in decoded["geometry_objects"]:
-            identifier = row["id"]
+        unknown = {row['id'] for row in decoded['geometry_objects'] if row.get('geometry_type') == 'tsdf_esdf'}
+        instance_points = {identifier: {view.camera_id: view.instance_points_base_m.get(identifier, np.empty((0, 3)))
+                                      for view in prepared} for identifier in unknown}
+        radius = max(float(np.max(spheres[:, 3])), float(decoded.get('mapping_max_sphere_radius_m', 0.)))
+        padding = radius + hard_clearance + self.instance_mapper.esdf_voxel_size_m
+        geometries = self.instance_mapper.build(prepared, instance_points, padding_m=padding, table_model=None)
+        grids = list(self.instance_mapper.grids)
+        self.tsdf_surfaces = {}
+        for row in decoded['geometry_objects']:
+            identifier = row['id']
             groups = [view.instance_points_base_m.get(identifier, np.empty((0, 3))) for view in prepared]
             count = sum(len(points) for points in groups)
-            _require(count > 0 and all(np.isfinite(points).all() for points in groups), "semantic_instance_depth_empty")
-            kind = "mesh" if row.get("cad") is not None else "cuboid"
-            metrics[identifier] = {"geometry": kind, "input_point_count": count, "filtered_point_count": count,
-                "camera_count": sum(bool(len(points)) for points in groups),
-                "geometry_source": model[kind]["semantic_instance::" + identifier]["geometry_source"]}
+            _require(count > 0 and all(np.isfinite(points).all() for points in groups), 'semantic_instance_depth_empty')
+            kind = 'mesh' if row.get('cad') is not None else 'voxel'
+            if identifier in unknown:
+                geometry = geometries[identifier]
+                model['voxel'][geometry.name] = {**dict(geometry.model), 'instance_id': identifier,
+                    'observation_id': decoded['observation_set_id'], 'generation': decoded['selection_generation'],
+                    'geometry_source': 'curobo_tsdf_esdf'}
+                self.tsdf_surfaces[identifier] = {'source': 'curobo_tsdf_surface', 'frame': 'world',
+                    'observation_id': decoded['observation_set_id'], 'generation': decoded['selection_generation'],
+                    'points_world_m': self.instance_mapper.surfaces[identifier],
+                    'tsdf_voxel_size_m': self.instance_mapper.voxel_size_m,
+                    'esdf_voxel_size_m': self.instance_mapper.esdf_voxel_size_m}
+            metrics[identifier] = {'geometry': kind, 'input_point_count': count, 'filtered_point_count': count,
+                'camera_count': sum(bool(len(points)) for points in groups),
+                'geometry_source': model[kind]['semantic_instance::' + identifier]['geometry_source']}
         bounds = fixed_mapping_bounds()
         if demo:
             bounds = MappingBounds(center_m=(.55, 0., .8), extent_m=(1.1, 2., 1.6),
                                    minimum_m=(0., -1., 0.), maximum_m=(1.1, 1., 1.6))
-        scene = create_mixed_esdf_scene(self.scene_type, [], sdk_scene_model(model))
+        from .workspace_mapping import BACKGROUND_LAYER
+
+        background_grid, background_model = self.workspace_mapper.build(prepared, decoded, model)
+        grids.append(background_grid)
+        model['voxel'][BACKGROUND_LAYER] = background_model
+        scene = create_mixed_esdf_scene(self.scene_type, grids, sdk_scene_model(model))
         integration = EsdfIntegrationResult(struct.pack("<I", 0), 0, 0, 1, 0, None)
         timings["build_total"] = (time.perf_counter() - started) * 1000
-        self.diagnostics = {"semantic_only_active": True, "background_grid_omitted": True,
-            "geometry_policy": "registered_cad_or_observed_obb", "grids": [], "demo_mapping": demo,
+        self.diagnostics = {"semantic_only_active": False, "background_grid_omitted": False,
+            "geometry_policy": "cuboid_cad_and_unknown_esdf", "grids": [grid.name for grid in grids], "demo_mapping": demo,
             "scene_policy": decoded.get("scene_policy"), "camera_ids": list(camera_metrics),
             "included_instance_ids": list(metrics), "table_cache": deepcopy(self.table_cache.diagnostics),
-            "background_drop_policy": "discard_all_unlisted_and_tabletop_returns", "unobserved_space": "unknown",
+            "background_drop_policy": "discard_robot_table_and_outside_workspace", "unobserved_space": "unknown",
+            "workspace_mapping": deepcopy(self.workspace_mapper.diagnostics),
             "workspace_bounds_m": {"minimum": list(bounds.minimum_m), "maximum": list(bounds.maximum_m)}}
         candidate = SemanticEsdfCandidate(observation_set_id=decoded["observation_set_id"],
             selected_instance_id=decoded["confirmed_instance_id"], selection_generation=decoded["selection_generation"],
             scene_data=scene, scene_model=MappingProxyType(model), bounds=bounds, table=table, integration=integration,
             camera_metrics=MappingProxyType(camera_metrics), instance_metrics=MappingProxyType(metrics),
             timings_ms=MappingProxyType(timings))
-        return candidate, [], model
+        return candidate, grids, model

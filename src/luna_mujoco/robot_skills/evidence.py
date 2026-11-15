@@ -5,13 +5,13 @@ import math
 
 import numpy as np
 
-from ..visual_api import VisualInventoryError
-from ..visual_inventory import image_part
+from ..visual_api import VisualDecisionError
+from ..visual_identity import image_part
 
 
 def _require(condition, reason):
     if not condition:
-        raise VisualInventoryError('result_evidence_' + reason)
+        raise VisualDecisionError('result_evidence_' + reason)
 
 
 def unpack_table_support(observation, table_id):
@@ -23,7 +23,7 @@ def unpack_table_support(observation, table_id):
     pose, size = np.asarray(model.get('pose'), float), np.asarray(model.get('dims'), float)
     floor = table.get('surface_height_m')
     _require(bool(identifier) and identifier == table_id and bool(cached.get('source_observation_id'))
-             and table.get('source') == 'initial_inventory_ransac_table'
+             and table.get('source') == 'initial_objects_ransac_table'
              and pose.shape == (7,) and size.shape == (3,)
              and np.isfinite(pose).all() and np.isfinite(size).all() and np.all(size > 0)
              and np.allclose(np.abs(pose[3:]), [1, 0, 0, 0], atol=1e-9)
@@ -57,7 +57,7 @@ def table_release_reference(capture, evidence, owner_id):
              and evidence.get('status') == 'at_destination'
              and evidence.get('source') == 'openai_decisions'
              and evidence.get('identity_source') == 'execution_chain'
-             and type(evidence.get('confidence')) in (int, float) and .8 <= evidence['confidence'] <= 1.
+             and evidence.get('placement_outcome') in {'direct_success', 'inferred_success'}
              and all(evidence.get(key) for key in ('target_id', 'release_feedback_id', 'binding_id', 'request_hash')),
              'table_release_reference_invalid')
     images = {}

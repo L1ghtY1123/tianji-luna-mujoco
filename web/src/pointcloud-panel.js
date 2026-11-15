@@ -312,6 +312,7 @@ export function createPointcloudPanel(container, status, {
   const obbButton = element('button', 'button secondary', '隐藏 OBB 线框');
   obbButton.type = 'button';
   obbButton.ariaPressed = 'true';
+  obbButton.hidden = true;
   controls.append(modeLabel, refreshButton, visibilityButton, environmentButton, obbButton);
   const environmentNote = element('p', 'helper-text', '隐藏仿真物体后，仅保留机器人、相机与所选叠层；测量地图中的桌面碰撞体仍显示。');
   const counts = element('p', 'pointcloud-counts');
@@ -353,9 +354,10 @@ export function createPointcloudPanel(container, status, {
       : '原始点云是最近一次建图观测的实测采样，不代表最终碰撞障碍，也不随机器人当前姿态重新采集。';
     obbEvidence.replaceChildren();
     const boxes = obbRows(payload, mode.value);
-    obbEvidence.append(element('p', 'helper-text', payload.object_obbs
-      ? `${mode.value === 'collision' ? '地图关联' : '本次观测'} OBB 线框：${boxes.length} 个。绿实线：本次观测；紫虚线：历史保留；红虚线：已失效。线框用于查看观测来源，具体碰撞几何见空间记忆；包络不证明隐藏表面已测量。`
-      : '当前快照未导出独立 OBB 线框；空间记忆显示已发布的几何。'));
+    obbButton.hidden = boxes.length === 0;
+    if (boxes.length) {
+      obbEvidence.append(element('p', 'helper-text', `历史实验 OBB 线框 ${boxes.length} 个，来源记录如下。`));
+    }
     for (const row of boxes) {
       const dimensions = row.obb.half_extents_m.map(value => (value * 2000).toFixed(1)).join(' × ');
       obbEvidence.append(element('p', 'helper-text', `${row.instance_id} · ${obbStates[row.status].label} · ${dimensions} mm · 来源 ${row.observation_id}`));

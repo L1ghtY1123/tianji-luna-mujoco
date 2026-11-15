@@ -30,7 +30,7 @@ class CadGraspLibrary:
     """Project-side reader; the asset repository and its reader remain read-only.
 
     The caller binds asset_id/source_sha256 to the identified model and supplies
-    its current original-CAD pose in metres. Freshness and inventory identity
+    its current original-CAD pose in metres. Freshness and objects identity
     belong to the caller; a rigid matrix alone cannot establish either fact.
     """
 

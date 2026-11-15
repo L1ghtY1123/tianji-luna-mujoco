@@ -37,10 +37,32 @@ def write_json(path, value):
 
 
 def archive_value(directory, name, value):
-    """JSON structure plus non-pickle arrays. References are relative to the experiment."""
-    arrays = {}
-    array_fingerprints = {}
-    array_path = name + ".npz"
+    """JSON records reference immutable arrays shared throughout one experiment."""
+    directory = Path(directory)
+    packed_fields = {'positions_rad', 'velocities_rad_s', 'accelerations_rad_s',
+                     'points_world_m', 'points_local_m', 'goal_matrices_world',
+                     'completed_geometry_points_world_m'}
+
+    def array_reference(item):
+        item = np.asarray(item, order='C')
+        digest = hashlib.sha256(json.dumps([item.dtype.descr, item.shape]).encode())
+        digest.update(item.tobytes())
+        relative = 'arrays/' + digest.hexdigest() + '.npz'
+        destination = directory / relative
+        if not destination.exists():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_suffix('.' + uuid4().hex + '.tmp')
+            try:
+                with (
+                    ZipFile(temporary, 'w', compression=ZIP_DEFLATED, compresslevel=1) as archive,
+                    archive.open('data.npy', 'w', force_zip64=True) as stream,
+                ):
+                    np.lib.format.write_array(stream, item, allow_pickle=False)
+                temporary.replace(destination)
+            finally:
+                temporary.unlink(missing_ok=True)
+        return {'type': 'ndarray', 'path': relative, 'key': 'data',
+                'dtype': str(item.dtype), 'shape': list(item.shape)}
 
     def convert(item):
         if isinstance(item, BaseModel):
@@ -48,15 +70,7 @@ def archive_value(directory, name, value):
         if isinstance(item, np.ndarray):
             if item.dtype.hasobject:
                 return convert(item.tolist())
-            fingerprint = (str(item.dtype), item.shape,
-                           hashlib.sha256(np.ascontiguousarray(item)).hexdigest())
-            key = array_fingerprints.get(fingerprint)
-            if key is None:
-                key = f"array_{len(arrays)}"
-                arrays[key] = item
-                array_fingerprints[fingerprint] = key
-            return {"type": "ndarray", "path": array_path, "key": key,
-                    "dtype": str(item.dtype), "shape": list(item.shape)}
+            return array_reference(item)
         if isinstance(item, np.generic):
             return convert(item.item())
         if isinstance(item, dict):
@@ -64,7 +78,18 @@ def archive_value(directory, name, value):
                 from .collision_archive import archive_collision_assets
 
                 item = archive_collision_assets(directory, item)
-            return {str(key): convert(child) for key, child in item.items()}
+            result = {}
+            for key, child in item.items():
+                if key in packed_fields and isinstance(child, list) and child:
+                    try:
+                        array = np.asarray(child)
+                    except ValueError:
+                        array = np.asarray([], dtype=object)
+                    if (array.dtype.kind in 'buif' and array.ndim >= 2 and array.size >= 256
+                            and array.tolist() == child):
+                        child = array
+                result[str(key)] = convert(child)
+            return result
         if isinstance(item, (tuple, list)):
             return [convert(child) for child in item]
         if isinstance(item, float) and not np.isfinite(item):
@@ -76,13 +101,6 @@ def archive_value(directory, name, value):
     converted = convert(value)
     path = directory / (name + ".json")
     path.parent.mkdir(parents=True, exist_ok=True)
-    if arrays:
-        # Keep ordinary NPZ/NPY compatibility while reducing background CPU
-        # competition with perception. Repeated snapshots share exact bytes.
-        with ZipFile(directory / array_path, 'w', compression=ZIP_DEFLATED, compresslevel=1) as archive:
-            for key, item in arrays.items():
-                with archive.open(key + '.npy', 'w', force_zip64=True) as stream:
-                    np.lib.format.write_array(stream, item, allow_pickle=False)
     write_json(path, converted)
     return name + ".json"
 
@@ -118,25 +136,17 @@ class ExperimentSession:
         self.manifest = manifest
         self._visual_calls = []
         self.started_at = time.monotonic()
-        self.simulation = simulation
-        self.generation = None
+        self.generation = simulation.robot_snapshot()['generation'] if simulation is not None else None
         self.video = None
         self.error = None
         # A bounded policy can emit several records per node, even without a
         # motor wait. Reserve room for those bursts while the disk writer runs.
         self._queue = queue.Queue(maxsize=512)
-        self._stop = threading.Event()
         self._finished = threading.Event()
         self._finish_lock = threading.Lock()
         self._writer = threading.Thread(target=self._write, name="experiment-writer", daemon=True)
-        self._sampler = None
         self._finish_thread = None
-        if simulation is not None:
-            self.generation = simulation.robot_snapshot()["generation"]
         self._writer.start()
-        if simulation is not None:
-            self._sampler = threading.Thread(target=self._sample, name="experiment-robot", daemon=True)
-            self._sampler.start()
         if manifest["record_video"] and simulation is not None:
             try:
                 if video_factory is None:
@@ -174,9 +184,15 @@ class ExperimentSession:
                 self._error("record_queue_full", error)
 
     def event(self, event, data):
-        artifact = f"artifacts/event-{event['id']:05d}.json"
-        event["artifact"] = artifact
-        self._submit("event", (event, data))
+        # These records index data already archived at their actual source.
+        index_only = {'ik_batch_start', 'planning_batch_start',
+                      'visual_decisions_call', 'observation_recorded',
+                      'observation_annotated', 'collision_scene_archived', 'run_start', 'run_end'}
+        if event['kind'] in index_only:
+            self._submit('event', (event, None))
+        else:
+            event['artifact'] = f"artifacts/event-{event['id']:05d}.json"
+            self._submit('event', (event, data))
 
     def artifact(self, name, data):
         self._submit("artifact", (name, data))
@@ -222,7 +238,8 @@ class ExperimentSession:
                 kind, payload = item
                 if kind == "event":
                     event, data = payload
-                    archive_value(self.directory, event["artifact"][:-5], data)
+                    if data is not None:
+                        archive_value(self.directory, event["artifact"][:-5], data)
                     with (self.directory / "events.jsonl").open("a", encoding="utf-8") as stream:
                         stream.write(json.dumps(event, ensure_ascii=False) + "\n")
                 elif kind == "artifact":
@@ -240,7 +257,6 @@ class ExperimentSession:
                         path.write_text(annotated_rgb_svg(rgb, labels, camera), encoding='utf-8')
                 elif kind == 'visual_decision':
                     name, evidence = payload
-                    count = 0
                     contents = [message['content'] for message in evidence['request']['input']]
                     contents.extend(question['instructions'] for question in evidence['request'].get('questions', [])
                                     if isinstance(question.get('instructions'), list))
@@ -249,48 +265,27 @@ class ExperimentSession:
                             if part['type'] != 'input_image':
                                 continue
                             image, media_type, extension = decode_visual_archive_image(part['image_url'])
-                            path = f'{name}-image-{count:03d}{extension}'
+                            digest = hashlib.sha256(image).hexdigest()
+                            path = f'decisions/images/{digest}{extension}'
                             target = self.directory / path
                             target.parent.mkdir(parents=True, exist_ok=True)
-                            target.write_bytes(image)
-                            part['image_url'] = {'path': path, 'sha256': hashlib.sha256(image).hexdigest(),
+                            if not target.exists():
+                                target.write_bytes(image)
+                            part['image_url'] = {'path': path, 'sha256': digest,
                                                  'media_type': media_type}
-                            count += 1
                     write_json(self.directory / (name + '.json'), evidence)
                     summary = {key: evidence.get(key) for key in
                                ('observation_id', 'request_hash', 'endpoint', 'purpose', 'elapsed_s', 'http_status', 'error')}
                     with (self.directory / 'decisions/calls.jsonl').open('a', encoding='utf-8') as stream:
                         stream.write(json.dumps(summary | {'artifact': name + '.json'}, ensure_ascii=False) + '\n')
-                elif kind == "robot":
-                    with (self.directory / "robot.jsonl").open("a", encoding="utf-8") as stream:
-                        stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
             except Exception as error:  # noqa: BLE001 — keep draining the queue after a disk failure
                 self._error("archive_write", error)
             finally:
                 self._queue.task_done()
 
-    def _sample(self):
-        while not self._stop.is_set():
-            try:
-                state = self.simulation.robot_snapshot()
-                if state["generation"] != self.generation:
-                    return
-                # The rolling 1.1s window belongs to verification inputs, archived
-                # with those events. Repeating it at 15Hz bloats telemetry.
-                arms = {arm: {key: value for key, value in feedback.items()
-                              if key != "gripper_position_samples"}
-                        for arm, feedback in state["arms"].items()}
-                self._submit("robot", {"t_s": time.monotonic() - self.started_at,
-                                       "sim_time_s": state["time"], "arms": arms})
-            except Exception as error:  # noqa: BLE001 — report background sampler failure
-                self._error("robot_sample", error)
-                return
-            self._stop.wait(1 / 15)
-
     def stop(self, state):
         """Finalize in the background. A new task does not wait for video encoding."""
         if self._finish_thread is None:
-            self._stop.set()
             self.manifest.update(status=state["status"], duration_s=time.monotonic() - self.started_at)
             if self.video is not None:
                 self.video.stop()
@@ -303,13 +298,10 @@ class ExperimentSession:
         with self._finish_lock:
             if self._finished.is_set():
                 return
-            self._stop.set()
             if self.video is not None:
                 self.video.stop()
             self.manifest.update(status=state["status"], duration_s=self.manifest.get(
                 "duration_s", time.monotonic() - self.started_at))
-            if self._sampler is not None:
-                self._sampler.join()
             for done in self._visual_calls:
                 done.wait()
             self._queue.put(None)
@@ -396,11 +388,10 @@ class ExperimentStore:
         try:
             (directory / "events.jsonl").touch()
             source_root = Path(__file__).resolve().parents[2]
-            source_paths = list((source_root / "src/luna_mujoco").rglob("*.py"))
-            source_paths.extend((source_root / "skill_catalog").glob("*/*"))
-            source_paths.extend((source_root / "resources").rglob("*.json"))
-            config = {**config, "source_sha256": {path.relative_to(source_root).as_posix():
-                      hashlib.sha256(path.read_bytes()).hexdigest() for path in source_paths if path.is_file()}}
+            model_paths = ('resources/robot/marvin_gui_dual.yml',
+                           'assets/marvin_urdf/marvin_with_grippers.urdf')
+            config = {**config, 'robot_model_sha256': {name:
+                hashlib.sha256((source_root / name).read_bytes()).hexdigest() for name in model_paths}}
             calibration = source_root / "resources/cameras/calibration.json"
             if calibration.exists():
                 config["camera_calibration"] = json.loads(calibration.read_text(encoding="utf-8"))

@@ -1,9 +1,23 @@
-"""Separate current measurements from dated, verified inventory memory."""
+"""Separate current measurements from dated, verified objects memory."""
 from copy import deepcopy
 
 import numpy as np
 
-from ..task_binding_images import current_instance_locations
+
+def geometric_support(measured):
+    """Resolve clear container volume membership or a complete CAD table contact."""
+    geometry = measured['current_measured_geometry']
+    containers = geometry.get('candidate_container_relationships', {})
+    inside = [identifier for identifier, row in containers.items()
+        if row['visible_inside_volume_fraction'] >= .9 and row['visible_xy_fraction'] >= .95
+        and row['highest_visible_minus_rim_m'] < -.01]
+    if len(inside) == 1:
+        return inside[0]
+    if any(row['visible_xy_fraction'] > .05 for row in containers.values()):
+        return None
+    tables = [identifier for identifier, row in geometry.get('candidate_table_relationships', {}).items()
+        if row['cad_xy_bounds_inside_table_xy_bounds'] and abs(row['cad_bottom_minus_table_surface_m']) <= .01]
+    return tables[0] if len(tables) == 1 else None
 
 
 def cad_support_geometry(cad, subject_id, capture, tables):
@@ -74,7 +88,7 @@ def cad_support_geometry(cad, subject_id, capture, tables):
 def support_memory(entity):
     """Physical history only; task attempts and intended destinations are not support evidence."""
     previous = entity.get('observed_support')
-    if not (isinstance(previous, dict) and previous.get('source') == 'openai_decisions'
+    if not (isinstance(previous, dict) and previous.get('source') in {'openai_decisions', 'measured_rgbd_geometry'}
             and previous.get('request_hash') and previous.get('observation_id')):
         previous = None
     else:
@@ -119,7 +133,7 @@ def measured_supports(observation, capture, candidates):
 
 
 def support_context(capture, observation, subject, candidates):
-    proof = observation.get('visual_inventory', {}).get('evidence', {})
+    proof = observation.get('visual_identity', {}).get('evidence', {})
     if (observation.get('observation_id') != capture['observation_id']
             or observation.get('generation') != capture.get('generation')
             or proof.get('source') != 'openai_decisions' or not proof.get('request_hash')):
@@ -140,6 +154,24 @@ def support_context(capture, observation, subject, candidates):
         'limits': 'Visible surfaces only; the lowest measured point need not be the physical bottom. '
             'Table models are retained measured references, not newly seen surfaces. '
             'No simulator object pose or hidden shape is supplied; this is not a clearance certificate.'}
+    from ..placement import region_contains_xy
+
+    relationships = {}
+    for support_id, support in measured['measured_supports'].items():
+        region = support.get('support_region')
+        shape = support.get('registered_cad', {}).get('bounds_world_m')
+        if region is None or shape is None:
+            continue
+        xy_inside = region_contains_xy(points[:, :2], region['polygon_world_xy_m'])
+        floor, rim = float(region['floor_z_m']), float(shape[1][2])
+        volume_inside = xy_inside & (points[:, 2] >= floor - .01) & (points[:, 2] <= rim + .01)
+        relationships[support_id] = {'visible_xy_fraction': float(xy_inside.mean()),
+            'visible_inside_volume_fraction': float(volume_inside.mean()),
+            'lowest_visible_minus_floor_m': float(points[:, 2].min() - floor),
+            'highest_visible_minus_rim_m': float(points[:, 2].max() - rim),
+            'floor_z_m': floor, 'rim_z_m': rim, 'tolerance_m': .01,
+            'point_count': len(points)}
+    measured['candidate_container_relationships'] = relationships
     if obj.get('cad'):
         model_geometry = cad_support_geometry(obj['cad'], subject['id'], capture, measured['measured_tables'])
         if model_geometry:
@@ -153,5 +185,4 @@ def support_context(capture, observation, subject, candidates):
         'support_candidates': {identifier: {key: value[key] for key in identity_fields if key in value}
                                for identifier, value in candidates.items()}, 'current_measured_geometry': measured,
         'verification_scope': 'current_support',
-        'current_instance_locations': current_instance_locations(observation),
         'interpretation': 'Determine current location/support, not task completion or planned destination.'}

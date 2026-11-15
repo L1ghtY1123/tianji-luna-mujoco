@@ -16,7 +16,7 @@ def current_table_measurements(observation):
     for identifier, measured in tables.get('tables', {}).items():
         entity = observation.get('scene_entities', {}).get(identifier, {})
         height, count = measured.get('surface_height_m'), measured.get('inlier_count')
-        if (entity.get('kind') != 'table' or measured.get('source') != 'initial_inventory_ransac_table'
+        if (entity.get('kind') != 'table' or measured.get('source') != 'initial_objects_ransac_table'
                 or type(height) not in (int, float) or not np.isfinite(height)
                 or type(count) is not int or count <= 0):
             continue
@@ -41,5 +41,3 @@ def measured_position(obj):
         return None
     position = np.asarray(value, dtype=float)
     return position if position.shape == (3,) and np.isfinite(position).all() else None
-
-

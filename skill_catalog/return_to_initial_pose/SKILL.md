@@ -1,6 +1,8 @@
 # return_to_initial_pose
 
-An unconfirmed destination relationship does not itself authorize or forbid motion. After release, returning requires the original completed release/open-gripper feedback, a current observation collision map containing the target measured after release. Graph-selected sensing/mapping must establish those prerequisites first. This case cannot use the retained pre-release map, and return does not confirm placement.
+Use the shared cuRoboV2-Fast v0.9.0 service for this skill's IK, motion planning and collision operations. Motion planning uses the pinned official solver defaults.
+
+An unconfirmed destination relationship does not itself authorize or forbid motion. After release, returning requires the original completed release-command and retreat receipt, a current observation collision map containing the target measured after release. Graph-selected sensing/mapping must establish those prerequisites first. This case cannot use the retained pre-release map, and return does not confirm placement.
 
 Return both empty hands to the actual joint posture recorded at task start, using the current or explicitly authorized retained collision scene. If already there, verify measured joints without movement. This is distinct from the operator observation posture. No implicit observation or completion judgment is inserted. The graph includes this skill when the user requires final return.
 

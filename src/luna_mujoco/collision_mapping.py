@@ -46,9 +46,9 @@ def collision_layer_bounds(grids, model, identity):
     """World bounds of published cells, cuboids and verified complete CAD meshes."""
     from scipy.spatial.transform import Rotation
 
-    from .inventory_map import require_native_inventory_geometry
+    from .collision_objects import require_native_objects_geometry
 
-    require_native_inventory_geometry(model)
+    require_native_objects_geometry(model)
     disabled = set(identity.get("disabled_obstacle_names", ()))
     layers = {}
     for grid in grids:
@@ -94,9 +94,9 @@ def _sample_indices(count, maximum):
 
 def collision_scene_preview(candidate, grids, model, identity, *, maximum_surface_points=15000):
     """Snapshot exactly the map products used by update_voxel_scene, without rebuilding."""
-    from .inventory_map import require_native_inventory_geometry
+    from .collision_objects import require_native_objects_geometry
 
-    require_native_inventory_geometry(model)
+    require_native_objects_geometry(model)
     integration = candidate.integration
     data = integration.pointcloud_data
     count = struct.unpack_from('<I', data)[0]
@@ -108,7 +108,8 @@ def collision_scene_preview(candidate, grids, model, identity, *, maximum_surfac
         # Semantic-only maps omit the background grid, so the first grid can
         # already be an instance. Its measured surface is keyed by grid name.
         is_instance = grid.name.startswith('semantic_instance::')
-        centers = np.asarray(metadata.get('centers_base_m', []), dtype=float).reshape(-1, 3) if is_instance else background
+        centers = (np.asarray(metadata['centers_base_m'], dtype=float).reshape(-1, 3)
+                   if 'centers_base_m' in metadata else background)
         selected = _sample_indices(len(centers), maximum_surface_points)
         values = grid.feature_tensor
         shape = list(values.shape)
@@ -179,11 +180,11 @@ def collision_scene_preview(candidate, grids, model, identity, *, maximum_surfac
         'coverage': {**deepcopy(identity.get('coverage', {})), 'full_environment_coverage': False,
                      'sensor_coverage_role': identity.get('sensor_coverage_role', 'diagnostic_for_model_mapping_strategy'),
                      'unknown_space_motion_gate': bool(identity.get('observed_free_motion_gate')),
-                     'collision_scope': ('registered_inventory_geometry_and_measured_table' if hybrid else
+                     'collision_scope': ('registered_objects_geometry_and_measured_table' if hybrid else
                                          'sam3_instances_and_measured_table' if identity.get('semantic_only_active')
                                          else 'measured_table_footprint_obstacles_and_inferred_support'),
                      'unknown_policy': ('swept_unknown_regions_rejected' if identity.get('observed_free_motion_gate')
                                         else 'motion_coverage_not_certified'),
-                     'surface_policy': ('registered_cad_meshes_and_observed_obb_solid_envelopes' if hybrid else
+                     'surface_policy': ('published_registered_object_geometry' if hybrid else
                                         'visible_returns_with_tsdf_esdf_inference_no_hidden_object_completion')},
     }

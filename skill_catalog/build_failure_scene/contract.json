@@ -1,0 +1,32 @@
+{
+  "id": "build_failure_scene",
+  "description": "Reserved terminal map publication bound to committed database state. Empty-hand refresh uses all registered current views, CAD, cuboid and ESDF; a current verified attachment retains its bound scene. Invalid or missing geometry cannot authorize return.",
+  "capability": "Reserved terminal map publication bound to committed database state. Empty-hand refresh uses all registered current views, CAD, cuboid and ESDF; a current verified attachment retains its bound scene. Invalid or missing geometry cannot authorize return.",
+  "requires": {
+    "terminal_motion_stopped": true,
+    "terminal_failure_observed": true
+  },
+  "provides": [
+    "terminal_failure_map_ready"
+  ],
+  "inputs": [
+    "terminal_failure_context",
+    "actual_robot_feedback",
+    "database_collision_scene"
+  ],
+  "outputs": [
+    "failure_return_result"
+  ],
+  "outcomes": [
+    "success",
+    "failure",
+    "unknown"
+  ],
+  "result_bindings": {},
+  "invalidates_observation": false,
+  "captures_observation": false,
+  "retry_safe": false,
+  "errors": [
+    "terminal_return_blocked"
+  ]
+}

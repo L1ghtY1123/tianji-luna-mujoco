@@ -16,8 +16,14 @@ class TaskSpec(StrictModel):
     reason: str
     scope: Literal['all', 'count', 'ids'] = Field(description=(
         'all selects every matching observed candidate; count selects quantity candidates; '
-        'ids selects exactly target_refs. For ids, quantity may be null or the exact number of refs.'))
-    target_selector: str = Field(min_length=1)
+        'ids selects exactly target_refs. A specific described object, even when described as one object, '
+        'uses ids when that identity is the requested target. count means selecting N matching objects '
+        'from a collection, not merely stating that one known object exists. '
+        'For ids, quantity may be null or the exact number of refs. '
+        'Every all/count graph, including count=1, requires select_target and a runtime target binding.'))
+    target_selector: str = Field(min_length=1, description=(
+        'Complete input-membership criterion including requested appearance, role, current state and source '
+        'constraints. Later processing and delivery outcomes belong to completion_conditions.'))
     target_refs: tuple[str, ...] = Field(description=(
         'Currently observed candidate refs for all/count, updated through sensing without freezing '
         'task membership. For ids, the exact requested instance refs, which must be nonempty.'))
@@ -40,9 +46,19 @@ class TaskSpec(StrictModel):
     work_area_ref: str | None = Field(default=None, description=(
         'Intermediate processing or staging area only. Null for direct pick-and-place with no '
         'intermediate operation; do not put the final placement area here.'))
-    selection_order: Literal['inventory', 'nearest', 'explicit'] = Field(description=(
-        'Use explicit by default: graph edges choose the object execution order. Use inventory or nearest '
-        'only when the instruction explicitly requires that order. This field does not select an arm.'))
+    allowed_intermediate_refs: tuple[str, ...] = Field(default=(), description=(
+        'Additional staging references explicitly authorized by the user and compiled now. '
+        'Do not invent permission at runtime. Final destination and work_area are already authorized.'))
+    unsupported_placement_constraints: tuple[str, ...] = Field(default=(), description=(
+        'Exact user placement clauses that the fixed operator TCP and preserved rotation cannot satisfy. '
+        'Nonempty requires supported=false. No runtime language judgment or coordinate search.'))
+    visual_completion_conditions: tuple[str, ...] = Field(default=(), description=(
+        'Only EXTRA current visual conditions not already proved by verify_grasp/verify_place/verify_unpack receipts. '
+        'Do not repeat delivery, processing, count, ordering or robot posture. Empty for ordinary transfer/unpack tasks.'))
+    selection_order: Literal['visual', 'explicit'] = Field(description=(
+        'Use explicit only for a user-specified order represented by target_refs. Otherwise use visual: '
+        'Decisions chooses an easier current object from database-backed candidates each round. '
+        'An initial proposal order is not an execution queue.'))
     processing: tuple[str, ...] = Field(description=(
         'Required object transformations only, declared processing_effect=true in the skill catalog. '
         'Ordinary observation, mapping, grasp, movement and placement are graph nodes, not processing requirements. '
@@ -63,6 +79,8 @@ class TaskSpec(StrictModel):
 
     @model_validator(mode='after')
     def consistent_selection(self):
+        if self.supported and self.unsupported_placement_constraints:
+            raise ValueError('unsupported_fixed_placement_requirement')
         if self.scope == 'count' and self.quantity is None:
             raise ValueError('task_count_scope_conflict: scope=count requires a positive quantity')
         if self.scope == 'all' and self.quantity is not None:
@@ -97,6 +115,9 @@ class SubgraphNode(StrictModel):
 class RouterNode(StrictModel):
     type: Literal['router']
     id: Identifier
+    rule: Literal['visual', 'observation_recovery', 'failure_return'] = Field(default='visual', description=(
+        'visual only for an unresolved CURRENT image fact. observation_recovery '
+        'are deterministic program rules and never call Decisions. Use direct edges for known statuses.'))
     condition: str = Field(min_length=1, description=(
         'One atomic evidence question, or one choice among declared recovery branches. '
         'The no edge must be valid for the full negation of the question. '
@@ -152,7 +173,7 @@ class Edge(StrictModel):
 
 class Subgraph(StrictModel):
     id: Identifier
-    input_id: str | None = Field(description='Permanent inventory ID owning this subgraph, null for shared work.')
+    input_id: str | None = Field(description='Permanent objects ID owning this subgraph, null for shared work.')
     task: TaskSpec | None
     entry: Identifier
     nodes: list[Node] = Field(min_length=1, max_length=512)
@@ -188,5 +209,3 @@ class Graph(StrictModel):
         from .topology import validate_topology
         validate_topology(self.model_dump())
         return self
-
-

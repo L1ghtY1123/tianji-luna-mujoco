@@ -9,12 +9,14 @@ import logging
 import time
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from traceback import clear_frames
-from types import SimpleNamespace
 
 import numpy as np
+from tianji_curobo._curobo_impl import _planner_interpolation_dt, _success_flag_is_true
+from tianji_curobo.contracts import PlanPlaceRequest
 
 from .carrying import (
     carrying_geometry,
@@ -29,23 +31,18 @@ from .sdk_scene import sdk_scene_model
 from .trajectory_postprocessing import (
     EndpointPoseMismatch,
     add_pose_derivatives,
-    add_trajectory_derivatives,
     pre_release_place_from_result,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
 from tianji_curobo._curobo_impl import (
     _create_world_clearance_checker,
-    _graph_planner_rollout_config,
     _NativeCuroboBackend,
-    _planner_interpolation_dt,
-    _success_flag_is_true,
 )
 from tianji_curobo.contracts import (
     CuroboToolError,
     NativeGraspBatchItem,
     NativeIkBatchResult,
-    PlanPlaceRequest,
 )
 from tianji_curobo.curobo_robot_config import (
     _exclude_collision_links,
@@ -55,68 +52,15 @@ from tianji_curobo.curobo_robot_config import (
 
 
 def create_solver_configs(settings, *, robot, scene_model, collision_cache, batch_size,
-                          ik_config_type, motion_config_type=None, graph_rollout=None):
+                          ik_config_type, motion_config_type=None, max_goalset=1):
     """Construct typed configs; never swap a live solver or its CUDA buffers."""
-    common = {
-        "robot": robot, "scene_model": sdk_scene_model(scene_model),
-        "collision_cache": collision_cache,
-        "self_collision_check": settings.self_collision_check,
-        "position_tolerance": settings.ik_position_threshold_m,
-        "orientation_tolerance": settings.ik_rotation_threshold_rad,
-        "random_seed": settings.random_seed, "use_cuda_graph": True,
-        "max_batch_size": batch_size, "multi_env": False, "max_goalset": 1,
-    }
-    ik = ik_config_type.create(
-        **common, optimizer_configs=["ik/lbfgs_ik.yml"],
-        num_seeds=settings.ik_num_seeds,
-        seed_solver_num_seeds=settings.ik_seed_solver_num_seeds,
-        success_requires_convergence=True,
-        optimizer_collision_activation_distance=settings.trajectory_collision_clearance_m,
-    )
+    common = {'robot': robot, 'scene_model': sdk_scene_model(scene_model),
+              'collision_cache': collision_cache, 'max_batch_size': batch_size,
+              'max_goalset': max_goalset}
     if motion_config_type is None:
-        return ik, None
-    # The public API accepts the already parsed RobotCfg. Sharing it within
-    # this backend also keeps IK, TrajOpt and graph collision spheres in sync.
-    common['robot'] = ik.robot_config
-    motion = motion_config_type.create(
-        **common, ik_optimizer_configs=["ik/lbfgs_ik.yml"],
-        num_ik_seeds=settings.ik_num_seeds, num_trajopt_seeds=settings.trajopt_num_seeds,
-        optimizer_collision_activation_distance=settings.optimizer_collision_activation_distance_m,
-        graph_planner_rollout=graph_rollout, interpolation_dt=1.0 / settings.freq_hz,
-    )
-    # MotionPlannerCfg.create otherwise gives its embedded IK the wider TrajOpt
-    # cost distance and cannot forward the LM seed count. This is a typed config
-    # assignment before any planner/solver is instantiated, matching the SDK API.
-    motion.ik_solver_config = ik
-    return ik, motion
-
-
-def validate_grasp_batch(result, validate_trajectory):
-    """Keep only three-phase candidates passing the existing dense hard check."""
-    checked = []
-    for item in result.items:
-        if not item.success:
-            checked.append(item)
-            continue
-        phases = (item.approach, item.grasp, item.lift)
-        try:
-            # The Tianji checker samples every segment at <= 0.25 degrees,
-            # including boundaries, and checks graph feasibility plus hard
-            # world clearance for both active and stationary arm spheres.
-            points = [point for phase in phases for point in phase.positions_rad]
-            validate_trajectory(SimpleNamespace(points_deg=np.rad2deg(points).tolist()))
-        except CuroboToolError as error:
-            if error.code != "CUROBO_TRAJECTORY_COLLISION":
-                raise
-            checked.append(replace(
-                item, success=False, approach_success=False, grasp_success=False,
-                lift_success=False, approach=None, grasp=None, lift=None,
-                grasp_end_joints_rad=None,
-                status=f"{error.code}: {error}"[:256],
-            ))
-        else:
-            checked.append(item)
-    return replace(result, items=tuple(checked))
+        return ik_config_type.create(**common), None
+    motion = motion_config_type.create(**common)
+    return motion.ik_solver_config, motion
 
 
 @dataclass(frozen=True)
@@ -133,45 +77,6 @@ class IkBatchWithToolPoses(NativeIkBatchResult):
 @dataclass(frozen=True)
 class GraspItemWithToolPose(NativeGraspBatchItem):
     grasp_endpoint_fk: dict | None = None
-
-
-@measured('place_endpoint_fk')
-def place_endpoint_errors(backend, request, phase, joints_rad):
-    """Verify returned samples against the request, never the SDK's mutable goal."""
-    from scipy.spatial.transform import Rotation
-
-    position = np.array(request.goal_position_m, dtype=float)
-    quaternion = np.array(request.goal_quaternion_wxyz, dtype=float)
-    rotation = Rotation.from_quat(quaternion[[1, 2, 3, 0]])
-    if phase == "approach":
-        offset = np.zeros(3)
-        offset["xyz".index(request.approach_axis)] = request.approach_offset_m
-        position += rotation.apply(offset) if request.approach_in_tool_frame else offset
-    elif phase != "place":
-        raise ValueError("invalid pre-release phase")
-    state = backend._state(np.rad2deg(joints_rad).tolist())
-    actual_positions, actual_quaternions = backend._tool_pose_arrays(state, sample_count=1)
-    actual_rotation = Rotation.from_quat(actual_quaternions[0, [1, 2, 3, 0]])
-    position_error = float(np.linalg.norm(actual_positions[0] - position))
-    rotation_error = float((rotation.inv() * actual_rotation).magnitude())
-    config = backend.motion_planner.trajopt_solver.config
-    position_tolerance = float(config.position_tolerance)
-    rotation_tolerance = float(config.orientation_tolerance)
-    if (not np.isfinite([position_error, rotation_error, position_tolerance, rotation_tolerance]).all()
-            or position_tolerance < 0 or rotation_tolerance < 0):
-        raise ValueError("invalid endpoint FK or configured pose tolerance")
-    if position_error > position_tolerance or rotation_error > rotation_tolerance:
-        raise EndpointPoseMismatch({
-            "source": "curobo_public_compute_kinematics", "frame": "world",
-            "arm": backend.arm, "tool_frame": backend.tool_frame, "compound_phase": phase,
-            "goal_position_m": position.tolist(), "goal_quaternion_wxyz": quaternion.tolist(),
-            "achieved_position_m": actual_positions[0].tolist(),
-            "achieved_quaternion_wxyz": actual_quaternions[0].tolist(),
-            "joint_names": list(backend.joint_names), "joints_rad": np.asarray(joints_rad).tolist(),
-            "position_error_m": position_error, "rotation_error_rad": rotation_error,
-            "position_tolerance_m": position_tolerance, "rotation_tolerance_rad": rotation_tolerance,
-        })
-    return position_error, rotation_error
 
 
 class ValidatedBatchBackend(_NativeCuroboBackend):
@@ -255,27 +160,6 @@ class ValidatedBatchBackend(_NativeCuroboBackend):
             self.carrying_link = self.carrying_spheres_tool = self.carrying_scene_token = None
             super().destroy()
 
-    def plan_grasp_batch_native(self, request):
-        started = time.perf_counter()
-        self.motion_planner.last_grasp_result = None
-        try:
-            result = super().plan_grasp_batch_native(request)
-            result = add_trajectory_derivatives(result, self.motion_planner.last_grasp_result)
-        finally:
-            self.motion_planner.last_grasp_result = None
-        native_done = time.perf_counter()
-        items = []
-        for item in result.items:
-            evidence = (self.tool_fk_evidence(item.grasp.positions_rad[-1], request.scene_token)
-                        if item.grasp_success and item.grasp is not None else None)
-            items.append(GraspItemWithToolPose(
-                **{field.name: getattr(item, field.name) for field in fields(NativeGraspBatchItem)},
-                grasp_endpoint_fk=evidence))
-        fk_done = time.perf_counter()
-        logging.getLogger(__name__).info("grasp timing arm=%s count=%d native_s=%.4f fk_s=%.4f",
-            self.arm, len(items), native_done - started, fk_done - native_done)
-        return replace(result, items=tuple(items))
-
 
 def support_departure_criteria(criteria_type, request, non_terminal_scale):
     criteria = criteria_type.linear_motion(axis=request.axis,
@@ -314,19 +198,74 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
 
     def query_world_sphere_costs(self, spheres_world_m):
         tensor = self._torch.as_tensor(spheres_world_m, device=self._device, dtype=self._dtype)
-        return self._motion_clearance_checker.get_collision_distance(tensor).detach().cpu().numpy().copy()
+        return self._motion_clearance_checker.get_collision_constraint(tensor).detach().cpu().numpy().copy()
 
-    def resolve_release_height(self, request, gripper_spheres, *, search=None):
-        from .demo_placement import resolve_release_height
 
-        if (getattr(self, "carrying_link", None) != f"jev_carried_object_{request.arm}"
-                or not getattr(self, "carrying_scene_token", None)
-                or getattr(self, "carrying_spheres_tool", None) is None):
-            raise CuroboToolError("release height requires the current uploaded attachment",
-                code="CUROBO_RELEASE_GEOMETRY_STALE", stage="validation", status=422)
+    def _plan_axis_linear_candidate(self, request, current_state, goal, non_terminal_scale):
+        if not getattr(self, "support_departure_planning", False):
+            return super()._plan_axis_linear_candidate(request, current_state, goal, non_terminal_scale)
+        try:
+            criteria = support_departure_criteria(self._tool_pose_criteria_type, request, non_terminal_scale)
+            self.motion_planner.update_tool_pose_criteria({self.tool_frame: criteria})
+            return self._plan_goal_native(request, current_state, goal)
+        finally:
+            self.motion_planner.update_tool_pose_criteria({self.tool_frame: self._tool_pose_criteria_type()})
 
-        return resolve_release_height(self.carrying_spheres_tool, gripper_spheres, request, self.query_world_sphere_costs,
-                                      scene_token=self.carrying_scene_token, search=search)
+    def attach_measured_carrying(self, binding, joints_deg):
+        # Configured spheres already reach IK, graph and checker, whose models
+        # are built separately. Public AttachmentManager updates TrajOpt's same
+        # carrying link without touching any private SDK state.
+        spheres = self._torch.as_tensor(carrying_spheres(binding), device=self._device, dtype=self._dtype)
+        state = self._state(joints_deg)
+        self.motion_planner.attachment_manager.update(spheres, state, link_name=f"jev_carried_object_{binding.arm}")
+        self.carrying_link = f"jev_carried_object_{binding.arm}"
+        self.carrying_spheres_tool = spheres.detach().cpu().numpy().copy()
+        self.carrying_scene_token = binding.scene_token
+        self.carrying_geometry_coverage = carrying_geometry_coverage(binding)
+
+
+    def plan_to_pose_native(self, request):
+        self.motion_planner.last_pose_result = None
+        try:
+            try:
+                departure = getattr(self, 'release_departure', None)
+                scope = linear_retreat_criteria(self, *departure) if departure else nullcontext()
+                # The native runtime owns the GPU lock while calling here.
+                with scope:
+                    result = super().plan_to_pose_native(request)
+            except CuroboToolError as error:
+                # The pinned wrapper uses one code for an SDK exception and a
+                # valid unsuccessful result. Only the latter permits another yaw.
+                if (error.code == "CUROBO_TRAJOPT_FAILED"
+                        and str(error) == "cuRobo trajectory optimization found no valid trajectory"):
+                    raise CuroboToolError(str(error), code="CUROBO_NO_VALID_TRAJECTORY",
+                        stage=error.stage, status=error.status, retryable=error.retryable,
+                        details=error.details) from error
+                raise
+            retained = add_pose_derivatives(result, self.motion_planner.last_pose_result)
+            return retained
+        finally:
+            self.motion_planner.last_pose_result = None
+
+    def plan_axis_linear_native(self, request):
+        self.motion_planner.last_pose_result = None
+        try:
+            result = super().plan_axis_linear_native(request)
+            return add_pose_derivatives(result, self.motion_planner.last_pose_result)
+        finally:
+            self.motion_planner.last_pose_result = None
+
+    def destroy(self):
+        try:
+            link = getattr(self, "carrying_link", None) or getattr(self, "configured_carrying_link", None)
+            if link is not None and self.motion_planner is not None:
+                self.motion_planner.attachment_manager.detach(link_name=link)
+                self.motion_planner.disable_link_collision([link])
+        finally:
+            self.carrying_link = None
+            self.carrying_spheres_tool = None
+            self.carrying_scene_token = None
+            super().destroy()
 
     def _plan_pre_release_native(self, request):
         """Use the public two-phase mode without constructing a vendor place plan."""
@@ -387,28 +326,6 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
             self.motion_planner.last_grasp_result = None
             self.motion_planner.last_pose_result = None
 
-    def _plan_axis_linear_candidate(self, request, current_state, goal, non_terminal_scale):
-        if not getattr(self, "support_departure_planning", False):
-            return super()._plan_axis_linear_candidate(request, current_state, goal, non_terminal_scale)
-        try:
-            criteria = support_departure_criteria(self._tool_pose_criteria_type, request, non_terminal_scale)
-            self.motion_planner.update_tool_pose_criteria({self.tool_frame: criteria})
-            return self._plan_goal_native(request, current_state, goal)
-        finally:
-            self.motion_planner.update_tool_pose_criteria({self.tool_frame: self._tool_pose_criteria_type()})
-
-    def attach_measured_carrying(self, binding, joints_deg):
-        # Configured spheres already reach IK, graph and checker, whose models
-        # are built separately. Public AttachmentManager updates TrajOpt's same
-        # carrying link without touching any private SDK state.
-        spheres = self._torch.as_tensor(carrying_spheres(binding), device=self._device, dtype=self._dtype)
-        state = self._state(joints_deg)
-        self.motion_planner.attachment_manager.update(spheres, state, link_name=f"jev_carried_object_{binding.arm}")
-        self.carrying_link = f"jev_carried_object_{binding.arm}"
-        self.carrying_spheres_tool = spheres.detach().cpu().numpy().copy()
-        self.carrying_scene_token = binding.scene_token
-        self.carrying_geometry_coverage = carrying_geometry_coverage(binding)
-
     def plan_place_native(self, request):
         self.motion_planner.last_grasp_result = None
         try:
@@ -420,7 +337,7 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
 
             def query_world_cost(world):
                 tensor = self._torch.as_tensor(world, device=self._device, dtype=self._dtype)
-                return self._motion_clearance_checker.get_collision_distance(tensor).detach().cpu().numpy().copy()
+                return self._motion_clearance_checker.get_collision_constraint(tensor).detach().cpu().numpy().copy()
 
             # Typed PlanPlaceRequest has no scene token. The runtime validates the
             # binding and refreshes this upload from it under its scene/GPU lock.
@@ -434,49 +351,6 @@ class ValidatedSingleBackend(_NativeCuroboBackend):
         finally:
             self.motion_planner.last_grasp_result = None
             self.motion_planner.last_pose_result = None
-
-    def plan_to_pose_native(self, request):
-        self.motion_planner.last_pose_result = None
-        try:
-            try:
-                departure = getattr(self, 'release_departure', None)
-                scope = linear_retreat_criteria(self, *departure) if departure else nullcontext()
-                # The native runtime owns the GPU lock while calling here.
-                with scope:
-                    result = super().plan_to_pose_native(request)
-            except CuroboToolError as error:
-                # The pinned wrapper uses one code for an SDK exception and a
-                # valid unsuccessful result. Only the latter permits another yaw.
-                if (error.code == "CUROBO_TRAJOPT_FAILED"
-                        and str(error) == "cuRobo trajectory optimization found no valid trajectory"):
-                    raise CuroboToolError(str(error), code="CUROBO_NO_VALID_TRAJECTORY",
-                        stage=error.stage, status=error.status, retryable=error.retryable,
-                        details=error.details) from error
-                raise
-            retained = add_pose_derivatives(result, self.motion_planner.last_pose_result)
-            return retained
-        finally:
-            self.motion_planner.last_pose_result = None
-
-    def plan_axis_linear_native(self, request):
-        self.motion_planner.last_pose_result = None
-        try:
-            result = super().plan_axis_linear_native(request)
-            return add_pose_derivatives(result, self.motion_planner.last_pose_result)
-        finally:
-            self.motion_planner.last_pose_result = None
-
-    def destroy(self):
-        try:
-            link = getattr(self, "carrying_link", None) or getattr(self, "configured_carrying_link", None)
-            if link is not None and self.motion_planner is not None:
-                self.motion_planner.attachment_manager.detach(link_name=link)
-                self.motion_planner.disable_link_collision([link])
-        finally:
-            self.carrying_link = None
-            self.carrying_spheres_tool = None
-            self.carrying_scene_token = None
-            super().destroy()
 
 
 def effective_solver_config(planner, settings, *, ik_only, robot_config_path):
@@ -510,9 +384,12 @@ def effective_solver_config(planner, settings, *, ik_only, robot_config_path):
             finetune_attempts=planner.planning_settings.finetune_attempts,
             finetune_dt_scale=planner.planning_settings.finetune_dt_scale,
             trajectory_hard_check=True,
+            graph_planner_algorithm=planner.config.graph_planner_algorithm,
+            enable_timeopt=trajectory.enable_timeopt,
+            sdk_release='cuRoboV2-Fast v0.9.0',
             planner_implementation='unmodified_public_sdk_composition',
             grasp_internal_pose_settings='official_defaults_not_overridden',
-            grasp_internal_max_attempts=1 if planner.batch else 5,
+            grasp_internal_max_attempts=1 if planner.batch else 20,
             grasp_advanced_attempt_controls_applied=False,
         )
     return values
@@ -560,8 +437,8 @@ def build_geometry_backend(runtime, arm, *, batch_size, ik_only, batch_planner_t
     from curobo.scene import Cuboid
     from curobo.types import GoalToolPose, JointState, Pose, ToolPoseCriteria
 
-    from .public_planner import PublicPlanner
     from .grasp_contact import grasp_contact_links
+    from .public_planner import PublicPlanner
 
     if arm not in ("A", "B"):
         raise ValueError("geometry service requires an A/B solver")
@@ -599,7 +476,7 @@ def build_geometry_backend(runtime, arm, *, batch_size, ik_only, batch_planner_t
         collision_cache=runtime._collision_cache, batch_size=1 if batch_size is None else batch_size,
         ik_config_type=InverseKinematicsCfg,
         motion_config_type=None if ik_only else MotionPlannerCfg,
-        graph_rollout=None if ik_only else _graph_planner_rollout_config(),
+        max_goalset=getattr(runtime, 'goalset_capacity', 32) if batch_size == 1 and not ik_only else 1,
     )
     if ik_only:
         planner = InverseKinematics(ik_config)
@@ -615,7 +492,7 @@ def build_geometry_backend(runtime, arm, *, batch_size, ik_only, batch_planner_t
     checker = _create_world_clearance_checker(
         checker_config_type=RobotCollisionCheckerCfg, checker_type=RobotCollisionChecker,
         robot_config=ik_config.robot_config, motion_planner=planner,
-        activation_distance_m=settings.trajectory_collision_clearance_m,
+        activation_distance_m=None,
     )
     reference = Kinematics(KinematicsCfg.from_data_dict(
         robot, tool_frames=peer_links, device_cfg=planner.device_cfg,
@@ -698,12 +575,12 @@ def build_dual_geometry_backend(runtime):
     ik_config, config = create_solver_configs(runtime.planning_settings, robot=robot,
         scene_model=scene or {"cuboid": {}}, collision_cache=runtime._collision_cache,
         batch_size=1, ik_config_type=InverseKinematicsCfg, motion_config_type=MotionPlannerCfg,
-        graph_rollout=_graph_planner_rollout_config())
+        )
     planner = MotionPlanner(config)
     checker = _create_world_clearance_checker(
         checker_config_type=RobotCollisionCheckerCfg, checker_type=RobotCollisionChecker,
         robot_config=ik_config.robot_config, motion_planner=planner,
-        activation_distance_m=runtime.planning_settings.trajectory_collision_clearance_m)
+        activation_distance_m=None)
     backend = ValidatedDualBackend(arm="AB", motion_planner=planner, torch_module=torch,
         joint_state_type=JointState, pose_type=Pose, goal_tool_pose_type=GoalToolPose,
         tool_pose_criteria_type=ToolPoseCriteria, motion_clearance_checker=checker,
@@ -711,5 +588,44 @@ def build_dual_geometry_backend(runtime):
         peer_collision_links=(), warmup_joint_space=False)
     backend.ik_only = False
     backend.resident_geometry = ResidentRobotGeometry(base_robot, runtime._urdf_path)
+    backend.command_validator = partial(runtime.validate_dual_command_unlocked, backend)
     return backend
 
+
+@measured('place_endpoint_fk')
+def place_endpoint_errors(backend, request, phase, joints_rad):
+    """Verify returned samples against the request, never the SDK's mutable goal."""
+    from scipy.spatial.transform import Rotation
+
+    position = np.array(request.goal_position_m, dtype=float)
+    quaternion = np.array(request.goal_quaternion_wxyz, dtype=float)
+    rotation = Rotation.from_quat(quaternion[[1, 2, 3, 0]])
+    if phase == "approach":
+        offset = np.zeros(3)
+        offset["xyz".index(request.approach_axis)] = request.approach_offset_m
+        position += rotation.apply(offset) if request.approach_in_tool_frame else offset
+    elif phase != "place":
+        raise ValueError("invalid pre-release phase")
+    state = backend._state(np.rad2deg(joints_rad).tolist())
+    actual_positions, actual_quaternions = backend._tool_pose_arrays(state, sample_count=1)
+    actual_rotation = Rotation.from_quat(actual_quaternions[0, [1, 2, 3, 0]])
+    position_error = float(np.linalg.norm(actual_positions[0] - position))
+    rotation_error = float((rotation.inv() * actual_rotation).magnitude())
+    config = backend.motion_planner.trajopt_solver.config
+    position_tolerance = float(config.position_tolerance)
+    rotation_tolerance = float(config.orientation_tolerance)
+    if (not np.isfinite([position_error, rotation_error, position_tolerance, rotation_tolerance]).all()
+            or position_tolerance < 0 or rotation_tolerance < 0):
+        raise ValueError("invalid endpoint FK or configured pose tolerance")
+    if position_error > position_tolerance or rotation_error > rotation_tolerance:
+        raise EndpointPoseMismatch({
+            "source": "curobo_public_compute_kinematics", "frame": "world",
+            "arm": backend.arm, "tool_frame": backend.tool_frame, "compound_phase": phase,
+            "goal_position_m": position.tolist(), "goal_quaternion_wxyz": quaternion.tolist(),
+            "achieved_position_m": actual_positions[0].tolist(),
+            "achieved_quaternion_wxyz": actual_quaternions[0].tolist(),
+            "joint_names": list(backend.joint_names), "joints_rad": np.asarray(joints_rad).tolist(),
+            "position_error_m": position_error, "rotation_error_rad": rotation_error,
+            "position_tolerance_m": position_tolerance, "rotation_tolerance_rad": rotation_tolerance,
+        })
+    return position_error, rotation_error

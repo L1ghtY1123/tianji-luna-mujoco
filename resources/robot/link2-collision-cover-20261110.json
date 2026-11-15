@@ -1,0 +1,1805 @@
+{
+  "version": 1,
+  "method": "minimum_enclosing_spheres_of_disjoint_urdf_collision_mesh_cells",
+  "source_config_sha256": "6aae69c87395ab76fcd0cc63140c157b8b91077cf9a1ca766e3ff81cf1db77e6",
+  "candidate_config_sha256": "3020f1d0ab37fc6ef1ef0ec250e0fa5c1bdd7f4447ab9668b8cc369c6596ab4b",
+  "urdf_sha256": "cad92ac6d4dd94a9651c79b383520efe7fafadaabcd83aff5b17222e7eab0dea",
+  "generator_sha256": "931fbe71b91e07d67de38b8983d7eca522ec16e7bb3e58698a3d0fc7e94cc035",
+  "trimesh_version": "4.12.2",
+  "links": {
+    "gripL_Link2_L": {
+      "source": {
+        "mesh": "assets/marvin_urdf/meshes/collision/gripL_Link2_L.stl",
+        "mesh_sha256": "72866b186fead0db0a23f6002efbcfef914172abf6a6a7bf96832fcd2063c276",
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "link_from_mesh": [
+          [
+            1.0,
+            -5.455313907e-22,
+            -1.05536587e-21,
+            0.0
+          ],
+          [
+            5.455313907e-22,
+            1.0,
+            1.212878268e-24,
+            1.110223025e-16
+          ],
+          [
+            1.05536587e-21,
+            -1.212878268e-24,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "sphere_count": 32,
+      "source_sphere_count": 3,
+      "grid_from_link": [
+        [
+          -0.4060916958551104,
+          0.9138312033765903,
+          -0.0014374605432824449,
+          0.0
+        ],
+        [
+          0.9138312033765903,
+          0.4060931653843164,
+          0.0009342180897208871,
+          0.0
+        ],
+        [
+          0.0014374605432824449,
+          -0.0009342180897208871,
+          -0.9999985304707939,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "divisions": [
+        8,
+        2,
+        2
+      ],
+      "source_volume_m3": 2.73754568273132e-05,
+      "partition_volume_m3": 2.7375456831062272e-05,
+      "cells": [
+        {
+          "index": [
+            0,
+            0,
+            0
+          ],
+          "volume_m3": 9.306500929882774e-07,
+          "vertex_count": 63,
+          "maximum_vertex_distance_m": 0.00867853988553373,
+          "radius_m": 0.008678540587425232
+        },
+        {
+          "index": [
+            0,
+            0,
+            1
+          ],
+          "volume_m3": 9.383894008022053e-07,
+          "vertex_count": 65,
+          "maximum_vertex_distance_m": 0.008714786260480506,
+          "radius_m": 0.008714786730706692
+        },
+        {
+          "index": [
+            0,
+            1,
+            0
+          ],
+          "volume_m3": 8.740088926620204e-07,
+          "vertex_count": 41,
+          "maximum_vertex_distance_m": 0.008616559914602535,
+          "radius_m": 0.008616561070084572
+        },
+        {
+          "index": [
+            0,
+            1,
+            1
+          ],
+          "volume_m3": 8.809665469707082e-07,
+          "vertex_count": 41,
+          "maximum_vertex_distance_m": 0.008652497478469955,
+          "radius_m": 0.00865249801427126
+        },
+        {
+          "index": [
+            1,
+            0,
+            0
+          ],
+          "volume_m3": 1.0819730542355699e-06,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.009304165085566554,
+          "radius_m": 0.009304165840148926
+        },
+        {
+          "index": [
+            1,
+            0,
+            1
+          ],
+          "volume_m3": 1.0909850543908007e-06,
+          "vertex_count": 32,
+          "maximum_vertex_distance_m": 0.009331805916122997,
+          "radius_m": 0.009331806562840939
+        },
+        {
+          "index": [
+            1,
+            1,
+            0
+          ],
+          "volume_m3": 9.936769961153867e-07,
+          "vertex_count": 22,
+          "maximum_vertex_distance_m": 0.009248069631303084,
+          "radius_m": 0.009248070418834686
+        },
+        {
+          "index": [
+            1,
+            1,
+            1
+          ],
+          "volume_m3": 1.001429491129472e-06,
+          "vertex_count": 22,
+          "maximum_vertex_distance_m": 0.009275877766916959,
+          "radius_m": 0.00927587877959013
+        },
+        {
+          "index": [
+            2,
+            0,
+            0
+          ],
+          "volume_m3": 1.0489944032840529e-06,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.009217472563036762,
+          "radius_m": 0.009217473678290844
+        },
+        {
+          "index": [
+            2,
+            0,
+            1
+          ],
+          "volume_m3": 1.0557319378558142e-06,
+          "vertex_count": 32,
+          "maximum_vertex_distance_m": 0.009238771573702665,
+          "radius_m": 0.009238772094249725
+        },
+        {
+          "index": [
+            2,
+            1,
+            0
+          ],
+          "volume_m3": 9.407311658397608e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.009087791330627747,
+          "radius_m": 0.009087792597711086
+        },
+        {
+          "index": [
+            2,
+            1,
+            1
+          ],
+          "volume_m3": 9.457312168882613e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.009109393595284109,
+          "radius_m": 0.009109394624829292
+        },
+        {
+          "index": [
+            3,
+            0,
+            0
+          ],
+          "volume_m3": 1.0090197901211706e-06,
+          "vertex_count": 20,
+          "maximum_vertex_distance_m": 0.009117173903352364,
+          "radius_m": 0.00911717489361763
+        },
+        {
+          "index": [
+            3,
+            0,
+            1
+          ],
+          "volume_m3": 1.0136320099064213e-06,
+          "vertex_count": 24,
+          "maximum_vertex_distance_m": 0.009129968379486025,
+          "radius_m": 0.009129969403147697
+        },
+        {
+          "index": [
+            3,
+            1,
+            0
+          ],
+          "volume_m3": 8.778919925594787e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.008922619653077576,
+          "radius_m": 0.008922620676457882
+        },
+        {
+          "index": [
+            3,
+            1,
+            1
+          ],
+          "volume_m3": 8.805497588831778e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.00893569273408211,
+          "radius_m": 0.00893569365143776
+        },
+        {
+          "index": [
+            4,
+            0,
+            0
+          ],
+          "volume_m3": 9.63101144899672e-07,
+          "vertex_count": 21,
+          "maximum_vertex_distance_m": 0.009020528299939394,
+          "radius_m": 0.009020529687404633
+        },
+        {
+          "index": [
+            4,
+            0,
+            1
+          ],
+          "volume_m3": 9.657807925260817e-07,
+          "vertex_count": 23,
+          "maximum_vertex_distance_m": 0.009024633930673768,
+          "radius_m": 0.009024634957313538
+        },
+        {
+          "index": [
+            4,
+            1,
+            0
+          ],
+          "volume_m3": 8.040702848194516e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008770496378772762,
+          "radius_m": 0.008770497515797615
+        },
+        {
+          "index": [
+            4,
+            1,
+            1
+          ],
+          "volume_m3": 8.04753129160639e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008774719346172594,
+          "radius_m": 0.008774720132350922
+        },
+        {
+          "index": [
+            5,
+            0,
+            0
+          ],
+          "volume_m3": 9.074214869454436e-07,
+          "vertex_count": 27,
+          "maximum_vertex_distance_m": 0.008875737161456074,
+          "radius_m": 0.008875737898051739
+        },
+        {
+          "index": [
+            5,
+            0,
+            1
+          ],
+          "volume_m3": 9.083899683173896e-07,
+          "vertex_count": 26,
+          "maximum_vertex_distance_m": 0.0088713001567618,
+          "radius_m": 0.00887130107730627
+        },
+        {
+          "index": [
+            5,
+            1,
+            0
+          ],
+          "volume_m3": 7.184291679828947e-07,
+          "vertex_count": 29,
+          "maximum_vertex_distance_m": 0.008578450046102968,
+          "radius_m": 0.008578451350331306
+        },
+        {
+          "index": [
+            5,
+            1,
+            1
+          ],
+          "volume_m3": 7.175200098158421e-07,
+          "vertex_count": 29,
+          "maximum_vertex_distance_m": 0.008573909230147421,
+          "radius_m": 0.008573910221457481
+        },
+        {
+          "index": [
+            6,
+            0,
+            0
+          ],
+          "volume_m3": 8.307328202368657e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.008676861008862983,
+          "radius_m": 0.008676862344145775
+        },
+        {
+          "index": [
+            6,
+            0,
+            1
+          ],
+          "volume_m3": 8.302514673112853e-07,
+          "vertex_count": 31,
+          "maximum_vertex_distance_m": 0.008663826510711004,
+          "radius_m": 0.008663827553391457
+        },
+        {
+          "index": [
+            6,
+            1,
+            0
+          ],
+          "volume_m3": 6.174922893104591e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008341237252979842,
+          "radius_m": 0.008341237902641296
+        },
+        {
+          "index": [
+            6,
+            1,
+            1
+          ],
+          "volume_m3": 6.15411576096958e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008327988854080844,
+          "radius_m": 0.008327989839017391
+        },
+        {
+          "index": [
+            7,
+            0,
+            0
+          ],
+          "volume_m3": 6.404942573007073e-07,
+          "vertex_count": 47,
+          "maximum_vertex_distance_m": 0.008197330880151664,
+          "radius_m": 0.008197331801056862
+        },
+        {
+          "index": [
+            7,
+            0,
+            1
+          ],
+          "volume_m3": 6.404678550775158e-07,
+          "vertex_count": 47,
+          "maximum_vertex_distance_m": 0.008184552467206776,
+          "radius_m": 0.008184553124010563
+        },
+        {
+          "index": [
+            7,
+            1,
+            0
+          ],
+          "volume_m3": 4.241960892299101e-07,
+          "vertex_count": 37,
+          "maximum_vertex_distance_m": 0.007872247960764599,
+          "radius_m": 0.007872248999774456
+        },
+        {
+          "index": [
+            7,
+            1,
+            1
+          ],
+          "volume_m3": 4.2258268739857826e-07,
+          "vertex_count": 37,
+          "maximum_vertex_distance_m": 0.007857102997402209,
+          "radius_m": 0.007857103832066059
+        }
+      ],
+      "quality": {
+        "count": 32,
+        "covered_fraction": 1.0,
+        "maximum_gap_mm": 0.0,
+        "outward_max_mm": 5.486846620923674,
+        "outward_p95_mm": 4.688294562721111,
+        "surface_samples": 40169,
+        "sphere_directions": 1024
+      },
+      "baseline_quality": {
+        "count": 3,
+        "covered_fraction": 0.789688565809455,
+        "maximum_gap_mm": 3.9087933179623273,
+        "outward_max_mm": 8.656053016658626,
+        "outward_p95_mm": 6.947711095576618,
+        "surface_samples": 40169,
+        "sphere_directions": 1024
+      }
+    },
+    "gripL_Link2_R": {
+      "source": {
+        "mesh": "assets/marvin_urdf/meshes/collision/gripL_Link2_R.stl",
+        "mesh_sha256": "a125ef05aeccd7b8ff58e558e7361f42a2d39725d732c6a463365b71bdb9ffe7",
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "link_from_mesh": [
+          [
+            1.0,
+            -5.455313907e-22,
+            -1.05536587e-21,
+            -1.387778781e-17
+          ],
+          [
+            5.455313907e-22,
+            1.0,
+            1.212878268e-24,
+            0.0
+          ],
+          [
+            1.05536587e-21,
+            -1.212878268e-24,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "sphere_count": 32,
+      "source_sphere_count": 3,
+      "grid_from_link": [
+        [
+          0.4041151027913683,
+          0.914704203642586,
+          0.0026839401082352724,
+          0.0
+        ],
+        [
+          -0.914704203642586,
+          0.4041202330933572,
+          -0.0017484402058258618,
+          0.0
+        ],
+        [
+          -0.0026839401082352724,
+          -0.0017484402058258615,
+          0.999994869698011,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "divisions": [
+        8,
+        2,
+        2
+      ],
+      "source_volume_m3": 2.7375456531141346e-05,
+      "partition_volume_m3": 2.7375456393736454e-05,
+      "cells": [
+        {
+          "index": [
+            0,
+            0,
+            0
+          ],
+          "volume_m3": 9.262627995579488e-07,
+          "vertex_count": 63,
+          "maximum_vertex_distance_m": 0.008660903963201166,
+          "radius_m": 0.008660905063152313
+        },
+        {
+          "index": [
+            0,
+            0,
+            1
+          ],
+          "volume_m3": 9.406886821104502e-07,
+          "vertex_count": 65,
+          "maximum_vertex_distance_m": 0.008728634797513802,
+          "radius_m": 0.008728635497391224
+        },
+        {
+          "index": [
+            0,
+            1,
+            0
+          ],
+          "volume_m3": 8.689149719443029e-07,
+          "vertex_count": 41,
+          "maximum_vertex_distance_m": 0.008598078453203577,
+          "radius_m": 0.008598078973591328
+        },
+        {
+          "index": [
+            0,
+            1,
+            1
+          ],
+          "volume_m3": 8.818542577836527e-07,
+          "vertex_count": 41,
+          "maximum_vertex_distance_m": 0.008665317076505712,
+          "radius_m": 0.008665317669510841
+        },
+        {
+          "index": [
+            1,
+            0,
+            0
+          ],
+          "volume_m3": 1.079461796833622e-06,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.009292874512339568,
+          "radius_m": 0.009292875416576862
+        },
+        {
+          "index": [
+            1,
+            0,
+            1
+          ],
+          "volume_m3": 1.0963304260676555e-06,
+          "vertex_count": 32,
+          "maximum_vertex_distance_m": 0.009344550004413832,
+          "radius_m": 0.009344550780951977
+        },
+        {
+          "index": [
+            1,
+            1,
+            0
+          ],
+          "volume_m3": 9.8993270008976e-07,
+          "vertex_count": 22,
+          "maximum_vertex_distance_m": 0.009235817612047666,
+          "radius_m": 0.00923581887036562
+        },
+        {
+          "index": [
+            1,
+            1,
+            1
+          ],
+          "volume_m3": 1.004426610700609e-06,
+          "vertex_count": 22,
+          "maximum_vertex_distance_m": 0.0092878105936027,
+          "radius_m": 0.009287811815738678
+        },
+        {
+          "index": [
+            2,
+            0,
+            0
+          ],
+          "volume_m3": 1.048783496913214e-06,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.009212911636641374,
+          "radius_m": 0.009212912991642952
+        },
+        {
+          "index": [
+            2,
+            0,
+            1
+          ],
+          "volume_m3": 1.0613711694887266e-06,
+          "vertex_count": 32,
+          "maximum_vertex_distance_m": 0.009252735725829976,
+          "radius_m": 0.00925273634493351
+        },
+        {
+          "index": [
+            2,
+            1,
+            0
+          ],
+          "volume_m3": 9.368306361468157e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.00907607087704854,
+          "radius_m": 0.00907607190310955
+        },
+        {
+          "index": [
+            2,
+            1,
+            1
+          ],
+          "volume_m3": 9.461640149212555e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.009116492591421917,
+          "radius_m": 0.009116493165493011
+        },
+        {
+          "index": [
+            3,
+            0,
+            0
+          ],
+          "volume_m3": 1.0110355495165902e-06,
+          "vertex_count": 20,
+          "maximum_vertex_distance_m": 0.009119092764669628,
+          "radius_m": 0.009119093418121338
+        },
+        {
+          "index": [
+            3,
+            0,
+            1
+          ],
+          "volume_m3": 1.0196356719431128e-06,
+          "vertex_count": 24,
+          "maximum_vertex_distance_m": 0.009143032387263786,
+          "radius_m": 0.009143033064901829
+        },
+        {
+          "index": [
+            3,
+            1,
+            0
+          ],
+          "volume_m3": 8.736327509060754e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.008911958977543996,
+          "radius_m": 0.008911959826946259
+        },
+        {
+          "index": [
+            3,
+            1,
+            1
+          ],
+          "volume_m3": 8.785825247505694e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.008936453864505077,
+          "radius_m": 0.00893645454198122
+        },
+        {
+          "index": [
+            4,
+            0,
+            0
+          ],
+          "volume_m3": 9.67259715406324e-07,
+          "vertex_count": 19,
+          "maximum_vertex_distance_m": 0.009028715604027364,
+          "radius_m": 0.009028716944158077
+        },
+        {
+          "index": [
+            4,
+            0,
+            1
+          ],
+          "volume_m3": 9.72249716575107e-07,
+          "vertex_count": 26,
+          "maximum_vertex_distance_m": 0.009036437960185613,
+          "radius_m": 0.009036438539624214
+        },
+        {
+          "index": [
+            4,
+            1,
+            0
+          ],
+          "volume_m3": 7.992541459320886e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008761508227341832,
+          "radius_m": 0.008761509321630001
+        },
+        {
+          "index": [
+            4,
+            1,
+            1
+          ],
+          "volume_m3": 8.005174992891121e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008769465809114665,
+          "radius_m": 0.008769466541707516
+        },
+        {
+          "index": [
+            5,
+            0,
+            0
+          ],
+          "volume_m3": 9.135921115869449e-07,
+          "vertex_count": 25,
+          "maximum_vertex_distance_m": 0.008889859942900891,
+          "radius_m": 0.008889860473573208
+        },
+        {
+          "index": [
+            5,
+            0,
+            1
+          ],
+          "volume_m3": 9.15397074859471e-07,
+          "vertex_count": 25,
+          "maximum_vertex_distance_m": 0.008881644035825437,
+          "radius_m": 0.008881645277142525
+        },
+        {
+          "index": [
+            5,
+            1,
+            0
+          ],
+          "volume_m3": 7.128813878715796e-07,
+          "vertex_count": 29,
+          "maximum_vertex_distance_m": 0.008571518827431273,
+          "radius_m": 0.008571519516408443
+        },
+        {
+          "index": [
+            5,
+            1,
+            1
+          ],
+          "volume_m3": 7.111837217021732e-07,
+          "vertex_count": 29,
+          "maximum_vertex_distance_m": 0.008563098619519477,
+          "radius_m": 0.008563099429011345
+        },
+        {
+          "index": [
+            6,
+            0,
+            0
+          ],
+          "volume_m3": 8.386730431767273e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008696757106779045,
+          "radius_m": 0.008696758188307285
+        },
+        {
+          "index": [
+            6,
+            0,
+            1
+          ],
+          "volume_m3": 8.377403865774068e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008672999330356444,
+          "radius_m": 0.008673000149428844
+        },
+        {
+          "index": [
+            6,
+            1,
+            0
+          ],
+          "volume_m3": 6.111154094097026e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008336888538252658,
+          "radius_m": 0.008336889557540417
+        },
+        {
+          "index": [
+            6,
+            1,
+            1
+          ],
+          "volume_m3": 6.072524334500171e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008312206657238065,
+          "radius_m": 0.008312207646667957
+        },
+        {
+          "index": [
+            7,
+            0,
+            0
+          ],
+          "volume_m3": 6.474476833508238e-07,
+          "vertex_count": 52,
+          "maximum_vertex_distance_m": 0.008209962305581662,
+          "radius_m": 0.008209963329136372
+        },
+        {
+          "index": [
+            7,
+            0,
+            1
+          ],
+          "volume_m3": 6.473675696626435e-07,
+          "vertex_count": 52,
+          "maximum_vertex_distance_m": 0.008186181683081238,
+          "radius_m": 0.00818618293851614
+        },
+        {
+          "index": [
+            7,
+            1,
+            0
+          ],
+          "volume_m3": 4.162983294825955e-07,
+          "vertex_count": 39,
+          "maximum_vertex_distance_m": 0.007865224136444221,
+          "radius_m": 0.007865224964916706
+        },
+        {
+          "index": [
+            7,
+            1,
+            1
+          ],
+          "volume_m3": 4.133181057293757e-07,
+          "vertex_count": 39,
+          "maximum_vertex_distance_m": 0.00783694624290475,
+          "radius_m": 0.007836947217583656
+        }
+      ],
+      "quality": {
+        "count": 32,
+        "covered_fraction": 1.0,
+        "maximum_gap_mm": 0.0,
+        "outward_max_mm": 5.531927140290258,
+        "outward_p95_mm": 4.679117696294565,
+        "surface_samples": 40167,
+        "sphere_directions": 1024
+      },
+      "baseline_quality": {
+        "count": 3,
+        "covered_fraction": 0.7866407747653547,
+        "maximum_gap_mm": 3.9076511035356263,
+        "outward_max_mm": 8.773500819211046,
+        "outward_p95_mm": 6.988849972003304,
+        "surface_samples": 40167,
+        "sphere_directions": 1024
+      }
+    },
+    "gripR_Link2_L": {
+      "source": {
+        "mesh": "assets/marvin_urdf/meshes/collision/gripR_Link2_L.stl",
+        "mesh_sha256": "72866b186fead0db0a23f6002efbcfef914172abf6a6a7bf96832fcd2063c276",
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "link_from_mesh": [
+          [
+            1.0,
+            -1.303736306e-21,
+            -8.37375043e-22,
+            -1.387778781e-17
+          ],
+          [
+            1.303736306e-21,
+            1.0,
+            -1.114010058e-21,
+            0.0
+          ],
+          [
+            8.37375043e-22,
+            1.114010058e-21,
+            1.0,
+            -2.220446049e-16
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "sphere_count": 32,
+      "source_sphere_count": 3,
+      "grid_from_link": [
+        [
+          -0.4060916958551104,
+          0.9138312033765903,
+          -0.0014374605432824449,
+          0.0
+        ],
+        [
+          0.9138312033765903,
+          0.4060931653843164,
+          0.0009342180897208871,
+          0.0
+        ],
+        [
+          0.0014374605432824449,
+          -0.0009342180897208871,
+          -0.9999985304707939,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "divisions": [
+        8,
+        2,
+        2
+      ],
+      "source_volume_m3": 2.73754568273132e-05,
+      "partition_volume_m3": 2.7375456831062272e-05,
+      "cells": [
+        {
+          "index": [
+            0,
+            0,
+            0
+          ],
+          "volume_m3": 9.306500929882774e-07,
+          "vertex_count": 63,
+          "maximum_vertex_distance_m": 0.00867853988553373,
+          "radius_m": 0.008678540587425232
+        },
+        {
+          "index": [
+            0,
+            0,
+            1
+          ],
+          "volume_m3": 9.383894008022053e-07,
+          "vertex_count": 65,
+          "maximum_vertex_distance_m": 0.008714786260480506,
+          "radius_m": 0.008714786730706692
+        },
+        {
+          "index": [
+            0,
+            1,
+            0
+          ],
+          "volume_m3": 8.740088926620204e-07,
+          "vertex_count": 41,
+          "maximum_vertex_distance_m": 0.008616559914602535,
+          "radius_m": 0.008616561070084572
+        },
+        {
+          "index": [
+            0,
+            1,
+            1
+          ],
+          "volume_m3": 8.809665469707082e-07,
+          "vertex_count": 41,
+          "maximum_vertex_distance_m": 0.008652497478469955,
+          "radius_m": 0.00865249801427126
+        },
+        {
+          "index": [
+            1,
+            0,
+            0
+          ],
+          "volume_m3": 1.0819730542355699e-06,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.009304165085566554,
+          "radius_m": 0.009304165840148926
+        },
+        {
+          "index": [
+            1,
+            0,
+            1
+          ],
+          "volume_m3": 1.0909850543908007e-06,
+          "vertex_count": 32,
+          "maximum_vertex_distance_m": 0.009331805916122997,
+          "radius_m": 0.009331806562840939
+        },
+        {
+          "index": [
+            1,
+            1,
+            0
+          ],
+          "volume_m3": 9.936769961153867e-07,
+          "vertex_count": 22,
+          "maximum_vertex_distance_m": 0.009248069631303084,
+          "radius_m": 0.009248070418834686
+        },
+        {
+          "index": [
+            1,
+            1,
+            1
+          ],
+          "volume_m3": 1.001429491129472e-06,
+          "vertex_count": 22,
+          "maximum_vertex_distance_m": 0.009275877766916959,
+          "radius_m": 0.00927587877959013
+        },
+        {
+          "index": [
+            2,
+            0,
+            0
+          ],
+          "volume_m3": 1.0489944032840529e-06,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.009217472563036762,
+          "radius_m": 0.009217473678290844
+        },
+        {
+          "index": [
+            2,
+            0,
+            1
+          ],
+          "volume_m3": 1.0557319378558142e-06,
+          "vertex_count": 32,
+          "maximum_vertex_distance_m": 0.009238771573702665,
+          "radius_m": 0.009238772094249725
+        },
+        {
+          "index": [
+            2,
+            1,
+            0
+          ],
+          "volume_m3": 9.407311658397608e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.009087791330627747,
+          "radius_m": 0.009087792597711086
+        },
+        {
+          "index": [
+            2,
+            1,
+            1
+          ],
+          "volume_m3": 9.457312168882613e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.009109393595284109,
+          "radius_m": 0.009109394624829292
+        },
+        {
+          "index": [
+            3,
+            0,
+            0
+          ],
+          "volume_m3": 1.0090197901211706e-06,
+          "vertex_count": 20,
+          "maximum_vertex_distance_m": 0.009117173903352364,
+          "radius_m": 0.00911717489361763
+        },
+        {
+          "index": [
+            3,
+            0,
+            1
+          ],
+          "volume_m3": 1.0136320099064213e-06,
+          "vertex_count": 24,
+          "maximum_vertex_distance_m": 0.009129968379486025,
+          "radius_m": 0.009129969403147697
+        },
+        {
+          "index": [
+            3,
+            1,
+            0
+          ],
+          "volume_m3": 8.778919925594787e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.008922619653077576,
+          "radius_m": 0.008922620676457882
+        },
+        {
+          "index": [
+            3,
+            1,
+            1
+          ],
+          "volume_m3": 8.805497588831778e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.00893569273408211,
+          "radius_m": 0.00893569365143776
+        },
+        {
+          "index": [
+            4,
+            0,
+            0
+          ],
+          "volume_m3": 9.63101144899672e-07,
+          "vertex_count": 21,
+          "maximum_vertex_distance_m": 0.009020528299939394,
+          "radius_m": 0.009020529687404633
+        },
+        {
+          "index": [
+            4,
+            0,
+            1
+          ],
+          "volume_m3": 9.657807925260817e-07,
+          "vertex_count": 23,
+          "maximum_vertex_distance_m": 0.009024633930673768,
+          "radius_m": 0.009024634957313538
+        },
+        {
+          "index": [
+            4,
+            1,
+            0
+          ],
+          "volume_m3": 8.040702848194516e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008770496378772762,
+          "radius_m": 0.008770497515797615
+        },
+        {
+          "index": [
+            4,
+            1,
+            1
+          ],
+          "volume_m3": 8.04753129160639e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008774719346172594,
+          "radius_m": 0.008774720132350922
+        },
+        {
+          "index": [
+            5,
+            0,
+            0
+          ],
+          "volume_m3": 9.074214869454436e-07,
+          "vertex_count": 27,
+          "maximum_vertex_distance_m": 0.008875737161456074,
+          "radius_m": 0.008875737898051739
+        },
+        {
+          "index": [
+            5,
+            0,
+            1
+          ],
+          "volume_m3": 9.083899683173896e-07,
+          "vertex_count": 26,
+          "maximum_vertex_distance_m": 0.0088713001567618,
+          "radius_m": 0.00887130107730627
+        },
+        {
+          "index": [
+            5,
+            1,
+            0
+          ],
+          "volume_m3": 7.184291679828947e-07,
+          "vertex_count": 29,
+          "maximum_vertex_distance_m": 0.008578450046102968,
+          "radius_m": 0.008578451350331306
+        },
+        {
+          "index": [
+            5,
+            1,
+            1
+          ],
+          "volume_m3": 7.175200098158421e-07,
+          "vertex_count": 29,
+          "maximum_vertex_distance_m": 0.008573909230147421,
+          "radius_m": 0.008573910221457481
+        },
+        {
+          "index": [
+            6,
+            0,
+            0
+          ],
+          "volume_m3": 8.307328202368657e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.008676861008862983,
+          "radius_m": 0.008676862344145775
+        },
+        {
+          "index": [
+            6,
+            0,
+            1
+          ],
+          "volume_m3": 8.302514673112853e-07,
+          "vertex_count": 31,
+          "maximum_vertex_distance_m": 0.008663826510711004,
+          "radius_m": 0.008663827553391457
+        },
+        {
+          "index": [
+            6,
+            1,
+            0
+          ],
+          "volume_m3": 6.174922893104591e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008341237252979842,
+          "radius_m": 0.008341237902641296
+        },
+        {
+          "index": [
+            6,
+            1,
+            1
+          ],
+          "volume_m3": 6.15411576096958e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008327988854080844,
+          "radius_m": 0.008327989839017391
+        },
+        {
+          "index": [
+            7,
+            0,
+            0
+          ],
+          "volume_m3": 6.404942573007073e-07,
+          "vertex_count": 47,
+          "maximum_vertex_distance_m": 0.008197330880151664,
+          "radius_m": 0.008197331801056862
+        },
+        {
+          "index": [
+            7,
+            0,
+            1
+          ],
+          "volume_m3": 6.404678550775158e-07,
+          "vertex_count": 47,
+          "maximum_vertex_distance_m": 0.008184552467206776,
+          "radius_m": 0.008184553124010563
+        },
+        {
+          "index": [
+            7,
+            1,
+            0
+          ],
+          "volume_m3": 4.241960892299101e-07,
+          "vertex_count": 37,
+          "maximum_vertex_distance_m": 0.007872247960764599,
+          "radius_m": 0.007872248999774456
+        },
+        {
+          "index": [
+            7,
+            1,
+            1
+          ],
+          "volume_m3": 4.2258268739857826e-07,
+          "vertex_count": 37,
+          "maximum_vertex_distance_m": 0.007857102997402209,
+          "radius_m": 0.007857103832066059
+        }
+      ],
+      "quality": {
+        "count": 32,
+        "covered_fraction": 1.0,
+        "maximum_gap_mm": 0.0,
+        "outward_max_mm": 5.486846620923674,
+        "outward_p95_mm": 4.688294562721111,
+        "surface_samples": 40169,
+        "sphere_directions": 1024
+      },
+      "baseline_quality": {
+        "count": 3,
+        "covered_fraction": 0.789688565809455,
+        "maximum_gap_mm": 3.9087933179623273,
+        "outward_max_mm": 8.656053016658626,
+        "outward_p95_mm": 6.947711095576618,
+        "surface_samples": 40169,
+        "sphere_directions": 1024
+      }
+    },
+    "gripR_Link2_R": {
+      "source": {
+        "mesh": "assets/marvin_urdf/meshes/collision/gripR_Link2_R.stl",
+        "mesh_sha256": "a125ef05aeccd7b8ff58e558e7361f42a2d39725d732c6a463365b71bdb9ffe7",
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "link_from_mesh": [
+          [
+            1.0,
+            -1.303736306e-21,
+            -8.37375043e-22,
+            -6.938893904e-18
+          ],
+          [
+            1.303736306e-21,
+            1.0,
+            -1.114010058e-21,
+            0.0
+          ],
+          [
+            8.37375043e-22,
+            1.114010058e-21,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      },
+      "sphere_count": 32,
+      "source_sphere_count": 3,
+      "grid_from_link": [
+        [
+          0.4041151027913683,
+          0.914704203642586,
+          0.0026839401082352724,
+          0.0
+        ],
+        [
+          -0.914704203642586,
+          0.4041202330933572,
+          -0.0017484402058258618,
+          0.0
+        ],
+        [
+          -0.0026839401082352724,
+          -0.0017484402058258615,
+          0.999994869698011,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "divisions": [
+        8,
+        2,
+        2
+      ],
+      "source_volume_m3": 2.7375456531141346e-05,
+      "partition_volume_m3": 2.7375456393736454e-05,
+      "cells": [
+        {
+          "index": [
+            0,
+            0,
+            0
+          ],
+          "volume_m3": 9.262627995579488e-07,
+          "vertex_count": 63,
+          "maximum_vertex_distance_m": 0.008660903963201166,
+          "radius_m": 0.008660905063152313
+        },
+        {
+          "index": [
+            0,
+            0,
+            1
+          ],
+          "volume_m3": 9.406886821104502e-07,
+          "vertex_count": 65,
+          "maximum_vertex_distance_m": 0.008728634797513802,
+          "radius_m": 0.008728635497391224
+        },
+        {
+          "index": [
+            0,
+            1,
+            0
+          ],
+          "volume_m3": 8.689149719443029e-07,
+          "vertex_count": 41,
+          "maximum_vertex_distance_m": 0.008598078453203577,
+          "radius_m": 0.008598078973591328
+        },
+        {
+          "index": [
+            0,
+            1,
+            1
+          ],
+          "volume_m3": 8.818542577836527e-07,
+          "vertex_count": 41,
+          "maximum_vertex_distance_m": 0.008665317076505712,
+          "radius_m": 0.008665317669510841
+        },
+        {
+          "index": [
+            1,
+            0,
+            0
+          ],
+          "volume_m3": 1.079461796833622e-06,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.009292874512339568,
+          "radius_m": 0.009292875416576862
+        },
+        {
+          "index": [
+            1,
+            0,
+            1
+          ],
+          "volume_m3": 1.0963304260676555e-06,
+          "vertex_count": 32,
+          "maximum_vertex_distance_m": 0.009344550004413832,
+          "radius_m": 0.009344550780951977
+        },
+        {
+          "index": [
+            1,
+            1,
+            0
+          ],
+          "volume_m3": 9.8993270008976e-07,
+          "vertex_count": 22,
+          "maximum_vertex_distance_m": 0.009235817612047666,
+          "radius_m": 0.00923581887036562
+        },
+        {
+          "index": [
+            1,
+            1,
+            1
+          ],
+          "volume_m3": 1.004426610700609e-06,
+          "vertex_count": 22,
+          "maximum_vertex_distance_m": 0.0092878105936027,
+          "radius_m": 0.009287811815738678
+        },
+        {
+          "index": [
+            2,
+            0,
+            0
+          ],
+          "volume_m3": 1.048783496913214e-06,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.009212911636641374,
+          "radius_m": 0.009212912991642952
+        },
+        {
+          "index": [
+            2,
+            0,
+            1
+          ],
+          "volume_m3": 1.0613711694887266e-06,
+          "vertex_count": 32,
+          "maximum_vertex_distance_m": 0.009252735725829976,
+          "radius_m": 0.00925273634493351
+        },
+        {
+          "index": [
+            2,
+            1,
+            0
+          ],
+          "volume_m3": 9.368306361468157e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.00907607087704854,
+          "radius_m": 0.00907607190310955
+        },
+        {
+          "index": [
+            2,
+            1,
+            1
+          ],
+          "volume_m3": 9.461640149212555e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.009116492591421917,
+          "radius_m": 0.009116493165493011
+        },
+        {
+          "index": [
+            3,
+            0,
+            0
+          ],
+          "volume_m3": 1.0110355495165902e-06,
+          "vertex_count": 20,
+          "maximum_vertex_distance_m": 0.009119092764669628,
+          "radius_m": 0.009119093418121338
+        },
+        {
+          "index": [
+            3,
+            0,
+            1
+          ],
+          "volume_m3": 1.0196356719431128e-06,
+          "vertex_count": 24,
+          "maximum_vertex_distance_m": 0.009143032387263786,
+          "radius_m": 0.009143033064901829
+        },
+        {
+          "index": [
+            3,
+            1,
+            0
+          ],
+          "volume_m3": 8.736327509060754e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.008911958977543996,
+          "radius_m": 0.008911959826946259
+        },
+        {
+          "index": [
+            3,
+            1,
+            1
+          ],
+          "volume_m3": 8.785825247505694e-07,
+          "vertex_count": 30,
+          "maximum_vertex_distance_m": 0.008936453864505077,
+          "radius_m": 0.00893645454198122
+        },
+        {
+          "index": [
+            4,
+            0,
+            0
+          ],
+          "volume_m3": 9.67259715406324e-07,
+          "vertex_count": 19,
+          "maximum_vertex_distance_m": 0.009028715604027364,
+          "radius_m": 0.009028716944158077
+        },
+        {
+          "index": [
+            4,
+            0,
+            1
+          ],
+          "volume_m3": 9.72249716575107e-07,
+          "vertex_count": 26,
+          "maximum_vertex_distance_m": 0.009036437960185613,
+          "radius_m": 0.009036438539624214
+        },
+        {
+          "index": [
+            4,
+            1,
+            0
+          ],
+          "volume_m3": 7.992541459320886e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008761508227341832,
+          "radius_m": 0.008761509321630001
+        },
+        {
+          "index": [
+            4,
+            1,
+            1
+          ],
+          "volume_m3": 8.005174992891121e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008769465809114665,
+          "radius_m": 0.008769466541707516
+        },
+        {
+          "index": [
+            5,
+            0,
+            0
+          ],
+          "volume_m3": 9.135921115869449e-07,
+          "vertex_count": 25,
+          "maximum_vertex_distance_m": 0.008889859942900891,
+          "radius_m": 0.008889860473573208
+        },
+        {
+          "index": [
+            5,
+            0,
+            1
+          ],
+          "volume_m3": 9.15397074859471e-07,
+          "vertex_count": 25,
+          "maximum_vertex_distance_m": 0.008881644035825437,
+          "radius_m": 0.008881645277142525
+        },
+        {
+          "index": [
+            5,
+            1,
+            0
+          ],
+          "volume_m3": 7.128813878715796e-07,
+          "vertex_count": 29,
+          "maximum_vertex_distance_m": 0.008571518827431273,
+          "radius_m": 0.008571519516408443
+        },
+        {
+          "index": [
+            5,
+            1,
+            1
+          ],
+          "volume_m3": 7.111837217021732e-07,
+          "vertex_count": 29,
+          "maximum_vertex_distance_m": 0.008563098619519477,
+          "radius_m": 0.008563099429011345
+        },
+        {
+          "index": [
+            6,
+            0,
+            0
+          ],
+          "volume_m3": 8.386730431767273e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008696757106779045,
+          "radius_m": 0.008696758188307285
+        },
+        {
+          "index": [
+            6,
+            0,
+            1
+          ],
+          "volume_m3": 8.377403865774068e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008672999330356444,
+          "radius_m": 0.008673000149428844
+        },
+        {
+          "index": [
+            6,
+            1,
+            0
+          ],
+          "volume_m3": 6.111154094097026e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008336888538252658,
+          "radius_m": 0.008336889557540417
+        },
+        {
+          "index": [
+            6,
+            1,
+            1
+          ],
+          "volume_m3": 6.072524334500171e-07,
+          "vertex_count": 28,
+          "maximum_vertex_distance_m": 0.008312206657238065,
+          "radius_m": 0.008312207646667957
+        },
+        {
+          "index": [
+            7,
+            0,
+            0
+          ],
+          "volume_m3": 6.474476833508238e-07,
+          "vertex_count": 52,
+          "maximum_vertex_distance_m": 0.008209962305581662,
+          "radius_m": 0.008209963329136372
+        },
+        {
+          "index": [
+            7,
+            0,
+            1
+          ],
+          "volume_m3": 6.473675696626435e-07,
+          "vertex_count": 52,
+          "maximum_vertex_distance_m": 0.008186181683081238,
+          "radius_m": 0.00818618293851614
+        },
+        {
+          "index": [
+            7,
+            1,
+            0
+          ],
+          "volume_m3": 4.162983294825955e-07,
+          "vertex_count": 39,
+          "maximum_vertex_distance_m": 0.007865224136444221,
+          "radius_m": 0.007865224964916706
+        },
+        {
+          "index": [
+            7,
+            1,
+            1
+          ],
+          "volume_m3": 4.133181057293757e-07,
+          "vertex_count": 39,
+          "maximum_vertex_distance_m": 0.00783694624290475,
+          "radius_m": 0.007836947217583656
+        }
+      ],
+      "quality": {
+        "count": 32,
+        "covered_fraction": 1.0,
+        "maximum_gap_mm": 0.0,
+        "outward_max_mm": 5.531927140290258,
+        "outward_p95_mm": 4.679117696294565,
+        "surface_samples": 40167,
+        "sphere_directions": 1024
+      },
+      "baseline_quality": {
+        "count": 3,
+        "covered_fraction": 0.7866407747653547,
+        "maximum_gap_mm": 3.9076511035356263,
+        "outward_max_mm": 8.773500819211046,
+        "outward_p95_mm": 6.988849972003304,
+        "surface_samples": 40167,
+        "sphere_directions": 1024
+      }
+    }
+  },
+  "old_robot_sphere_count": 533,
+  "new_robot_sphere_count": 649,
+  "contact_links": [
+    "Link3_L",
+    "Link3_R",
+    "Link4_L",
+    "Link4_R"
+  ],
+  "checks": {
+    "partition_vertices_inside_enclosing_spheres": true,
+    "partition_volume_matches_source": true,
+    "only_link2_sphere_arrays_changed": true,
+    "world_and_self_buffers_preserved": true
+  },
+  "metric_limits": [
+    "Surface coverage and outward-distance metrics use fixed finite samples.",
+    "Each partition is enclosed through its full vertex set with outward float32 radius rounding."
+  ]
+}

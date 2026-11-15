@@ -61,28 +61,33 @@ export function createCollisionReplay(document, {load}) {
       const stageLabels = new Map(labels);
       for (const [id, label] of Object.entries(context.object_labels ?? {})) stageLabels.set(id, label);
       const name = (id, fallback) => displayEntityName(id, stageLabels, fallback);
+      const layers = [...Object.values(snapshot.mesh_layers ?? {}),
+        ...(snapshot.cuboid_layers ?? []), ...(snapshot.voxel_layers ?? [])];
       const scope = {global: '全局更新', local: '局部更新'}[context.scope] ?? '更新范围未归档';
       status.textContent = [
         `${event.t_s.toFixed(1)} 秒 · ${scope}`,
         context.excluded_instance_id ? `本阶段排除：${name(context.excluded_instance_id)}（抓取目标）。`
           : '本阶段没有指定排除目标。',
-        '半透明面参与碰撞，虚线框表示已排除；颜色对应下方物体。',
+        '半透明面和表面体素参与碰撞。虚线轮廓表示已排除，大线框表示 ESDF 存储范围。颜色对应下方图例。',
       ].join('\n');
       if (details) details.textContent = JSON.stringify({
         scene_token: snapshot.scene_token, observation_id: snapshot.observation_id,
         generation: snapshot.generation, exclusion_state: snapshot.exclusion_state,
-        objects: [...Object.values(snapshot.mesh_layers ?? {}), ...(snapshot.cuboid_layers ?? [])]
+        objects: layers
           .map(layer => ({name: name(layer.instance_id), id: layer.instance_id ?? layer.name,
             geometry: layer.geometry_source, enabled: layer.enabled})),
       }, null, 2);
-      for (const layer of [...Object.values(snapshot.mesh_layers ?? {}), ...(snapshot.cuboid_layers ?? [])]) {
+      for (const layer of layers) {
         const row = document.createElement('li');
-        const type = layer.geometry_source === 'observed_obb' ? 'OBB' : layer.asset_id ? 'CAD' : 'CUBOID';
-        const label = name(layer.instance_id, layer.role === 'measured_table' ? '桌面' : layer.asset_id ?? '未知物体');
+        const voxel = Array.isArray(layer.surface_centers_world_m);
+        const type = voxel ? 'TSDF / ESDF' : layer.geometry_source === 'observed_obb' ? 'OBB' : layer.asset_id ? 'CAD' : 'CUBOID';
+        const label = layer.name === 'workspace_environment' ? '工作空间匿名几何'
+          : name(layer.instance_id, layer.role === 'measured_table' ? '桌面' : layer.asset_id ?? layer.name ?? '未知物体');
         const exclusion = layer.instance_id === context.excluded_instance_id ? '抓取目标从环境排除' : '已排除（未归档具体原因）';
         row.textContent = `${label} · ${type} · ${layer.enabled ? '参与碰撞' : exclusion}`;
-        const swatch = document.createElement('i'); swatch.className = 'collision-swatch'; swatch.style.color = colorFor(layer);
-        if (layer.enabled) swatch.style.background = colorFor(layer); else swatch.style.borderStyle = 'dashed';
+        const color = voxel ? (layer.enabled ? (layer.role === 'background' ? '#4bdcca' : '#ffb05c') : '#8a92a3') : colorFor(layer);
+        const swatch = document.createElement('i'); swatch.className = 'collision-swatch'; swatch.style.color = color;
+        if (layer.enabled) swatch.style.background = color; else swatch.style.borderStyle = 'dashed';
         row.prepend(swatch);
         entities.append(row);
       }

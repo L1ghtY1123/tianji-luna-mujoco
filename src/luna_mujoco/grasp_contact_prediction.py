@@ -43,4 +43,4 @@ def bounded_contact_prediction(points_world_m, T_world_tcp, arm, driver_limit_ra
         'opposing_contact_predicted': all(row['minimum_signed_gap_m'] is not None
             and row['minimum_signed_gap_m'] <= 0. for row in patches), 'pads': patches,
         'limitations': ['unobserved_surfaces_unknown', 'rigid_fixed_cloud_prediction',
-                       'actual_stable_gripper_feedback_required_before_lift']}
+                       'post_sequence_visual_grasp_verification_required']}

@@ -10,7 +10,6 @@ from .geometry import TOOL_PROFILE
 from .workspace import MODEL_POLICY, model_fingerprint
 
 
-
 def workspace_robot(root, arm, *, urdf_path=None):
     import yaml
     from tianji_curobo.curobo_robot_config import create_single_arm_robot_config
@@ -55,7 +54,7 @@ def workspace_bound(root, arm):
 
 
 class WorkspaceIK:
-    def __init__(self, root, arm, *, batch_size=1024, num_seeds=16):
+    def __init__(self, root, arm, *, batch_size=1024, num_seeds=32):
         import torch
         from curobo.inverse_kinematics import InverseKinematics, InverseKinematicsCfg
         from curobo.types import GoalToolPose, Pose, ToolPoseCriteria
@@ -68,9 +67,10 @@ class WorkspaceIK:
         self.tool = robot['robot_cfg']['kinematics']['tool_frames'][0]
         self.batch_size, self.num_seeds = batch_size, num_seeds
         self.torch, self.Pose, self.GoalToolPose = torch, Pose, GoalToolPose
-        cfg = InverseKinematicsCfg.create(robot=robot, num_seeds=num_seeds, seed_solver_num_seeds=num_seeds * 2,
-            max_batch_size=batch_size, self_collision_check=True, scene_model=None,
-            position_tolerance=.002, orientation_tolerance=3.15, random_seed=123)
+        cfg = InverseKinematicsCfg.create(robot=robot, max_batch_size=batch_size)
+        if num_seeds != cfg.num_seeds:
+            raise ValueError('workspace_uses_official_ik_seed_default')
+        self.config = cfg
         self.solver = InverseKinematics(cfg)
         self.solver.update_tool_pose_criteria({self.tool: ToolPoseCriteria.track_position()})
 
@@ -90,7 +90,7 @@ class WorkspaceIK:
         return valid, active.position.reshape(self.batch_size, -1).detach().cpu().numpy()[:count]
 
 
-def build_workspace(root, arm, output, *, resolution=.01, batch_size=1024, num_seeds=16, max_batches=None):
+def build_workspace(root, arm, output, *, resolution=.01, batch_size=1024, num_seeds=32, max_batches=None):
     if (not np.isfinite(resolution) or resolution <= 0 or batch_size < 1 or num_seeds < 1
             or (max_batches is not None and max_batches < 1)):
         raise ValueError('invalid_workspace_build_budget')
@@ -119,8 +119,9 @@ def build_workspace(root, arm, output, *, resolution=.01, batch_size=1024, num_s
         'bound_center_m': center.tolist(), 'bound_radius_m': radius, 'collision_links': solver.collision_links,
         'reference_offset_m': [0., 0., TOOL_PROFILE[arm]['tcp_ee_z_m']], 'orientation_constrained': False,
         'self_collision_checked': True, 'peer_arm_included': False, 'environment_included': False,
-        'num_seeds': num_seeds, 'seed_solver_num_seeds': num_seeds * 2, 'position_tolerance_m': .002,
-        'sdk_commit': '8e734f3ced1df898990bcd92de40abce475907db',
+        'num_seeds': solver.config.num_seeds, 'seed_solver_num_seeds': solver.config.seed_solver_num_seeds,
+        'position_tolerance_m': solver.config.position_tolerance,
+        'sdk_commit': '42498cf4e7d0d6fbd4ef9fbcec1243c00c888a83',
         'checked_points': total, 'reachable_points': int(reachable.sum()),
         'complete': total == len(candidates), 'elapsed_s': time.monotonic() - started}
     output.mkdir(parents=True, exist_ok=True)

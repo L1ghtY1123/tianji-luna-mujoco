@@ -13,9 +13,8 @@ import httpx
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from .geometry import TCP_FRAMES, TOOL_PROFILE, grasp_targets, rigid_matrix
+from .geometry import TCP_FRAMES, TOOL_PROFILE, grasp_targets, graspgen_tcp_binding, rigid_matrix
 from .placement import observed_object
-from .planning_batches import trajectory_batches
 from .planning_settings import PlanningSettings
 from .trajectory_postprocessing import build_execution_phases
 
@@ -28,6 +27,8 @@ class AlgorithmError(RuntimeError):
 
 
 def _proven_endpoint_rejection(proof):
+    from .demo_grasp import grasp_direction_evidence
+
     if (not isinstance(proof, dict) or proof.get('accepted') is not False
             or proof.get('reference') != 'original_graspgen_tool_pose_with_arm_jaw_symmetry'):
         return False
@@ -47,6 +48,19 @@ def _proven_endpoint_rejection(proof):
         'achieved_tool_tilt_exceeded': downward < np.cos(np.deg2rad(tilt)) - 1e-9,
         'achieved_tool_points_toward_robot': proof.get('require_away_from_robot') is True and away < -1e-9,
     }
+    sector = proof.get('sector', {})
+    if not isinstance(sector, dict):
+        return False
+    try:
+        if type(sector.get('applied')) is not bool:
+            return False
+        computed = grasp_direction_evidence(sector.get('tool_z_world'),
+            sector.get('maximum_lateral_angle_deg'), applied=sector['applied'])
+    except (TypeError, ValueError):
+        return False
+    checks.update(
+        achieved_tool_outside_forward_down_sector=computed['applied'] and not computed['forward_downward_passed'],
+        achieved_tool_lateral_angle_exceeded=computed['applied'] and not computed['lateral_passed'])
     reasons = proof.get('reason')
     if not isinstance(reasons, str) or not reasons:
         return False
@@ -72,13 +86,17 @@ def determinate_grasp_failure(failure):
     if (isinstance(failure, dict) and failure.get('stage') == 'command_validation'
             and failure.get('code') == 'execution_collision'):
         proof = failure.get('details') or {}
+        world_collision = proof.get('first_world_collision') or {}
+        world_cost = world_collision.get('public_collision_cost') if isinstance(world_collision, dict) else None
+        world_collision_proven = type(world_cost) in (int, float) and np.isfinite(world_cost) and world_cost > 0
         index, count = proof.get('first_invalid_index'), proof.get('command_point_count')
         checked, digest = proof.get('checked_point_count'), proof.get('binding_sha256')
         return (proof.get('collision_free') is False and proof.get('motion_collision_checks_passed') is False
-            and proof.get('failure_reason') == 'collision_or_joint_bounds'
+            and (proof.get('failure_reason') == 'collision_or_joint_bounds'
+                 or world_collision_proven)
             and proof.get('phase') in {'approach_grasp', 'grasp', 'grasp_closure', 'grasp_lift'}
             and proof.get('collision_scope') in {
-                'published_inventory_geometry_and_both_robot_arms',
+                'published_objects_geometry_and_both_robot_arms',
                 'measured_obstacles_and_both_robot_arms'}
             and type(index) is int and type(count) is int and 0 <= index < count
             and type(checked) is int and checked > 0 and bool(proof.get('scene_token'))
@@ -91,6 +109,22 @@ def determinate_grasp_failure(failure):
     if (not isinstance(failure, dict) or failure.get("stage") != "planner"
             or failure.get("error") is not None):
         return False
+    if failure.get('status') == 'Lift FK path violates the world +Z constraint.':
+        proof = failure.get('lift_direction')
+        if (not isinstance(proof, dict) or proof.get('accepted') is not False
+                or proof.get('frame') != 'world' or proof.get('axis') != [0., 0., 1.]
+                or proof.get('source') != 'curobo_public_compute_kinematics'
+                or type(proof.get('checked_sample_count')) is not int or proof['checked_sample_count'] < 2):
+            return False
+        fields = ('requested_height_m', 'actual_height_m', 'maximum_horizontal_deviation_m',
+                  'minimum_height_m', 'maximum_downward_step_m', 'position_tolerance_m')
+        if any(type(proof.get(key)) not in (int, float) or not np.isfinite(proof[key]) for key in fields):
+            return False
+        requested, actual, lateral, lowest, downward, tolerance = (proof[key] for key in fields)
+        return (requested > 0 and tolerance > 0 and lateral >= 0 and downward >= 0
+                and failure.get('phase_success') == {'goalset': True, 'approach': True, 'grasp': True, 'lift': False}
+                and (lateral > tolerance or abs(actual - requested) > tolerance
+                     or lowest < -tolerance or downward > tolerance))
     # Public BatchMotionPlanner.plan_grasp also returns at a failed phase.
     # These are completed planning attempts with no physical execution.
     failed_phase = {
@@ -112,7 +146,6 @@ def determinate_grasp_failure(failure):
 
 
 class Algorithms:
-    grasp_trajectory_batch_capacity = 16
     def __init__(self, *, curobo_request=None, graspgen_client=None, perception=None, workspace_lookup=None,
                  cad_grasp_library=None):
         from tianji_graspgen.client import GraspGenClient
@@ -205,9 +238,16 @@ class Algorithms:
         if snapshot.get("observation_id") != scene.get("observation_id"):
             raise AlgorithmError("scene observation is stale", code="planning_stale_observation")
 
-    def observe(self, capture, instruction="", *, checkpoint=None, source_hint=None):
+    def observe(self, capture, instruction="", *, checkpoint=None, source_hint=None, progress=None, cancelled=None):
+        source_hint = {**(source_hint or {}), 'observation_progress': progress}
         return self.perception.observe(capture, instruction=instruction, checkpoint=checkpoint,
                                        source_hint=source_hint)
+
+    def prepare_observation_memory(self):
+        return self.request('/tools/prepare_observation_memory', {})
+
+    def prepare_gripper_evidence(self, capture, arms, entities):
+        return self.perception.prepare_gripper_evidence(capture, arms, entities)
 
     @staticmethod
     def _cloud_reference(target):
@@ -230,7 +270,7 @@ class Algorithms:
     def build_scene(self, snapshot, target_id, *, planning_settings=None, exclusion_state="selected",
                     head_only=False):
         from .cameras import letterbox_view
-        from .inventory_map import mapping_strategy
+        from .collision_objects import mapping_strategy
         from .semantic_transport import encode_project_semantic_request
 
         if any(obj.get('completed_geometry_points_world_m') is not None
@@ -255,20 +295,18 @@ class Algorithms:
         entities = snapshot.get('scene_entities') or snapshot['objects']
         if isinstance(entities, dict):
             entities = list(entities.values())
-        inventory = {entity['id']: entity for entity in entities}
+        objects = {entity['id']: entity for entity in entities}
         lifecycle = dict(snapshot.get('mapping_lifecycle', {}))
         strategy = mapping_strategy(**{key: lifecycle[key] for key in
-            ('requested_scope', 'mapping_entity_ids', 'strategy_source', 'scope_reason') if key in lifecycle})
-        retained_required = set()
+            ('requested_scope', 'strategy_source', 'scope_reason') if key in lifecycle})
         if exclusion_state in {'observation', 'selected'}:
             unresolved = snapshot.get('mapping_unresolved', [])
             if strategy:
-                retained_rows = [row for row in unresolved
+                unseen_rows = [row for row in unresolved
                     if row.get('status') == 'unseen' and not row.get('candidates')
-                    and row.get('previous_id') in inventory
+                    and row.get('previous_id') in objects
                     and row['previous_id'] not in lifecycle.get('retired_entity_ids', [])]
-                retained_required = {row['previous_id'] for row in retained_rows}
-                unresolved = [row for row in unresolved if row not in retained_rows]
+                unresolved = [row for row in unresolved if row not in unseen_rows]
             if unresolved:
                 raise AlgorithmError('semantic_scene_identity_unresolved', code='semantic_scene_identity_unresolved',
                     details={'unresolved': unresolved})
@@ -336,13 +374,8 @@ class Algorithms:
             {**semantic, 'views': coverage_views}, exclusion_state=exclusion_state)
         lifecycle.setdefault('required_entity_ids', [obj['id'] for obj in entities
             if obj.get('kind') not in {'marker', 'table'} and not obj.get('retired', False)])
-        lifecycle['required_entity_ids'] = sorted(set(lifecycle['required_entity_ids']) | retained_required)
         payload['mapping_lifecycle'] = lifecycle
-        from .pointcloud_preview import observed_obb_preview
-
-        payload['object_obb_observations'] = observed_obb_preview(snapshot)
-        if os.getenv('LUNA_GEOMETRY_MODE') == 'cad_obb':
-            from .object_obb import observed_object_obb
+        if os.getenv('LUNA_GEOMETRY_MODE') == 'cad_esdf':
 
             visible_ids = set().union(*(set(view['instance_masks']) for view in views.values()))
             payload['geometry_objects'] = []
@@ -350,7 +383,7 @@ class Algorithms:
                 if obj.get('kind') in {'table', 'marker'} or obj['id'] not in visible_ids:
                     continue
                 geometry = ({'cad': deepcopy(obj['cad'])} if obj.get('cad') is not None
-                            else {'obb': observed_object_obb(obj)})
+                            else {'geometry_type': 'tsdf_esdf'})
                 payload['geometry_objects'].append({'id': obj['id'], 'kind': obj['kind'],
                     'observation_id': snapshot['observation_id'], 'generation': snapshot['generation'], **geometry})
         if snapshot.get("demo_mapping") is True or demo_background:
@@ -372,17 +405,17 @@ class Algorithms:
                                 arm: float(state["gripper_position_rad"])
                                 for arm, state in snapshot["arms"].items()},
                             "selected_surface_world_m": [] if target is None else np.asarray(target["points_world_m"]).tolist()})
+        for surface in result.get('tsdf_surfaces', {}).values():
+            surface['points_world_m'] = np.asarray(surface['points_world_m'], dtype=np.float32)
         return {**result, "generation": snapshot["generation"], "target_id": target_id,
                 "observation_id": snapshot["observation_id"], "exclusion_state": exclusion_state}
 
     @staticmethod
     def _graspgen_object_points(snapshot, target):
-        """Sample the observed OBB; keep the existing measured cloud frame."""
-        from .object_obb import obb_surface_points, observed_object_obb
-        from .placement import measured_object_geometry
+        """Use only the current published TSDF surface for an unknown target."""
+        from .object_tsdf import current_tsdf_surface
 
-        measured_object_geometry(target)
-        return obb_surface_points(observed_object_obb(target))
+        return current_tsdf_surface(snapshot, target)
 
     def generate_grasps(self, snapshot, target_id, *, arm=None, candidate_count=200,
                         progress=None, cancelled=None):
@@ -400,7 +433,9 @@ class Algorithms:
             return self._generate_cad_grasps(snapshot, target, arm)
         reference = self._cloud_reference(target)
         cloud_frame = self._cloud_frame(target)
-        object_points = (self._graspgen_object_points(snapshot, target) - cloud_frame[:3, 3]).astype(np.float32)
+        inverse = np.linalg.inv(cloud_frame)
+        object_points = (self._graspgen_object_points(snapshot, target) @ inverse[:3, :3].T
+                         + inverse[:3, 3]).astype(np.float32)
         groups = [deproject_view(view) for view in snapshot["views"].values()]
         world = np.concatenate(groups)
         if not len(world):
@@ -426,6 +461,10 @@ class Algorithms:
             if model is not None and result["model"] != model:
                 raise AlgorithmError("GraspGen model changed between candidate batches")
             model = result["model"]
+            try:
+                graspgen_tcp_binding(model, arm or 'A')
+            except ValueError as error:
+                raise AlgorithmError(str(error), code='graspgen_frame_mismatch') from error
             candidates.extend({"source_batch": batch, "source_index": c["index"], "score": c["score"],
                                "T_object_grasp": rigid_matrix(c["T_camera_grasp"]).tolist()}
                               for c in result["candidates"])
@@ -438,18 +477,18 @@ class Algorithms:
         candidates = [{"index": index, **candidate} for index, candidate in enumerate(candidates)]
         if arm is not None:
             world = cloud_frame @ np.asarray([candidate['T_object_grasp'] for candidate in candidates])
-            for candidate, tcp in zip(candidates, grasp_targets(world, arm)):
+            for candidate, model_tcp, tcp in zip(candidates, world, grasp_targets(world, arm), strict=True):
+                candidate['T_world_model_tcp'] = model_tcp.tolist()
                 candidate['T_world_tcp'] = tcp.tolist()
         all_generated = deepcopy(candidates)
         candidates = candidates[:candidate_count]
-        from .object_obb import observed_object_obb
-
         return {"candidates": candidates, "all_generated_candidates": all_generated,
-                "object_obb": observed_object_obb(target),
-                "graspgen_input_source": "observed_obb_mesh_surface_samples",
+                "graspgen_input_source": "curobo_tsdf_surface",
                 "model": model, "frame": f"cloud:{target_id}",
                 'arm': arm, 'tool_profile_revision': TOOL_PROFILE['revision'],
                 'tcp_frame': TCP_FRAMES.get(arm),
+                'tcp_conversion': {key: graspgen_tcp_binding(model, key)
+                                   for key in ((arm,) if arm else ('A', 'B'))},
                 "T_world_cloud": cloud_frame.tolist(),
                 "graspgen_input": request,
                 "requested_candidate_count": candidate_count, "candidate_count": len(candidates), "batches": batches,
@@ -508,11 +547,12 @@ class Algorithms:
         # missing historical inference input from a measured target cloud.
         fields = ("graspgen_request", "T_world_cloud", "observation_id",
                   "graspgen_input_source", "graspgen_input_sampling",
-                  "completion_provenance", "graspgen_input_cloud", "object_obb",
+                  "completion_provenance", "graspgen_input_cloud",
                   "measured_cloud_reference", "completed_geometry_points_world_m")
         return deepcopy({key: replay[key] for key in fields if key in replay})
 
-    def evaluate_reachability(self, snapshot, target_id, destination_id=None, *, requested_arm=None):
+    def evaluate_reachability(self, snapshot, target_id, destination_id=None, *, requested_arm=None,
+                              placement_request=None, planning_settings=None):
         from .observation_geometry import measured_position
 
         if requested_arm not in (None, 'A', 'B'):
@@ -579,60 +619,12 @@ class Algorithms:
                        "gripper_joint_positions_rad": {a: snapshot['arms'][a]['gripper_position_rad'] for a in ('A', 'B')},
                        "scene_token": scene["scene_token"], "planning_settings": settings,
                        "trajectory_collision_clearance_m": settings["trajectory_collision_clearance_m"]}
-            valid, batches = [], []
-            for start in range(0, len(candidates), 100):
-                self._check_cancelled(cancelled)
-                goals = poses[start:start + 100].tolist()
-                batch_data = {**sampling, "arm": arm, "batch_index": start // 100 + 1,
-                              "batch_count": (len(candidates) + 99) // 100,
-                              "candidate_indices": indices[start:start + 100],
-                              "duration_s": 0., "success_count": 0}
-                if progress is not None:
-                    progress("ik_batch_start", "cuRobo batched IK 开始", batch_data)
-                self._check_cancelled(cancelled)
-                started = time.monotonic()
-                try:
-                    ik = self.request("/tools/solve_ik_batch", {**request, "goal_matrices_world": goals})
-                except AlgorithmError:
-                    self._check_cancelled(cancelled)
-                    raise
-                self._check_cancelled(cancelled)
-                items = self._batch_items(ik, len(goals), scene["scene_token"], "IK")
-                candidate_filters = []
-                for local_index, item in enumerate(items):
-                    index = start + local_index
-                    if item["success"]:
-                        candidate = {**sampling, **{key: candidates[index][key]
-                                      for key in ("source_batch", "source_index", "source", "grasp_id", "pair_id") if key in candidates[index]},
-                                      "candidate_index": candidates[index]["index"],
-                                      "score": candidates[index]["score"],
-                                      "T_world_tcp": poses[index].tolist(), "ik": item}
-                        candidate, evidence = self._grasp_ik_candidate(
-                            candidate, snapshot, target_id, arm, scene, settings)
-                        if evidence is not None:
-                            candidate_filters.append(evidence)
-                        if candidate is not None:
-                            valid.append(candidate)
-                completed = {**batch_data, "duration_s": time.monotonic() - started,
-                             "success_count": sum(item["success"] for item in items),
-                              "eligible_count": sum(item["success"] for item in items) - sum(
-                                  not row["accepted"] for row in candidate_filters),
-                              "candidate_filters": candidate_filters,
-                              "effective_config": ik.get("effective_config"),
-                              "candidate_replay": {**replay_inputs, **sampling, "stage": "after_ik", "target_id": target_id,
-                                  "candidate_indices": indices[start:start + 100],
-                                  "request": {**request, "goal_matrices_world": goals},
-                                  "response": deepcopy(ik),
-                                  "candidate_filters": deepcopy(candidate_filters),
-                                  "measured_points_world_m": np.asarray(target["points_world_m"]).copy(),
-                                  "T_world_cloud": cloud_frame.tolist()}}
-                batches.append(completed)
-                if progress is not None:
-                    progress("ik_batch_complete", "cuRobo batched IK 完成", completed)
-                self._check_cancelled(cancelled)
-            valid, destination_screening = self._grasp_destination_candidates(
-                valid, snapshot, target_id, arm, scene, settings, destination_id, placement_request)
-            self._check_cancelled(cancelled)
+            valid = [{**sampling, **{key: candidate[key] for key in
+                      ('source_batch', 'source_index', 'source', 'grasp_id', 'pair_id') if key in candidate},
+                      'candidate_index': candidate['index'], 'score': candidate['score'],
+                      'T_world_tcp': poses[index].tolist(), 'nominal_T_world_tcp': poses[index].tolist()}
+                     for index, candidate in enumerate(candidates)]
+            batches, destination_screening = [], None
             result[arm] = {**sampling, **({"graspgen_replay_inputs": replay_inputs} if replay_inputs else {}),
                            "valid_candidates": valid, "tested_count": len(candidates),
                            "arm": arm, "target_id": target_id,
@@ -646,8 +638,7 @@ class Algorithms:
                 observed_object(snapshot, destination_id)
                 # Fixed tool geometry can reject a bounded set of destination
                 # endpoints before closure; carried motion still needs actual feedback.
-                screened = isinstance(destination_screening, dict) and destination_screening.get('applied') is True
-                scope = 'grasp_ik_and_fixed_tool_destination_screen' if screened else 'grasp_ik_only'
+                scope = 'nominal_goalset_pending_official_ik_selection'
                 result[arm].update(destination_id=destination_id, feasibility_scope=scope,
                                    place_planning_stage="after_grasp_attachment")
                 if destination_screening is not None:
@@ -749,7 +740,7 @@ class Algorithms:
                    "planning_settings": settings, "gripper_joint_positions_rad": {
                        name: float(value["gripper_position_rad"]) for name, value in observation["arms"].items()}}
         payload["gripper_geometry_mode"] = (
-            "fixed_open" if binding is None and phase in {"approach_grasp", "grasp", "grasp_closure", "close", "open_grasp"}
+            "fixed_open" if binding is None and phase in {"approach_grasp", "grasp", "grasp_closure", "grasp_lift", "close", "open_grasp"}
             else "actual")
         if binding is not None:
             payload["carrying_binding"] = binding
@@ -788,48 +779,7 @@ class Algorithms:
         return held_collision_binding(holding, scene, arm, target_id)
 
 
-    def _complete_place_candidate(self, observation, arm, scene, binding, raw, settings, *, cancelled=None):
-        phases = build_execution_phases(raw, settings["time_scale"])
-        checks = {}
-        checking = deepcopy(observation)
-        for name in ("approach", "place"):
-            self._check_cancelled(cancelled)
-            checks[name] = self.validate_execution(checking, arm, scene, name, phases[name], binding,
-                                                   planning_settings=settings)
-            checking["arms"][arm]["joints_rad"] = phases[name]["positions_rad"][-1]
-        # Plan the third stage with an open, detached model. This is hypothetical;
-        # the runtime's logical attachment remains held until execution opens it.
-        from .kinematics import robot_tcp
 
-        checking["arms"][arm].update(gripper_position_rad=0., gripper_closed_fraction=0.)
-        release_tcp = np.asarray(robot_tcp(checking["arms"], arm), dtype=float)
-        checking["arms"][arm]["tcp"] = release_tcp.tolist()
-        retreat_goal = release_tcp.copy()
-        offset = np.eye(3)["xyz".index(settings["place_retreat_axis"])] * settings["place_retreat_offset_m"]
-        if settings["place_retreat_in_tool_frame"]:
-            offset = release_tcp[:3, :3] @ offset
-        retreat_goal[:3, 3] += offset
-        self._check_cancelled(cancelled)
-        retreat = self.plan_retreat(checking, arm, scene, retreat_goal.tolist(), planning_settings=settings,
-                                    start_state=raw['place'].get('terminal_state'))
-        self._check_cancelled(cancelled)
-        phases["retreat"], checks["retreat"] = retreat["command"], retreat["check"]
-        return phases, checks
-
-    def plan_retreat(self, observation, arm, scene, goal, *, planning_settings=None, start_state=None):
-        settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
-        payload = self._motion_request(observation, arm, scene, goal, settings)
-        payload.update(departure_axis=settings['place_retreat_axis'],
-                       departure_in_tool_frame=settings['place_retreat_in_tool_frame'])
-        if start_state is not None:
-            payload['departure_start_state'] = deepcopy(start_state)
-        response = self.request("/tools/plan_to_pose", payload)
-        if response.get("scene_token") != scene["scene_token"] or response.get("attached") is not False:
-            raise AlgorithmError("retreat requires a detached current scene")
-        raw = self._native_phases({"retreat": response["trajectory"]}, arm)
-        command = build_execution_phases(raw, settings["time_scale"])["retreat"]
-        check = self.validate_execution(observation, arm, scene, "retreat", command, planning_settings=settings)
-        return {"command": command, "check": check}
 
     def clear_carrying(self):
         return self.request("/carrying/clear", {})
@@ -840,11 +790,8 @@ class Algorithms:
         settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
         binding = self._held_binding(observation, holding["instance_id"], arm, scene, holding)
         payload = self._motion_request(observation, arm, scene, observation["arms"][arm]["tcp"], settings)
-        if placement_request:
-            if placement_request.get('transport_region'):
-                payload['next_motion_kind'] = 'pose'
-            elif placement_request.get('region'):
-                payload['next_motion_kind'] = 'place'
+        if placement_request and (placement_request.get('transport_region') or placement_request.get('region')):
+            payload['next_motion_kind'] = 'place'
         result = self.request("/carrying/prepare", {**payload, "carrying_binding": binding})
         expected = {key: binding[key] for key in ('arm', 'instance_id', 'observation_id', 'generation', 'scene_token')}
         expected['carrying_owner_id'] = binding['owner_id']
@@ -855,45 +802,47 @@ class Algorithms:
     def detach_carrying(self):
         return self.request("/carrying/detach", {})
 
-    def plan_dual_observation_motion(self, observation, scene, goals, *, planning_settings=None):
+    def plan_dual_observation_motion(self, observation, scene, goals, *, planning_settings=None,
+                                    terminal_return=False, carrying_binding=None):
         self._binding(observation, scene["target_id"], scene)
-        if scene.get("exclusion_state") != "observation" and not scene.get('return_after_place'):
+        if carrying_binding is not None and not terminal_return:
+            raise AlgorithmError('carrying observation return requires terminal policy')
+        if scene.get("exclusion_state") != "observation" and not scene.get('return_after_place') and not terminal_return:
             raise AlgorithmError("observation motion requires target-inclusive scene")
         settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
         payload = {"scene_token": scene["scene_token"], "planning_settings": settings,
+                   'terminal_return': terminal_return, 'carrying_binding': carrying_binding,
                    'return_after_place': bool(scene.get('return_after_place')),
                    "start_joints_deg": {a: np.rad2deg(observation["arms"][a]["joints_rad"]).tolist() for a in ("A", "B")},
                    "goal_joints_deg": {a: np.rad2deg(goals[a]).tolist() for a in ("A", "B")},
                    "gripper_joint_positions_rad": {a: observation["arms"][a]["gripper_position_rad"] for a in ("A", "B")}}
         result = self.request("/tools/plan_dual_observation", payload)
-        if result.get("scene_token") != scene["scene_token"] or result.get("attached") is not False:
+        if result.get("scene_token") != scene["scene_token"] or result.get("attached") is not (carrying_binding is not None):
             raise AlgorithmError("dual observation returned stale or attached trajectory")
         return {"paths": {a: np.deg2rad(result["trajectories"][a]).tolist() for a in ("A", "B")},
                 "dt": result["sample_dt_s"], "scene_token": scene["scene_token"]}
 
-    def validate_dual_observation(self, observation, scene, paths, *, planning_settings=None):
+    def validate_dual_observation(self, observation, scene, paths, *, planning_settings=None,
+                                  terminal_return=False, carrying_binding=None):
+        if carrying_binding is not None and not terminal_return:
+            raise AlgorithmError('carrying observation return requires terminal policy')
         settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
         result = self.request("/tools/validate_dual_observation", {
+            'terminal_return': terminal_return, 'carrying_binding': carrying_binding,
             'return_after_place': bool(scene.get('return_after_place')),
             "scene_token": scene["scene_token"], "planning_settings": settings,
             "expected_scene_token": scene["scene_token"],
             "points_deg": {a: np.rad2deg(paths[a]).tolist() for a in ("A", "B")},
             "gripper_joint_positions_rad": {a: observation["arms"][a]["gripper_position_rad"] for a in ("A", "B")}})
-        if result.get("scene_token") != scene["scene_token"] or result.get("collision_free") is not True:
+        if (result.get("scene_token") != scene["scene_token"] or result.get("collision_free") is not True
+                or result.get('attached') is not (carrying_binding is not None)):
             raise AlgorithmError("dual observation command failed collision checking")
         return result
 
-    def _grasp_ik_candidate(self, candidate, snapshot, target_id, arm, scene, settings):
-        return candidate, None
 
-    def _grasp_destination_candidates(self, valid, snapshot, target_id, arm, scene, settings, destination_id, placement_request):
-        return valid, None
 
     def _grasp_plan_evidence(self, candidate, item, phases, snapshot, target_id, arm, scene, settings):
         return {}
-
-    def _grasp_lift_settings(self, snapshot, target_id, arm, candidates, scene, settings):
-        return settings, None
 
     def plan_grasp(self, snapshot, target_id, arm, evaluations, scene, *, planning_settings=None,
                    progress=None, cancelled=None, destination_id=None):
@@ -908,6 +857,9 @@ class Algorithms:
         evaluation = evaluations[arm]
         sampling = {key: deepcopy(evaluation[key]) for key in ("sampling_round", "sampling_evidence")
                     if key in evaluation}
+        # Pool history contains prior batches. Embedding it in each new batch
+        # recursively multiplies the archive when another pool is attempted.
+        batch_sampling = {key: sampling[key] for key in ("sampling_round",) if key in sampling}
         replay_inputs = self._graspgen_replay_inputs(evaluation.get("graspgen_replay_inputs", {}))
         expected = {"arm": arm, "target_id": target_id, "generation": snapshot["generation"],
                     "scene_token": scene["scene_token"], "planning_settings": settings,
@@ -927,7 +879,7 @@ class Algorithms:
                 raise AlgorithmError("IK evaluation has invalid frozen start joints")
             joint_drift[checked_arm] = float(np.max(np.abs(current - frozen)))
             if not np.isfinite(joint_drift[checked_arm]) or joint_drift[checked_arm] > 1.:
-                raise AlgorithmError(f"arm {checked_arm} moved more than 1 degree since batched IK",
+                raise AlgorithmError(f"arm {checked_arm} moved more than 1 degree since goalset preparation",
                                      code="planning_start_changed", details={"joint_drift_deg": joint_drift})
         failures, batches = [], []
         candidates = evaluation["valid_candidates"]
@@ -935,55 +887,70 @@ class Algorithms:
         if (len(indices) != len(set(indices)) or any(type(index) is not int for index in indices)
                 or any(not np.isfinite(candidate["score"]) for candidate in candidates)):
             raise AlgorithmError("IK evaluation has invalid candidate indices or scores")
-        # Preserve planner batching. Rank its successful returned paths by travel.
-        candidates = sorted(candidates, key=lambda candidate: -candidate["score"])
+        # Keep candidate identity/order while official ranked IK selects its goal.
         indices = [candidate["candidate_index"] for candidate in candidates]
-        effective_settings, lift_clearance = self._grasp_lift_settings(
-            snapshot, target_id, arm, candidates, scene, settings) if candidates else (settings, None)
-        lift_metadata = ({} if lift_clearance is None else
-                         {"effective_grasp_settings": effective_settings, "lift_clearance": lift_clearance})
         planner_fields = ("freq_hz", "approach_axis", "approach_offset_m", "approach_in_tool_frame",
                           "lift_axis", "lift_offset_m", "lift_in_tool_frame",
                           "trajectory_collision_clearance_m", "optimizer_collision_activation_distance_m")
         request_base = {"arm": arm, "start_joints_deg": evaluation["start_joints_deg"],
                         "other_joints_deg": evaluation["other_joints_deg"], "scene_token": scene["scene_token"],
                         "gripper_joint_positions_rad": {a: snapshot['arms'][a]['gripper_position_rad'] for a in ('A', 'B')},
-                        "planning_settings": effective_settings,
-                        **{key: effective_settings[key] for key in planner_fields}}
+                        "planning_settings": settings,
+                        **{key: settings[key] for key in planner_fields}}
         planned_count = 0
+        remaining_candidates = list(candidates)
         measured_start = np.asarray(snapshot["arms"][arm]["joints_rad"], dtype=float)
-        chunks = trajectory_batches(candidates, self.grasp_trajectory_batch_capacity)
+        goalset_limit = settings['grasp_goalset_size']
+        candidate_groups = {candidate['candidate_index']: index // goalset_limit + 1
+                            for index, candidate in enumerate(candidates)}
+        chunks = [candidates[start:start + goalset_limit] for start in range(0, len(candidates), goalset_limit)]
         for batch_index, chunk in enumerate(chunks, 1):
             check_cancelled()
             request = {**request_base, "goal_matrices_world":
                        [rigid_matrix(candidate["T_world_tcp"]).tolist() for candidate in chunk]}
-            batch_data = {**sampling, "arm": arm, "planning_stage": "grasp", "batch_index": batch_index,
-                          "batch_count": len(chunks),
+            batch_data = {**batch_sampling, "arm": arm, "planning_stage": "grasp", "batch_index": batch_index,
+                          "batch_count": len(chunks), "goalset_limit": goalset_limit,
+                          "request_index": batch_index,
+                          "candidate_group_index": candidate_groups[chunk[0]['candidate_index']],
+                          "candidate_group_count": (len(candidates) + goalset_limit - 1) // goalset_limit,
                           "candidate_indices": [candidate["candidate_index"] for candidate in chunk],
                           "duration_s": 0., "success_count": 0}
             if progress is not None:
-                progress("planning_batch_start", "cuRobo plan_grasp_batch 开始", batch_data)
+                progress("planning_batch_start", "cuRobo plan_grasp goalset 开始", batch_data)
             check_cancelled()
             started = time.monotonic()
             try:
-                response = self.request("/tools/plan_grasp_batch", request)
+                response = self.request("/tools/plan_grasp", request)
             except AlgorithmError:
                 check_cancelled()
                 raise
             check_cancelled()
             if progress is not None:
-                progress("planning_batch_replay", "保存plan_grasp_batch完整候选与轨迹", {
-                    **batch_data, "candidate_replay": {**replay_inputs, **sampling,
-                        "stage": "after_plan_grasp_batch", "target_id": target_id,
-                        **lift_metadata,
+                progress("planning_batch_replay", "保存官方goalset候选与选中轨迹", {
+                    **batch_data, "candidate_replay": {**replay_inputs, **batch_sampling,
+                        "stage": "after_plan_grasp", "target_id": target_id,
                         "candidate_indices": batch_data["candidate_indices"],
                         "planning_candidates": deepcopy(chunk),
                         "request": deepcopy(request), "response": deepcopy(response),
                         "measured_points_world_m": np.asarray(
                             self._target(snapshot, target_id)["points_world_m"]).copy()}})
-            items = self._batch_items(response, len(chunk), scene["scene_token"], "plan_grasp_batch")
+            if response.get('scene_token') != scene['scene_token']:
+                raise AlgorithmError('grasp goalset returned a stale scene', code='planning_stale_scene')
+            selected = response.get('goalset_index')
+            if selected is None:
+                failure = {'stage': 'planner', 'status': response.get('status'), 'error': response.get('error'),
+                    'phase_success': {phase: response.get(phase + '_success')
+                                      for phase in ('goalset', 'approach', 'grasp', 'lift')}}
+                if response.get('goalset_success') is not False or not determinate_grasp_failure(failure):
+                    raise AlgorithmError('official goalset returned unresolved evidence',
+                        code='grasp_goalset_failed', details=response)
+                selected_pairs = [(candidate, response) for candidate in chunk]
+            elif type(selected) is not int or not 0 <= selected < len(chunk):
+                raise AlgorithmError('invalid official goalset index', code='algorithm_invalid_response')
+            else:
+                selected_pairs = [(chunk[selected], response)]
             batch_failures, feasible = [], []
-            for candidate, item in zip(chunk, items):
+            for candidate, item in selected_pairs:
                 check_cancelled()
                 phases = self._plan_phases(item, arm)
                 if phases is None:
@@ -991,6 +958,7 @@ class Algorithms:
                                            "stage": "planner",
                                            "score": candidate["score"], "status": item.get("status"),
                                            "error": item.get("error"),
+                                           "lift_direction": item.get("lift_direction"),
                                            "phase_success": {phase: item[f"{phase}_success"]
                                                              for phase in ("goalset", "approach", "grasp", "lift")}})
                     continue
@@ -1012,7 +980,7 @@ class Algorithms:
                 travel = float(np.abs(np.diff(positions, axis=0)).sum())
                 feasible.append((travel, candidate, phases, goal_evidence))
             best = None
-            for travel, candidate, phases, goal_evidence in sorted(feasible, key=lambda item: item[0]):
+            for travel, candidate, phases, goal_evidence in feasible:
                 check_cancelled()
                 try:
                     phases = build_execution_phases(phases, settings["time_scale"])
@@ -1038,6 +1006,9 @@ class Algorithms:
                                 checking, arm, scene, "approach_grasp" if name == "approach" else "grasp",
                                 command, planning_settings=settings,
                                 contact_goal_pose_world=candidate["T_world_tcp"])
+                        else:
+                            checks[name] = self.validate_execution(checking, arm, scene, 'grasp_lift',
+                                command, planning_settings=settings)
                         checking["arms"][arm]["joints_rad"] = points[-1].tolist()
                         if name == 'grasp':
                             close_command = {'positions_rad': [points[-1].tolist()], 'dt': command['dt']}
@@ -1093,30 +1064,38 @@ class Algorithms:
                         "scope": "deferred_until_attachment", "formal_place_requires_attachment": True}
                 break
             failures.extend(batch_failures)
-            planned_count += len(chunk)
-            remaining_count = len(candidates) - planned_count
+            planned_count += len(selected_pairs)
+            attempted_indices = {row['candidate_index'] for row, _ in selected_pairs}
+            remaining_candidates = [row for row in remaining_candidates if row['candidate_index'] not in attempted_indices]
+            remaining_chunk = [row for row in chunk if row['candidate_index'] not in attempted_indices]
+            remaining_count = len(remaining_candidates)
             completed = {**batch_data, "duration_s": time.monotonic() - started,
-                         "success_count": len(feasible), "failures": batch_failures,
+                         "success_count": int(best is not None),
+                         "solver_success_count": int(response.get('success') is True),
+                         "command_validated_candidate_count": int(best is not None),
+                         "failures": batch_failures,
                          "stopped_early": best is not None and remaining_count > 0,
                          "unplanned_candidate_count": remaining_count,
                          "effective_config": response.get("effective_config")}
             batches.append(completed)
             if progress is not None:
-                progress("planning_batch_complete", "cuRobo plan_grasp_batch 完成", completed)
+                progress("planning_batch_complete", "cuRobo plan_grasp goalset 完成", completed)
             check_cancelled()
             if best is not None:
-                return {**best, **lift_metadata, **sampling, "arm": arm, "scene_token": scene["scene_token"], "target_id": target_id,
+                return {**best, **sampling, "arm": arm, "scene_token": scene["scene_token"], "target_id": target_id,
+                        'lift_direction': response['lift_direction'],
                         "excluded_object_ids": [target_id], "prior_failures": failures, "batches": batches,
                         "planned_candidate_count": planned_count,
-                        "unplanned_candidate_indices": indices[planned_count:],
-                        "selection": {"rule": "minimum_total_joint_travel",
-                            "metric": "sum_absolute_planner_joint_increments_rad",
-                            "scope": "first_feasible_batch",
-                            "all_ik_candidates_evaluated": remaining_count == 0,
-                            "raw_complete_candidate_count": len(feasible),
+                        "unplanned_candidate_indices": [row['candidate_index'] for row in remaining_candidates],
+                        "selection": {"rule": "official_ranked_ik_goalset_selection",
+                            "goalset_index": selected,
+                            "goalset_candidate_count": len(chunk),
+                            "scope": "bounded_ranked_goalset", "goalset_limit": goalset_limit,
+                            "complete_goalset_submitted": len(chunk) == len(candidates),
+                            "raw_complete_candidate_count": len(candidates),
                             "command_validated_candidate_count": 1,
-                            "lift_command_collision_checked": False,
-                            "tie_break": "higher_graspgen_score_then_original_order",
+                            "lift_command_collision_checked": True,
+                            "lift_attachment_applied": False,
                             "start_joints_rad": measured_start.tolist(),
                             "joint_names": [f"Joint{i}_{'L' if arm == 'A' else 'R'}" for i in range(1, 8)]},
                         "planning_settings": settings, "time_scale": settings["time_scale"],
@@ -1126,14 +1105,62 @@ class Algorithms:
                         "start_joints_deg": evaluation["start_joints_deg"],
                         "other_joints_deg": evaluation["other_joints_deg"], "joint_drift_deg": joint_drift,
                         "joint_drift_threshold_deg": 1.}
+            if batch_failures and all(determinate_grasp_failure(row) for row in batch_failures):
+                if remaining_chunk:
+                    chunks.insert(batch_index, remaining_chunk)
+            else:
+                break
         exhaustion = {**expected, "scope": "internal_frozen_candidate_pool",
             "sampling_round": evaluation.get("sampling_round"),
             "start_joints_deg": deepcopy(evaluation["start_joints_deg"]),
             "other_joints_deg": deepcopy(evaluation["other_joints_deg"]),
             "candidate_indices": indices, "planned_candidate_count": planned_count,
-            "unplanned_candidate_indices": indices[planned_count:],
+            "unplanned_candidate_indices": [row['candidate_index'] for row in remaining_candidates],
             "outcome": "determinate_planner_failure" if candidates and len(failures) == len(candidates)
                 and all(determinate_grasp_failure(row) for row in failures) else "pool_expansion_not_permitted"}
         raise AlgorithmError(f"no valid three-phase grasp plan for arm {arm}: {failures}",
             code="planning_no_valid_candidate", details={"arm": arm, "failures": failures,
                 "batches": batches, "pool_exhaustion": exhaustion})
+
+    def _complete_place_candidate(self, observation, arm, scene, binding, raw, settings, *, cancelled=None):
+        phases = build_execution_phases(raw, settings["time_scale"])
+        checks = {}
+        checking = deepcopy(observation)
+        for name in ("approach", "place"):
+            self._check_cancelled(cancelled)
+            checks[name] = self.validate_execution(checking, arm, scene, name, phases[name], binding,
+                                                   planning_settings=settings)
+            checking["arms"][arm]["joints_rad"] = phases[name]["positions_rad"][-1]
+        # Plan the third stage with an open, detached model. This is hypothetical;
+        # the runtime's logical attachment remains held until execution opens it.
+        from .kinematics import robot_tcp
+
+        checking["arms"][arm].update(gripper_position_rad=0., gripper_closed_fraction=0.)
+        release_tcp = np.asarray(robot_tcp(checking["arms"], arm), dtype=float)
+        checking["arms"][arm]["tcp"] = release_tcp.tolist()
+        retreat_goal = release_tcp.copy()
+        offset = np.eye(3)["xyz".index(settings["place_retreat_axis"])] * settings["place_retreat_offset_m"]
+        if settings["place_retreat_in_tool_frame"]:
+            offset = release_tcp[:3, :3] @ offset
+        retreat_goal[:3, 3] += offset
+        self._check_cancelled(cancelled)
+        retreat = self.plan_retreat(checking, arm, scene, retreat_goal.tolist(), planning_settings=settings,
+                                    start_state=raw['place'].get('terminal_state'))
+        self._check_cancelled(cancelled)
+        phases["retreat"], checks["retreat"] = retreat["command"], retreat["check"]
+        return phases, checks
+
+    def plan_retreat(self, observation, arm, scene, goal, *, planning_settings=None, start_state=None):
+        settings = PlanningSettings.model_validate(planning_settings or {}).model_dump()
+        payload = self._motion_request(observation, arm, scene, goal, settings)
+        payload.update(departure_axis=settings['place_retreat_axis'],
+                       departure_in_tool_frame=settings['place_retreat_in_tool_frame'])
+        if start_state is not None:
+            payload['departure_start_state'] = deepcopy(start_state)
+        response = self.request("/tools/plan_to_pose", payload)
+        if response.get("scene_token") != scene["scene_token"] or response.get("attached") is not False:
+            raise AlgorithmError("retreat requires a detached current scene")
+        raw = self._native_phases({"retreat": response["trajectory"]}, arm)
+        command = build_execution_phases(raw, settings["time_scale"])["retreat"]
+        check = self.validate_execution(observation, arm, scene, "retreat", command, planning_settings=settings)
+        return {"command": command, "check": check}

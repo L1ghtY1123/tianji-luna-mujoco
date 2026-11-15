@@ -19,7 +19,7 @@ import numpy as np
 import trimesh
 import yaml
 
-SDK_COMMIT = "8e734f3ced1df898990bcd92de40abce475907db"
+SDK_COMMIT = "42498cf4e7d0d6fbd4ef9fbcec1243c00c888a83"
 LOCK_PATH = "/tmp/jev-sphere-fit-guangyu.lock"
 
 

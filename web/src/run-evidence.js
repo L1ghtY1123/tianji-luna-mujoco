@@ -1,4 +1,4 @@
-import { isTaskInventory, inventoryEntities, inventoryTransformations } from './task-inventory.js';
+import { isTaskLedger, memoryEntities, memoryTransformations } from './task-ledger.js';
 
 // Display only summary fields; measured point arrays remain in their dedicated preview.
 function pick(value, keys) {
@@ -12,8 +12,9 @@ function scalars(value) {
 
 function verification(value) {
   if (!value) return null;
-  return { ...pick(value, ['status', 'success', 'reason', 'source', 'verification_scope', 'open_confirmed', 'conflicting_evidence']),
+  return { ...pick(value, ['status', 'success', 'reason', 'source', 'verification_scope', 'observation_id', 'release_commanded', 'open_confirmed', 'conflicting_evidence']),
     position: scalars(value.position), visual: scalars(value.visual),
+    visual_evidence: scalars(value.visual_evidence),
     checks: scalars(value.checks), measurements: scalars(value.measurements) };
 }
 
@@ -23,8 +24,8 @@ function progressCount(value) {
 
 export function taskProgressSummary(progress) {
   if (!progress) return '';
-  if (isTaskInventory(progress)) return `已完成 ${progressCount(progress.completed_input_ids)} / ${progressCount(progress.selected_input_ids)} 个目标 · 已登记产物 ${progressCount(progress.product_ids)} 个`;
-  return '历史清单：请查看归档原始记录';
+  if (isTaskLedger(progress)) return `已完成 ${progressCount(progress.completed_input_ids)} / ${progressCount(progress.selected_input_ids)} 个目标 · 已登记产物 ${progressCount(progress.product_ids)} 个`;
+  return '历史物体记录：请查看归档原始记录';
 }
 
 export function runEvidence(run) {
@@ -36,7 +37,7 @@ export function runEvidence(run) {
     observation_budget: run.observation_budget ?? null,
     decision_budget: run.decision_budget ?? null,
     scene: run.scene_evidence ?? null,
-    coordinate_reference: '放置固定两指前端TCP的世界XY；只搜索世界Z轴yaw。球底规划间隙=碰撞阈值+2 mm，实际不得低于碰撞阈值。',
+    coordinate_reference: '配置区域固定物体参考点 XY，放置保持抓取姿态。Z 由实测支撑或盒沿、配置间隙与碰撞检查确定。',
     holding: holding ? {
       ...pick(holding, ['state', 'arm', 'verified', 'attached', 'reason', 'observation_id', 'attachment_detach_pending']),
       verification: verification(holding.verification),
@@ -51,16 +52,16 @@ export function runEvidence(run) {
       'lift_carried_collision_checked', 'prepare_wall_ms']) : null,
     verification: verification(run.verification),
     metrics: run.metrics ?? null,
-    task_inventory: run.task_inventory ?? null,
-    task_progress: isTaskInventory(run.task_progress) ? {
+    task_bindings: run.task_bindings ?? null,
+    task_progress: isTaskLedger(run.task_progress) ? {
       ...pick(run.task_progress, ['selected_input_ids', 'completed_input_ids', 'product_ids', 'retired_entity_ids']),
       completed_count: progressCount(run.task_progress.completed_input_ids),
-      entities: inventoryEntities(run.task_progress).map(item => pick(item, ['id', 'kind', 'description', 'status', 'current_region', 'processing_history'])),
+      entities: memoryEntities(run.task_progress).map(item => pick(item, ['id', 'kind', 'description', 'status', 'current_region', 'processing_history'])),
       objects: (run.task_progress.objects ?? []).map(item => ({
         ...pick(item, ['id', 'status', 'current_region', 'processing_history']),
         transfers: (item.transfers ?? []).map(transfer => ({ ...scalars(transfer), evidence: scalars(transfer.evidence) })),
       })),
-      transformations: inventoryTransformations(run.task_progress).map(item => ({
+      transformations: memoryTransformations(run.task_progress).map(item => ({
         ...pick(item, ['id', 'skill', 'input_entity_id', 'output_entity_id']), evidence: scalars(item.evidence),
       })),
     } : null,

@@ -2,7 +2,7 @@
   "source": "user_declared_experiment_conditions_2026-10-26",
   "work_area": "Robot tasks take place around the table.",
   "surroundings": "There are no other obstacles on either side of or behind the robot.",
-  "collision_map_scope": "Only currently or previously observed, confirmed entities in the Responses inventory, including the task support surfaces.",
+  "collision_map_scope": "Workspace-observed confirmed instances in temporal memory and measured task support surfaces, including valid retained historical geometry.",
   "evidence_type": "operator_supplied_environment_conditions_not_camera_measurements",
   "batch_processing": {
     "source_empty_action": "finish_current_batch",
@@ -10,9 +10,9 @@
     "source": "explicit_user_request_2026-11-08"
   },
   "container_entry_rule": {
-    "rule": "open_above_bound_container_assumes_entry",
-    "description": "For ordinary container_release, the operator accepts checked above-container release and confirmed opening as entry. Store an execution-rule receipt and use the measured container envelope for conservative contents occupancy. Individual settled poses remain unmeasured. Additional landing constraints and surface_setdown retain their own verification.",
-    "source": "explicit_user_request_2026-11-08"
+    "rule": "visual_containment_required",
+    "description": "Both grasping and placement require visual confirmation at graph-declared verification nodes. After visual confirmation of container entry, bind the receipt to the executed transfer and use measured container bounds for conservative contents occupancy. Individual settled metric poses remain unmeasured until a subsequent measurement.",
+    "source": "explicit_user_request_2026-11-09"
   },
   "completion_requirements": {
     "robot_pose": "observation",

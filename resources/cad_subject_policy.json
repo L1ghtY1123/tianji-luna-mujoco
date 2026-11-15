@@ -1,0 +1,12 @@
+{
+  "source": "user_declared_catalog_scope",
+  "instruction": "只有黑色工件和蓝色盒子有CAD",
+  "allowed_subject_colors": {
+    "black_workpiece": ["black"],
+    "blue_box": ["blue"]
+  },
+  "allowed_subject_kinds": {
+    "black_workpiece": ["object"],
+    "blue_box": ["bin"]
+  }
+}

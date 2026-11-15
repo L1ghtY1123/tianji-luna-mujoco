@@ -83,7 +83,12 @@ export function createReplayCloud(container, { points = [], candidates = [], col
     render();
   }
   function fit() {
-    const box = replayBounds(cloud, lines).union(new THREE.Box3().setFromObject(collision));
+    const box = replayBounds(cloud, lines);
+    collision.traverse(object => {
+      if (object.geometry && !object.name.endsWith(':esdf-bounds')) {
+        box.union(new THREE.Box3().setFromObject(object));
+      }
+    });
     const center = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
     const radius = box.isEmpty() ? .1 : Math.max(.04, box.getSize(new THREE.Vector3()).length() / 2);
     controls.target.copy(center);

@@ -29,24 +29,30 @@ IDENTITY_NAMES = {'openai_decisions': 'Decisions 已关联 ID',
                   'mixed_decisions_measured_container': 'Decisions 与 RGBD 对应关联 ID'}
 
 
-def responses_reference_labels(capture, reference):
-    """Draw the original model boxes on their input RGB, before any SAM result."""
+def registered_reference_labels(capture, reference):
+    """Summarize accepted initial identities using their same-capture SAM3 masks."""
     items = []
-    for identifier, entity in reference.get('entities', {}).items():
-        camera, box = entity.get('reference_camera_id'), entity.get('bbox')
-        if (camera not in capture['views'] or box is None
-                or entity.get('reference_observation_id', capture['observation_id']) != capture['observation_id']):
+    for identifier, record in reference.get('identity_references', {}).items():
+        if record.get('observation_id') != capture['observation_id']:
             continue
-        left, top, right, bottom = box
+        entity = reference.get('entities', {}).get(identifier, {})
         name = COLORS.get(entity.get('color'), '') + KINDS.get(entity.get('kind'), '物体')
-        items.append({'id': identifier, 'camera_id': camera, 'name': name,
-            'role': 'proposal', 'status': 'unverified', 'box_source': 'responses_reference_proposal',
-            'identity_source': 'responses_proposal_not_verified', 'geometry_status': 'not_measured',
-            'label': f'{name} · Responses 提议\nID {identifier}',
-            'x': left, 'y': top, 'width': right - left, 'height': bottom - top})
+        for camera, view in record.get('views', {}).items():
+            mask = view.get('mask')
+            if mask is None or camera not in capture['views'] or not np.any(mask):
+                continue
+            rows, columns = np.nonzero(mask)
+            height, width = mask.shape
+            items.append({'id': identifier, 'camera_id': camera, 'name': name,
+                'role': 'reference', 'status': 'associated', 'box_source': 'associated_instance_mask',
+                'identity_source': 'openai_decisions', 'geometry_status': 'not_measured',
+                'label': f'ID {identifier} {name} · Decisions 已关联',
+                'x': float(columns.min() / width), 'y': float(rows.min() / height),
+                'width': float((columns.max() + 1 - columns.min()) / width),
+                'height': float((rows.max() + 1 - rows.min()) / height)})
     return {'observation_id': capture['observation_id'], 'generation': capture.get('generation'),
-        'analysis_status': 'responses_proposal', 'overlay_scope': 'initial_responses_reference',
-        'image_source': 'captured_rgb', 'overlay_source': 'responses_reference_proposal',
+        'analysis_status': 'analyzed', 'overlay_scope': 'capture_identity_geometry',
+        'image_source': 'captured_rgb', 'overlay_source': 'confirmed_registration_masks',
         'used_as_model_input': False, 'items': items}
 
 
@@ -75,7 +81,7 @@ def make_object_labels(observation, records, membership, *, holding=None, destin
         name_source = 'measured_attributes'
         if color not in COLORS:
             color = observation.get('scene_entities', {}).get(identifier, {}).get('color')
-            name_source = 'inventory_description' if color in COLORS else 'generic_kind'
+            name_source = 'objects_description' if color in COLORS else 'generic_kind'
         name = COLORS.get(color, '') + KINDS.get(obj.get('kind'), '物体')
         title = 'ID ' + identifier + ' ' + name
         identity_text = IDENTITY_NAMES.get(identity_source, '身份依据未记录')

@@ -1,7 +1,40 @@
-"""Remove duplicate display evidence without dropping cameras or identity questions."""
-import hashlib
-import re
+"""Count authored multimodal evidence without changing image roles or order."""
+import json
 from copy import deepcopy
+
+from .evidence_versions import DECISION_INPUT_VERSION
+
+
+def bind_decision_images(payload, capture):
+    """Number the actual transmitted images and validate their adjacent provenance."""
+    payload = deepcopy(payload)
+    contents = [message.get('content', []) for message in payload.get('input', [])]
+    contents.extend(question['instructions'] for question in payload.get('questions', [])
+                    if isinstance(question.get('instructions'), list))
+    image_index = 0
+    for content in contents:
+        for index, part in enumerate(content):
+            if part.get('type') != 'input_image':
+                continue
+            if index == 0 or content[index - 1].get('type') != 'input_text':
+                raise ValueError('decision_image_metadata_missing')
+            metadata = json.loads(content[index - 1]['text'])
+            if not isinstance(metadata, dict) or not metadata.get('modality') or not metadata.get('image_size_px'):
+                raise ValueError('decision_image_metadata_invalid')
+            if metadata.get('role') in {'current', 'same_capture_reference'} and (
+                    metadata.get('observation_id') != capture.get('observation_id')
+                    or metadata.get('generation') != capture.get('generation')
+                    or metadata.get('camera_id') not in capture.get('views', {})):
+                raise ValueError('decision_current_image_capture_mismatch')
+            if metadata.get('role') not in {'current', 'same_capture_reference', None} and (
+                    not metadata.get('observation_id') or metadata.get('generation') is None):
+                raise ValueError('decision_dated_image_provenance_missing')
+            image_index += 1
+            metadata['evidence_input_version'] = DECISION_INPUT_VERSION
+            metadata['image_id'] = f'image_{image_index:03d}'
+            metadata['image_index'] = image_index
+            content[index - 1]['text'] = json.dumps(metadata, ensure_ascii=False)
+    return payload
 
 
 def decision_image_count(payload):
@@ -11,43 +44,3 @@ def decision_image_count(payload):
         for question in payload.get('questions', []) if isinstance(question.get('instructions'), list)
         for part in question['instructions'])
     return shared + scoped
-
-
-def compact_decision_images(payload):
-    original = decision_image_count(payload)
-    payload = deepcopy(payload)
-    images, selected = {}, {}
-    for message_index, message in enumerate(payload.get('input', [])):
-        current_raw = False
-        for part_index, part in enumerate(message.get('content', [])):
-            if part.get('type') == 'input_text':
-                # Only standalone camera labels establish a role, never prompt prose.
-                current_raw = re.fullmatch(
-                    r'CURRENT(?: RGB camera [123]| camera [123] — original RGB)', part['text']) is not None
-            elif part.get('type') == 'input_image':
-                digest = hashlib.sha256(part['image_url'].encode()).hexdigest()
-                position = (message_index, part_index)
-                images[position] = {'digest': digest, 'current_raw': current_raw}
-                previous = selected.get(digest)
-                if previous is None or current_raw and not images[previous]['current_raw']:
-                    selected[digest] = position
-                current_raw = False
-            else:
-                current_raw = False
-    # Number the images in their final order across messages, including forward aliases.
-    numbers = {position: number for number, position in enumerate(sorted(selected.values()), 1)}
-    for position, entry in images.items():
-        message_index, part_index = position
-        retained_position = selected[entry['digest']]
-        if position == retained_position:
-            continue
-        direction = 'above' if retained_position < position else 'below'
-        text = (f'Identical image bytes to image {numbers[retained_position]} {direction}; '
-                'the preceding role also refers to that image. This is image reuse, '
-                'not a new observation or an identity judgment.')
-        payload['input'][message_index]['content'][part_index] = {'type': 'input_text', 'text': text}
-    # Question images are local evidence: an alias to another question would
-    # change its meaning. Count them, but never deduplicate across questions.
-    retained = decision_image_count(payload)
-    return payload, {'original_image_count': original, 'image_count': retained,
-                     'removed_image_count': original - retained}

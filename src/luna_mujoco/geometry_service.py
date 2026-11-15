@@ -8,36 +8,34 @@ import subprocess
 import threading
 import time
 from collections import OrderedDict
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import asdict, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import numpy as np
+from tianji_curobo._curobo_impl import _busy_error, _validated_timeout
+from tianji_curobo.contracts import PlanPlaceRequest as VendorPlanPlaceRequest
 
-from .inventory_map import (
-    apply_inventory_update,
+from .collision_objects import (
+    apply_objects_update,
     certify_workspace,
-    freeze_inventory_scene,
-    reconcile_inventory,
+    freeze_objects_scene,
+    reconcile_objects,
 )
 from .motion_coverage import MotionCoverage
-from .planning_batches import TRAJECTORY_BATCH_CAPACITY, pad_trajectory_batch
 from .planning_settings import PlanningSettings, load_settings
 from .planning_timing import collect_timings, measured, timed_stage
 from .sdk_scene import sdk_scene_model, sdk_voxel_grid
 from .trajectory_postprocessing import PreReleasePlacePlan
 
 ROOT = Path(__file__).resolve().parents[2]
-from tianji_curobo._curobo_impl import CuroboRuntime, _busy_error, _validated_timeout
+from tianji_curobo._curobo_impl import CuroboRuntime
 from tianji_curobo.contracts import (
     CuroboToolError,
     PlanAxisLinearRequest,
     PlanToPoseRequest,
-)
-from tianji_curobo.contracts import (
-    PlanPlaceRequest as VendorPlanPlaceRequest,
 )
 from tianji_curobo.curobo_scene import collision_cache_for_scene
 
@@ -60,9 +58,9 @@ from .perception_mapping import (
     filter_mapping_views,
     mapping_filter_settings,
 )
-from .planning_contracts import PlanGraspBatchRequest, PlanPlaceRequest, SolveIkBatchRequest
+from .planning_contracts import PlanPlaceRequest, SolveIkBatchRequest
 
-SDK_COMMIT = "8e734f3ced1df898990bcd92de40abce475907db"
+SDK_COMMIT = "42498cf4e7d0d6fbd4ef9fbcec1243c00c888a83"
 LOGGER = logging.getLogger(__name__)
 IK_BATCH_CAPACITY = 100
 INITIAL_VOXEL_LAYER_CAPACITY = 16
@@ -89,7 +87,7 @@ def geometry_collision_cache(scene_model):
         count = len(model.get(kind, {}))
         cache[kind] = max(minimum, 1 << (max(1, count) - 1).bit_length())
     count = len(model.get('voxel', {}))
-    # Retained surfaces from multiple captures can exceed the object count.
+    # Current object layers share the scene with the anonymous workspace grid.
     # Reserve their slots during startup, so a fifth measured layer does not
     # destroy every warmed IK and motion planner in the middle of a task.
     cache['voxel']['layers'] = max(INITIAL_VOXEL_LAYER_CAPACITY,
@@ -145,7 +143,7 @@ def measured_target_collision_scope(runtime, planner, phase):
     Closing contact and carrying retain their separate phase policy.
     """
     proof = {'policy': 'existing_phase_selection', 'target_layers': []}
-    if phase not in {'approach_grasp', 'grasp', 'grasp_closure'}:
+    if phase not in {'approach_grasp', 'grasp', 'grasp_closure', 'grasp_lift'}:
         yield proof
         return
     scene = runtime.geometry_scene
@@ -159,7 +157,7 @@ def measured_target_collision_scope(runtime, planner, phase):
                                {'cuboid': 'cuboids', 'mesh': 'meshes', 'voxel': 'voxels'}[kind])
                 changed.append((data, name))
                 data.set_enabled(name, enabled=True, env_idx=0)
-        yield {'policy': 'measured_target_retained_during_open_approach',
+        yield {'policy': 'measured_target_retained_during_detached_grasp',
                'target_layers': [name for _, name in layers], 'target_contact_exemptions': []}
     finally:
         for data, name in reversed(changed):
@@ -184,7 +182,7 @@ class GeometryRuntime(CuroboRuntime):
         self.perception_gripper_feedback = None
         self.observed_free_guard = None
         self.motion_coverage = None
-        self._inventory_archive = None
+        self._collision_archive = None
         self.carrying_binding = None
         self.gripper_feedback = None
         self.support_frame = None
@@ -211,7 +209,7 @@ class GeometryRuntime(CuroboRuntime):
             for arm in ('A', 'B'):
                 # Larger trajectory batches remain available on demand. Their
                 # resident CUDA graphs otherwise displace first-capture masking.
-                for capacity, ik_only in ((100, True), (2, False), (None, False)):
+                for capacity, ik_only in ((100, True), (1, False), (None, False)):
                     backend = self._create_real_backend_unlocked(arm, batch_size=capacity, ik_only=ik_only)
                     try:
                         backend.warmup()
@@ -289,6 +287,21 @@ class GeometryRuntime(CuroboRuntime):
         if errors:
             raise CuroboToolError("cuRobo backend cleanup failed", stage="cleanup",
                                   code="CUROBO_BACKEND_CLEANUP_FAILED") from errors[0]
+
+    def prepare_observation_memory(self):
+        """Yield idle solver allocations to the next RGBD inference on this shared GPU."""
+        import torch
+
+        minimum_free = 8 * 1024 ** 3
+        with self._carrying_scope_lock, self.gpu_lock:
+            before = cuda_memory_snapshot()
+            released = before['free_bytes'] < minimum_free
+            if released:
+                self._clear_planners_unlocked()
+                torch.cuda.empty_cache()
+            return {'ok': True, 'solver_cache_released': released, 'minimum_free_bytes': minimum_free,
+                    'before': before, 'after': cuda_memory_snapshot(),
+                    'scene_token': (self.geometry_scene or {}).get('scene_token')}
 
     _planner_cache_fields = ("_backends", "_dual_backends", "_compound_backends", "_batch_backends",
                             "_ik_batch_backends", "_scene_snapshot_key_by_arm",
@@ -453,7 +466,7 @@ class GeometryRuntime(CuroboRuntime):
             self.geometry_solver_profile = None
             self.observed_free_guard = None
             self.motion_coverage = None
-            self._inventory_archive = None
+            self._collision_archive = None
             self.pointcloud_preview = None
             if self.perception_mapper is not None:
                 self.perception_mapper.reset()
@@ -473,8 +486,8 @@ class GeometryRuntime(CuroboRuntime):
             old = self.geometry_scene
             previous = ((self.geometry_scene, self.geometry_grids, self.geometry_model)
                         if self.geometry_scene is not None and self.geometry_grids is not None
-                        and self.geometry_model is not None else self._inventory_archive)
-            self._inventory_archive = freeze_inventory_scene(previous)
+                        and self.geometry_model is not None else self._collision_archive)
+            self._collision_archive = freeze_objects_scene(previous)
             if old is None or any(old.get(field) != identity.get(field) for field in ("generation", "target_id")):
                 self.logical_carrying_binding = None
             self.carrying_binding = None
@@ -517,14 +530,8 @@ class GeometryRuntime(CuroboRuntime):
             self.perception_gripper_feedback = dict(feedback)
             segmenter_ready = time.perf_counter()
             candidate, grids, model = self.perception_mapper.build(decoded)
-            identity, grids, model = reconcile_inventory(self._inventory_archive, identity, grids, model,
+            identity, grids, model = reconcile_objects(self._collision_archive, identity, grids, model,
                                                          **decoded.get('mapping_lifecycle', {}))
-            from .pointcloud_preview import reconcile_obb_preview
-
-            previous_obbs = (self._inventory_archive[0].get('mapped_object_obbs', [])
-                             if self._inventory_archive else [])
-            identity['mapped_object_obbs'] = reconcile_obb_preview(
-                previous_obbs, payload.get('object_obb_observations', []), identity)
             mapper_done = time.perf_counter()
             diagnostics = dict(self.perception_mapper.diagnostics)
             identity['mapping_diagnostics'] = diagnostics
@@ -563,14 +570,11 @@ class GeometryRuntime(CuroboRuntime):
             self.geometry_scene = identity | {"support_plane": getattr(candidate.table, "support_plane", None)}
             self.geometry_grids = grids
             self.geometry_model = model
-            self._inventory_archive = (self.geometry_scene, grids, model)
+            self._collision_archive = (self.geometry_scene, grids, model)
             self.geometry_solver_profile = settings.solver_payload()
             guard_done = time.perf_counter()
             published_preview = {**preview, **{key: identity[key] for key in
                 ("scene_token", "observation_id", "generation")}, "checkpoint": payload.get("checkpoint")}
-            published_preview['object_obbs'] = {
-                'observed': deepcopy(payload.get('object_obb_observations', [])),
-                'mapped': deepcopy(identity['mapped_object_obbs'])}
             from .collision_mapping import collision_layer_bounds, collision_scene_preview
 
             if decoded.get("demo_mapping"):
@@ -593,6 +597,7 @@ class GeometryRuntime(CuroboRuntime):
                 **{key: identity[key] for key in ('scene_token', 'observation_id', 'generation')}}
         background_only = candidate.selected_instance_id == ""
         return {"ok": True, **identity, "layer_count": len(grids), "voxel_size_m": None if hybrid else .02,
+                'tsdf_surfaces': getattr(self.perception_mapper, 'tsdf_surfaces', {}),
                 'collision_snapshot': collision_snapshot,
                 "measured_table_task_scope": self.observed_free_guard.measured_table_task_scope,
                 "background_includes_selected": background_only,
@@ -600,7 +605,7 @@ class GeometryRuntime(CuroboRuntime):
                 "source_restoration": dict(self.perception_mapper.capture_segmenter.source_restoration),
                 "implicit_sensor_filter": False, "implicit_pointcloud_filter": False,
                 "excluded_object_ids": [identity["target_id"]] if identity["disabled_obstacle_names"] else [],
-                "collision_objects": [name for name in identity['inventory_map']['entities']
+                "collision_object_ids": [name for name in identity['object_layers']['entities']
                     if identity["exclusion_state"] in ("released", "observation") or name != identity["target_id"]],
                 "table_collision_enabled": True, "table": dict(candidate.table.model),
                 "instance_metrics": {key: dict(value) for key, value in candidate.instance_metrics.items()},
@@ -618,46 +623,7 @@ class GeometryRuntime(CuroboRuntime):
                 "segmenter_timings_ms": dict(getattr(self.perception_mapper.capture_segmenter, "timings_ms", {})),
                 "pointcloud_filter": filtering, "solver_profile": self.geometry_solver_profile}
 
-    def plan_place_scoped(self, request, binding, feedback=None):
-        with self.carrying_scope(binding, feedback):
-            native = self.plan_pre_release_place_native(request, lock_timeout_s=600)
-            evidence = dict(self.effective_config[request.arm]["plan"])
-        return native, evidence
 
-    def resolve_release_height_scoped(self, request, binding, feedback, gripper_spheres, *,
-                                     search=None, ik_payload=None):
-        """Query tool geometry, then public held IK outside the non-reentrant GPU lock."""
-        with self.carrying_scope(binding, feedback):
-            with self.gpu_lock:
-                snapshot = self._prepare_scene_cache_unlocked()
-                backend = self._compound_backend_unlocked(request.arm,
-                    request.trajectory_collision_clearance_m, request.optimizer_collision_activation_distance_m)
-                token = self._refresh_scene_unlocked(snapshot=snapshot, arm=request.arm, backend=backend)
-                if token != binding.scene_token:
-                    self._raise_scene_changed(binding.scene_token, token)
-                self._refresh_peer_collision_unlocked(arm=request.arm, backend=backend,
-                    active_joints_deg=request.start_joints_deg, other_joints_deg=request.other_joints_deg)
-                began = time.monotonic()
-                result = (backend.resolve_release_height(request, gripper_spheres) if search is None else
-                          backend.resolve_release_height(request, gripper_spheres, search=search))
-                world_query_s = time.monotonic() - began
-                self._require_scene_token_unchanged_unlocked(token)
-            if search is not None:
-                from .object_obb import held_geometry_points
-                from .release_height_search import select_held_height
-
-                def solve(poses):
-                    query = {key: value for key, value in ik_payload.items()
-                             if key not in ('goal_position_m', 'goal_quaternion_wxyz',
-                                            'height_search', 'gripper_spheres_tool_m')}
-                    query['goal_matrices_world'] = poses
-                    return run_operation(self, '/tools/solve_ik_batch', query)
-
-                result['world_query_s'] = world_query_s
-                result = select_held_height(result, search, held_geometry_points(asdict(binding)), solve)
-                with self.gpu_lock:
-                    self._require_scene_token_unchanged_unlocked(token)
-            return result
 
     def query_world_spheres(self, payload, settings):
         """Query proposed fixed-tool endpoints without attaching or planning motion."""
@@ -690,50 +656,6 @@ class GeometryRuntime(CuroboRuntime):
                 return query_result(spheres, costs[0], token, clearance)
 
 
-    def plan_pre_release_place_native(self, request, lock_timeout_s=600):
-        """Own two-phase contract with the same scene/peer and failure boundary."""
-        if not isinstance(request, VendorPlanPlaceRequest):
-            raise CuroboToolError("request must be a PlanPlaceRequest", code="CUROBO_INVALID_REQUEST",
-                stage="input", status=400)
-        timeout = _validated_timeout(lock_timeout_s)
-        deadline = time.monotonic() + timeout
-        if not self.gpu_lock.acquire(timeout=timeout):
-            raise _busy_error()
-        try:
-            snapshot = self._prepare_scene_cache_unlocked()
-            backend = self._compound_backend_unlocked(request.arm,
-                request.trajectory_collision_clearance_m, request.optimizer_collision_activation_distance_m)
-            try:
-                if timeout > 0 and time.monotonic() >= deadline:
-                    raise _busy_error()
-                token = self._refresh_scene_unlocked(snapshot=snapshot, arm=request.arm,
-                    backend=backend, cache_snapshot=False)
-                self._refresh_peer_collision_unlocked(arm=request.arm, backend=backend,
-                    active_joints_deg=request.start_joints_deg, other_joints_deg=request.other_joints_deg,
-                    cache_snapshot=False)
-                if timeout > 0 and time.monotonic() >= deadline:
-                    raise _busy_error()
-                result = backend.plan_place_native(request)
-                if not isinstance(result, PreReleasePlacePlan):
-                    raise TypeError("backend must return a real two-phase pre-release plan")
-                self._require_scene_token_unchanged_unlocked(token)
-                return PreReleasePlacePlan(approach=replace(result.approach, scene_token=token),
-                    place=replace(result.place, scene_token=token))
-            except Exception as error:
-                if isinstance(error, CuroboToolError) and (
-                        error.code in {'CUROBO_SCENE_CHANGED', 'release_clearance_conflict'}
-                        or error.code == 'CUROBO_GRASP_FAILED' and error.details.get('phase') in {'approach', 'grasp'}):
-                    raise
-                self._discard_compound_backend_unlocked(arm=request.arm,
-                    trajectory_collision_clearance_m=request.trajectory_collision_clearance_m,
-                    optimizer_collision_activation_distance_m=request.optimizer_collision_activation_distance_m,
-                    backend=backend)
-                if isinstance(error, CuroboToolError):
-                    raise
-                raise CuroboToolError("cuRobo backend pre-release planning failed", stage="sdk",
-                    code="CUROBO_BACKEND_FAILED", status=500, details={"arm": request.arm}) from error
-        finally:
-            self.gpu_lock.release()
 
     def plan_retreat_scoped(self, request, feedback=None, *, departure_axis=None, departure_in_tool_frame=False,
                            departure_start_state=None):
@@ -841,7 +763,7 @@ class GeometryRuntime(CuroboRuntime):
         """Include a selected measured object in both dual-arm motion queries.
 
         Selection is bookkeeping, not contact permission for an empty hand.
-        The operation snapshot/cache key changes; the inventory does not.
+        The operation snapshot/cache key changes; the objects does not.
         """
         with self._carrying_scope_lock:
             previous = getattr(self._planning_scope, 'retain_empty_hand_target', False)
@@ -852,12 +774,12 @@ class GeometryRuntime(CuroboRuntime):
                 self._planning_scope.retain_empty_hand_target = previous
 
     def dual_operation_native(self, request, *, validate=False, lock_timeout_s=120.0):
-        with self.empty_hand_target_scope():
+        with self.empty_hand_target_scope() if self.carrying_binding is None else nullcontext():
             return super().dual_operation_native(request, validate=validate, lock_timeout_s=lock_timeout_s)
 
-    def validate_dual_execution(self, request, feedback):
+    def validate_dual_execution(self, request, feedback, *, terminal_return=False):
         """Reuse the world, checking both command chains with exact current fingers."""
-        with self.empty_hand_target_scope(), self.gpu_lock:
+        with self.empty_hand_target_scope() if self.carrying_binding is None else nullcontext(), self.gpu_lock:
             self._prepare_scene_cache_unlocked()
             backend = next(iter(self._dual_backends.values()), None)
             if backend is None:
@@ -867,12 +789,7 @@ class GeometryRuntime(CuroboRuntime):
                 if request.expected_scene_token is not None and request.expected_scene_token != token:
                     self._raise_scene_changed(request.expected_scene_token, token)
                 self._refresh_scene_unlocked(arm="AB", backend=backend)
-                payload = {"arm": "AB", "phase": "observation", "scene_token": token,
-                    "positions_rad": np.deg2rad(np.concatenate(
-                        (request.points_deg["A"], request.points_deg["B"]), axis=1)).tolist(),
-                    "joint_names": [f"Joint{i}_{side}" for side in ("L", "R") for i in range(1, 8)],
-                    "gripper_joint_positions_rad": feedback}
-                result = check_command_path(self, backend.motion_planner, payload, None)
+                result = self.validate_dual_command_unlocked(backend, request)
                 self._require_scene_token_unchanged_unlocked(token)
                 if not result['collision_free']:
                     coverage_missing = result.get('failure_reason') == 'observation_coverage_insufficient'
@@ -882,6 +799,20 @@ class GeometryRuntime(CuroboRuntime):
                         code="observation_coverage_insufficient" if coverage_missing else "CUROBO_TRAJECTORY_COLLISION",
                         stage="validation", status=422, details=result)
                 return result
+
+    def validate_dual_command_unlocked(self, backend, request):
+        """Check final dual commands under the caller's current scene/carrying lock."""
+        token = self._scene_snapshot_unlocked()['scene_token']
+        payload = {'arm': 'AB', 'phase': 'observation', 'scene_token': token,
+            'terminal_return': self.carrying_binding is not None,
+            'carrying_binding': asdict(self.carrying_binding) if self.carrying_binding else None,
+            'positions_rad': np.deg2rad(np.concatenate(
+                (request.points_deg['A'], request.points_deg['B']), axis=1)).tolist(),
+            'joint_names': [f'Joint{i}_{side}' for side in ('L', 'R') for i in range(1, 8)],
+            'gripper_joint_positions_rad': self.gripper_feedback}
+        result = check_command_path(self, backend.motion_planner, payload, self.carrying_binding)
+        self._require_scene_token_unchanged_unlocked(token)
+        return result
 
     def validate_execution(self, payload, binding):
         phase = validate_phase_request(payload)
@@ -930,22 +861,29 @@ class GeometryRuntime(CuroboRuntime):
         from .scene_update import prepare_scene_update, updated_preview
 
         with self.gpu_lock:
+            existing = (self.geometry_scene or {}).get('object_layers', {}).get('entities', {}).get(payload.get('target_id'), {})
+            if (payload.get('operation') == 'container_entry' and payload.get('source') == 'visual_container_entry'
+                    and payload.get('generation') == (self.geometry_scene or {}).get('generation')
+                    and existing.get('source') in {'container_contents_pending', 'container_contents_tsdf'}
+                    and existing.get('entry_receipt_id') == payload.get('receipt_id')
+                    and existing.get('release_binding_id') == payload.get('binding_id')
+                    and existing.get('container_id') == payload.get('container_id')):
+                return {'ok': True, **deepcopy(self.geometry_scene), 'layer_count': len(self.geometry_grids)}
             identity, grids, model = prepare_scene_update(
                 self.geometry_scene, self.geometry_grids, self.geometry_model, payload)
             for name in ('_scene_snapshot_key_by_arm', '_peer_collision_snapshot_by_arm', '_command_checkers'):
                 getattr(self, name).clear()
                 for _, saved in self._planner_configurations.values():
                     saved[name].clear()
-            apply_inventory_update(identity, payload, model)
-            self.geometry_scene, self.geometry_grids, self.geometry_model = identity, grids, model
+            apply_objects_update(identity, payload, model)
             preview = updated_preview(getattr(self, 'pointcloud_preview', None), identity, payload, model)
-            identity['mapped_object_obbs'] = deepcopy((preview or {}).get('object_obbs', {}).get('mapped', []))
-            self._inventory_archive = (identity, grids, model)
-            self.pointcloud_preview = preview
             if payload.get('operation') == 'container_entry' and preview is not None:
                 from .collision_archive import freeze_collision_snapshot
 
                 identity['collision_snapshot'] = freeze_collision_snapshot(preview['collision_scene'])
+            self.geometry_scene, self.geometry_grids, self.geometry_model = identity, grids, model
+            self._collision_archive = (identity, grids, model)
+            self.pointcloud_preview = preview
             self.carrying_binding = self.logical_carrying_binding = None
             if self.observed_free_guard is not None:
                 # Rays remain attached to their original capture; only collision version changes.
@@ -953,40 +891,60 @@ class GeometryRuntime(CuroboRuntime):
                 self.observed_free_guard.selected_instance_id = identity['target_id']
                 self.observed_free_guard.selected_surface_world_m = identity.get('selected_surface_world_m', [])
             if self.motion_coverage is not None:
-                if payload.get('operation') in {'select', 'container_entry'}:
+                if payload.get('operation') == 'select':
                     self.motion_coverage.scene_token = identity['scene_token']
-                    if payload.get('operation') == 'container_entry':
-                        update = {'source': 'operator_container_release_rule',
-                            'target_id': payload['target_id'], 'container_id': payload['container_id'],
-                            'entry_receipt_id': payload['receipt_id'], 'scene_token': identity['scene_token'],
-                            'occupied_bounds': deepcopy(identity['collision_layer_bounds']['layers'][
-                                'semantic_instance::' + payload['target_id']]),
-                            'raw_capture_reused': True, 'requires_separate_world_collision_check': True}
-                        if not any(row.get('entry_receipt_id') == payload['receipt_id']
-                                   for row in self.motion_coverage.bounded_updates):
-                            self.motion_coverage.bounded_updates.append(update)
                 else:
                     self.motion_coverage.invalidate('scene_geometry_changed_requires_registered_rgbd')
             names = [name.removeprefix('semantic_instance::') for name in model.get('voxel', {})
                      if name.startswith('semantic_instance::')]
             return {'ok': True, **identity, 'layer_count': len(grids),
                     'excluded_object_ids': [identity['target_id']] if identity['exclusion_state'] == 'selected' else [],
-                    'collision_objects': [name for name in names if 'semantic_instance::' + name not in identity['disabled_obstacle_names']],
+                    'collision_object_ids': [name for name in names if 'semantic_instance::' + name not in identity['disabled_obstacle_names']],
                     'collision_evidence': 'native_voxel_pose_and_tensor_version_checked_before_each_planning_query'}
 
     def build_geometry(self, payload):
         raise ValueError('simulation_geometry_mapping_unsupported:use_registered_rgbd')
 
-    def plan_grasp_batch_native(self, request, lock_timeout_s=120.0):
-        # Keep selection identity unchanged. Only this operation's uploaded
-        # snapshot retains the target; its cache key records the enabled set.
-        with self._carrying_scope_lock:
+
+    def plan_grasp_goalset(self, payload, settings):
+        from .goalset_transport import grasp_result
+
+        arm = payload['arm']
+        feedback = payload['gripper_joint_positions_rad']
+        if arm not in ('A', 'B') or set(feedback) != {'A', 'B'}:
+            raise ValueError('grasp_requires_arm_and_measured_gripper_feedback')
+        count = len(payload['goal_matrices_world'])
+        if not count:
+            raise ValueError('empty_grasp_goalset')
+        with self.carrying_scope(None, {**feedback, arm: 0.}), self.gpu_lock:
             previous = getattr(self._planning_scope, 'retain_grasp_target', False)
             self._planning_scope.retain_grasp_target = True
+            backend = None
             try:
-                return super().plan_grasp_batch_native(request, lock_timeout_s=lock_timeout_s)
+                clearance = settings.trajectory_collision_clearance_m
+                optimizer_clearance = settings.optimizer_collision_activation_distance_m
+                key = (arm, 1, clearance, optimizer_clearance)
+                backend = self._batch_backends.get(key)
+                if backend is not None and backend.motion_planner.ik_solver.config.max_goalset < count:
+                    self._batch_backends.pop(key).destroy()
+                    backend = None
+                self.goalset_capacity = max(32, 1 << (count - 1).bit_length())
+                backend = self._batch_backend_unlocked(arm, 1, clearance, optimizer_clearance)
+                snapshot = self._prepare_scene_cache_unlocked()
+                token = self._refresh_scene_unlocked(snapshot=snapshot, arm=arm, backend=backend,
+                                                     cache_snapshot=False)
+                if token != payload['scene_token']:
+                    self._raise_scene_changed(payload['scene_token'], token)
+                self._refresh_peer_collision_unlocked(arm=arm, backend=backend,
+                    active_joints_deg=payload['start_joints_deg'], other_joints_deg=payload['other_joints_deg'],
+                    cache_snapshot=False)
+                result = grasp_result(backend, payload)
+                self._require_scene_token_unchanged_unlocked(token)
+                return result
             finally:
                 self._planning_scope.retain_grasp_target = previous
+                if backend is not None:
+                    backend.motion_planner.last_grasp_result = None
 
     def _scene_snapshot_unlocked(self, *, allow_unstable_object=False):
         if self.geometry_scene is None:
@@ -1001,9 +959,9 @@ class GeometryRuntime(CuroboRuntime):
         return snapshot
 
     def _prepare_scene_cache_unlocked(self):
-        from .inventory_map import require_native_inventory_geometry
+        from .collision_objects import require_native_objects_geometry
 
-        require_native_inventory_geometry(self.geometry_model or {})
+        require_native_objects_geometry(self.geometry_model or {})
         snapshot = self._scene_snapshot_unlocked()
         cache = geometry_collision_cache(self.geometry_model)
         # The upload list is authoritative even if a mapper omits background
@@ -1026,9 +984,9 @@ class GeometryRuntime(CuroboRuntime):
         return snapshot
 
     def _refresh_scene_unlocked(self, *, arm, backend, snapshot=None, update_robot_geometry=True, **kwargs):
-        from .inventory_map import require_native_inventory_geometry
+        from .collision_objects import require_native_objects_geometry
 
-        require_native_inventory_geometry(self.geometry_model or {})
+        require_native_objects_geometry(self.geometry_model or {})
         if update_robot_geometry and hasattr(backend, 'resident_geometry'):
             with timed_stage('robot_geometry_update'):
                 changed = backend.resident_geometry.update(backend, self.gripper_feedback, self.carrying_binding)
@@ -1111,9 +1069,64 @@ class GeometryRuntime(CuroboRuntime):
                 backend.attach_measured_carrying(self.carrying_binding, active_joints_deg)
         return not reuse
 
+    def plan_place_scoped(self, request, binding, feedback=None):
+        with self.carrying_scope(binding, feedback):
+            native = self.plan_pre_release_place_native(request, lock_timeout_s=600)
+            evidence = dict(self.effective_config[request.arm]["plan"])
+        return native, evidence
+
+    def plan_pre_release_place_native(self, request, lock_timeout_s=600):
+        """Own two-phase contract with the same scene/peer and failure boundary."""
+        if not isinstance(request, VendorPlanPlaceRequest):
+            raise CuroboToolError("request must be a PlanPlaceRequest", code="CUROBO_INVALID_REQUEST",
+                stage="input", status=400)
+        timeout = _validated_timeout(lock_timeout_s)
+        deadline = time.monotonic() + timeout
+        if not self.gpu_lock.acquire(timeout=timeout):
+            raise _busy_error()
+        try:
+            snapshot = self._prepare_scene_cache_unlocked()
+            backend = self._compound_backend_unlocked(request.arm,
+                request.trajectory_collision_clearance_m, request.optimizer_collision_activation_distance_m)
+            try:
+                if timeout > 0 and time.monotonic() >= deadline:
+                    raise _busy_error()
+                token = self._refresh_scene_unlocked(snapshot=snapshot, arm=request.arm,
+                    backend=backend, cache_snapshot=False)
+                self._refresh_peer_collision_unlocked(arm=request.arm, backend=backend,
+                    active_joints_deg=request.start_joints_deg, other_joints_deg=request.other_joints_deg,
+                    cache_snapshot=False)
+                if timeout > 0 and time.monotonic() >= deadline:
+                    raise _busy_error()
+                result = backend.plan_place_native(request)
+                if not isinstance(result, PreReleasePlacePlan):
+                    raise TypeError("backend must return a real two-phase pre-release plan")
+                self._require_scene_token_unchanged_unlocked(token)
+                return PreReleasePlacePlan(approach=replace(result.approach, scene_token=token),
+                    place=replace(result.place, scene_token=token))
+            except Exception as error:
+                if isinstance(error, CuroboToolError) and (
+                        error.code in {'CUROBO_SCENE_CHANGED', 'release_clearance_conflict'}
+                        or error.code == 'CUROBO_GRASP_FAILED' and error.details.get('phase') in {'approach', 'grasp'}):
+                    raise
+                self._discard_compound_backend_unlocked(arm=request.arm,
+                    trajectory_collision_clearance_m=request.trajectory_collision_clearance_m,
+                    optimizer_collision_activation_distance_m=request.optimizer_collision_activation_distance_m,
+                    backend=backend)
+                if isinstance(error, CuroboToolError):
+                    raise
+                raise CuroboToolError("cuRobo backend pre-release planning failed", stage="sdk",
+                    code="CUROBO_BACKEND_FAILED", status=500, details={"arm": request.arm}) from error
+        finally:
+            self.gpu_lock.release()
+
+
+
 
 def run_operation(runtime, path, payload):
     """Validate settings once, then dispatch to the existing typed GPU boundary."""
+    if path == '/tools/prepare_observation_memory':
+        return runtime.prepare_observation_memory()
     if path == '/tools/evaluate_reachability':
         from .reachability import PositionReachability, validate_query
 
@@ -1147,9 +1160,21 @@ def run_operation(runtime, path, payload):
         if payload.get("scene_token") != scene["scene_token"]:
             raise ValueError("request scene token is stale")
         returning = payload.get('return_after_place') is True
+        terminal = payload.get('terminal_return') is True
+        carrying = payload.get('carrying_binding')
+        if carrying is not None and not terminal:
+            raise ValueError('carrying observation return requires terminal policy')
+        binding = None if carrying is None else CarryingBinding.from_mapping(carrying, scene=scene, arm=carrying.get('arm'))
+        logical = getattr(runtime, 'logical_carrying_binding', None)
+        if terminal:
+            if (logical is None) != (binding is None):
+                raise ValueError('terminal return attachment does not match persistent state')
+            if binding is not None and (binding.state != 'held' or any(
+                    getattr(logical, key) != getattr(binding, key) for key in ('owner_id', 'instance_id', 'arm', 'scene_token'))):
+                raise ValueError('terminal return attachment identity is stale')
         if returning and getattr(runtime, 'logical_carrying_binding', None) is not None:
             raise ValueError('post_place_observation_requires_detached_object')
-        if runtime.geometry_scene.get("exclusion_state") != "observation" and not returning:
+        if runtime.geometry_scene.get("exclusion_state") != "observation" and not returning and not terminal:
             raise ValueError("dual observation requires a target-inclusive map")
         if settings.solver_payload() != runtime.geometry_solver_profile:
             raise ValueError("scene planning settings changed; rebuild the geometry scene")
@@ -1171,13 +1196,13 @@ def run_operation(runtime, path, payload):
             values["goal_transforms_world"] = goals
         request = (DualValidationRequest if validate else DualPlanRequest).from_mapping(values)
         runtime.configure_planning(settings)
-        if validate:
-            result = runtime.validate_dual_execution(request, feedback)
-            return {**result, "attached": False}
-        with runtime.carrying_scope(None, feedback):
-            result = runtime.dual_operation_native(request, validate=validate, lock_timeout_s=600.)
-        return {**result, "attached": False}
-    if path not in ("/tools/solve_ik_batch", "/tools/plan_grasp_batch", "/tools/plan_place", "/tools/resolve_release_height", "/tools/plan_carried_pose", "/tools/plan_to_pose", "/tools/plan_observation", "/carrying/prepare", "/carrying/validate"):
+        with runtime.carrying_scope(binding, feedback):
+            if validate:
+                result = runtime.validate_dual_execution(request, feedback, terminal_return=terminal)
+            else:
+                result = runtime.dual_operation_native(request, validate=False, lock_timeout_s=600.)
+        return {**result, 'attached': binding is not None, 'terminal_return': terminal}
+    if path not in ("/tools/solve_ik_batch", "/tools/plan_grasp", "/tools/plan_place", "/tools/plan_pose", "/tools/plan_to_pose", "/tools/plan_observation", "/carrying/prepare", "/carrying/validate"):
         raise ValueError("unknown endpoint")
     settings = PlanningSettings.model_validate(payload["planning_settings"])
     scene = runtime._scene_snapshot_unlocked()
@@ -1185,7 +1210,12 @@ def run_operation(runtime, path, payload):
         raise ValueError("request scene token is stale")
     if settings.solver_payload() != runtime.geometry_solver_profile:
         raise ValueError("scene planning settings changed; rebuild the geometry scene")
-    if path in ("/tools/plan_place", "/tools/resolve_release_height", "/tools/plan_carried_pose", "/tools/plan_to_pose", "/tools/plan_observation", "/carrying/prepare", "/carrying/validate"):
+    if path == '/tools/plan_grasp':
+        runtime.configure_planning(settings)
+        result = runtime.plan_grasp_goalset(payload, settings)
+        return {**result, 'official_api': 'BatchMotionPlanner.plan_grasp',
+                'planning_settings_revision': settings.revision()}
+    if path in ("/tools/plan_place", "/tools/plan_pose", "/tools/plan_to_pose", "/tools/plan_observation", "/carrying/prepare", "/carrying/validate"):
         arm = payload.get("arm")
         carrying = payload.get("carrying_binding")
         binding = None if carrying is None else CarryingBinding.from_mapping(carrying, scene=scene, arm=arm)
@@ -1198,9 +1228,9 @@ def run_operation(runtime, path, payload):
         feedback = payload.get('gripper_joint_positions_rad')
         if not isinstance(feedback, dict) or set(feedback) != {'A', 'B'}:
             raise ValueError('pose and place planning requires measured A and B gripper feedback')
-        if path in ("/tools/plan_place", "/tools/resolve_release_height") and binding is None:
-            raise ValueError("plan_place requires measured or scoped preflight carrying geometry")
-        if path == "/tools/plan_carried_pose":
+        if path in ("/tools/plan_place",) and binding is None:
+            raise ValueError("plan_pose requires measured or scoped preflight carrying geometry")
+        if path == "/tools/plan_pose":
             if scene.get("exclusion_state") not in ("selected", "held"):
                 raise ValueError("carried pose requires a selected or held object map")
             if binding is None:
@@ -1209,7 +1239,7 @@ def run_operation(runtime, path, payload):
             if not isinstance(feedback, dict) or set(feedback) != {"A", "B"}:
                 raise ValueError("carried pose requires measured A and B gripper driver feedback")
         values = {"freq_hz": settings.freq_hz, "max_attempts": settings.plan_max_attempts}
-        if path in ("/tools/plan_place", "/tools/resolve_release_height"):
+        if path in ("/tools/plan_place",):
             values.update(trajectory_collision_clearance_m=settings.trajectory_collision_clearance_m,
                 optimizer_collision_activation_distance_m=settings.optimizer_collision_activation_distance_m,
                 approach_axis=settings.place_approach_axis, approach_offset_m=settings.place_approach_offset_m,
@@ -1219,29 +1249,12 @@ def run_operation(runtime, path, payload):
         for name, value in values.items():
             if name in payload and payload[name] != value:
                 raise ValueError(f"{name} conflicts with planning_settings")
-        request_type = PlanPlaceRequest if path in ("/tools/plan_place", "/tools/resolve_release_height") else PlanToPoseRequest
+        request_type = PlanPlaceRequest if path in ("/tools/plan_place",) else PlanToPoseRequest
         request = request_type.from_mapping(payload | values)
         if request.trajectory_point_scale is not None:
             raise ValueError("project execution retains raw derivatives before Hermite insertion")
         runtime.configure_planning(settings)
         feedback = payload.get("gripper_joint_positions_rad")
-        if path == "/tools/resolve_release_height":
-            if not isinstance(feedback, dict) or set(feedback) != {"A", "B"}:
-                raise ValueError("release height requires measured A and B gripper feedback")
-            search = payload.get('height_search')
-            if search is None:
-                result = runtime.resolve_release_height_scoped(
-                    request, binding, feedback, payload.get("gripper_spheres_tool_m"))
-            else:
-                from .object_obb import held_geometry_points
-                from .release_height_search import validate_search
-
-                validate_search(search, held_geometry_points(asdict(binding)), payload)
-                result = runtime.resolve_release_height_scoped(request, binding, feedback,
-                    payload.get('gripper_spheres_tool_m'), search=search, ik_payload=payload)
-            return result | {"ok": True, "planner": ("release_height_world_query" if search is None else
-                             "release_height_world_and_held_ik"), "attached": True,
-                             "planning_settings_revision": settings.revision()}
         if path == "/carrying/prepare":
             if 'next_motion_kind' in payload:
                 return runtime.prepare_carrying(request, binding, feedback, payload['next_motion_kind'])
@@ -1251,7 +1264,7 @@ def run_operation(runtime, path, payload):
             return {"ok": True, "planner": "curobo_observation_pose", "scene_token": native.scene_token,
                     "trajectory": asdict(native), "collision_evidence": evidence,
                     "attached": False, "planning_settings_revision": settings.revision()}
-        if path == "/tools/plan_carried_pose":
+        if path == "/tools/plan_pose":
             policy = payload.get("support_contact_policy")
             if policy is None:
                 native, evidence = runtime.plan_carry_pose_scoped(request, binding, feedback)
@@ -1302,7 +1315,7 @@ def run_operation(runtime, path, payload):
         if name in payload and payload[name] != value:
             raise ValueError(f"{name} conflicts with planning_settings")
     request_payload = payload | values
-    request_type = SolveIkBatchRequest if ik_only else PlanGraspBatchRequest
+    request_type = SolveIkBatchRequest
     request = request_type.from_mapping(request_payload)
     runtime.configure_planning(settings)
     if ik_only:
@@ -1332,30 +1345,6 @@ def run_operation(runtime, path, payload):
         result['items'] = result['items'][:candidate_count]
         result['batch_size'] = candidate_count
         result['batch_capacity'] = IK_BATCH_CAPACITY
-    else:
-        candidate_count = len(request.goal_matrices_world)
-        # Solve the first ranked pair before spending work on later candidates.
-        # Keep fixed shapes for CUDA graphs; never truncate a larger request.
-        capacity = next((size for size in (2, 4, 8) if candidate_count <= size), TRAJECTORY_BATCH_CAPACITY)
-        if candidate_count < capacity:
-            request = replace(request, goal_matrices_world=pad_trajectory_batch(request.goal_matrices_world, capacity))
-        started = time.perf_counter()
-        feedback = payload.get('gripper_joint_positions_rad')
-        if not isinstance(feedback, dict) or set(feedback) != {'A', 'B'}:
-            raise ValueError('grasp planning requires measured A and B gripper feedback')
-        with runtime.carrying_scope(None, {**feedback, request.arm: 0.}):
-            native = runtime.plan_grasp_batch_native(request, lock_timeout_s=600)
-        LOGGER.info("cuRobo grasp batch complete: arm=%s candidates=%d capacity=%d wall_s=%.3f",
-                    request.arm, candidate_count, native.batch_capacity, time.perf_counter() - started)
-        items = []
-        for item in native.items[:candidate_count]:
-            value = asdict(item)
-            value["phases"] = {name: value.pop(name) for name in ("approach", "grasp", "lift")}
-            items.append(value)
-        result = {"ok": True, "planner": "curobo_grasp_batch", "items": items,
-                  "batch_size": candidate_count, "batch_capacity": native.batch_capacity,
-                  "planning_time_s": native.planning_time_s, "scene_token": native.scene_token,
-                  "target_collision_policy": "measured_target_retained_during_open_grasp_planning"}
     result["effective_config"] = runtime.effective_config[request.arm]["ik" if ik_only else "plan"]
     result["planning_settings_revision"] = settings.revision()
     return result
@@ -1390,12 +1379,17 @@ def sdk_identity():
 
 
 def main():
+    from importlib.metadata import version
+
     import torch
     from tianji_curobo.curobo_service import materialize_urdf
     logging.basicConfig(level=logging.INFO)
     source, module_path = sdk_identity()
     if source != SDK_COMMIT:
         raise RuntimeError(f"cuRobo source identity mismatch: {source}; expected {SDK_COMMIT}")
+    sdk_version = version("nvidia-curobo")
+    if sdk_version != "0.9.0":
+        raise RuntimeError(f"cuRoboV2-Fast package version mismatch: {sdk_version}")
     urdf_path = Path(os.environ["LUNA_ROBOT_URDF"])
     urdf = materialize_urdf(urdf_path,
         marvin_meshes=Path(os.environ["LUNA_MARVIN_MESHES"]),
@@ -1420,6 +1414,7 @@ def main():
             self.send_json(200, {"ok": True, "ready": runtime.warmup_status['ready'] and torch.cuda.is_available(),
                 "warmup": runtime.warmup_status,
                 "gpu_available": torch.cuda.is_available(), "curobo_source": source,
+                "curobo_version": sdk_version, "planner_family": "cuRoboV2-Fast",
                 "module_path": module_path, "scene_token": (runtime.geometry_scene or {}).get("scene_token"),
                 "robot_config_sha256": hashlib.sha256((ROOT / "resources/robot/marvin_gui_dual.yml").read_bytes()).hexdigest()})
 
@@ -1471,4 +1466,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

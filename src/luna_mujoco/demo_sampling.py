@@ -7,7 +7,7 @@ import numpy as np
 from .algorithms import AlgorithmError, determinate_grasp_failure
 from .geometry import TCP_FRAMES, TOOL_PROFILE
 
-GRASP_CANDIDATE_COUNTS = (256, 512, 1000, 1000, 1000, 1000)
+GRASP_CANDIDATE_COUNTS = (100, 100)
 MAX_SAMPLING_ROUNDS = len(GRASP_CANDIDATE_COUNTS)
 
 
@@ -50,14 +50,16 @@ def empty_pool_filter(grasps):
                 or any(type(row.get('candidate_index')) is not int
                        or type(row.get('tilt_passed')) is not bool
                        or type(row.get('away_from_robot_passed')) is not bool
-                       or (row['tilt_passed'] and row['away_from_robot_passed'])
+                       or row.get('accepted') is not False
+                       or not isinstance(row.get('sector'), dict)
+                       or (row['tilt_passed'] and row['away_from_robot_passed'] and row['sector'].get('accepted') is not False)
                        or not all(type(row.get(key)) in (int, float) and np.isfinite(row[key])
                                   for key in ('downward_dot', 'horizontal_away_from_robot_dot'))
                        for row in rows)
                 or len(rows) != len(generated)
                 or {row['candidate_index'] for row in rows} != {row['index'] for row in generated}):
             raise AlgorithmError('empty grasp pool lacks complete direction filter evidence')
-        return 'no_downward_candidate', 'grasp_no_downward_candidate', direction
+        return 'no_allowed_direction', 'grasp_no_allowed_direction', direction
     filtered = grasps.get('placement_reach_filter', {})
     rows = filtered.get('candidate_evidence', [])
     if (filtered.get('applied') is not True
@@ -71,7 +73,7 @@ def empty_pool_filter(grasps):
 
 def grasp_input_identity(grasps):
     fields = ("generation", "observation_id", "arm", "model", "tool_profile_revision", "tcp_frame",
-              "cloud", "T_world_cloud", "sampling_input_digest")
+              "cloud", "T_world_cloud", "sampling_input_digest", "tcp_conversion")
     if grasps.get('source') == 'cad_offline_library':
         fields = ('source', 'generation', 'observation_id', 'arm', 'model', 'tool_profile_revision',
                   'tcp_frame', 'asset_id', 'source_sha256', 'library_sha256', 'T_world_source')

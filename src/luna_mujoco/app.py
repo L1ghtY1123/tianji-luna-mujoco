@@ -107,12 +107,12 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
     @app.get('/api/objects')
     async def object_memory():
         world_key = runner.world_namespace + ':' + str(simulation.robot_snapshot()['generation'])
-        return {'objects': await asyncio.to_thread(runner.world_inventory.entities, world_key=world_key)}
+        return {'objects': await asyncio.to_thread(runner.object_database.entities, world_key=world_key)}
 
     @app.get('/api/objects/{identifier}/history')
     async def object_history(identifier: str):
         try:
-            return await asyncio.to_thread(runner.world_inventory.get, identifier)
+            return await asyncio.to_thread(runner.object_database.get, identifier)
         except ValueError as error:
             raise HTTPException(404, str(error)) from error
 
@@ -186,7 +186,9 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
     async def camera_preview():
         capture = await asyncio.to_thread(simulation.preview_rgb)
         if capture is None or capture["generation"] != simulation.robot_snapshot()["generation"]:
-            raise HTTPException(503, "camera_preview_pending")
+            feedback = simulation.robot_snapshot()
+            return {'preview_frame_id': None, 'generation': feedback['generation'],
+                    'time': feedback['time'], 'cameras': [], 'source': 'awaiting_graph_observation'}
         identifier = capture["preview_frame_id"]
         preview_frames[identifier] = capture
         while len(preview_frames) > 2:
@@ -290,7 +292,7 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
             except Exception as error:  # noqa: BLE001 — service boundary reports unavailable, never success
                 status = {"algorithms": {"ready": False, "error": type(error).__name__}}
             status["controller"] = {"ready": True, "name": "responses_program"}
-            status["luna"] = {"ready": bool(runner.visual_inventory and runner.visual_inventory.api_key),
+            status["luna"] = {"ready": bool(runner.visual_identity and runner.visual_identity.api_key),
                               "model": "gpt-6-luna", "api_verified": any(
                                   e["kind"] == "visual_decisions_call" and not e["data"].get("error")
                                   for e in runner.events)}
@@ -344,6 +346,13 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
                 return await runner.start(request.instruction, experiment=request.experiment)
             except ValueError as error:
                 raise HTTPException(409, str(error)) from error
+
+    @app.post('/api/stop')
+    async def stop():
+        async with operations:
+            result = simulation.stop_motion()
+            await runner.cancel()
+            return {**result, 'status': runner.state['status']}
 
     @app.post("/api/reset")
     async def reset():

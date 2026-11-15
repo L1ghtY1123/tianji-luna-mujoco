@@ -1,5 +1,7 @@
 # verify_grasp
 
-Check bound grasp execution and current mechanical gripper feedback for the execution-layer carrying model. No Decisions call or new image capture. Do not infer object identity, location, processing state or completion from the gripper, and do not write held/not-held state to instance memory. This skill does not move, plan or close again.
+verify_grasp 在 Lift 后只调用一次 Decisions 判断是否持物，输入执行臂当前夹持接触区原始分辨率 RGB 和同次夹爪反馈，不做夹爪状态或运算，也不调用 SAM3。明确未持物允许空抓恢复；请求异常、拒答或证据不足保留 unknown。确认持物后，程序核对连续抓取记录的目标、执行臂、运行、代次、来源观测、场景及动作版本，继承抓取前已确认目标的永久 ID，再建立 attachment。identity_binding 明确标记 continuous_grasp_execution 和 visual_identity_verified=false；这属于执行过程推定身份。执行记录不一致时保留持物结果与身份未确定状态，不建立 attachment。历史参考保留用于抓取前关联与放置核验，正常主线不再单独做抓后身份题。
 
-Inputs, typed arguments, prerequisites, effects and recoverable results are defined in `contract.json` and the registered parameter schema. Responses authors normal and recovery routes; Decisions only selects existing branches. This skill executes only its selected operation. Current policy: `docs/cad-runtime-policy-20261102.md`.
+实际全开判未持物；动作结束后未全开且未全闭判持物；全闭不能单凭位置判断，要看 CURRENT 两指之间是否有材料，包含薄物、形变和深色物体。当前局部图由同次 TCP 和标定投影，投影不可用时使用完整腕图。持物题不发送历史整图。夹爪反馈不代表夹持力，程序不做夹爪状态或运算。
+
+Continuous identity inheritance additionally requires a new post-Lift capture, same-generation dated Decisions reference with request provenance, and unchanged run/arm/target/scene/action bindings. Identity remains inferred from execution, not visually re-identified.

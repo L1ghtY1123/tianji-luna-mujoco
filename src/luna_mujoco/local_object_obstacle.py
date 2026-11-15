@@ -49,7 +49,7 @@ def select_unpack_component(points, work_area):
             upper = np.asarray(previous['maximum_world_m']) + .01
             overlap = np.all((component >= lower) & (component <= upper), axis=1)
             if overlap.all():
-                if previous.get('geometry_source') == 'container_occupancy':
+                if previous.get('region_source') == 'container_bounds_for_identity_scope_only':
                     excluded_containers.append({key: previous[key] for key in
                         ('container_id', 'scene_token', 'entry_receipt_id', 'layer_name')})
                 else:

@@ -4,7 +4,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 # Match the existing trajectory validator's numerical activation-cost epsilon.
-CLEARANCE_COST_EPSILON = 1e-9
+CLEARANCE_COST_EPSILON = 0.0
 
 
 def carrying_geometry_coverage(binding):
@@ -13,20 +13,18 @@ def carrying_geometry_coverage(binding):
         return None
     if binding.cad_tool is not None:
         return 'registered_cad_volume_with_uncertainty'
-    if binding.obb_tool is not None:
-        return 'observed_obb_volume_with_uncertainty'
-    return 'measured_surface_voxels_with_uncertainty'
+    return 'observed_tsdf_surface_voxels_with_uncertainty'
 
 
 def release_clearance_evidence(spheres_tool_m, request, query_world_cost, *, scene_token,
-                               geometry_coverage='measured_surface_voxels_with_uncertainty'):
+                               geometry_coverage='observed_tsdf_surface_voxels_with_uncertainty'):
     """Query the exact uploaded attachment spheres at the requested TCP pose.
 
     The public checker returns activation costs, not signed metric distances.
     A zero cost proves neither reachability nor observed free-space coverage.
     """
-    if geometry_coverage not in {'measured_surface_voxels_with_uncertainty',
-            'observed_obb_volume_with_uncertainty', 'registered_cad_volume_with_uncertainty'}:
+    if geometry_coverage not in {'observed_tsdf_surface_voxels_with_uncertainty',
+            'registered_cad_volume_with_uncertainty'}:
         raise ValueError('release_requires_bound_geometry_coverage')
     spheres = np.asarray(spheres_tool_m, dtype=float)
     position = np.asarray(request.goal_position_m, dtype=float)
@@ -51,7 +49,7 @@ def release_clearance_evidence(spheres_tool_m, request, query_world_cost, *, sce
     conflict = bool(len(indices))
     return {"conflict": conflict, "status": "conflict" if conflict else "no_conflict_detected",
             "scope": ("attached_surface_spheres_at_requested_release_goal"
-                      if geometry_coverage == 'measured_surface_voxels_with_uncertainty'
+                      if geometry_coverage == 'observed_tsdf_surface_voxels_with_uncertainty'
                       else "attached_model_volume_spheres_at_requested_release_goal"), "frame": "world",
             "arm": request.arm, "scene_token": scene_token,
             "goal_position_m": position.tolist(), "goal_quaternion_wxyz": quaternion.tolist(),

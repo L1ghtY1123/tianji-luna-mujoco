@@ -1,6 +1,6 @@
 {
   "id": "execute_place",
-  "description": "Execute only the phases of the bound release_mode. surface_setdown executes approach/place, opens and detaches, then executes the checked retreat. container_release executes the single carried place trajectory, stops, verifies actual complete-object bottom and opening footprint, opens and detaches; no automatic retreat or observation follows. Preserve release receipts and invalidate changed spatial geometry before any subsequent planning. verify_place judges the landing separately.  MotionPlanBinding binds target, destination, arm, generation, observation, scene and settings; execution checks it before physical commands.",
+  "description": "Execute the bound approach, place and retreat trajectories on one time axis. Open the gripper after the place phase using gripper_transition_s. Validate carried motion, opening and detached retreat before execution. Record actual release TCP and action receipt, detach carrying geometry, and invalidate the affected spatial layer. Graph calls verify_place to judge the final destination from current RGBD.",
   "requires": {
     "needs_place": true,
     "grasp_held": true,
@@ -18,7 +18,7 @@
     "collision_scene",
     "placement_zone"
   ],
-  "capability": "Execute the bound placement/release mode and retain physical feedback",
+  "capability": "Execute the bound approach, place and retreat trajectories on one time axis",
   "outputs": [
     "place_execution_completed",
     "execution_or_evidence_record"
@@ -41,5 +41,6 @@
     "observed": false,
     "at_initial_pose": false,
     "observation_pose_ready": false
-  }
+  },
+  "captures_observation": false
 }

@@ -125,7 +125,7 @@ class ObjectMemory:
                 'object_history': {key: {field: deepcopy(row[field]) for field in fields if field in row}
                                    for key, row in entities.items()},
                 'retired_entity_ids': [key for key, row in entities.items() if row['status'] in {'consumed', 'removed'}],
-                'transformations': transformations, 'inventory_revision': self.revision}
+                'transformations': transformations, 'memory_revision': self.revision}
 
     def scene_queries(self):
         queries = {}

@@ -1,4 +1,4 @@
-// Preview RGB and cached task RGBD use separate endpoints and frame identities.
+// RGB and RGBD panels display cached graph-authorized observations.
 import { labelsForFrame } from './object-list.js';
 import { regionsForFrame, appendPlacementOverlay } from './placement-overlay.js';
 export function createCameraPanel(container, status, {
@@ -43,7 +43,7 @@ export function createCameraPanel(container, status, {
     if (payload.generation < generation) return;
     if (!payload.cameras.length) {
       clear();
-      status.textContent = '等待三路 RGBD 相机采集。';
+      status.textContent = '等待 Graph 观测或视觉核验节点采集。';
       return;
     }
     const identifier = mode === "preview" ? payload.preview_frame_id : payload.observation_id;
@@ -125,7 +125,7 @@ export function createCameraPanel(container, status, {
     generation = payload.generation;
     observationId = identifier;
     labelKey = currentLabelKey;
-    status.textContent = `${mode === "preview" ? "实时 RGB 预览" : "最近任务观察"} ${observationId} · 场景 ${generation}`;
+    status.textContent = `${mode === "preview" ? "最近授权观测 RGB" : "最近任务观察"} ${observationId} · 场景 ${generation}`;
   }
 
   function refresh() {
@@ -153,7 +153,7 @@ export function createCameraPanel(container, status, {
       mode = value;
       revision++;
       clear();
-      status.textContent = value === 'preview' ? '等待实时 RGB 预览。' : '等待最近任务观察。';
+      status.textContent = value === 'preview' ? '等待最近授权观测 RGB。' : '等待最近任务观察。';
       next(0);
     },
     start() { if (!running) { running = true; next(0); } },

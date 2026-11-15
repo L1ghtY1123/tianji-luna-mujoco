@@ -99,7 +99,7 @@ def validate_topology(graph):
     owners = [scope['input_id'] for scope in graph['subgraphs'] if scope['input_id'] is not None]
     issues = []
     if len(set(scope_ids)) != len(scope_ids) or len(set(owners)) != len(owners):
-        issues.append('duplicate_subgraph_or_inventory_owner')
+        issues.append('duplicate_subgraph_or_objects_owner')
     node_owners = {}
     references = {scope['id']: set() for scope in scopes}
     total = 0
@@ -176,6 +176,4 @@ def validate_topology(graph):
     def has_nested_owner(name):
         return any(child in owner_scopes or has_nested_owner(child) for child in references[name])
     if any(has_nested_owner(name) for name in owner_scopes):
-        raise ValueError('nested_inventory_owned_subgraph')
-
-
+        raise ValueError('nested_objects_owned_subgraph')

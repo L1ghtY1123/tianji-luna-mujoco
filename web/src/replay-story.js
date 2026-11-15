@@ -1,24 +1,21 @@
 import { buildObjectTimeline } from './execution-graph.js';
-import { inventoryEntities, renderTaskInventory } from './task-inventory.js';
+import { memoryEntities, renderTaskObjects } from './task-ledger.js';
 
 const PURPOSES = {
+  description_instance: '初始描述绑定', physical_instance: '额外物体确认',
+  object_held: '夹持检查', held_object_is_target: '持物目标身份',
   compile_task: '理解任务并生成总编排', revise_graph: '根据新事件修订总编排',
-  initialize_inventory: '登记初始实例与任务图', associate_inventory: '关联当前观测与时间记忆',
+  current_instance_correspondence: '跨相机掩码对应', instance_temporal: '跨时刻实例对应',
+  instance_archive: '历史档案身份恢复', instance_novelty: '新实例确认',
+  initialize_objects: '登记初始实例与任务图', associate_objects: '关联当前观测与时间记忆',
   associate_completed_objects: '核对已放置物体的身份',
   verify_release_result: '确认放置与松爪', verify_unpacking: '确认拆包产物',
   verify_right_bin_drop: '确认目的地投放',
   verify_bin_drop: '确认物体入盒', semantic_judgments: '核验任务条件', task_completion: '核验最终完成条件',
 };
-const CHECKPOINTS = { initial: '场景观测', fine: '抓取相关观测', post_grasp: '抓取后采集',
-  post_place: '放置后采集', post_unpack: '处理后采集', result: '结果采集', task_completion: '任务完成检查',
-  recovery_decision: '恢复判断输入' };
-const CAPTURE_SKILLS = { observe_scene: '场景识别', observe: '场景识别',
-  execute_place: '放置完成后采集', verify_place: '放置结果核验', verify_drop: '投放结果核验',
-  verify_unpack: '拆包结果核验', vla_unpack: '拆包后采集',
-  move_to_observe: '移至观测位姿后采集', return_to_initial_pose: '返回任务起始位姿后采集' };
 const STATUS_NAMES = { complete: '完成', failed: '失败', warning: '需关注', incomplete: '未记录结束', recorded: '已记录', cancelled: '已取消' };
 const PHASES = {
-  observe: ['观测与时间记忆', 'observe_scene', 'observe', 'bind_inventory'],
+  observe: ['观测与时间记忆', 'observe_scene', 'observe', 'bind_objects'],
   grasp: ['抓取物体', 'identify_target', 'identify_destination', 'choose_arm', 'build_scene', 'generate_grasps', 'evaluate_arms', 'plan_grasp', 'plan_grasp_and_place', 'execute_approach', 'execute_grasp', 'close_gripper', 'execute_lift', 'verify_grasp'],
   place: ['物体放置', 'plan_place', 'execute_place', 'verify_place', 'observe_result'],
   unpack: ['VLA 拆包', 'prepare_unpack', 'vla_unpack', 'verify_unpack'],
@@ -30,95 +27,11 @@ export function modelCallInfo(event) {
   const data = event.data ?? event;
   const type = data.endpoint?.endsWith('/responses') ? 'Responses'
     : data.endpoint?.endsWith('/decisions') ? 'Decisions' : '模型调用';
-  let purpose = PURPOSES[data.purpose] ?? data.purpose ?? '用途未归档';
-  if (type === 'Decisions' && data.purpose === 'initialize_inventory') purpose = '核对分割提议与实例记忆';
+  const questionName = (data.request?.questions ?? data.questions)?.[0]?.name;
+  let purpose = PURPOSES[questionName] ?? PURPOSES[data.purpose] ?? data.purpose ?? '用途未归档';
+  if (type === 'Decisions' && data.purpose === 'initialize_objects') purpose = '核对分割提议与实例记忆';
   return { type, purpose, elapsed: data.elapsed_s,
     failed: Boolean(data.error) || (Number.isFinite(data.http_status) && data.http_status >= 400) };
-}
-
-export function observationImageSections(observation, frame, cameraId) {
-  const labels = observation.event.data?.object_labels ?? {};
-  const time = value => Number.isFinite(value) ? `${value.toFixed(3)} 秒` : '未归档';
-  const items = (labels.items ?? []).filter(item => item.camera_id === cameraId);
-  const boxes = new Set(items.map(item => item.box_source));
-  const sources = [];
-  if (boxes.has('associated_instance_mask')) sources.push('已关联 SAM3 掩码的外接矩形');
-  if (boxes.has('responses_reference_proposal')) sources.push(labels.analysis_status === 'responses_proposal'
-    ? '初始 Responses 输出的原始参考框，未经 SAM3 或 Decisions 确认' : 'Responses 初始参考框（缺少当前掩码）');
-  if (boxes.has(undefined)) sources.push('旧归档未记录逐框来源');
-  const legacy = labels.overlay_scope !== 'capture_identity_geometry';
-  return [
-    `RGB 来源：相机 ${cameraId} 的归档采集，拍摄于 ${time(frame.captureTime)}。标注记录：事件 #${observation.event.id}，${time(observation.time)}。`,
-    `框来源：${sources.join('；') || '本版本没有已确认身份的框；不表示没有检测候选'}。`,
-    `身份来源：${labels.analysis_status === 'responses_proposal' ? 'Responses 实例提议与登记后的永久 ID，尚未由 Decisions 确认，不代表实测几何。' : legacy ? '旧版叠加可能含后续任务状态，不代表拍摄时的物体状态。' : '逐框记录 Decisions 的身份判断或已验证的测量对应，程序据此绘制 ID；不含后续夹持或完成状态。'}`,
-    '去向：此叠加图供人检查，不是模型输入。程序使用底层 ID、掩码与实测几何。下面的“实际模型输入”直接展示已发送的参考框和候选框，点击可查看完整问题与回答。',
-  ];
-}
-
-export function observationImageSource(observation, frame, cameraId) {
-  return observationImageSections(observation, frame, cameraId).join('\n\n');
-}
-
-export function groupObservationFrames(observations, events = []) {
-  const captures = new Map(events.filter(event => event.kind === 'observation_recorded')
-    .map(event => [event.data?.observation_id, event]));
-  const frames = new Map();
-  for (const observation of observations) {
-    const capture = captures.get(observation.observationId);
-    if (!frames.has(observation.observationId)) frames.set(observation.observationId, {
-      id: observation.observationId, captureTime: capture?.t_s ?? null,
-      title: CHECKPOINTS[capture?.data?.checkpoint ?? observation.checkpoint] ?? '观测（用途未归档）', revisions: [],
-    });
-    const labels = observation.event.data?.object_labels ?? {};
-    const statuses = new Set((labels.items ?? []).map(item => item.status));
-    const held = statuses.has('held');
-    const selected = statuses.has('selected');
-    const title = labels.analysis_status === 'responses_proposal' ? 'Responses 初始参考框（未核验提议）'
-      : held ? '夹爪反馈更新：夹持中' : selected ? '选择当前抓取目标'
-      : labels.analysis_status === 'unprocessed' ? '原始 RGB（无身份叠加）'
-        : labels.analysis_status !== 'analyzed' ? '图像记录（标注状态未归档）'
-          : !labels.items?.length ? '识别结果（无实体标注）'
-            : '身份与几何结果（程序叠加）';
-    frames.get(observation.observationId).revisions.push({ ...observation,
-      revisionTitle: title, reusesCapture: held || selected });
-  }
-  return [...frames.values()].map(frame => {
-    const capture = captures.get(frame.id);
-    const invocation = capture?.invocation_id;
-    const completion = capture?.data?.checkpoint === 'task_completion';
-    const source = invocation && events.find(event => event.kind === 'skill_start' && event.invocation_id === invocation);
-    const skill = source?.data?.skill ?? source?.title;
-    const models = events.filter(event => event.kind === 'visual_decisions_call' && event.data?.observation_id === frame.id);
-    const compilerInput = models.some(event => modelCallInfo(event).type === 'Responses'
-      && ['compile_task', 'initialize_inventory'].includes(event.data?.purpose));
-    let title = completion ? '任务完成检查'
-      : CAPTURE_SKILLS[skill] ?? (skill ? `${skill} 采集` : compilerInput ? '任务编排参考画面' : frame.title);
-    const targetId = completion ? null : capture?.target_id ?? source?.data?.target_id;
-    if (targetId) {
-      const label = [...frame.revisions, ...observations.filter(item => item.event.id < capture.id).reverse()]
-        .flatMap(item => item.event.data?.object_labels?.items ?? [])
-        .find(item => item.id === targetId);
-      const name = label?.name && !label.name.includes('unknown') ? label.name : '物体';
-      title += ` · ${label ? `${label.id ? `ID ${label.id} ` : ''}${name}` : targetId}`;
-    }
-    const hasLabels = frame.revisions.some(item => item.event.data?.object_labels?.analysis_status === 'analyzed'
-      && item.event.data.object_labels.items?.length);
-    const modelUses = [...new Set(models.map(event => {
-      const info = modelCallInfo(event);
-      return `${info.type}：${info.purpose}${info.failed ? '（调用失败）' : ''}`;
-    }))];
-    const reuseUses = [...new Set(events.filter(event => event.kind === 'observation_reused'
-      && event.data?.observation_id === frame.id).map(event => PURPOSES[event.data.purpose] ?? event.data.purpose))];
-    const analysisSummary = `${hasLabels ? '已保存本帧物体识别与身份标注。' : '未保存本帧物体识别与身份标注。'}${modelUses.length
-      ? `此画面用于 ${modelUses.join('；')}。模型使用画面不代表生成了分割或身份叠加图。`
-      : '未记录与此帧关联的模型调用，不能仅凭原始图判断是否做过分析。'}${reuseUses.length
-      ? `复用此采集：${reuseUses.join('；')}。保留原始采集时间；复用图像不代表复用判断结果。` : ''}`;
-    return { ...frame, title, analysisSummary,
-      source: capture ? `${completion ? '任务完成检查 · ' : skill ? `${skill} · ${invocation} · ` : '独立采集 · '}事件 #${capture.id ?? '未归档'} · 观测 ID ${frame.id}`
-        : `采集记录缺失，拍摄时间与调用来源无法核实 · 观测 ID ${frame.id}`,
-      preferredId: (frame.revisions.find(item => item.status === 'analyzed' && !item.reusesCapture)
-        ?? frame.revisions[0]).id };
-  });
 }
 
 export function buildReplayStages(graph) {
@@ -157,7 +70,7 @@ export function buildReplayStages(graph) {
     if (stage.phase === 'unpack' && stage.nodes.some(node => node.events.some(event => event.title === 'vla_unpack'))) stage.title = 'VLA 拆包（仿真）';
     if (stage.phase === 'grasp') {
       const progress = graph.events.findLast(event => event.data?.task_progress)?.data.task_progress;
-      const entities = new Map(inventoryEntities(progress).map(item => [item.id, item]));
+      const entities = new Map(memoryEntities(progress).map(item => [item.id, item]));
       const targetIds = [...new Set(stage.events.map(event => event.target_id ?? event.data?.target_id).filter(id => entities.get(id)?.kind === 'object'))];
       if (targetIds.length === 1) stage.title = `抓取 ${entityLabel(entities.get(targetIds[0]))}`;
     }
@@ -172,13 +85,13 @@ export function buildReplayStages(graph) {
 }
 
 // Read committed memory snapshots and the entity fields archived by earlier runs.
-export function inventorySnapshots(events = []) {
+export function objectsSnapshots(events = []) {
   const snapshots = [];
   for (const event of events) {
     const source = event.data?.temporal_memory ?? event.data?.task_progress;
     if (!source?.entities || typeof source.entities !== 'object') continue;
     const progress = Object.fromEntries(['entities', 'object_history', 'retired_entity_ids',
-      'transformations', 'inventory_revision'].filter(key => key in source)
+      'transformations', 'memory_revision'].filter(key => key in source)
       .map(key => [key, structuredClone(source[key])]));
     snapshots.push({ event, progress: structuredClone(progress), provenance: 'snapshot',
       title: event.kind === 'run_end' ? '任务结束时间记忆' : event.data?.checkpoint ?? '时间记忆快照' });
@@ -187,6 +100,8 @@ export function inventorySnapshots(events = []) {
 }
 
 const QUESTION_NAMES = { place_result: '放置结果', workpiece_still_held: '工件仍被夹持',
+  description_instance: '初始描述绑定', physical_instance: '额外物体确认',
+  object_held: '夹持检查', held_object_is_target: '持物目标身份',
   unpack_result: '处理产物核验', current_item_added: '本次投放结果' };
 
 export function modelResult(archive) {
@@ -196,19 +111,22 @@ export function modelResult(archive) {
     const question = questions.find(item => item.name === answer.name);
     const choice = question?.choices?.find(item => item.value === answer.choice);
     return { ...answer, check: archive.diagnostic_checks?.find(item => item.name === answer.name),
+    choiceProbability: answer.probabilities?.find(item => item.value === answer.choice)?.probability,
+    optionProbabilities: (question?.choices ?? []).map(option => ({...option,
+      probability: answer.probabilities?.find(item => item.value === option.value)?.probability})),
     title: QUESTION_NAMES[answer.name] ?? (/^identity_/.test(answer.name)
       ? `分割提议 ${answer.name.slice(9)} · 身份判断` : answer.name),
     instructions: Array.isArray(question?.instructions)
       ? question.instructions.filter(part => part.type === 'input_text').map(part => part.text).join('\n')
       : question?.instructions ?? '完整问题未归档',
-    choiceLabel: ({ reject: '排除此提议', unknown: '无法确认' })[answer.choice] ?? choice?.description ?? answer.choice };
-  }), inventory: archive.graph_proposal ?? null };
-  if (archive.endpoint?.endsWith('/responses') && !result.inventory) {
+    choiceLabel: [answer.choice, choice?.description].filter(Boolean).join(' · ') };
+  }), objects: archive.graph_proposal ?? null };
+  if (archive.endpoint?.endsWith('/responses') && !result.objects) {
     for (const message of archive.response?.output ?? []) {
       if (message.type !== 'message') continue;
       for (const part of message.content ?? []) {
         if (part.type !== 'output_text') continue;
-        try { result.inventory = JSON.parse(part.text); } catch { /* Raw response remains available. */ }
+        try { result.objects = JSON.parse(part.text); } catch { /* Raw response remains available. */ }
       }
     }
   }
@@ -276,12 +194,12 @@ function entityLabel(entity) {
   return `${entity.id ? `ID ${entity.id} ` : ''}${entity.name ?? `${COLOR_NAMES[entity.color] ?? ''}${KIND_NAMES[entity.kind] ?? entity.kind ?? '物体'}`}`;
 }
 
-export function renderInventorySnapshot(container, snapshot, onEvidence) {
+export function renderObjectMemorySnapshot(container, snapshot, onEvidence) {
   const element = dom(container);
   container.replaceChildren();
   if (!snapshot) { container.append(element('p', '该实验缺少已归档的时间记忆快照。', 'muted')); return; }
   const { progress, event } = snapshot;
-  const provenance = element('div', '', 'inventory-provenance');
+  const provenance = element('div', '', 'objects-provenance');
   provenance.append(element('span', '数据库历史快照', 'badge'),
     element('span', `事件 #${event.id ?? '—'}`, 'muted'));
   if (event.data?.model_event_ids?.length) provenance.append(element('span',
@@ -293,7 +211,7 @@ export function renderInventorySnapshot(container, snapshot, onEvidence) {
   provenance.append(source);
   container.append(provenance);
   if (progress.entities) {
-    renderTaskInventory(container, progress);
+    renderTaskObjects(container, progress);
     return;
   }
   container.append(element('p', '查看归档中的原始时间记忆记录。', 'muted'));

@@ -51,14 +51,14 @@
             </div>
             <details class="camera-panel" id="camera-panel" role="tabpanel" aria-label="三路相机" hidden>
               <summary class="sr-only">三路 RGBD 相机</summary>
-              <div class="camera-toolbar"><label>画面来源 <select id="camera-mode"><option value="preview">实时 RGB 预览</option><option value="task">最近任务观察 RGBD</option></select></label><p class="sim-clock">任务用时 <b id="camera-task-time">0.00</b> s</p></div>
-              <p class="camera-note">左腕 — 头部 — 右腕 · 实时预览目标 2 fps</p>
+              <div class="camera-toolbar"><label>画面来源 <select id="camera-mode"><option value="preview">最近授权观测 RGB</option><option value="task">最近任务观察 RGBD</option></select></label><p class="sim-clock">任务用时 <b id="camera-task-time">0.00</b> s</p></div>
+              <p class="camera-note">左腕 — 头部 — 右腕 · 画面由 Graph 授权采集节点更新</p>
               <div id="camera-grid" class="camera-grid"></div>
               <p id="camera-status" class="helper-text" role="status">等待三路 RGBD 相机采集。</p>
             </details>
             <details class="pointcloud-panel" id="pointcloud-panel" role="tabpanel" aria-label="点云诊断" hidden>
               <summary class="sr-only">原始 RGBD 点云与碰撞场景</summary>
-              <p class="pointcloud-note">选择原始 RGBD 点云或当前碰撞场景，点击“显示点云”叠加最近建图快照。可隐藏仿真物体，查看机器人与已发布的 CAD、OBB 和桌面几何。</p>
+              <p class="pointcloud-note">选择原始 RGBD 点云或当前碰撞场景，点击“显示点云”叠加最近建图快照。可隐藏仿真物体，查看机器人与已发布的 CAD、TSDF/ESDF 和桌面几何。</p>
               <p id="pointcloud-status" class="helper-text" role="status">等待观察节点完成点云建图。</p>
               <div id="pointcloud-content"></div>
             </details>
@@ -73,7 +73,7 @@
             <label>保存方式<select id="experiment-save-mode"><option value="auto" selected>自动保存</option><option value="ask">完成后决定</option><option value="none">不保存</option></select></label>
             <label class="record-video"><input id="record-video" type="checkbox" checked /><span id="record-video-label">录制视频</span></label>
           </div>
-          <div class="instruction-actions"><p id="start-hint">先确认场景，再开始任务。</p><div><button id="reset" class="button secondary" disabled>↺ Reset</button><button id="start" class="button primary start-button" disabled>开始任务 ↗</button></div></div>
+          <div class="instruction-actions"><p id="start-hint">先确认场景，再开始任务。</p><div><button id="reset" class="button secondary" disabled>↺ Reset</button><button id="stop-task" class="button secondary" disabled>停止任务</button><button id="start" class="button primary start-button" disabled>开始任务 ↗</button></div></div>
         </section>
       </section>
       <aside class="panel trace-panel" aria-label="运行记录">
@@ -88,7 +88,7 @@
             <p id="algorithm-pending" class="run-warning" hidden>后台算法调用尚未返回。结果不会触发后续动作；返回前不能开始新任务，仍可 Reset 或编辑场景。</p>
           </section>
           <section id="task-object-list" class="object-list" aria-label="任务实体与处理关联清单" hidden></section>
-          <details class="log-guide"><summary>记录说明与性能</summary><p class="panel-description">Responses 建立初始清单并编排 skills，程序校验与执行；Decisions 判断身份及放置结果。</p><div id="performance-summary" class="performance-summary" aria-label="视觉模型性能摘要" hidden><div><span>Responses / Decisions 调用</span><strong id="metric-count">—</strong></div><div><span>已记录平均耗时</span><strong id="metric-mean">—</strong></div><div><span>已记录累计耗时</span><strong id="metric-total">—</strong></div><div><span>整轮耗时</span><strong id="metric-run">—</strong></div></div></details>
+          <details class="log-guide"><summary>记录说明与性能</summary><p class="panel-description">Responses 建立初始清单并编排 skills，程序校验与执行；Decisions 判断身份、抓取及放置结果。</p><div id="performance-summary" class="performance-summary" aria-label="视觉模型性能摘要" hidden><div><span>Responses / Decisions 调用</span><strong id="metric-count">—</strong></div><div><span>已记录平均耗时</span><strong id="metric-mean">—</strong></div><div><span>已记录累计耗时</span><strong id="metric-total">—</strong></div><div><span>整轮耗时</span><strong id="metric-run">—</strong></div></div></details>
           <div id="trace-list" class="trace-list"><div class="trace-empty"><strong>等待第一条指令</strong><p>运行事件按时间记录于此。</p></div></div>
           <details id="facts-section" class="facts-section" hidden><summary>运行事实 / 验证 / 性能</summary><pre id="facts-content"></pre></details>
         </div>
@@ -98,7 +98,7 @@
       <section class="planning-panel" id="planning-panel">
         <div class="dialog-heading"><h2 id="planning-title">算法与执行参数</h2><button id="close-planning" class="button secondary" aria-label="关闭参数设置">关闭 ×</button></div>
         <p class="planning-intro">当前值来自后端。修改后需应用，下一次任务使用；项目默认仅作参考。</p>
-        <div class="planning-tabs" aria-label="参数分类"><button id="planning-tab-common" aria-pressed="true">常用</button><button id="planning-tab-experimental" aria-pressed="false">实验调参</button><button id="planning-tab-system" aria-pressed="false">系统只读</button></div>
+        <div class="planning-tabs" aria-label="参数分类"><button id="planning-tab-common" aria-pressed="true">常用</button><button id="planning-tab-experimental" aria-pressed="false">实验调参</button></div>
         <div class="planning-lock"><p id="advanced-planning-status" role="status">实验调参默认锁定。</p><button id="toggle-advanced-planning" type="button" class="button secondary" aria-controls="planning-groups" aria-describedby="advanced-planning-status" aria-pressed="false" disabled>解锁高级参数</button></div>
         <div class="planning-scroll"><fieldset id="planning-fields" disabled><div id="planning-groups"></div></fieldset><details id="run-planning-settings" class="facts-section" hidden><summary>本次任务实际参数（API 原始单位）</summary><pre id="run-planning-settings-content"></pre></details></div>
         <p id="planning-error" class="planning-error" role="alert" hidden></p>

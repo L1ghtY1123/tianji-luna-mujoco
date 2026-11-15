@@ -28,7 +28,7 @@ function labelLines(text) {
   return lines;
 }
 
-export function renderExecutableGraph(container, graph, events = null, skills = {}, selectedScope = graph.id, callSelections = {}) {
+export function renderExecutableGraph(container, graph, events = null, skills = {}, selectedScope = graph.id, callSelections = {}, templates = {}) {
   container.replaceChildren();
   const document = container.ownerDocument;
   const html = (tag, text = '', className = '') => {
@@ -46,12 +46,17 @@ export function renderExecutableGraph(container, graph, events = null, skills = 
   const buttons = new Map();
   function showScope(id) {
     selectedScope = id;
-    for (const section of container.querySelectorAll('.graph-scope')) section.hidden = section.dataset.scopeId !== id;
+    for (const section of container.querySelectorAll('.graph-scope')) section.hidden = id !== 'all' && section.dataset.scopeId !== id;
     for (const [key, button] of buttons) button.setAttribute('aria-pressed', String(key === id));
-    const canvas = container.querySelector('.graph-scope:not([hidden]) .policy-canvas');
-    if (canvas) requestAnimationFrame(() => fitGraphCanvas(canvas, Number(canvas.dataset.scale ?? 1)));
+    for (const canvas of container.querySelectorAll('.graph-scope:not([hidden]) .policy-canvas'))
+      requestAnimationFrame(() => fitGraphCanvas(canvas));
   }
-  if (!panels.some(panel => panel.id === selectedScope)) selectedScope = graph.id;
+  if (selectedScope !== 'all' && !panels.some(panel => panel.id === selectedScope)) selectedScope = graph.id;
+  const counts = {nodes:scopes.reduce((sum, scope) => sum + scope.nodes.length, 0),
+    edges:scopes.reduce((sum, scope) => sum + scope.edges.length, 0)};
+  container.append(html('p', `完整编排：${counts.nodes} 节点 / ${counts.edges} 条边 / ${graph.subgraphs.length} 个子图，包含未执行的失败恢复。`, 'graph-view-note'));
+  const expandAll = html('button', '完整图：展开全部子图与失败恢复', 'button');
+  expandAll.addEventListener('click', () => showScope('all')); container.append(expandAll);
   const final = evidence.runEnd;
   container.append(html('p', final ? `任务最终结果：${final.status === 'succeeded' ? '已完成' : '未完成 / 已停止'}`
     : events?.length ? '尚无任务结束记录。节点结果不代表整个任务结果。' : '编排预览：尚未执行。', 'graph-run-result'));
@@ -71,7 +76,7 @@ export function renderExecutableGraph(container, graph, events = null, skills = 
     button.addEventListener('click', () => {
       const panel = panels.find(item => item.scopeId === visit.scopeId && item.nodes.some(value => value.id === visit.nodeId));
       renderExecutableGraph(container, graph, events, skills, panel.id,
-        {...callSelections, [visit.scopeId]: visit.scopeCallId ?? 'all'});
+        {...callSelections, [visit.scopeId]: visit.scopeCallId ?? 'all'}, templates);
       const section = container.querySelector('.graph-scope:not([hidden])');
       section?.scrollIntoView({block: 'start', behavior: 'smooth'});
       const target = [...section.querySelectorAll('[data-node-id]')].find(item => item.dataset.nodeId === visit.nodeId);
@@ -129,6 +134,7 @@ export function renderExecutableGraph(container, graph, events = null, skills = 
       const button = html('button', '', 'graph-scope-button');
       const visits = scopeVisits(evidence, panel.scopeId).filter(visit => panel.nodes.some(node => node.id === visit.nodeId));
       button.append(html('strong', panel.title), html('span', `${panel.nodes.length} 节点 · 累计执行 ${visits.length} 次`));
+      if (templates[panel.scopeId]) button.append(html('span', `固定模板：${templates[panel.scopeId].template}`));
       button.addEventListener('click', () => showScope(panel.id)); buttons.set(panel.id, button); options.append(button);
     }
     if (!matches.length) group.append(html('p', '未编排', 'graph-view-note'));
@@ -152,6 +158,7 @@ export function renderExecutableGraph(container, graph, events = null, skills = 
     const section = html('section', '', 'graph-scope');
     section.setAttribute('data-scope-id', panel.id);
     section.append(html('h3', `${panel.title} · 本视图 ${view.nodes.length} 节点 · ${call ? `第 ${call.number} 次调用` : '累计记录'}`));
+    if (templates[scope.id]) section.append(html('p', `固定模板：${templates[scope.id].template} · 输入：${JSON.stringify(templates[scope.id].arguments)}`, 'graph-view-note'));
     section.append(html('p', `所属 ${scope.id === graph.id ? '主图' : 'subgraph'}：${scope.id}，共 ${scope.nodes.length} 节点 / ${scope.edges.length} 条边。`
       + (panel.category === 'recovery' ? '这里展示失败或缺证后的处理；成功返回主线的连接保留，恢复失败后的终止也保留。' : '失败处理放在独立视图中，通过节点下的连接进入。')
       + (panel.sharedWithRecovery ? '此子图也被恢复路径复用。' : ''), 'graph-view-note'));
@@ -162,7 +169,7 @@ export function renderExecutableGraph(container, graph, events = null, skills = 
       }
       const all = html('option', '全部调用（累计）'); all.value = 'all'; picker.append(all); picker.value = call?.id ?? 'all';
       picker.addEventListener('change', () => renderExecutableGraph(container, graph, events, skills, panel.id,
-        {...callSelections, [scope.id]: picker.value})); section.append(picker);
+        {...callSelections, [scope.id]: picker.value}, templates)); section.append(picker);
     }
     if (!visits.length) section.append(html('p', '暂无执行记录；以下保留完整编排。', 'graph-view-note'));
     const lastOperation = visits.findLast(visit => byId.get(visit.nodeId)?.type !== 'end');
@@ -199,7 +206,7 @@ export function renderExecutableGraph(container, graph, events = null, skills = 
       const destination = panels.find(item => item.scopeId === scope.id && item.nodes.some(value => value.id === node.id));
       if (!destination) return;
       renderExecutableGraph(container, graph, events, skills, destination.id,
-        {...callSelections, [scope.id]: call?.id ?? 'all'});
+        {...callSelections, [scope.id]: call?.id ?? 'all'}, templates);
       const element = [...container.querySelectorAll('[data-node-id]')].find(item => item.dataset.nodeId === node.id);
       element?.scrollIntoView({block: 'center', behavior: 'smooth'}); element?.focus({preventScroll: true});
     }
@@ -217,7 +224,7 @@ export function renderExecutableGraph(container, graph, events = null, skills = 
       if (node.type === 'subgraph') {
         const open = html('button', `进入：${scopeTitles.get(node.subgraph_id) ?? node.subgraph_id}`, 'button');
         open.addEventListener('click', () => renderExecutableGraph(container, graph, events, skills, node.subgraph_id,
-          {...callSelections, [scope.id]: call?.id ?? 'all', [node.subgraph_id]: String(history.at(-1)?.eventId ?? '')})); information.append(open);
+          {...callSelections, [scope.id]: call?.id ?? 'all', [node.subgraph_id]: String(history.at(-1)?.eventId ?? '')}, templates)); information.append(open);
       }
       if (node.type === 'router') information.append(html('p', `判断问题：${node.condition}`));
       const contract = skills[node.skill];
@@ -317,7 +324,7 @@ export function renderExecutableGraph(container, graph, events = null, skills = 
         pinnedNode = node.id; focusEdges(node.id);
         if (node.type === 'subgraph' && scopes.some(scope => scope.id === node.subgraph_id))
           renderExecutableGraph(container, graph, events, skills, node.subgraph_id,
-            {...callSelections, [scope.id]: call?.id ?? 'all', [node.subgraph_id]: String(node.history.at(-1)?.eventId ?? '')});
+            {...callSelections, [scope.id]: call?.id ?? 'all', [node.subgraph_id]: String(node.history.at(-1)?.eventId ?? '')}, templates);
         else choose(byId.get(node.authoredId));
       };
       group.addEventListener('click', activate); group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } }); svg.append(group);

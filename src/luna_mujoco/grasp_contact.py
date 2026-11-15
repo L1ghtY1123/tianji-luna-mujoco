@@ -1,6 +1,6 @@
-"""Pair-specific clearance for the intended target during open-hand descent.
+"""Pair-specific clearance for the intended target during detached grasp phases.
 
-The executing Link3 fingers and Link4 linkage may contact the selected target during descent and closure.
+The executing Link3 fingers and Link4 linkage may contact the selected target during descent, closure and Lift.
 They keep the configured clearance from every other entity.
 This policy never applies to approach transit, palms, cameras or the peer arm.
 """

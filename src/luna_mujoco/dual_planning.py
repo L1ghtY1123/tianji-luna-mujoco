@@ -16,6 +16,14 @@ from .planning_contracts import DualValidationRequest
 
 
 class ValidatedDualBackend(_NativeDualCuroboBackend):
+    def validate_dual_native(self, request):
+        """Validate interpolated commands through the current public collision API."""
+        result = self.command_validator(request)
+        if result.get('collision_free') is not True:
+            raise CuroboToolError('dual command intersects measured obstacles or the robot',
+                code='CUROBO_TRAJECTORY_COLLISION', stage='validation', status=422, details=result)
+        return result['checked_point_count']
+
     def front_goal(self, matrices):
         """The dual transport contract uses millimetres; public SDK Pose uses metres."""
         from scipy.spatial.transform import Rotation
@@ -86,7 +94,7 @@ class ValidatedDualBackend(_NativeDualCuroboBackend):
         }))
         return {"ok": True, "planner": "curobo_dual", "trajectories": command_paths,
                 "raw_trajectories": raw_paths, "joint_names": {a: list(JOINT_NAMES[a]) for a in ("A", "B")},
-                "sample_dt_s": 1. / request.freq_hz,
+                "sample_dt_s": _planner_interpolation_dt(self.motion_planner),
                 "raw_sample_dt_s": _planner_interpolation_dt(self.motion_planner),
                 "trajectory_point_scale": request.trajectory_point_scale,
                 "time_parameterization": "quintic_hermite",

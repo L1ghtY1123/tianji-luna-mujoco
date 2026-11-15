@@ -1,4 +1,4 @@
-"""Measured inventory geometry without hidden-surface completion."""
+"""Measured objects geometry without hidden-surface completion."""
 import numpy as np
 from scipy.ndimage import binary_propagation
 from scipy.spatial import cKDTree
@@ -64,7 +64,7 @@ def fuse_table_plane(seed, point_groups, *, normal, offset):
         'accepted_point_count_by_camera': {camera: len(points) for camera, points in kept.items()}}
 
 
-def fit_inventory_table(view, bbox, excluded, *, supplemental_points=None):
+def fit_objects_table(view, bbox, excluded, *, supplemental_points=None):
     """Bounded RANSAC on measured depth inside an initial RGB table rectangle."""
     rows, columns = np.indices(view['depth_m'].shape)
     height, width = rows.shape
@@ -74,7 +74,7 @@ def fit_inventory_table(view, bbox, excluded, *, supplemental_points=None):
     points = points[(points[:, 0] >= 0) & (points[:, 0] <= 1.1)
                     & (np.abs(points[:, 1]) <= 1.) & (points[:, 2] > .1) & (points[:, 2] <= 1.6)]
     if len(points) < 100:
-        raise PerceptionError('demo_inventory_table_unobservable')
+        raise PerceptionError('demo_objects_table_unobservable')
     rng = np.random.default_rng(0)
     sample = points if len(points) <= 6000 else points[rng.choice(len(points), 6000, replace=False)]
     best_count, best = 0, None
@@ -92,13 +92,13 @@ def fit_inventory_table(view, bbox, excluded, *, supplemental_points=None):
         if count > best_count:
             best_count, best = count, (normal, offset)
     if best is None:
-        raise PerceptionError('demo_inventory_table_unobservable')
+        raise PerceptionError('demo_objects_table_unobservable')
     normal, offset = best
     # Near-height returns can be a vertical container wall. The main camera
     # needs the same measured local surface support as supplemental cameras.
     surface = _locally_supported_plane(points, normal=normal, offset=offset)
     if len(surface) < 100:
-        raise PerceptionError('demo_inventory_table_unobservable')
+        raise PerceptionError('demo_objects_table_unobservable')
     seed_support = {'source': 'measured_local_plane_neighbourhood',
         'input_point_count': len(points), 'accepted_point_count': len(surface),
         'local_support_radius_m': .02, 'local_support_neighbours': 16,
@@ -110,14 +110,15 @@ def fit_inventory_table(view, bbox, excluded, *, supplemental_points=None):
         surface, fusion = fuse_table_plane(surface, supplemental_points, normal=normal, offset=offset)
     low, high = surface.min(axis=0), surface.max(axis=0)
     if np.any(high[:2] - low[:2] < .02):
-        raise PerceptionError('demo_inventory_table_footprint_insufficient')
+        raise PerceptionError('demo_objects_table_footprint_insufficient')
     z = float(np.median(surface[:, 2]))
     center = (low[:2] + high[:2]) / 2
-    return {'model': {'pose': [*center.tolist(), z - .15, 1., 0., 0., 0.],
-                      'dims': [*(high[:2] - low[:2]).tolist(), .30]},
+    depth = max(.30, z)
+    return {'model': {'pose': [*center.tolist(), z - depth / 2, 1., 0., 0., 0.],
+                      'dims': [*(high[:2] - low[:2]).tolist(), depth]},
             'surface_height_m': z, 'normal': normal.tolist(), 'inlier_count': len(surface),
-            'source': 'initial_inventory_ransac_table',
+            'source': 'initial_objects_ransac_table',
             'fit': {'iterations': 256, 'distance_threshold_m': .006, 'maximum_tilt_deg': 5.,
                     'input_point_count': len(points), 'sample_limit': 6000,
                     'seed_surface_support': seed_support, 'multicamera_fusion': fusion},
-            'downward_extent_m': .30, 'downward_extent_source': 'bounded_cuboid_completion'}
+            'downward_extent_m': depth, 'downward_extent_source': 'measured_footprint_to_world_ground'}

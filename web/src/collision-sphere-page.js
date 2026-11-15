@@ -7,6 +7,7 @@ import { createCollisionSphereLayer, validateCollisionSpheres } from './collisio
 const element = id => document.getElementById(id);
 const view = createSceneView(element('viewport'));
 const spheres = createCollisionSphereLayer();
+spheres.setContactArm('A');
 let manifestRevision = null;
 let following = true;
 let loading = false;
@@ -44,6 +45,8 @@ async function refresh() {
     if (snapshotTime === null) view.home();
     snapshotTime = Number.isFinite(snapshot.time) ? snapshot.time : null;
     element('sphere-count').textContent = `${payload.link_count} 个 link · ${payload.sphere_count} 个碰撞球`;
+    const arm = element('contact-arm').value;
+    element('contact-count').textContent = `${arm} 臂目标接触豁免 ${payload.spheres.filter(sphere => sphere.target_contact_arms?.includes(arm)).length} 球`;
     element('sphere-source').textContent = `来源：${payload.source}`;
     element('sphere-loading').hidden = true;
     showStatus();
@@ -58,6 +61,10 @@ async function refresh() {
 }
 
 element('home-view').addEventListener('click', () => view.home());
+element('contact-arm').addEventListener('change', event => {
+  spheres.setContactArm(event.target.value);
+  refresh();
+});
 element('refresh-spheres').addEventListener('click', refresh);
 element('toggle-follow').addEventListener('click', () => {
   following = !following;

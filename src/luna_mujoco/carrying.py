@@ -16,8 +16,8 @@ from .planning_timing import measured
 from .release_clearance import CLEARANCE_COST_EPSILON
 
 # Keep the existing transport bound compatible with accepted payloads. New
-# held bindings preserve the pregrasp capture's measured points separately
-# from registered CAD or the OBB approximation. Sphere budgeting never trims geometry.
+# held bindings use registered CAD or all corners of the pregrasp TSDF surface
+# voxels. Sphere budgeting never trims source geometry.
 MAX_CARRYING_POINTS = 2 * 3 * 640 * 480
 DEFAULT_CARRYING_SPHERES = 24
 MAX_CARRYING_SPHERES = 31
@@ -39,8 +39,6 @@ def held_collision_binding(holding, scene, arm, target_id):
     for name in ("minimum_partition_size_m", "voxel_size_m", "margin_m", "sphere_budget"):
         if name in holding:
             binding[name] = holding[name]
-    if holding.get('obb_tool') is not None:
-        binding['obb_tool'] = deepcopy(holding['obb_tool'])
     if holding.get('cad_tool') is not None:
         binding['cad_tool'] = deepcopy(holding['cad_tool'])
     return binding
@@ -63,7 +61,6 @@ class CarryingBinding:
     voxel_size_m: float = .01
     margin_m: float = .001
     sphere_budget: int = DEFAULT_CARRYING_SPHERES
-    obb_tool: dict | None = None
     cad_tool: dict | None = None
 
     @cached_property
@@ -73,9 +70,9 @@ class CarryingBinding:
         points = np.asarray(self.points_tool_m, dtype="<f8")
         digest = hashlib.sha256(points.tobytes()).digest()
         measured_count = (self.measurement_provenance or {}).get("measured_point_count", len(points))
-        obb_key = json.dumps(self.obb_tool, sort_keys=True, allow_nan=False)
         cad_key = json.dumps(self.cad_tool, sort_keys=True, allow_nan=False)
-        return digest, self.voxel_size_m, self.margin_m, self.uncertainty_m, measured_count, obb_key, cad_key
+        source = (self.measurement_provenance or {}).get('source')
+        return digest, self.voxel_size_m, self.margin_m, self.uncertainty_m, measured_count, source, cad_key
 
     @classmethod
     def from_mapping(cls, payload, *, scene, arm):
@@ -89,7 +86,7 @@ class CarryingBinding:
             if "voxel_size_m" in payload and payload["voxel_size_m"] != partition:
                 raise ValueError("conflicting attachment partition sizes")
             payload["voxel_size_m"] = partition
-        required = set(cls.__dataclass_fields__) - {"coverage", "measurement_provenance", "voxel_size_m", "margin_m", "sphere_budget", "obb_tool", "cad_tool"}
+        required = set(cls.__dataclass_fields__) - {"coverage", "measurement_provenance", "voxel_size_m", "margin_m", "sphere_budget", "cad_tool"}
         if not required.issubset(payload) or set(payload) - set(cls.__dataclass_fields__):
             raise ValueError("carrying_binding fields are invalid")
         if arm not in ("A", "B") or payload["arm"] != arm:
@@ -117,21 +114,17 @@ class CarryingBinding:
         if np.max(np.ptp(points, axis=0)) <= 0 or np.max(np.abs(points)) > 1:
             raise ValueError("carrying measured envelope is empty or out of bounds")
         if payload.get('cad_tool') is not None:
-            if payload.get('obb_tool') is not None:
-                raise ValueError('cad_and_obb_carrying_geometry_conflict')
             _validate_cad_tool(payload['cad_tool'], instance_id=payload['instance_id'],
                 generation=payload['generation'], points=points, provenance=payload.get('measurement_provenance'))
             payload = payload | {'cad_tool': deepcopy(payload['cad_tool'])}
-        if payload.get('obb_tool') is not None:
-            from .object_obb import validate_obb
-
-            validate_obb(payload['obb_tool'], points, frame='gripper_front', instance_id=payload['instance_id'])
-            payload = payload | {'obb_tool': deepcopy(payload['obb_tool'])}
         provenance = payload.get("measurement_provenance")
+        expected_source = 'registered_rgbd_visible_surface' if payload.get('cad_tool') else 'curobo_tsdf_surface_voxels'
+        if expected_source == 'curobo_tsdf_surface_voxels':
+            require_tsdf_carrying_provenance(provenance, len(points), payload['instance_id'])
         if provenance is not None:
             require_measured_carrying_provenance(provenance)
             if (not isinstance(provenance, dict)
-                    or provenance.get("source") != "registered_rgbd_visible_surface"
+                    or provenance.get("source") != expected_source
                     or provenance.get("point_count") != len(points)):
                 raise ValueError("carrying measurement provenance must match geometry points")
         voxel_size = float(payload.get("voxel_size_m", .01))
@@ -152,6 +145,28 @@ def require_measured_carrying_provenance(provenance):
                        or provenance.get('synthetic_point_count', 0)
                        or provenance.get('geometry_completion')):
         raise ValueError('synthetic_scene_geometry_unsupported:reobserve_required')
+
+
+def require_tsdf_carrying_provenance(provenance, point_count, instance_id):
+    if (not isinstance(provenance, dict) or provenance.get('source') != 'curobo_tsdf_surface_voxels'
+            or provenance.get('instance_id') != instance_id
+            or not provenance.get('reference_observation_id')
+            or type(provenance.get('reference_generation')) is not int
+            or provenance.get('point_count') != point_count
+            or provenance.get('surface_voxel_count', 0) * 8 != point_count):
+        raise ValueError('attachment_requires_bound_tsdf_surface_voxels')
+    size = float(provenance.get('tsdf_voxel_size_m', 0))
+    if not np.isfinite(size) or size <= 0:
+        raise ValueError('attachment_requires_tsdf_voxel_size')
+
+
+def held_geometry_points(holding):
+    """Return CAD support vertices or the complete held TSDF voxel corners."""
+    if holding.get('cad_tool') is not None:
+        return cad_geometry_points(holding)
+    points = np.asarray(holding['points_tool_m'], float)
+    require_tsdf_carrying_provenance(holding.get('measurement_provenance'), len(points), holding['instance_id'])
+    return points
 
 
 @lru_cache(maxsize=8)
@@ -200,7 +215,7 @@ def _cad_residual(validation, point_count):
 
 
 def _validate_cad_tool(cad, *, instance_id, generation, points, provenance):
-    from .object_obb import points_digest
+    from .geometry import points_digest
 
     if (not isinstance(cad, dict) or cad.get('frame') != 'gripper_front'
             or cad.get('instance_id') != instance_id or cad.get('generation') != generation
@@ -216,7 +231,7 @@ def _validate_cad_tool(cad, *, instance_id, generation, points, provenance):
 
 def cad_binding_in_tool(target, observation, tcp, points_tool):
     """Bind a currently validated CAD pose without replacing measured evidence."""
-    from .object_obb import points_digest
+    from .geometry import points_digest
 
     cad = target['cad']
     if (not isinstance(cad, dict) or cad.get('instance_id') != target['id']
@@ -315,7 +330,7 @@ def carrying_spheres(binding, *, maximum_spheres=MAX_CARRYING_SPHERES):
 
 
 def carrying_geometry(binding, *, maximum_spheres=MAX_CARRYING_SPHERES):
-    """Cache the CAD/OBB/archived-surface fit; return independent results."""
+    """Cache the registered CAD or observed TSDF voxel fit."""
     require_measured_carrying_provenance(binding.measurement_provenance)
     if type(maximum_spheres) is not int or maximum_spheres < 1:
         raise ValueError("maximum_spheres must be a positive integer")
@@ -336,66 +351,48 @@ def _fit_carrying_geometry(binding, maximum_spheres):
     """At most 30 principal-direction splits, retaining every padded point."""
     if binding.cad_tool is not None:
         return _cad_covering_geometry(binding, maximum_spheres)
-    if binding.obb_tool is not None:
-        from .object_obb import obb_covering_spheres
-
-        spheres = obb_covering_spheres(binding.obb_tool, maximum_spheres=maximum_spheres,
-            minimum_size_m=binding.voxel_size_m, padding_m=binding.uncertainty_m + binding.margin_m)
-        return {'spheres': spheres, 'sphere_count': len(spheres), 'sphere_budget': maximum_spheres,
-            'fit_method': 'obb_volume_partition_cover', 'obb_tool': deepcopy(binding.obb_tool),
-            'minimum_partition_size_m': binding.voxel_size_m,
-            'margin_m': binding.margin_m, 'measurement_uncertainty_m': binding.uncertainty_m}
     points = np.asarray(binding.points_tool_m, dtype=float)
-    voxel_size = binding.voxel_size_m
-    groups = [(points, points.min(axis=0), points.max(axis=0), np.arange(len(points)))]
+    require_tsdf_carrying_provenance(binding.measurement_provenance, len(points), binding.instance_id)
+    cells = points.reshape(-1, 8, 3)
+    centers = cells.mean(axis=1)
+    groups = [np.arange(len(cells))]
     while len(groups) < maximum_spheres:
-        index = max(range(len(groups)), key=lambda i: round(float(np.max(groups[i][2] - groups[i][1])), 12))
-        observed, lower, upper, indices = groups[index]
-        if np.max(upper - lower) <= voxel_size:
+        widths = [float(np.ptp(cells[indices].reshape(-1, 3), axis=0).max())
+                  if len(indices) > 1 else 0. for indices in groups]
+        index = int(np.argmax(widths))
+        if widths[index] <= binding.voxel_size_m:
             break
-        # A slanted surface cut along a fixed TCP axis can leave a coarse
-        # diagonal group whose covering ball intersects nearby gripper links.
-        # Use this group's measured spread; no robot collision pair, point,
-        # padding or sphere budget is changed to make the fit clear.
-        # Picometre rounding affects partition decisions only. It makes tied
-        # symmetric groups stable under harmless floating-point translations;
-        # all original coordinates still determine the covering spheres.
-        local = np.round(observed - observed[0], 12)
-        centered = local - local.mean(axis=0)
-        direction = np.linalg.svd(centered, full_matrices=False)[2][0]
+        indices = groups[index]
+        local = centers[indices] - centers[indices].mean(axis=0)
+        direction = np.linalg.svd(local, full_matrices=False)[2][0]
         if direction[np.argmax(np.abs(direction))] < 0:
             direction = -direction
-        projected = centered @ direction
-        left = projected < (projected.min() + projected.max()) * .5 - 1e-12
-        children = [(observed[mask], indices[mask]) for mask in (left, ~left)]
-        groups[index:index + 1] = [(child, child.min(axis=0), child.max(axis=0), child_indices)
-                                  for child, child_indices in children]
+        order = np.argsort(np.round(local @ direction, 12), kind='stable')
+        middle = len(indices) // 2
+        groups[index:index + 1] = [indices[order[:middle]], indices[order[middle:]]]
     spheres = []
     source_counts = []
-    measured_count = len(points)
-    for observed, lower, upper, indices in groups:
-        center = (lower + upper) * .5
-        distances = np.linalg.norm(observed - center, axis=1)
-        radius = float(distances.max())
-        first = observed[int(np.argmax(np.round(distances, 12)))]
-        opposite = observed[int(np.argmax(np.round(np.linalg.norm(observed - first, axis=1), 12)))]
-        # Keep the original bounding-box sphere if neither candidate improves
-        # it. Recheck every point, so tightening never trims measured surfaces.
-        for candidate in (observed.mean(axis=0), (first + opposite) * .5):
-            candidate_radius = float(np.linalg.norm(observed - candidate, axis=1).max())
-            if candidate_radius < radius - 1e-12:
-                center, radius = candidate, candidate_radius
+    for indices in groups:
+        # Keep each voxel indivisible. One convex ball covers all its corners,
+        # which also covers the whole cell between those corners.
+        observed = cells[indices].reshape(-1, 3)
+        center = (observed.min(axis=0) + observed.max(axis=0)) * .5
+        radius = float(np.linalg.norm(observed - center, axis=1).max())
+        mean = observed.mean(axis=0)
+        mean_radius = float(np.linalg.norm(observed - mean, axis=1).max())
+        if mean_radius < radius:
+            center, radius = mean, mean_radius
         radius = max(.002, radius + binding.uncertainty_m + binding.margin_m)
         spheres.append([*center.tolist(), radius])
-        measured = int(np.count_nonzero(indices < measured_count))
-        source_counts.append({"measured": measured, "height_completion": len(indices) - measured})
-    width = max(voxel_size, max(float(np.max(upper - lower)) for _, lower, upper, _ in groups))
-    return {"spheres": spheres, "sphere_count": len(spheres), "sphere_budget": maximum_spheres,
-            "minimum_partition_size_m": voxel_size, "maximum_group_extent_m": width,
-            "fit_method": "bounded_principal_splits_tight_centers",
-            "partition_direction_source": "point_group_principal_component",
-            "source_counts_by_sphere": source_counts,
-            "margin_m": binding.margin_m, "measurement_uncertainty_m": binding.uncertainty_m}
+        source_counts.append({'tsdf_surface_voxels': len(indices), 'voxel_corners': len(observed)})
+    return {'spheres': spheres, 'sphere_count': len(spheres), 'sphere_budget': maximum_spheres,
+            'geometry_source': 'curobo_tsdf_surface_voxels',
+            'geometry_coverage': 'observed_tsdf_surface_voxels_with_uncertainty',
+            'minimum_partition_size_m': binding.voxel_size_m,
+            'fit_method': 'tsdf_voxel_group_cover',
+            'partition_direction_source': 'voxel_centers_principal_component',
+            'source_counts_by_sphere': source_counts,
+            'margin_m': binding.margin_m, 'measurement_uncertainty_m': binding.uncertainty_m}
 
 
 def carrying_touch_links(arm):
@@ -444,7 +441,7 @@ def validate_phase_request(payload):
     mode = payload.get("gripper_geometry_mode", "actual")
     if mode not in ("actual", "fixed_open"):
         raise ValueError("unknown gripper_geometry_mode")
-    if mode == "fixed_open" and (payload.get("carrying_binding") is not None or phase not in ("open_grasp", "approach_grasp", "grasp", "grasp_closure", "close")):
+    if mode == "fixed_open" and (payload.get("carrying_binding") is not None or phase not in ("open_grasp", "approach_grasp", "grasp", "grasp_closure", "grasp_lift", "close")):
         raise ValueError("fixed_open requires a detached grasp phase")
     if phase not in ("observation", "open_grasp", "approach_grasp", "grasp", "grasp_closure", "grasp_lift", "lift", "approach", "place", "transport", "close", "open", "retreat"):
         raise ValueError("unknown carrying validation phase")
@@ -452,12 +449,14 @@ def validate_phase_request(payload):
     if policy is not None and (phase != "lift" or policy != "observed_plane_normal_departure"):
         raise ValueError("support contact policy applies only to observed normal lift departure")
     carrying = payload.get("carrying_binding")
-    if phase == "observation" and carrying is not None:
+    if phase == "observation" and carrying is not None and payload.get('terminal_return') is not True:
         raise ValueError("observation requires detached geometry")
     if phase == "retreat" and carrying is not None:
         raise ValueError("retreat requires detached carrying geometry")
     if phase in ("open_grasp", "approach_grasp", "grasp", "grasp_closure", "grasp_lift") and carrying is not None:
         raise ValueError("grasp phases require detached geometry")
+    if phase == 'grasp_lift' and mode != 'fixed_open':
+        raise ValueError('grasp lift requires the detached grasp-planning gripper model')
     if phase in ("lift", "approach", "place", "transport", "open") and carrying is None:
         raise ValueError(f"{phase} requires a measured carrying binding")
     if phase == "transport" and carrying.get("state") != "held":
@@ -680,13 +679,13 @@ def check_command_path(runtime, planner, payload, binding):
     from tianji_curobo.grasp_lift import collision_samples
     from tianji_curobo.grasp_lift_compute import collision_verdict
 
+    from .collision_objects import objects_admission
     from .grasp_contact import (
         combine_grasp_costs,
         grasp_contact_links,
         gripping_pad_links,
         target_disabled_for_environment,
     )
-    from .inventory_map import inventory_admission
     from .motion_coverage import joint_motion_bounds, segment_motion_bounds, task_interaction_links
 
     phase = validate_phase_request(payload)
@@ -694,7 +693,7 @@ def check_command_path(runtime, planner, payload, binding):
     names = payload.get("joint_names")
     all_names = ARM_CONFIG_SPECS["A"]["joint_names"] + ARM_CONFIG_SPECS["B"]["joint_names"]
     dual = payload["arm"] == "AB"
-    if dual and (phase != "observation" or binding is not None):
+    if dual and (phase != "observation" or binding is not None and payload.get('terminal_return') is not True):
         raise ValueError("dual command checking requires detached observation motion")
     expected_names = all_names if dual else ARM_CONFIG_SPECS[payload["arm"]]["joint_names"]
     if (positions.ndim != 2 or positions.shape[1] != len(expected_names) or not 1 <= len(positions) <= 10000
@@ -746,9 +745,9 @@ def check_command_path(runtime, planner, payload, binding):
     coverage_failed = False
     observation_coverage_incomplete = False
     first_world_collision = None
-    contact_policy = phase in {'grasp', 'grasp_closure'} and binding is None and fixed_open
+    contact_policy = phase in {'grasp', 'grasp_closure', 'grasp_lift'} and binding is None and fixed_open
     contact_queries = 0
-    admission = inventory_admission(getattr(runtime, 'geometry_scene', None) or {})
+    admission = objects_admission(getattr(runtime, 'geometry_scene', None) or {})
     for angle, exact, envelope in variants:
         checker = make_checker(exact, cache=True)
         world_checker = checker if envelope is None else make_checker(envelope, cache=False)
@@ -769,7 +768,6 @@ def check_command_path(runtime, planner, payload, binding):
         joint_steps = np.zeros_like(ordered)
         joint_steps[:-1] = np.abs(np.diff(ordered, axis=0))
         motion_coefficients = np.max(np.concatenate(list(sphere_motion.values())), axis=0)
-        displacement = None
         coverage = getattr(runtime, 'motion_coverage', None)
         robot_indices, contact_indices, task_indices = [], [], []
         sphere_links = {}
@@ -812,6 +810,14 @@ def check_command_path(runtime, planner, payload, binding):
                     if measured:
                         contact_bounds = [np.min([item['minimum_world_m'] for item in measured], axis=0),
                                           np.max([item['maximum_world_m'] for item in measured], axis=0)]
+        padding = None
+        padding_tensor = None
+        if closure_padding is not None:
+            padding = np.zeros(len(motion_coefficients))
+            for link in exact['robot_cfg']['kinematics']['collision_link_names']:
+                indices = checker.kinematics.kinematics_config.get_sphere_index_from_link_name(link).detach().cpu().numpy().reshape(-1)
+                padding[indices] = closure_padding[link]
+            padding_tensor = torch.as_tensor(padding, **planner.device_cfg.as_torch_dict())
         with torch.no_grad():
             for offset in range(0, len(ordered), 128):
                 chunk = ordered[offset:offset + 128]
@@ -820,21 +826,14 @@ def check_command_path(runtime, planner, payload, binding):
                 world_state = state if envelope is None else world_checker.get_kinematics(q)
                 world_spheres = world_state.robot_spheres
                 if closure_padding is not None:
-                    pads = []
-                    for link in exact['robot_cfg']['kinematics']['collision_link_names']:
-                        indices = checker.kinematics.kinematics_config.get_sphere_index_from_link_name(link).detach().cpu().numpy().reshape(-1)
-                        pads.extend(zip(map(int, indices), closure_padding[link], strict=True))
-                    padding = np.zeros(world_spheres.shape[-2])
-                    for index, amount in pads:
-                        padding[index] = amount
                     world_spheres = world_spheres.clone()
-                    world_spheres[..., 3] += torch.as_tensor(padding, **planner.device_cfg.as_torch_dict())
+                    world_spheres[..., 3] += padding_tensor
                 # Public collision queries reuse output buffers; retain the full
                 # world's costs before querying the environment without target.
-                world = world_checker.get_collision_distance(world_spheres).detach().cpu().numpy().copy()
+                world = world_checker.get_collision_constraint(world_spheres).detach().cpu().numpy().copy()
                 if contact_policy:
                     with target_disabled_for_environment(runtime, planner):
-                        environment = checker.get_collision_distance(world_spheres).detach().cpu().numpy().copy()
+                        environment = checker.get_collision_constraint(world_spheres).detach().cpu().numpy().copy()
                     world = combine_grasp_costs(world, environment, sphere_links, payload['arm'])
                     contact_queries += 1
                 world = np.where((world >= 0) & (world <= CLEARANCE_COST_EPSILON), 0., world)
@@ -857,7 +856,7 @@ def check_command_path(runtime, planner, payload, binding):
                 checked_count += len(chunk)
                 if not admission['accepted']:
                     proof = {'covered': False, 'failure_reason': 'observation_coverage_insufficient',
-                             'reason': admission['reason'], 'inventory_admission': admission}
+                             'reason': admission['reason'], 'objects_admission': admission}
                 elif coverage is None or not coverage.views:
                     proof = {'covered': False, 'failure_reason': 'observation_coverage_insufficient',
                              'reason': 'registered_rgbd_coverage_missing'}
@@ -865,12 +864,12 @@ def check_command_path(runtime, planner, payload, binding):
                     geometry = world_state.robot_spheres.detach().cpu().numpy().reshape(len(chunk), -1, 4)
                     if geometry.shape[1] != len(motion_coefficients):
                         raise ValueError('task coverage public geometry has unmapped spheres')
-                    if displacement is None:
-                        # Read the public input tensor dtype, not a guessed metre
-                        # tolerance. The fallback only supports CPU test doubles.
-                        model_dtype = np.dtype(str(q.dtype).removeprefix('torch.')) if hasattr(q, 'dtype') else geometry.dtype
-                        displacement, stationary = segment_motion_bounds(ordered, motion_coefficients, model_dtype)
-                    proof = coverage.check(geometry, displacement[offset:offset + len(chunk)],
+                    # Include the next endpoint so the final segment in this chunk
+                    # has exactly the same bound as whole-path evaluation.
+                    model_dtype = np.dtype(str(q.dtype).removeprefix('torch.')) if hasattr(q, 'dtype') else geometry.dtype
+                    displacement, stationary = segment_motion_bounds(
+                        ordered[offset:offset + len(chunk) + 1], motion_coefficients, model_dtype)
+                    proof = coverage.check(geometry, displacement[:len(chunk)],
                                            scene_token=payload['scene_token'], robot_sphere_indices=robot_indices,
                                            contact_sphere_indices=contact_indices, contact_bounds=contact_bounds,
                                            stop_on_first_unknown=True, required_sphere_indices=task_indices)
@@ -878,7 +877,7 @@ def check_command_path(runtime, planner, payload, binding):
                     proof['required_collision_links'] = sorted(task_links)
                     proof['joint_model_storage_dtype'] = str(model_dtype)
                     proof['motion_bound_precision_policy'] = 'max_requested_and_represented_delta_except_identical_influencing_joint_vector'
-                    proof['stationary_model_sphere_segment_count'] = int(np.count_nonzero(stationary[offset:offset + len(chunk)]))
+                    proof['stationary_model_sphere_segment_count'] = int(np.count_nonzero(stationary[:len(chunk)]))
                     if 'first_unobserved_sphere_index' in proof:
                         sphere_index = proof['first_unobserved_sphere_index']
                         sample_index = offset + proof['first_unobserved_sample_index']
@@ -900,19 +899,23 @@ def check_command_path(runtime, planner, payload, binding):
                 if evidence_invalid:
                     coverage_failed = True
                     valid[offset] = False
+                if not valid[offset:offset + len(chunk)].all():
+                    break
         if sweep is not None:
             sweep["checked_driver_sample_count"] += 1
             if not valid.all():
                 sweep["first_invalid_driver_rad"] = angle
                 break
     invalid = next((index for index, free in enumerate(valid) if not free), None)
+    evaluation_complete = checked_count == len(samples) * len(variants)
     from .gripper_sweep import safe_closure_prefix
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, allow_nan=False, separators=(",", ":")).encode()).hexdigest()
     world_source = runtime.geometry_scene.get('collision_world_source')
-    hybrid_world = world_source == 'inventory_cad_meshes_obb_and_measured_table_cuboids'
+    hybrid_world = world_source == 'objects_cad_meshes_tsdf_esdf_and_measured_table_cuboids'
     return {"ok": True, "collision_free": invalid is None, "phase": phase,
+            'lift_carried_collision_checked': False,
             "grasp_closure_preflight": None if closure_angles is None else {
-                'driver_samples_rad': closure_angles.tolist(), 'continuous_world_sweep_checked': True,
+                'driver_samples_rad': closure_angles.tolist(), 'continuous_world_sweep_checked': evaluation_complete,
                 'safe_driver_limit_rad': safe_closure_prefix(closure_angles, valid),
                 'self_collision_scope': 'sampled_driver_positions',
                 'selected_target_policy': 'executing_link3_link4_target_contact',
@@ -931,10 +934,11 @@ def check_command_path(runtime, planner, payload, binding):
                 'environment_clearance_m': runtime.planning_settings.trajectory_collision_clearance_m,
                 'other_links_target_clearance_m': runtime.planning_settings.trajectory_collision_clearance_m},
             "checked_point_count": checked_count, "command_point_count": len(positions),
+            "command_evaluation_complete": evaluation_complete,
             "first_invalid_index": None if invalid is None else int(source_indices[invalid]),
             "scene_token": payload["scene_token"], "binding_sha256": digest,
             "attached": binding is not None, "carrying_owner_id": None if binding is None else binding.owner_id,
-            "collision_scope": ("published_inventory_geometry_and_both_robot_arms" if hybrid_world
+            "collision_scope": ("published_objects_geometry_and_both_robot_arms" if hybrid_world
                                 else "measured_obstacles_and_both_robot_arms"),
             "collision_world_source": world_source,
             "coverage_scope": "task_interaction_geometry",
@@ -943,7 +947,7 @@ def check_command_path(runtime, planner, payload, binding):
             "unknown_space_motion_gate": False,
             "sensor_coverage_role": "diagnostic_for_model_mapping_strategy",
             "observation_coverage_incomplete": observation_coverage_incomplete,
-            "geometry_coverage": "registered_cad_and_observed_obb_models" if hybrid_world else "visible_surface_only",
+            "geometry_coverage": "registered_cad_and_observed_tsdf_voxels" if hybrid_world else "visible_surface_only",
             "full_object_coverage": False,
             "gripper_joint_positions_rad": dict(feedback),
             "modeled_gripper_joint_positions_rad": dict(modeled_feedback),

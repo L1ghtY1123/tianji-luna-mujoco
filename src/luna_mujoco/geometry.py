@@ -7,11 +7,17 @@ from functools import lru_cache
 
 import numpy as np
 
+
+def points_digest(points):
+    return hashlib.sha256(np.asarray(points, dtype='<f8').tobytes()).hexdigest()
+
+
 TOOL_PROFILE = {
-    "revision": "marvin-rag-source-default-185mm-v1",
+    "revision": "marvin-front-tcp-185mm-graspgen-tcp-v2",
     "A": {"orientation_deg": 180, "tcp_ee_z_m": .185},
     "B": {"orientation_deg": 0, "tcp_ee_z_m": .185},
-    "grasp_ee_z_m": .195,
+    "graspgen_model_tcp_offset_m": .195,
+    "graspgen_pose_frame": "gripper_tcp",
     "gripper_config_id": "robotiq_2f_140",
 }
 
@@ -144,15 +150,37 @@ class GeometryCache:
 
 
 def grasp_targets(world_grasps, arm):
-    """GraspGen model frame to calibrated finger front, with arm-local 180 flip."""
-    result = np.asarray(world_grasps, dtype=float).copy()
+    """GraspGen TCP to calibrated finger-front orientation, with arm-local jaw symmetry."""
     if arm not in {"A", "B"}:
         raise ValueError("arm must be A or B")
+    result = np.asarray([rigid_matrix(pose) for pose in world_grasps], dtype=float)
+    alignment = np.eye(4)
     if TOOL_PROFILE[arm]["orientation_deg"] == 180:
-        result[:, :3, :2] *= -1
-    grasp_ee = np.eye(4)
-    grasp_ee[2, 3] = TOOL_PROFILE["grasp_ee_z_m"]
-    return result @ grasp_ee
+        alignment[:3, :3] = np.diag([-1., -1., 1.])
+    return result @ alignment
+
+
+def graspgen_tcp_binding(model, arm):
+    """Declare the service/contact/robot frame chain without another depth offset."""
+    if (model.get('pose_frame') != TOOL_PROFILE['graspgen_pose_frame']
+            or model.get('gripper_model') != TOOL_PROFILE['gripper_config_id']
+            or model.get('model_base_to_tcp_m') != TOOL_PROFILE['graspgen_model_tcp_offset_m']):
+        raise ValueError('graspgen_frame_mismatch')
+    alignment = grasp_targets([np.eye(4)], arm)[0]
+    model_tcp = np.eye(4)
+    model_tcp[2, 3] = TOOL_PROFILE['graspgen_model_tcp_offset_m']
+    mount_front = np.eye(4)
+    mount_front[:3, 3] = front_tcp_offset(arm)
+    return {'revision': 'graspgen-contact-to-arm-front-v1', 'arm': arm,
+        'robot_side': 'left' if arm == 'A' else 'right', 'tcp_frame': TCP_FRAMES[arm],
+        'mount_frame': 'TCP_Link_L' if arm == 'A' else 'TCP_Link_R',
+        'model_gripper': model['gripper_model'], 'model_pose_frame': model['pose_frame'],
+        'T_model_base_model_tcp': model_tcp.tolist(),
+        'T_model_tcp_robot_front': alignment.tolist(), 'T_robot_mount_robot_front': mount_front.tolist(),
+        'additional_insertion_m': 0.,
+        'semantics': 'Service applies model base +Z 195mm once. Coincide model contact TCP with '
+            'the selected arm front TCP; its URDF mount is 185mm behind it. '
+            'Different jaw geometry still requires actual-robot contact and collision checks.'}
 
 
 def geometry_payload(snapshot, target_id):

@@ -1,16 +1,19 @@
 import { modelCallInfo, modelResult } from './replay-story.js';
 import { renderPolicyGraph } from './replay-policy.js';
-import { renderTaskBindings } from './task-inventory.js';
+import { renderTaskBindings } from './task-ledger.js';
 
 const STAGE_NAMES = { raw_graspgen: '① GraspGen 全部生成位姿', before_ik: '② 方向与执行臂预筛选', after_ik: '③ Batched IK 筛选', after_plan_grasp_batch: '④ plan_grasp_batch 筛选' };
 const STATUS_NAMES = { passed: '通过', failed: '未通过', unknown: '未记录判定' };
 
 function imageSource(role) {
-  if (role === 'initial_reference_annotations') return '程序绘制 Responses 提议的初始参考框，供模型定位永久 ID；框不是分割结果。';
+  if (role === 'catalog_reference') return '实际发送的 CAD 目录预览图，模型编号见图片元数据。';
+  if (role?.endsWith('_mask')) return '实际发送的独立主体掩码，标签与对应 RGB 一致。';
+  if (role?.endsWith('_depth')) return '实际发送的深度证据，标定与采集时间见原请求。';
+  if (role === 'initial_reference_annotations') return '归档中的初始身份参考标注，来源以该次请求记录为准。';
   if (role === 'release_target_region_reference') return '当前 RGB 上的目标区域参考投影；不是落定物体测量，也不证明区域未遮挡。';
   if (role === 'current_annotations') return '程序绘制当前 SAM3 候选掩码的外接矩形，供 Decisions 关联 ID；框本身不证明身份。';
   if (role === 'current_candidate_sam_subject') return '当前 SAM 主体图保留原 RGB 的 silhouette 轮廓内像素，轮廓外置灰；无损 PNG 随实际模型请求发送，图像本身不证明身份或隐藏几何。';
-  if (role === 'current_rgb' || role === 'reference_rgb') return '相机实际采集 RGB 经模型请求编码，无框；此文件是实际发送的图片。';
+  if (role === 'current_rgb' || role === 'reference_rgb') return '实际发送的 RGB，包含该次请求采用的有效区域过滤及主体框；具体范围见原请求。';
   if (role === 'verified_product_reference') return '处理结果核验时保存的产物参考 RGB，供模型识别独立产物 ID。';
   if (role?.includes('zoom')) return '程序从已归档 RGB 裁剪的定位图片，实际随请求发送；范围以原请求为准。';
   return '实际模型请求中的图片；旧记录未明确标注框来源，请结合原请求核对。';
@@ -28,7 +31,7 @@ export function extractReplayEvidence(value) {
     if (!item || typeof item !== 'object' || seen.has(item)) return;
     seen.add(item);
     if (Array.isArray(item.request?.input)) {
-      if (item.endpoint && item.response) result.models.push(item);
+      if (item.endpoint) result.models.push(item);
       let label = item.endpoint ?? '模型输入';
       let frame = 'other';
       let imageRole = null;
@@ -51,18 +54,31 @@ export function extractReplayEvidence(value) {
           if (part.type === 'input_text') {
             try {
               const text = JSON.parse(part.text);
+              if (text.modality === 'catalog_reference') {
+                text.image_role = 'catalog_reference';
+                text.frame_role = 'STATIC_REFERENCE';
+              }
+              if (!text.image_role && text.camera_id && item.endpoint === '/v1/responses') {
+                text.image_role = 'current_rgb';
+                text.frame_role = 'CURRENT';
+              }
               if (text.image_role) {
                 imageRole = text.image_role;
                 sourceObservationId = text.observation_id ?? text.source_observation_id ?? null;
                 const camera = text.camera_id ?? text.source_camera_id ?? text.camera;
                 cameraId = camera == null ? null : String(camera);
-                annotationItems = text.items ?? text.original_candidates ?? [];
+                annotationItems = text.items ?? text.original_candidates ?? Object.entries(text.subject_boxes ?? {}).map(([id, bbox]) => ({ id, bbox }));
                 frame = text.frame_role === 'CURRENT' || text.image_role.startsWith('current_') ? 'current'
-                  : text.frame_role === 'BEFORE' || text.image_role.startsWith('initial_') || text.image_role === 'verified_product_reference' ? 'reference' : 'other';
-                const roles = { initial_reference_annotations: '初始参考 · 身份标注', current_work_area_zoom: '当前 · 工作区放大',
+                  : ['BEFORE', 'SAME_CAPTURE', 'DATED_REFERENCE'].includes(text.frame_role) || text.image_role.startsWith('initial_') || text.image_role.startsWith('reference_') || text.image_role.startsWith('historical_') || text.image_role === 'verified_product_reference' ? 'reference' : 'other';
+                const roles = { catalog_reference: `CAD 参考 ${text.reference ?? ''}`,
+                  current_rgb: '当前 RGB', current_mask: '当前独立掩码', current_depth: '当前深度',
+                  reference_rgb: text.frame_role === 'SAME_CAPTURE' ? '同次采集参考 RGB' : '带日期参考 RGB',
+                  reference_mask: '参考掩码', reference_depth: '参考深度',
+                  historical_rgb: '历史原始 RGB', historical_mask: '历史独立掩码', historical_depth: '历史深度',
+                  initial_reference_annotations: '初始参考 · 身份标注', current_work_area_zoom: '当前 · 工作区放大',
                   current_candidate_sam_subject: `当前 · SAM 主体 ${text.candidate ?? ''}`,
                   drop_bin_region_zoom: `${frame === 'current' ? '当前' : '投放前'} · 盒内放大` };
-                label = [camera && `相机 ${camera}`, roles[text.image_role] ?? text.image_role].filter(Boolean).join(' · ');
+                label = [camera && `相机 ${camera}`, (roles[text.image_role] ?? text.image_role) + (text.crop_pixels ? ' · 主体裁剪' : '')].filter(Boolean).join(' · ');
               }
             } catch {
               // Camera labels in older archives are plain text, not JSON.
@@ -149,7 +165,8 @@ export function candidateRows(replay) {
     const evidence = new Map((replay.direction_filter?.candidate_evidence ?? []).map(row => [row.candidate_index, row]));
     return (replay.candidates_before_ik ?? []).map(candidate => {
       const row = evidence.get(candidate.index);
-      const evaluated = typeof row?.tilt_passed === 'boolean' && typeof row?.away_from_robot_passed === 'boolean';
+      const evaluated = typeof row?.accepted === 'boolean' || (typeof row?.tilt_passed === 'boolean' && typeof row?.away_from_robot_passed === 'boolean');
+      const accepted = row?.accepted ?? (row?.tilt_passed && row?.away_from_robot_passed);
       const dot = value => Number.isFinite(value) ? value.toFixed(4) : '未记录';
       const budgetLimited = replay.pre_budget_eligible_indices?.includes(candidate.index)
         && !replay.pre_ik_eligible_indices?.includes(candidate.index);
@@ -157,8 +174,9 @@ export function candidateRows(replay) {
         beforeInsertion: candidate.T_world_tcp_before_insertion,
         status: budgetLimited ? 'unknown' : Array.isArray(replay.pre_ik_eligible_indices)
           ? replay.pre_ik_eligible_indices.includes(candidate.index) ? 'passed' : 'failed'
-          : evaluated ? row.tilt_passed && row.away_from_robot_passed ? 'passed' : 'failed' : 'unknown',
-        reason: (row ? `向下 ${dot(row.downward_dot)} · 离机器人 ${dot(row.horizontal_away_from_robot_dot)}` : '')
+          : evaluated ? accepted ? 'passed' : 'failed' : 'unknown',
+        reason: (row?.sector ? `向前 ${dot(row.sector.forward_dot)} · 向下 ${dot(row.sector.downward_dot)} · 左右偏角 ${dot(row.sector.lateral_angle_deg)}°`
+          : row ? `向下 ${dot(row.downward_dot)} · 离机器人 ${dot(row.horizontal_away_from_robot_dot)}` : '')
           + (budgetLimited ? ' · 预筛选通过，超出本轮 IK 数量上限，未提交' : ''),
       };
     });
@@ -307,21 +325,34 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
       const info = modelCallInfo(archive);
       const result = modelResult(archive);
       const model = section(`${info.type} · ${info.purpose}`, true);
+      if (info.type === 'Decisions') {
+        const state = element('details');
+        const texts = archive.request.input.flatMap(message => message.content ?? [])
+          .filter(part => part.type === 'input_text').map(part => {
+            try { return JSON.parse(part.text); } catch { return part.text; }
+          });
+        state.append(element('summary', 'state 与图片元数据'),
+          element('pre', JSON.stringify(texts, null, 2), 'candidate-detail'));
+        const questions = element('details');
+        questions.append(element('summary', 'questions'),
+          element('pre', JSON.stringify(archive.request.questions, null, 2), 'candidate-detail'));
+        model.append(state, questions);
+      }
       if (info.failed) model.append(element('p', `调用失败：${archive.error ?? `HTTP ${archive.http_status}`}`, 'inline-error'));
-      if (result.inventory) {
-        const inventory = result.inventory;
-        if (inventory.task_inventory) renderTaskBindings(model, inventory.task_inventory);
-        model.append(element('p', inventory.task_spec?.reason ?? inventory.task?.reason ?? '模型已返回结构化场景与程序。'));
+      if (result.objects) {
+        const objects = result.objects;
+        if (objects.task_bindings) renderTaskBindings(model, objects.task_bindings);
+        model.append(element('p', objects.task_spec?.reason ?? objects.task?.reason ?? '模型已返回结构化场景与程序。'));
         const entities = element('details');
-        entities.append(element('summary', `Responses 提议的实体 · ${inventory.entities?.length ?? 0} 项`));
-        for (const entity of inventory.entities ?? []) entities.append(element('p', `${entity.id ?? entity.ref} · ${entity.description ?? entity.kind}`));
+        entities.append(element('summary', `Responses 提议的实体 · ${objects.entities?.length ?? 0} 项`));
+        for (const entity of objects.entities ?? []) entities.append(element('p', `${entity.id ?? entity.ref} · ${entity.description ?? entity.kind}`));
         const program = element('details');
         program.append(element('summary', '查看 Responses 编排（包含尚未执行的步骤）'));
         const tree = element('div', '', 'policy-tree');
-        const graph = inventory.policy_graph;
+        const graph = objects.policy_graph;
         if (graph) renderPolicyGraph(tree, graph);
         else tree.append(element('p', '未归档 policy_graph；以下为原始模型输出，不重建历史编排。', 'muted'));
-        program.append(tree, element('pre', JSON.stringify(graph ?? inventory, null, 2), 'candidate-detail'));
+        program.append(tree, element('pre', JSON.stringify(graph ?? objects, null, 2), 'candidate-detail'));
         model.append(entities, program);
       }
       if (result.answers.length) {
@@ -330,32 +361,46 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
         if (result.answers.length > 4) answers.append(element('summary', `展开 ${result.answers.length} 项身份判断`));
         for (const answer of result.answers) {
           const row = element('article', '', 'model-answer');
-          row.append(element('strong', answer.title));
+          row.append(element('strong', answer.title), element('p', answer.instructions));
           if (answer.type === 'predicate') row.append(element('p', `该命题成立的概率：${Number.isFinite(answer.probability) ? `${(answer.probability * 100).toFixed(1)}%` : '未归档'}`, 'answer-value'));
           else if (answer.type === 'refusal') row.append(element('p', '模型拒答：未提供概率，不作为否定或成功。', 'answer-value'));
-          else row.append(element('p', `选择：${answer.choiceLabel ?? '未归档'}${Number.isFinite(answer.confidence) ? ` · 返回 confidence ${answer.confidence}` : ''}`, 'answer-value'));
+          else {
+            row.append(element('p', `模型选择 ${answer.choiceLabel ?? '未归档'}`, 'answer-value'));
+            row.append(element('p', `所选项概率 ${Number.isFinite(answer.choiceProbability) ? answer.choiceProbability.toFixed(3) : '未返回概率分布'} · confidence ${Number.isFinite(answer.confidence) ? answer.confidence : '未返回'}（单独返回字段）`));
+            const distribution = element('ul', '', 'choice-probabilities');
+            for (const option of answer.optionProbabilities) {
+              distribution.append(element('li', `${option.value} · ${Number.isFinite(option.probability) ? option.probability.toFixed(3) : '概率未返回'}${option.description ? ` · ${option.description}` : ''}`));
+            }
+            row.append(distribution);
+          }
           if (answer.check) {
             const check = answer.check;
             const reason = ({ predicate_probability_uncertain: '概率处于不确定区间',
+              binary_probability_argmax: '二值概率取较大项',
+              equal_binary_probabilities: '二值概率平分，保留 unknown',
+              choice_probability_argmax: '各选项概率取最大项，confidence 仅归档',
+              service_selected_choice: '采用服务返回选项，概率分布未返回，confidence 仅归档',
+              model_unknown_or_equal_maxima: 'unknown 为最大概率项或最大值平分',
               choice_confidence_below_threshold: '所选答案未达到事实确认阈值',
               model_selected_unknown: '模型明确选择 unknown', model_refusal: '模型拒答，无概率',
               predicate_probability_gate: '命题概率通过肯定或否定阈值', confidence_gate: '事实选项通过阈值',
               operation_proposal: '操作建议，由技能继续检查执行条件' })[check.reason] ?? check.reason ?? '按该技能的判定规则';
             let rule = '';
+            if (check.selected_value) rule = `；采用选项：${check.selected_value}`;
             if (Number.isFinite(check.threshold) && check.reason !== 'model_refusal') {
               rule = Number.isFinite(check.negative_threshold)
-                ? `；yes ≥ ${check.threshold}，no ≤ ${check.negative_threshold}` : `；确认阈值 ≥ ${check.threshold}`;
+                ? `；yes ${check.comparison ?? '≥'} ${check.threshold}，no ${check.negative_comparison ?? '≤'} ${check.negative_threshold}` : `；确认阈值 ${check.comparison ?? '≥'} ${check.threshold}`;
             }
             row.append(element('p', `程序判定：${check.status} · ${reason}${rule}`, 'muted'));
           }
           const question = element('details');
-          question.append(element('summary', '完整问题与原始回答'), element('p', answer.instructions),
+          question.append(element('summary', '原始回答'),
             element('pre', JSON.stringify(archive.response.answers.find(item => item.name === answer.name), null, 2), 'candidate-detail'));
           row.append(question);
           answers.append(row);
         }
         model.append(answers);
-      } else if (!result.inventory) model.append(element('p', '完整结构化回答未归档；请检查原始 JSON。', 'muted'));
+      } else if (!result.objects) model.append(element('p', '完整结构化回答未归档；请检查原始 JSON。', 'muted'));
     }
     const images = evidence.images.length ? section(`实际输入图片 · ${evidence.images.length} 张`, true) : element('div');
     const grid = element('div', '', 'evidence-images');
@@ -366,7 +411,7 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
       if (value !== 'all' && !frames.has(value)) continue;
       const option = element('option', title); option.value = value; filter.append(option);
     }
-    filter.value = frames.has('current') ? 'current' : 'all';
+    filter.value = 'all';
     const figures = [];
     for (const [index, image] of evidence.images.entries()) {
       const figure = element('figure');
@@ -376,14 +421,14 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
       link.append(img);
       const metadata = element('details');
       metadata.append(element('summary', '图片来源与校验值'), element('p', `SHA-256 ${image.sha256 ?? '未归档'} · 请求绑定观测 ${image.observationId ?? '未归档'} · 图片源采集 ${image.sourceObservationId ?? '未独立记录，请核对参考类型与原请求'}`, 'evidence-hash'));
-      figure.append(element('figcaption', `${index + 1}. ${image.label}`),
-        element('p', `${modelCallInfo(image).type} 实际输入 · ${image.source}`, 'muted'), link, metadata);
+      metadata.append(element('p', image.source, 'muted'));
+      figure.append(element('figcaption', `${index + 1}. ${image.label}`), link, metadata);
       figure.hidden = filter.value !== 'all' && image.frame !== filter.value;
       figures.push({ figure, frame: image.frame });
       grid.append(figure);
     }
     filter.addEventListener('change', () => { for (const item of figures) item.figure.hidden = filter.value !== 'all' && item.frame !== filter.value; });
-    images.append(element('p', 'C 编号是 SAM3 临时分割候选，多个描述可以指向同一物体；不是永久 ID。R 标签定位时间记忆中的实例。已确认记录按永久 ID 合并，同一物体不会因提示词增加而重复建档。', 'muted'), filter, grid);
+    images.append(element('p', '图片直接读取该次请求归档，按发送顺序显示。图中已有的框、轮廓和编号随图发送给模型。C 标记当前候选，P 标记上次观测实例，历史档案按各请求的标签定义识别。', 'muted'), filter, grid);
     const sam = evidence.segmentation.length ? section(`SAM3 提示与掩码 · ${evidence.segmentation.length} 次`) : element('div');
     sam.append(element('p', 'SAM3 score 是分割模型输出的候选分数，不是身份正确率。掩码 IoU = 两掩码交集像素数 / 并集像素数；它衡量轮廓重合，不证明是同一物体。Decisions 的分类置信度与谓词概率是另一组指标。阈值须用已标注的成功和失败样本校准，不能按一次失败临时降低。', 'muted'));
     for (const query of evidence.segmentation) {

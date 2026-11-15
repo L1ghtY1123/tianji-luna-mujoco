@@ -37,12 +37,25 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def configured_destination(observation, region, *, identifier=DESTINATION_ID, support_id=None):
     """Bind operator XY intent to a currently measured support height."""
+    from scipy.spatial import ConvexHull
+
+    from .placement_region import measured_table_region
+
     center = np.asarray(region["center_world_xy_m"], dtype=float)
     polygon = np.asarray(region["region_polygon_world_xy_m"], dtype=float)
-    floor = float(observation["table"]["surface_height_m"])
     if (center.shape != (2,) or polygon.shape != (4, 2)
-            or not np.isfinite(center).all() or not np.isfinite(polygon).all() or not np.isfinite(floor)):
+            or not np.isfinite(center).all() or not np.isfinite(polygon).all()):
         raise ValueError("invalid_configured_destination")
+    supports = []
+    for table_id in observation.get('demo_tables', {}).get('tables', {}):
+        measured = measured_table_region(observation, table_id)['placement_reference']
+        hull = ConvexHull(np.asarray(measured['region_polygon_world_xy_m']))
+        if np.all(np.vstack((center, polygon)) @ hull.equations[:, :2].T + hull.equations[:, 2] <= 1e-9):
+            supports.append((table_id, measured))
+    if len(supports) != 1:
+        raise ValueError('configured_region_requires_unique_measured_table:' + identifier)
+    support_id, measured = supports[0]
+    floor = measured['floor_z_m']
     precise = {}
     if region.get('precise_xy'):
         tolerance = region.get('xy_tolerance_m')
@@ -59,7 +72,8 @@ def configured_destination(observation, region, *, identifier=DESTINATION_ID, su
         "coverage": {"camera_ids": [], "configured_region": True},
         "placement_reference": {**precise, **constraints, "floor_z_m": floor, "position_world_m": [*center.tolist(), floor],
             "region_polygon_world_xy_m": polygon.tolist(), "region_id": "region:" + identifier,
-            "support_entity_id": support_id or "table", "observation_id": observation["observation_id"],
+            "support_entity_id": support_id, "observation_id": observation["observation_id"],
+            "support_measurement": copy.deepcopy(measured),
             "source": "configured_xy_measured_support"}}
 
 
@@ -265,6 +279,18 @@ class RobotOperations(ProcessingSkills, Runner):
         return await self.capture_observation(context, capture=capture)
 
     async def execute(self, skill, context, arguments=None):
+        from .failure_return import (
+            build_failure_scene,
+            observe_after_failure,
+            prepare_failure_return,
+            return_after_failure,
+        )
+        terminal = {'prepare_failure_return': prepare_failure_return,
+                    'observe_after_failure': observe_after_failure,
+                    'build_failure_scene': build_failure_scene,
+                    'return_after_failure': return_after_failure}
+        if skill in terminal:
+            return await terminal[skill](self, context)
         if skill == 'recover_failed_grasp':
             from .grasp_recovery import recover_failed_grasp
             return await recover_failed_grasp(self, context)
@@ -295,7 +321,9 @@ class RobotOperations(ProcessingSkills, Runner):
         if skill == "observe_scene":
             capture = await self.capture_scene_observation(context, arguments or {})
             self.require_grasp_view(context, capture)
+            resources = await self.call_algorithm(self.algorithms.prepare_observation_memory)
             result = await self.observe(context, checkpoint="initial", capture=capture)
+            result['observation_gpu_memory'] = resources
             context["observation_pose_capture_id"] = result["observation_id"]
             context["observation_pose_reference"] = {
                 key: copy.deepcopy(result[key]) for key in ("observation_id", "time", "arms")}
@@ -384,36 +412,10 @@ class RobotOperations(ProcessingSkills, Runner):
             context.update(post_place_capture=capture, latest_capture=capture)
             self.record_observation(capture, "post_place")
             self.sync_result_evidence(context, "post_place")
-            zone = binding.get('placement_zone', {})
-            if (zone.get('intent', {}).get('release_mode') == 'container_release'
-                    and zone.get('semantic_scope') == 'entire_region'):
-                from ..demo_transfer_verification import container_entry_receipt
-
-                reference = context['release_execution_evidence']['release_reference']
-                receipt = container_entry_receipt(binding, reference, capture)
-                context['container_entry_receipt'] = copy.deepcopy(receipt)
-                previous_scene = self.spatial_memory.scene
-                if not released_target_map_is_current(context, target, collision=self.spatial_memory.collision_snapshot()):
-                    updated_scene = await self.call_algorithm(
-                        self.algorithms.publish_container_occupancy, previous_scene, receipt)
-                    self.check_generation()
-                    self.spatial_memory.accept_container_occupancy(updated_scene, receipt,
-                        previous_scene_token=previous_scene['scene_token'])
-                confirmed = self.task_progress.confirm_container_transfer(target, receipt)
-                if not confirmed:
-                    raise ValueError('container_entry_receipt_binding_changed')
-                result.update(success=True, status='confirmed', verification_scope='operator_container_entry_rule',
-                              container_entry=receipt, reason=None)
-                context['pending_transfer']['verified'] = True
-                context['place_verification'] = result
-                context['verified_release_reference'] = copy.deepcopy(reference)
-                self.state['facts']['table_release_verified'] = False
-                self.state['facts']['scene_available'] = not self.spatial_memory.refresh_required
-                self.emit('container_entry_confirmed', '按用户规则登记入盒并发布容器占据范围', receipt)
-                self.sync_inventory(context)
-                return result
-            after = await self.call_algorithm(self.algorithms.verify_release, capture, binding,
-                context["visual_inventory_reference"], self.state["instruction"])
+            verification_capture = {**capture, 'release_baseline': context.get('pre_place_capture'),
+                                    'released_holding': carried}
+            after = await self.call_algorithm(self.algorithms.verify_release, verification_capture, binding,
+                context["identity_reference"], self.state["instruction"])
             if after.get('observation_assessment', {}).get('needs_observation'):
                 self.emit('visual_transfer_result', 'Decisions：放置核验需要补充观测', after)
                 context['use_retained_scene_for_return'] = True
@@ -434,16 +436,22 @@ class RobotOperations(ProcessingSkills, Runner):
                     or evidence.get("layout_revision") != binding["layout_revision"]
                     or evidence.get("identity_source") != "execution_chain"
                     or evidence.get("source") != "openai_decisions"):
-                raise ValueError("visual_inventory_progress_frame_mismatch")
+                raise ValueError("visual_identity_progress_frame_mismatch")
             confidence = evidence.get("confidence")
-            refused = any(answer.get('type') == 'refusal'
-                and answer.get('name') in evidence.get('primary_required_checks', [])
-                for answer in evidence.get('answers', []))
-            missing_probability = confidence is None and refused and evidence.get('status') != 'at_destination'
-            if not missing_probability and (type(confidence) not in (int, float) or not 0. <= confidence <= 1.
-                    or evidence.get("status") == "at_destination" and confidence < .8):
+            if confidence is not None and (type(confidence) not in (int, float) or not 0. <= confidence <= 1.):
                 raise ValueError("release_verification_result_confidence")
+            if (evidence.get('status') == 'at_destination'
+                    and evidence.get('placement_outcome') not in {'direct_success', 'inferred_success'}):
+                raise ValueError('release_verification_placement_outcome')
             context["post_place_result"] = after
+            released = evidence.get('judgments', {}).get('target_released', 'unknown')
+            if released != 'yes':
+                context['holding'] = {**carried, 'state': 'release_unconfirmed',
+                    'verified': False, 'attached': False, 'release_visual_status': released}
+                self.holding_state = copy.deepcopy(context['holding'])
+            else:
+                context.pop('holding', None)
+                self.holding_state = None
             context["visual_result"] = copy.deepcopy(evidence)
             self.state["visual_result"] = copy.deepcopy(evidence)
             context["post_place_verification_input"] = {
@@ -451,10 +459,40 @@ class RobotOperations(ProcessingSkills, Runner):
                 "visual_observation_id": evidence["observation_id"], "binding_id": binding["binding_id"]}
             self.sync_result_evidence(context, "post_place")
             self.emit("visual_transfer_result", "Decisions 放置结果核验", after)
+            zone = binding.get('placement_zone', {})
+            if (zone.get('intent', {}).get('release_mode') == 'container_release'
+                    and zone.get('semantic_scope') == 'entire_region'
+                    and evidence.get('status') == 'at_destination'):
+                from ..demo_transfer_verification import container_entry_receipt
+
+                reference = context['release_execution_evidence']['release_reference']
+                receipt = container_entry_receipt(binding, reference, capture, evidence)
+                context['container_entry_receipt'] = copy.deepcopy(receipt)
+                previous_scene = self.spatial_memory.scene
+                if not released_target_map_is_current(context, target, collision=self.spatial_memory.collision_snapshot()):
+                    updated_scene = await self.call_algorithm(
+                        self.algorithms.publish_container_occupancy, previous_scene, receipt)
+                    self.check_generation()
+                    self.spatial_memory.accept_container_occupancy(updated_scene, receipt,
+                        previous_scene_token=previous_scene['scene_token'])
+                confirmed = self.task_progress.confirm_container_transfer(target, receipt)
+                if not confirmed:
+                    raise ValueError('container_entry_receipt_binding_changed')
+                result.update(success=True, status='confirmed', verification_scope='visual_container_entry', visual_evidence=evidence,
+                              container_entry=receipt, placement_outcome=evidence['placement_outcome'], reason=None)
+                context['pending_transfer']['verified'] = True
+                context['place_verification'] = result
+                context['verified_release_reference'] = copy.deepcopy(reference)
+                self.state['facts']['table_release_verified'] = False
+                self.state['facts']['scene_available'] = not self.spatial_memory.refresh_required
+                self.emit('container_entry_confirmed', '视觉确认入盒，等待全工作空间重建', receipt)
+                self.sync_memory(context)
+                return result
             confirmed = self.task_progress.confirm_visual_transfer(target, evidence)
             outside = evidence.get('measured_object_position', {}).get('status') == 'outside'
             rejected = evidence.get('status') == 'rejected'
             result.update(success=confirmed, status="confirmed" if confirmed else "failure" if outside or rejected else "unknown",
+                placement_outcome=evidence['placement_outcome'],
                 verification_scope="release_and_visual_destination", visual_evidence=evidence,
                 reason=None if confirmed else "measured_object_outside_placement_region" if outside
                 else "visual_placement_rejected" if rejected
@@ -463,26 +501,31 @@ class RobotOperations(ProcessingSkills, Runner):
             if 'pending_transfer' in context:
                 context['pending_transfer']['verified'] = confirmed
             context["place_verification"] = result
-            context["demo_inventory_check"] = after.get("demo_inventory_check", {})
+            context["demo_objects_check"] = after.get("demo_objects_check", {})
             if confirmed:
                 context['post_place_verification_input'] = table_release_reference(capture, evidence, self.run_id)
                 context['verified_release_reference'] = copy.deepcopy(
                     context['release_execution_evidence']['release_reference']
                     if 'release_execution_evidence' in context else context['place_plan']['goal']['release_reference'])
                 self.state['facts']['table_release_verified'] = (
-                    evidence.get('destination_id') == self.task_inventory.get('work_area_id'))
-                self.sync_inventory(context)
+                    evidence.get('destination_id') == self.task_bindings.get('work_area_id'))
+                self.sync_memory(context)
                 if not carried:
                     raise ValueError("release_geometry_missing")
                 if not released_target_map_is_current(context, target, collision=self.spatial_memory.collision_snapshot()):
                     previous_scene = self.spatial_memory.scene
-                    if previous_scene['scene_token'] == binding['scene_token']:
+                    target_layer = previous_scene.get('collision_layer_bounds', {}).get('layers', {}).get(
+                        'semantic_instance::' + target, {})
+                    if (previous_scene['scene_token'] == binding['scene_token']
+                            and target_layer.get('kind') in {'cuboid', 'mesh'}):
                         updated_scene = await self.call_algorithm(
                             self.algorithms.publish_released_object, previous_scene, target,
                             carried["grasp_support_reference"]["T_world_tcp_at_grasp"],
                             binding['release_tcp'], capture["observation_id"],
                             support_floor_z_m=context["destination"]["placement_reference"]["floor_z_m"])
                     else:
+                        # Measured voxel grids require fresh RGBD after release.
+                        # Retain their occupied cells with explicit stale provenance.
                         updated_scene = await self.call_algorithm(self.algorithms.invalidate_scene_entity,
                             previous_scene, target, result['feedback_id'], source='verified_release_action')
                     self.spatial_memory.replace_geometry(updated_scene, previous_scene_token=previous_scene['scene_token'])
@@ -493,5 +536,3 @@ class RobotOperations(ProcessingSkills, Runner):
                         "source": "verified_release_action", "rgbd_remapped": False})
             return result
         return await super().execute(skill, context, arguments)
-
-

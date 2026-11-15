@@ -16,7 +16,7 @@ def source_presence_request():
 
 
 def completion_expected_status(name):
-    """Remaining input is a presence question: completion requires a confident no."""
+    """Remaining input is a presence question: completion requires a current no."""
     return 'no' if name == 'source_has_remaining_input' else 'yes'
 
 
@@ -25,36 +25,7 @@ def completion_failures(judgments):
             if answer.get('status') != completion_expected_status(name)}
 
 
-COMPLETION_MILESTONE_RULE = (
-    ' Judge past delivery and processing milestones from the matching input/output IDs in '
-    'verified_obligations.objects and transformations, including container_entry, destination_visual_evidence, '
-    'visual_release and creation_evidence. A consumed input need not remain visible or still sit '
-    'at its earlier destination in the final RGB. Use CURRENT images for current physical state, '
-    'and reject contradictory current evidence. Missing or unverified historical receipts remain '
-    'unproven; completed status alone is not evidence. A container_entry with source '
-    'operator_container_release_rule is the operator-authorized delivery receipt after checked '
-    'above-container release. Accept that receipt for the requested entry milestone, including '
-    'occluded or stacked stored contents. It does not claim a measured individual settled pose. '
-    'Apply the same evidence standard to this '
-    'requirement whether it is phrased at aggregate or individual-object scope. '
-    'For aggregate processing/delivery milestones, assess the selected_input_ids and their verified '
-    'lineages. The separate source_has_remaining_input question checks current source closure, '
-    'including additional matching inputs. Do not add a source-closure requirement to a historical '
-    'milestone that does not ask for it. With zero selected inputs, per-input milestones are vacuously '
-    'satisfied and source closure is assessed separately. Do not invent a minimum quantity. '
-    'If the quoted condition explicitly asks about current source '
-    'contents, judge that clause from CURRENT source RGB and the original input selector, consistently '
-    'with source_has_remaining_input. Initial unknown completeness is not current contrary evidence.')
 
-COMPLETION_HISTORY_RULE = (
-    ' INITIAL reference descriptions and images may show old contents; they describe historical '
-    'appearances. Retired entities are confirmed consumed or removed instances; '
-    'their old visible/occluded fields do not assert that they still exist. Assess remaining targets '
-    'within task.source_ref from the union of CURRENT views and the original target_selector. '
-    'Do not substitute the current manipulation target_id (which may be a processing output) for '
-    'that original selector or source. Unknown historical completeness can be resolved by current '
-    'visible evidence; current occlusion or indistinguishable subjects must still remain uncertain. '
-    'Current images cannot prove past action order; use matching verified receipts for past milestones.')
 
 
 def completion_obligations(snapshot, memory):
@@ -79,6 +50,6 @@ def completion_obligations(snapshot, memory):
                 summary[name] = {key: deepcopy(evidence[key]) for key in (
                     'status', 'source', 'identity_source', 'request_hash', 'observation_id', 'generation',
                     'destination_id', 'target_id', 'region_id', 'binding_id',
-                    'reason', 'confidence', 'answers') if key in evidence}
+                    'reason', 'confidence', 'answers', 'placement_outcome') if key in evidence}
         result['objects'].append(summary)
     return result

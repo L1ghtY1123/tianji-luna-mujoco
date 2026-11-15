@@ -8,6 +8,8 @@ import mujoco
 import numpy as np
 import yaml
 
+from .grasp_contact import grasp_contact_links
+
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = "resources/robot/marvin_gui_dual.yml"
 
@@ -34,6 +36,7 @@ def collision_sphere_snapshot(model, live_data, geometry_ids):
     mujoco.mj_fwdPosition(model, data)
     spheres = []
     buffers = config["collision_sphere_buffer"]
+    contact_links = {arm: grasp_contact_links(arm) for arm in ('A', 'B')}
     for link in config["collision_link_names"]:
         body_id = model.body(link).id
         rotation = data.xmat[body_id].reshape(3, 3)
@@ -41,6 +44,7 @@ def collision_sphere_snapshot(model, live_data, geometry_ids):
         for index, sphere in enumerate(config["collision_spheres"][link]):
             center = data.xpos[body_id] + rotation @ np.asarray(sphere["center"])
             spheres.append({"id": f"collision::{link}::{index}", "link": link,
+                            "target_contact_arms": [arm for arm, links in contact_links.items() if link in links],
                             "center_m": center.tolist(), "radius_m": float(sphere["radius"]) + buffer})
     poses = []
     for index in geometry_ids:

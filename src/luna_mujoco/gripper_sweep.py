@@ -15,7 +15,7 @@ def safe_closure_prefix(angles, valid):
     return None if end <= 0 else float(angles[end])
 
 
-def grasp_closure_samples(robot_config, arm, urdf_path, maximum_driver_rad=None):
+def grasp_closure_samples(robot_config, arm, urdf_path, maximum_driver_rad=None, *, sample_step_rad=CLOSURE_SAMPLE_STEP_RAD):
     """Possible stopping positions before object contact, from authored limits."""
     if arm not in {'A', 'B'}:
         raise ValueError('closure preflight requires one arm')
@@ -30,7 +30,9 @@ def grasp_closure_samples(robot_config, arm, urdf_path, maximum_driver_rad=None)
                 or not lower < maximum_driver_rad <= upper):
             raise ValueError('closure limit must be inside authored limits')
         upper = float(maximum_driver_rad)
-    angles = np.linspace(lower, upper, int(np.ceil((upper - lower) / CLOSURE_SAMPLE_STEP_RAD)) + 1)
+    if not np.isfinite(sample_step_rad) or sample_step_rad <= 0:
+        raise ValueError('gripper sample step must be positive')
+    angles = np.linspace(lower, upper, int(np.ceil((upper - lower) / sample_step_rad)) + 1)
     padding = gripper_sweep_padding(robot_config, arm, urdf_path, float(np.diff(angles).max()))
     return angles, padding
 

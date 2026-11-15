@@ -83,15 +83,18 @@ def instance_grid_layout(points, padding_m, *, voxel_size_m=.02, floor_z_m=None)
 
 class InstanceMapper:
     """One mapper/stream per layer; bounded workers, atomic publication after join."""
-    def __init__(self, segmenter, *, max_workers=4, compact_esdf=True, local_frame=True, voxel_size_m=.02):
+    def __init__(self, segmenter, *, max_workers=1, compact_esdf=True, local_frame=True, voxel_size_m=.005,
+                 esdf_voxel_size_m=.05):
         self.segmenter = segmenter
         self.max_workers = max_workers
         self.compact_esdf = compact_esdf
         self.local_frame = local_frame
         self.voxel_size_m = voxel_size_m
+        self.esdf_voxel_size_m = esdf_voxel_size_m
         self.cache = OrderedDict()
         self.grids = []
         self.metrics = {}
+        self.surfaces = {}
 
     def build(self, observations, instances, *, padding_m, table_model, floor_heights_m=None):
         import torch
@@ -100,7 +103,7 @@ class InstanceMapper:
         from tianji_curobo.mixed_esdf_scene import InstanceGeometry
 
         started = time.perf_counter()
-        self.grids, self.metrics = [], {}
+        self.grids, self.metrics, self.surfaces = [], {}, {}
         jobs, owned_inputs = [], []
         producer = torch.cuda.current_stream()
         build_error = None
@@ -114,7 +117,7 @@ class InstanceMapper:
                 points = np.concatenate([np.asarray(value).reshape(-1, 3) for value in points_by_camera.values()])
                 floor = (floor_heights_m or {}).get(name)
                 voxel_size = self.voxel_size_m
-                layout = instance_grid_layout(points, padding_m, voxel_size_m=voxel_size, floor_z_m=floor)
+                layout = instance_grid_layout(points, padding_m, voxel_size_m=self.esdf_voxel_size_m, floor_z_m=floor)
                 observation = self.segmenter.stack_instance_observations(observations, name)
                 center = self.segmenter.device_cfg.to_device(layout['center'])
                 local_table = table_model
@@ -133,7 +136,7 @@ class InstanceMapper:
                 # phase. Key by actual cell counts, not float extent roundoff.
                 origin = (0., 0., 0.) if self.local_frame else tuple(layout['center'])
                 key = (name, origin, voxel_size, tuple(math.ceil(v / voxel_size) for v in tsdf_extent),
-                       tuple(math.ceil(v / voxel_size) for v in esdf_extent), camera_count, int(height), int(width))
+                       tuple(math.ceil(v / self.esdf_voxel_size_m) for v in esdf_extent), camera_count, int(height), int(width))
                 cached = self.cache.pop(key, None)
                 packed_ms = (time.perf_counter() - packed_at) * 1000
                 allocated_at = time.perf_counter()
@@ -141,13 +144,9 @@ class InstanceMapper:
                     # MapperCfg computes ceil(extent / voxel_size). Retain the
                     # input scalar dtype, as in the native adapter: converting
                     # float32 to Python float here can allocate an extra cell.
-                    cfg = MapperCfg(extent_meters_xyz=tsdf_extent,
-                        extent_esdf_meters_xyz=esdf_extent, voxel_size=voxel_size, esdf_voxel_size=voxel_size,
+                    cfg = MapperCfg(extent_meters_xyz=tsdf_extent, extent_esdf_meters_xyz=esdf_extent,
                         grid_center=self.segmenter.device_cfg.to_device(origin),
-                        truncation_distance=.03, minimum_tsdf_weight=.5,
-                        depth_minimum_distance=.05, depth_maximum_distance=3.,
-                        decay_factor=1., frustum_decay_factor=1., enable_static=False,
-                        num_cameras=camera_count, image_height=int(height), image_width=int(width), seeding_method='scatter')
+                        num_cameras=camera_count, image_height=int(height), image_width=int(width))
                     mapper, stream = Mapper(cfg), torch.cuda.Stream()
                 else:
                     mapper, stream = cached
@@ -167,9 +166,8 @@ class InstanceMapper:
                 # The executor waits for every worker even when one result fails.
                 phase_times = [future.result() for future in futures]
             geometries, grids = {}, []
-            for (name, mapper, _stream, _observation, _table, center), measured in zip(jobs, phase_times):
+            for (name, mapper, _stream, _observation, _table, center), (measured, grid) in zip(jobs, phase_times):
                 exported_at = time.perf_counter()
-                grid = mapper.integrator.get_voxel_grid()
                 grid.name = 'semantic_instance::' + name
                 grid.feature_tensor = grid.feature_tensor.clone()
                 centers = mapper.extract_occupied_voxels(surface_only=True).centers
@@ -179,7 +177,8 @@ class InstanceMapper:
                 if not len(centers):
                     raise CuroboToolError('Masked depth produced no integrated surface.', stage='scene',
                         code='mapping_instance_surface_empty', status=422, details={'instance_id': name})
-                surface = surface_geometry_metadata(centers, grid.voxel_size)
+                surface = surface_geometry_metadata(centers, self.voxel_size_m)
+                self.surfaces[name] = centers.detach().cpu().numpy().astype(float).tolist()
                 geometries[name] = InstanceGeometry(grid.name, name, 'voxel',
                     {'pose': list(grid.pose), 'dims': list(grid.dims), 'voxel_size': float(grid.voxel_size),
                      **surface}, self.metrics[name]['input_point_count'], len(surface['centers_base_m']))
@@ -223,16 +222,14 @@ class InstanceMapper:
         with torch.cuda.stream(stream):
             marks = [torch.cuda.Event(enable_timing=True) for _ in range(4)]
             marks[0].record(stream)
-            mapper.integrate(observation)
+            mapper.integrate(camera_observation=observation)
             marks[1].record(stream)
             if table_model is not None:
                 crop_tsdf_to_table(mapper, table_model)
             marks[2].record(stream)
-            # Public advanced API avoids the per-map CPU metadata conversion
-            # inside Mapper.compute_esdf; materialize metadata only after join.
-            mapper.integrator.compute_esdf()
+            grid = mapper.compute_esdf()
             marks[3].record(stream)
             stream.synchronize()
             for index, name in enumerate(('tsdf_gpu_ms', 'table_crop_gpu_ms', 'esdf_gpu_ms')):
                 times[name] = marks[index].elapsed_time(marks[index + 1])
-        return times
+        return times, grid

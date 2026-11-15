@@ -191,7 +191,7 @@ class GripperWidthModel:
             offsets.append(float((pose[:3, :3] @ center + pose[:3, 3]) @ self.normal))
         return offsets[1] - offsets[0]
 
-    def contact_patch_gaps(self, points_tool_m, q):
+    def contact_patch_gaps(self, points_tool_m, q, *, proximity_m=None):
         """Signed gaps only for measured points projected inside finite pad faces."""
         poses, result = self.transforms(q), []
         for link in self.pads:
@@ -202,8 +202,11 @@ class GripperWidthModel:
             projected = points @ basis
             inside = (projected @ equations[:, :2].T + equations[:, 2] <= 1e-9).all(axis=1)
             gaps = points[inside] @ normal
-            result.append({'link': link, 'observed_patch_point_count': int(inside.sum()),
-                'minimum_signed_gap_m': float(gaps.min()) if len(gaps) else None})
+            evidence = {'link': link, 'observed_patch_point_count': int(inside.sum()),
+                'minimum_signed_gap_m': float(gaps.min()) if len(gaps) else None}
+            if proximity_m is not None:
+                evidence['near_surface_point_count'] = int((np.abs(gaps) <= proximity_m).sum())
+            result.append(evidence)
         return result
 
     def width_angle(self, width):

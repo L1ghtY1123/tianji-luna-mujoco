@@ -1,6 +1,6 @@
 {
   "id": "return_to_initial_pose",
-  "description": "Return both empty hands to the actual joint posture recorded at task start, using the current or explicitly authorized retained collision scene. If already there, verify measured joints without movement. This is distinct from the operator observation posture. No implicit observation or completion judgment is inserted. The graph includes this skill when the user requires final return. After release with unconfirmed destination semantics, observation motion requires the original completed release/open-gripper feedback, a current observation collision map containing the released target measured after that release. Obtain this map through graph-selected observe_scene and build_scene before moving. Do not use the retained pre-release map for this case. Destination acceptance remains unknown until verify_place succeeds; movement does not confirm placement.",
+  "description": "Return both empty hands to the actual joint posture recorded at task start, using the current or explicitly authorized retained collision scene. If already there, verify measured joints without movement. This is distinct from the operator observation posture. No implicit observation or completion judgment is inserted. The graph includes this skill when the user requires final return. After release with unconfirmed destination semantics, observation motion requires the original completed release-command and retreat receipt, a current observation collision map containing the released target measured after that release. Obtain this map through graph-selected observe_scene and build_scene before moving. Do not use the retained pre-release map for this case. Destination acceptance remains unknown until verify_place succeeds; movement does not confirm placement.",
   "inputs": [
     "initial_joint_reference",
     "current_robot_feedback",
@@ -32,5 +32,6 @@
     "observation_pose_ready": null,
     "grasp_view_ready": null
   },
-  "retry_safe": true
+  "retry_safe": true,
+  "captures_observation": false
 }

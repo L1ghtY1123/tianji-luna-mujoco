@@ -38,15 +38,3 @@ class PlacementIntent(BaseModel):
         if directional and self.frame is None:
             raise ValueError('placement_direction_requires_frame')
         return self
-
-
-class ResolvePlacementArguments(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
-    preference: Literal['decide', 'clearance', 'reach'] = Field(default='decide', description=(
-        'decide keeps the bound destination ranking preference (clearance by default). Explicit ranking changes only '
-        'candidate order, never the bound spatial relationship, grasp rotation or exact configured XY.'))
-    capture_mode: Literal['reuse_current', 'fresh'] = Field(default='reuse_current', description=(
-        'For candidate-level language checks, fresh explicitly acquires current three-camera RGBD without '
-        'segmentation, CAD registration, scene reconstruction or movement. Geometry remains bound to the '
-        'verified planning scene. Choose fresh after grasp motion invalidates the earlier camera capture. '
-        'Entire-region permission needs no candidate images.'))

@@ -36,5 +36,6 @@
     "views_ready": false,
     "scene_ready": false,
     "at_initial_pose": false
-  }
+  },
+  "captures_observation": false
 }

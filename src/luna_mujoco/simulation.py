@@ -16,6 +16,7 @@ from .geometry import front_tcp_pose, scene_object_rotation
 from .model_builder import ARM_JOINTS, DEFAULT_SCENE, GRIP_DRIVERS, TCP_BODIES, ModelBuilder, normalize_scene
 
 MAX_TRAJECTORY_TRACKING_ERROR_RAD = .03
+JOINT_COMMAND_PERIOD_S = .02
 
 
 class GripperLimitError(ValueError):
@@ -61,6 +62,10 @@ class Trajectory:
     stable_window_s: float = .08
     settle_timeout_s: float = 3.
     stable_since_s: float | None = None
+    times_s: np.ndarray | None = None
+    gripper_events: list = field(default_factory=list)
+    event_receipts: list = field(default_factory=list)
+    control_tick: int = -1
 
 
 def _transform(position, rotation):
@@ -90,6 +95,8 @@ class Simulation:
         self.world_id = str(uuid4())
         self._revision = 1
         self._command_revision = 0
+        self._motion_epoch = 0
+        self._motion_context = threading.local()
         self._confirmed = False
         self._baseline = None
         self._commands = {}
@@ -100,9 +107,9 @@ class Simulation:
         self._sensor_renderer = None
         self._sensor_model = None
         self._latest_capture = None
-        self._latest_preview = None
-        self._preview_started = 0.
-        self._task_capture_pending = 0
+        from .workspace import WorkspaceAtlas
+
+        self._workspace = WorkspaceAtlas()
         self._scene = normalize_scene(DEFAULT_SCENE if scene is None else scene)
         self._model = self._builder.build(self._scene)
         self._data = mujoco.MjData(self._model)
@@ -148,6 +155,33 @@ class Simulation:
         self._desired_v = {arm: np.zeros(7) for arm in ARM_JOINTS}
         self._desired_grip = {arm: float(self._data.qpos[index]) for arm, index in self._grip_q.items()}
 
+    def motion_epoch(self):
+        with self._condition:
+            return self._motion_epoch
+
+    def run_motor(self, epoch, function, *args, **kwargs):
+        """Bind queued motor work to the task's cancellation epoch."""
+        self._motion_context.epoch = epoch
+        try:
+            return function(*args, **kwargs)
+        finally:
+            del self._motion_context.epoch
+
+    def stop_motion(self):
+        with self._condition:
+            self._motion_epoch += 1
+            for command in self._commands.values():
+                command.done = True
+                command.error = 'task_stopped'
+                command.result['gripper_events'] = deepcopy(command.event_receipts)
+            gripper_targets = self._desired_grip.copy()
+            self._hold_current_pose()
+            self._desired_grip = gripper_targets
+            self._apply_motor_controls()
+            self._condition.notify_all()
+            return {'stopped': True, 'generation': self._generation,
+                    'motion_epoch': self._motion_epoch}
+
     def start(self):
         with self._condition:
             if self._closed:
@@ -179,82 +213,52 @@ class Simulation:
             self._sensor_renderer = None
             self._sensor_model = None
 
-    def _render_capture(self, model, data, generation, arms, rgb_only=False):
+    def _render_capture(self, model, data, generation, arms):
         from .cameras import RgbdRenderer, clone_render_model
 
         if self._sensor_model is not model:
             self._close_sensor()
             self._sensor_renderer = RgbdRenderer(clone_render_model(model))
             self._sensor_model = model
-        return self._sensor_renderer.capture(data, generation, arms, rgb_only=rgb_only)
+        return self._sensor_renderer.capture(data, generation, arms)
 
     def capture_rgbd(self):
         """Freeze briefly, render on one GL thread, and reject a superseded frame."""
-        with self._condition:
-            self._task_capture_pending += 1
-        try:
-            with self._sensor_lock:
-                with self._condition:
-                    if self._closed:
-                        raise RuntimeError("simulation has been closed")
-                    model = self._model
-                    data = mujoco.MjData(model)
-                    mujoco.mj_copyData(data, model, self._data)
-                    captured_monotonic_s = time.monotonic()
-                    captured_perf_counter_ns = time.perf_counter_ns()
-                    generation = self._generation
-                    revision = self._revision
-                    arms = self._robot_snapshot()["arms"]
-                    command_revision = self._command_revision
-                    active_commands = list(self._commands)
-                captured = self._sensor_executor.submit(self._render_capture, model, data, generation, arms).result()
-                captured["captured_monotonic_s"] = captured_monotonic_s
-                captured["captured_perf_counter_ns"] = captured_perf_counter_ns
-                captured['command_revision'] = command_revision
-                captured['active_commands'] = active_commands
-                with self._condition:
-                    self._check_generation(generation)
-                    if revision != self._revision:
-                        raise StaleCommandError("geometry changed during RGBD capture")
-                    captured["manifest_revision"] = revision
-                    self._latest_capture = captured
-                return captured
-        finally:
+        with self._sensor_lock:
             with self._condition:
-                self._task_capture_pending -= 1
-
-    def preview_rgb(self):
-        """Demand-driven latest RGB group; busy frames are dropped, never queued."""
-        with self._condition:
-            if self._latest_preview and (self._latest_preview["generation"] != self._generation
-                                         or self._latest_preview.get("manifest_revision") != self._revision):
-                self._latest_preview = None
-            if self._task_capture_pending or time.monotonic() - self._preview_started < .5:
-                return self._latest_preview
-        if not self._sensor_lock.acquire(blocking=False):
-            return self._latest_preview
-        try:
-            with self._condition:
-                if self._closed or self._task_capture_pending:
-                    return self._latest_preview
-                self._preview_started = time.monotonic()
+                if self._closed:
+                    raise RuntimeError("simulation has been closed")
                 model = self._model
                 data = mujoco.MjData(model)
                 mujoco.mj_copyData(data, model, self._data)
                 captured_monotonic_s = time.monotonic()
+                captured_perf_counter_ns = time.perf_counter_ns()
                 generation = self._generation
                 revision = self._revision
-            captured = self._sensor_executor.submit(self._render_capture, model, data, generation, {}, True).result()
+                arms = self._robot_snapshot()["arms"]
+                command_revision = self._command_revision
+                active_commands = list(self._commands)
+            captured = self._sensor_executor.submit(self._render_capture, model, data, generation, arms).result()
+            captured = self._workspace.mask_capture(captured)
             captured["captured_monotonic_s"] = captured_monotonic_s
+            captured["captured_perf_counter_ns"] = captured_perf_counter_ns
+            captured['command_revision'] = command_revision
+            captured['active_commands'] = active_commands
             with self._condition:
                 self._check_generation(generation)
                 if revision != self._revision:
-                    return None
+                    raise StaleCommandError("geometry changed during RGBD capture")
                 captured["manifest_revision"] = revision
-                self._latest_preview = captured
+                self._latest_capture = captured
             return captured
-        finally:
-            self._sensor_lock.release()
+
+    def preview_rgb(self):
+        """Display the last authorized observation without acquiring another frame."""
+        capture = self.latest_rgbd()
+        if capture is None:
+            return None
+        return {**capture, 'preview_frame_id': capture['observation_id'],
+                'source': 'last_graph_observation'}
 
     def latest_rgbd(self):
         with self._condition:
@@ -301,6 +305,8 @@ class Simulation:
             raise RuntimeError("start the simulation before waiting for physics")
 
     def _check_generation(self, generation):
+        if getattr(self._motion_context, 'epoch', self._motion_epoch) != self._motion_epoch:
+            raise StaleCommandError('task_stopped')
         if generation != self._generation:
             raise StaleCommandError("scene generation changed; the old motion request was cancelled")
         self._check_running()
@@ -382,13 +388,28 @@ class Simulation:
             if command.done:
                 continue
             elapsed = float(self._data.time) - command.start_time
-            duration = (len(command.positions) - 1) * command.dt
+            control_tick = int((elapsed + 1e-9) / JOINT_COMMAND_PERIOD_S)
+            if control_tick == command.control_tick:
+                continue
+            command.control_tick = control_tick
+            elapsed = control_tick * JOINT_COMMAND_PERIOD_S
+            times = command.times_s
+            duration = float(times[-1]) if times is not None else (len(command.positions) - 1) * command.dt
+            while command.gripper_events and elapsed >= command.gripper_events[0]['time_s']:
+                event = command.gripper_events.pop(0)
+                lower, upper = self._model.joint(GRIP_DRIVERS[arm]).range
+                self._desired_grip[arm] = float(event.get('maximum_position_rad', upper) if event['closed'] else lower)
+                self._command_revision += 1
+                command.event_receipts.append({**event, 'feedback': self._robot_snapshot()})
             if elapsed < duration:
-                index = min(int(elapsed / command.dt), len(command.positions) - 2)
-                fraction = (elapsed - index * command.dt) / command.dt
+                index = (min(int(elapsed / command.dt), len(command.positions) - 2) if times is None
+                         else min(int(np.searchsorted(times, elapsed, side='right')) - 1, len(times) - 2))
+                start = index * command.dt if times is None else times[index]
+                dt = command.dt if times is None else times[index + 1] - times[index]
+                fraction = (elapsed - start) / dt
                 self._desired_q[arm] = ((1 - fraction) * command.positions[index]
                                         + fraction * command.positions[index + 1])
-                self._desired_v[arm] = (command.positions[index + 1] - command.positions[index]) / command.dt
+                self._desired_v[arm] = (command.positions[index + 1] - command.positions[index]) / dt
                 continue
             self._desired_q[arm] = command.positions[-1].copy()
             self._desired_v[arm] = np.zeros(7)
@@ -404,10 +425,11 @@ class Simulation:
             if command.stable_since_s is not None and stable_duration >= command.stable_window_s:
                 command.done = True
                 command.result = {"arm": arm, "generation": command.generation,
-                                  "duration_s": elapsed, "max_final_error_rad": error,
+                                  "duration_s": elapsed, "joint_command_hz": 50, "max_final_error_rad": error,
                                   "max_tracking_error_rad": command.max_tracking_error_rad,
                                   "stable_duration_s": stable_duration, "final_velocity_rad_s": speed,
-                                  "joints_rad": self._data.qpos[self._arm_q[arm]].tolist()}
+                                  "joints_rad": self._data.qpos[self._arm_q[arm]].tolist(),
+                                  'gripper_events': deepcopy(command.event_receipts)}
             elif elapsed > duration + command.settle_timeout_s:
                 command.done = True
                 command.error = f"arm {arm} failed to track trajectory: final error {error:.4f} rad"
@@ -629,8 +651,7 @@ class Simulation:
                 self._geometries = geometries
                 self._revision += 1
                 self._bind_indices()
-                self._latest_capture = self._latest_preview = None
-                self._preview_started = 0.
+                self._latest_capture = None
                 self._condition.notify_all()
                 return {"kind": "mock_unpack", "source": "mock_vla",
                         "provenance": "authorized_simulation_substitute", "is_visual_evidence": False,
@@ -771,7 +792,8 @@ class Simulation:
             self._condition.notify_all()
             return self._snapshot()
 
-    def execute_trajectory(self, arm, positions_rad, dt, generation, *, execution_settings=None):
+    def execute_trajectory(self, arm, positions_rad, dt, generation, *, execution_settings=None,
+                           times_s=None, gripper_events=None):
         from .planning_settings import PlanningSettings
 
         settings = PlanningSettings.model_validate(execution_settings or {})
@@ -781,8 +803,22 @@ class Simulation:
             raise ValueError("positions_rad must be a nonempty finite N-by-7 array")
         if not np.isfinite(dt) or dt <= 0:
             raise ValueError("trajectory dt must be positive and finite")
+        times = None if times_s is None else np.asarray(times_s, dtype=float)
+        if times is not None and (times.shape != (len(positions),) or not np.isfinite(times).all()
+                                  or times[0] != 0 or np.any(np.diff(times) <= 0)):
+            raise ValueError('invalid_sequence_time_axis')
+        duration = float(times[-1]) if times is not None else (len(positions) - 1) * dt
+        events = deepcopy(gripper_events or [])
+        if any(type(event.get('closed')) is not bool or not 0 <= event.get('time_s', -1) <= duration
+               for event in events) or events != sorted(events, key=lambda event: event['time_s']):
+            raise ValueError('invalid_sequence_gripper_events')
         with self._motion_locks[arm], self._condition:
             self._check_generation(generation)
+            lower_grip, upper_grip = self._model.joint(GRIP_DRIVERS[arm]).range
+            for event in events:
+                limit = event.get('maximum_position_rad', upper_grip)
+                if not np.isfinite(limit) or not lower_grip < limit <= upper_grip:
+                    raise ValueError('sequence_gripper_target_outside_limits')
             if np.max(np.abs(self._data.qpos[self._arm_q[arm]] - positions[0])) > np.deg2rad(.05):
                 raise ValueError("trajectory_start_changed_after_collision_check")
             for index, name in enumerate(ARM_JOINTS[arm]):
@@ -794,9 +830,11 @@ class Simulation:
                 velocity_tolerance_rad_s=settings.motion_stable_velocity_rad_s,
                 stable_window_s=settings.motion_stable_window_s,
                 settle_timeout_s=settings.motion_settle_timeout_s)
+            command.times_s = times
+            command.gripper_events = events
             self._command_revision += 1
             self._commands[arm] = command
-            wall_deadline = time.monotonic() + max(10, (len(positions) * dt + settings.motion_settle_timeout_s) * 4 + 5)
+            wall_deadline = time.monotonic() + max(10, (duration + settings.motion_settle_timeout_s) * 4 + 5)
             try:
                 while not command.done:
                     self._check_generation(generation)

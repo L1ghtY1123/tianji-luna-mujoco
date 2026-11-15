@@ -39,13 +39,6 @@ def _robot_clearance(table, spheres):
     return float(np.min(np.linalg.norm(outside, axis=1) - spheres[:, 3]))
 
 
-def _with_downward_depth(table, depth):
-    model = dict(table.model)
-    model['pose'] = [*model['pose'][:2], table.height_m - depth / 2, *model['pose'][3:]]
-    model['dims'] = [*model['dims'][:2], depth]
-    return replace(table, model=model)
-
-
 class MeasuredTableCache:
     """Freeze measured static support until explicit reset or head calibration change."""
 
@@ -65,7 +58,7 @@ class MeasuredTableCache:
         self.demo_signature = None
 
     def build_demo(self, evidence, spheres, *, hard_clearance_m):
-        """Reuse each initial inventory table; never fit arbitrary background."""
+        """Reuse each initial objects table; never fit arbitrary background."""
         from tianji_curobo.mixed_esdf_scene import TableCompletion
 
         if (not isinstance(evidence, dict) or not evidence.get('source_observation_id')
@@ -75,7 +68,7 @@ class MeasuredTableCache:
         signature = hashlib.sha256(json.dumps(evidence, sort_keys=True, allow_nan=False).encode()).hexdigest()
         if self.demo_tables is not None:
             if signature != self.demo_signature:
-                raise ValueError('demo_table_inventory_changed_requires_reset')
+                raise ValueError('demo_table_objects_changed_requires_reset')
             for table in self.demo_tables.values():
                 if _robot_clearance(table, spheres) < hard_clearance_m - 1e-8:
                     raise ValueError('tabletop_robot_clearance_violated')
@@ -92,26 +85,16 @@ class MeasuredTableCache:
                     or normal.shape != (3,) or not np.isfinite(normal).all()
                     or abs(np.linalg.norm(normal) - 1) > 1e-5 or normal[2] < np.cos(np.deg2rad(5))
                     or abs(pose[2] + dims[2] / 2 - z) > 1e-6
-                    or item.get('source') != 'initial_inventory_ransac_table' or item['inlier_count'] < 100):
+                    or item.get('source') != 'initial_objects_ransac_table' or item['inlier_count'] < 100):
                 raise ValueError('demo_table_evidence_invalid')
             table = TableCompletion(model, z, tuple(item['normal']), int(item['inlier_count']), hard_clearance_m)
             if _robot_clearance(table, spheres) < hard_clearance_m - 1e-8:
-                # Only inferred downward thickness can shrink; measured XY/top stay fixed.
-                low, high = .001, float(dims[2])
-                if _robot_clearance(_with_downward_depth(table, low), spheres) < hard_clearance_m - 1e-8:
-                    raise ValueError('tabletop_robot_clearance_violated')
-                for _ in range(40):
-                    middle = (low + high) / 2
-                    if _robot_clearance(_with_downward_depth(table, middle), spheres) >= hard_clearance_m:
-                        low = middle
-                    else:
-                        high = middle
-                table = _with_downward_depth(table, low)
+                raise ValueError('tabletop_robot_clearance_violated')
             tables[identifier] = table
         self.demo_tables, self.demo_signature = tables, signature
         self.table = tables[evidence['primary_table_id']]
         self.diagnostics = {'cache_hit': False, 'source_observation_id': evidence['source_observation_id'],
-                            'table_ids': list(tables), 'source': 'initial_inventory_ransac_table',
+                            'table_ids': list(tables), 'source': 'initial_objects_ransac_table',
                             'tabletop_voxels': False, 'table_revision': signature[:24]}
         return self.table, {identifier: dict(table.model) for identifier, table in tables.items()}
 

@@ -130,13 +130,13 @@ def validate_capabilities(graph, catalog, *, initial_bindings=(), initial_facts=
                             for binding in sorted(missing)}})
                 contract = argument_contract(catalog[node['skill']], node['arguments'])
                 conflicts = [key for key, expected in contract.get('requires', {}).items()
-                             if key in state and state[key] != expected]
+                             if state.get(key, False) != expected]
                 if initial_facts is not None and conflicts:
                     issue = 'planning_precondition_not_satisfied:' + identifier + ':' + ','.join(sorted(conflicts))
                     issues.append(issue)
                     counterexamples.setdefault(issue, {'error': issue, 'scope': scope['id'], 'node': identifier,
                         'symbolic_path': list(path), 'required': {key: contract['requires'][key] for key in conflicts},
-                        'actual': {key: state[key] for key in conflicts},
+                        'actual': {key: state.get(key, False) for key in conflicts},
                         'fact_dependencies': fact_dependencies(
                             {key: contract['requires'][key] for key in conflicts}, path, all_nodes, catalog)})
                 if missing or initial_facts is not None and conflicts:

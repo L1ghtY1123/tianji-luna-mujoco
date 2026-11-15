@@ -1,6 +1,6 @@
 {
   "id": "identify_target",
-  "description": "Bind an existing permanent instance ID as the current target, including a verified product. Require current associated geometry. Reuse valid confirmed creation/support/transfer evidence; otherwise judge current support. Use a current proposal or a dated remembered relation only as a hypothesis for one current predicate. If explicitly false, exclude that support and ask one different choice among remaining supports; unknown stays unknown. Without a hypothesis, ask one support choice. Show views locating the subject and candidate supports first, retaining all cameras. Supply current candidate CAD/support geometry and separately dated table/history evidence. Source support is not the intended destination. Preserve raw probability/confidence and the factual threshold. This skill does not select CAD, run FoundationPose or generate grasps. Missing current target identity returns unknown with observed_instance_missing_or_ambiguous. A successful observe_scene does not prove this ID is visible. Prefer a graph-authored configured observation return and reobservation when empty hands and a valid motion map can be established; extra wrist viewpoints retain the visual-limitation prerequisite. Unchanged evidence is not retried until yes. Establish source_support_current only from accepted support evidence bound to the current observation. A confirmed historical region alone is not current support evidence. Reuse a same-capture proof without another Decisions request; a new capture requires a current assessment. The permanent ID itself does not change. Support predicates use local A/B image labels mapped to permanent IDs in their structured context. Support judgments display current object identity labels and dated measured table polygons projected with the current calibration. The table's permanent ID and measurement date identify the support reference. Prefer a view locating both subject and support, retain all three current RGB views, and preserve the existing Decisions probability gates. Keep other accepted current instances labelled C for disambiguation, and include one same-capture subject detail using the shared raw-crop presentation.",
+  "description": "Bind the selected permanent instance with current associated geometry. Reuse verified current support or a uniquely measured numerical support. If support remains unresolved, ask one original-RGB/separate-mask choice among the current supports; do not run a predicate followed by another choice. Return unknown or rejected explicitly. New observation invalidates current support proof until re-established. No motion or capture.",
   "requires": {
     "observed": true,
     "recovery_needed": false,
@@ -13,9 +13,9 @@
   "inputs": [
     "target_id",
     "current_observation",
-    "task_inventory"
+    "task_bindings"
   ],
-  "capability": "Bind an existing permanent instance ID as the current target, including a verified transformation product",
+  "capability": "Bind the selected permanent instance with current associated geometry",
   "outputs": [
     "target_selected",
     "execution_or_evidence_record",
@@ -58,11 +58,12 @@
     "unpack_verified": null,
     "cycle_completed": false,
     "destination_is_container": false,
-    "placement_resolved": false,
-    "placement_zone_ready": false
+    "placement_zone_ready": false,
+    "same_arm_transfer_ready": false
   },
   "retry_safe": true,
   "result_bindings": {
     "$current": "target_id"
-  }
+  },
+  "captures_observation": false
 }

@@ -1,10 +1,9 @@
 {
   "id": "select_target",
-  "description": "Select a currently measured eligible input for the compiled task. Read current identities and task-scoped operation history. For a newly registered instance with unresolved task membership, use one Decisions predicate on the input selector and source restriction. Reuse the answer within that capture. Preserve exact-ID, count and requested ordering constraints. For all/count tasks, initial target_refs are candidate references and do not define a closed queue. Historical inventory row order does not define execution order. When several all/count inputs are eligible and no fixed ordering mode applies, one Decisions choice selects the next input from current ID-labelled RGB and measured candidate summaries, preferring exposed grasp surfaces and clearance. Selection is a proposal; downstream numerical planners validate feasibility. A single candidate needs no selection query. Exact-ID and nearest/inventory ordering retain their defined order. Larger candidate sets are compared in bounded single-question batches. An unresolved choice returns unknown. A selected unfinished input keeps its handling obligation and returns failure. Success binds selected_id; follow with identify_target($selected). Require a current observation at configured observation posture. Each completed batch input returns through explicitly authored move_to_observe and fresh observe_scene before selection. For all scope, when no current eligible candidate exists, ask one current-source-presence Decisions question. A confident no returns empty and ends this batch through verify_task_completion. A visible but unlocalized remaining input or uncertain source returns unknown with its evidence. Initial candidates do not fix batch size. For count, requested_quantity_selected returns empty after verified quantity. For exact-ID tasks, missing unfinished requested instances return unknown. Completion reuses source absence only while its capture and action epoch remain current. Selection clears earlier operation bindings, plans and transfer facts while retaining valid measured scene/posture state and object history. This skill does not move, capture or compile a graph. Selection receives measured support and container region geometry alongside candidate measurements, allowing comparison of room around the gripper before selecting an input.",
-  "capability": "Select a current input at observation posture, or verify current source empty for batch termination",
+  "description": "Query current database-backed, observed, unfinished task inputs. Unless the user explicitly orders them, ask one Decisions choice for an easier next grasp using original RGB and optional separate identity masks. Prefer exposed contact surfaces and less obstruction; choose again after each completed object. A sole candidate needs no model choice. Preserve all/count/ids obligations and do not treat an empty candidate query as task success.",
+  "capability": "Query current database-backed, observed, unfinished task inputs",
   "requires": {
     "observed": true,
-    "observation_pose_ready": true,
     "grasp_held": false,
     "recovery_needed": false
   },
@@ -34,7 +33,7 @@
     "target_identity_unresolved",
     "target_selection_unknown",
     "remaining_input_unlocalized",
-    "source_inventory_unknown"
+    "source_objects_unknown"
   ],
   "planning_effects": {
     "target_selected": false,
@@ -62,7 +61,7 @@
     "unpack_verified": null,
     "cycle_completed": false,
     "destination_is_container": false,
-    "placement_resolved": false,
     "placement_zone_ready": false
-  }
+  },
+  "captures_observation": false
 }

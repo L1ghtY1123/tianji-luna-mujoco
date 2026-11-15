@@ -65,13 +65,13 @@ export function createTraceList(container, counter) {
   return function render(events = [], contextEvents = events) {
     const nextSignature = JSON.stringify(events === contextEvents ? events : [events, contextEvents]);
     if (nextSignature === signature) return;
-    signature = nextSignature;
     counter.textContent = events.length;
     if (!events.length) {
       container.replaceChildren();
       const empty = element('div', 'trace-empty');
       empty.append(element('div', 'trace-empty-icon', '⌘'), element('strong', '', '等待第一条指令'), element('p', '', '任务开始后，这里按时间记录 Responses / Decisions、skill 执行、算法计算和系统事件。'));
       container.append(empty);
+      signature = nextSignature;
       return;
     }
     const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
@@ -112,17 +112,31 @@ export function createTraceList(container, counter) {
         const batch = event.data;
         const count = candidateCount(batch.candidate_indices);
         const candidates = ikBatch ? `候选 ${count ?? '—'} 个` : `候选编号 ${candidateIndicesLabel(batch.candidate_indices)}`;
-        text.append(element('p', 'trace-event-note', `批次 ${batch.batch_index} / ${batch.batch_count ?? '—'} · ${candidates} · Arm ${batch.arm ?? '—'}`));
+        const batchTitle = batch.request_index
+          ? `请求 ${batch.request_index} · 候选组 ${batch.candidate_group_index} / ${batch.candidate_group_count}`
+          : `批次 ${batch.batch_index} / ${batch.batch_count ?? '—'}`;
+        text.append(element('p', 'trace-event-note', `${batchTitle} · ${candidates} · Arm ${batch.arm ?? '—'}`));
         if (Number.isFinite(batch.success_count) && event.kind !== 'ik_batch_start') {
           const remaining = ikBatch && count !== null && batch.success_count >= 0 && batch.success_count <= count
             ? ` · 未通过 ${count - batch.success_count} 个` : '';
-          text.append(element('p', 'trace-event-note', `${ikBatch ? '通过' : '成功'} ${batch.success_count} 个${remaining}`));
+          const checked = batch.command_validated_candidate_count;
+          const result = ikBatch ? `通过 ${batch.success_count} 个${remaining}`
+            : Number.isFinite(checked) ? `完整执行检查通过 ${checked} 个 · SDK 求解成功 ${batch.solver_success_count} 个`
+              : `历史 success_count ${batch.success_count} · 执行检查结果见失败明细和最终规划结果`;
+          text.append(element('p', 'trace-event-note', result));
+          const failures = Array.isArray(batch.failures) ? batch.failures : batch.failures?.first ?? [];
+          for (const failure of failures) {
+            text.append(element('p', 'trace-event-note', `候选 ${failure.candidate_index} · ${failure.stage} · ${failure.code ?? failure.status ?? failure.error}`));
+          }
+          if (Number.isFinite(batch.failures?.count) && batch.failures.count > failures.length) {
+            text.append(element('p', 'trace-event-note', `失败明细共 ${batch.failures.count} 条，实时摘要显示前 ${failures.length} 条，完整记录见实验原始数据。`));
+          }
         }
       }
       if (event.kind === 'planning_batch_complete' && event.data?.stopped_early === true) {
         const count = event.data.unplanned_candidate_count;
         const remaining = Number.isFinite(count) ? `；${count} 个候选未规划` : '';
-        text.append(element('p', 'trace-event-note', `已找到最高 score 可行轨迹，停止后续批次${remaining}。`));
+        text.append(element('p', 'trace-event-note', `首条轨迹通过完整执行检查，已停止后续规划${remaining}。`));
       }
       if (event.kind === 'planning_attempt_failed') {
         text.append(element('p', 'trace-event-note', `Arm ${event.data?.arm ?? '—'} 本次规划无解，尚未执行运动；后续行为以实际事件为准。`));
@@ -152,6 +166,7 @@ export function createTraceList(container, counter) {
       return card;
     });
     container.replaceChildren(...cards);
+    signature = nextSignature;
     if (nearBottom) container.scrollTop = container.scrollHeight;
   };
 }

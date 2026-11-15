@@ -42,9 +42,7 @@ class PositionReachability:
             'joint_name': self.tool_frame + '_joint', 'joint_type': 'FIXED',
             'link_name': self.tool_frame, 'parent_link_name': self.parent_frame}
         kin['tool_frames'] = [self.tool_frame]
-        config = InverseKinematicsCfg.create(robot=robot, num_seeds=32, seed_solver_num_seeds=64,
-            max_batch_size=2, self_collision_check=False, scene_model=None,
-            position_tolerance=.005, orientation_tolerance=3.15, random_seed=123)
+        config = InverseKinematicsCfg.create(robot=robot, max_batch_size=2)
         self.solver = InverseKinematics(config)
         self.solver.update_tool_pose_criteria({self.tool_frame: ToolPoseCriteria.track_position()})
 

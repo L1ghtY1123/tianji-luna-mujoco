@@ -300,7 +300,7 @@ def audit_model(config_path, urdf_path=DEFAULT_URDF, poses_path=None):
             "units": "metres and radians unless explicitly named otherwise", "seed": SEED,
             "surface_samples_per_link": SURFACE_SAMPLES, "coverage_tolerance_m": COVERAGE_TOLERANCE_M,
             "sphere_count": sum(value["sphere_count"] for value in links.values()),
-            "self_radius_semantics": "raw + collision_sphere_buffer + self_collision_buffer; pinned SDK 8e734f3",
+            "self_radius_semantics": "raw + collision_sphere_buffer + self_collision_buffer; cuRoboV2-Fast v0.9.0, 42498cf4",
             "lock_joints": config.get("lock_joints", {}), "table": table, "assets": assets, "links": links,
             "poses": [{**pose, **audit_pose(robot, config, pose["joint_positions_rad"], table)} for pose in poses],
             "limitations": ["Measurements are not a cuRobo planning or execution safety proof.",

@@ -4,10 +4,10 @@ import json
 import math
 from copy import deepcopy
 
+from ..core.decisions import predicate_status
 from ..decision_conditions import condition, parse_answers
 from ..observation_requirements import assessment
-from ..visual_api import VisualAPI, VisualInventoryError, merge_decision_evidence
-from ..visual_inventory import image_part
+from ..visual_api import VisualAPI, VisualDecisionError, merge_decision_evidence
 from ..vla_configuration import vla_processing_effect
 from .evidence import (
     _require,
@@ -81,12 +81,9 @@ def unpack_question_payload(capture, before, question, *, target_id, audit_marke
                    before_observation_id=before['observation_id'], target_id=target_id, audit_marker=audit_marker)
     context['processing_effect'] = vla_processing_effect()
     content = [{'type': 'input_text', 'text': json.dumps(context)}]
-    for camera in ('1', '2', '3'):
-        content.extend([
-            {'type': 'input_text', 'text': 'BEFORE UNPACKING, AFTER VERIFIED TABLE RELEASE RGB camera ' + camera},
-            image_part(before['views'][camera]['rgb']),
-            {'type': 'input_text', 'text': 'CURRENT RGB camera ' + camera},
-            image_part(capture['views'][camera]['rgb'])])
+    from ..raw_visual_input import capture_content
+    content.extend(capture_content(before, modalities=('rgb',), role='before_unpacking'))
+    content.extend(capture_content(capture, modalities=('rgb',)))
     return {'model': 'gpt-6-luna', 'input': [{'role': 'user', 'content': content}], 'questions': [deepcopy(question)]}
 
 
@@ -102,7 +99,7 @@ def verify_unpacking(client, capture, *, target_id, release_evidence, action_evi
              and table.get('release_feedback_id') == action_evidence['table_release_feedback_id']
              and table.get('target_id') == target_id and table.get('status') == 'at_destination'
              and table.get('identity_source') == 'execution_chain'
-             and type(confidence) in (int, float) and client.minimum_confidence <= confidence <= 1.
+             and predicate_status(confidence) == 'yes'
              and bool(table.get('request_hash')) and bool(table.get('binding_id')), 'table_release_required')
     validate_table_release_reference(table_release_capture, table_release_reference, capture,
                                      table, action_evidence, owner_id)
@@ -116,7 +113,7 @@ def verify_unpacking(client, capture, *, target_id, release_evidence, action_evi
                                       sort_keys=True).encode()).hexdigest()
     questions = unpack_result_questions()
     def parse(body, evidence):
-        judgments, answers = parse_answers(body, questions, client.minimum_confidence)
+        judgments, answers = parse_answers(body, questions)
         result_answer = next(answer for answer in answers if answer['name'] == 'unpack_result')
         views = {'judgments': {'unpack_result': judgments['unpack_result']},
                  'answers': [deepcopy(result_answer)], 'confidence': result_answer.get('probability'),
@@ -126,7 +123,7 @@ def verify_unpacking(client, capture, *, target_id, release_evidence, action_evi
         # answers without identifying any missing fact. Derive completeness
         # from the required facts; unknown or failed facts still cannot pass.
         observation = assessment(judgments, {'unpack_result': 'yes', 'wrapper_removed': 'yes'},
-                                 capture['observation_id'], require_sufficiency=False)
+                                 capture['observation_id'])
         observation['sufficiency_source'] = 'required_visual_criteria'
         success = observation['status'] == 'confirmed'
         reason = None if success else ('unpack_visual_criteria_' + observation['status'] + ':'
@@ -155,7 +152,7 @@ def verify_unpacking(client, capture, *, target_id, release_evidence, action_evi
         try:
             body, evidence = VisualAPI.request(client, payload, capture, 'verify_unpacking',
                                               lambda body, evidence: (body, evidence))
-        except VisualInventoryError as error:
+        except VisualDecisionError as error:
             error.evidence['completed_questions'] = merge_decision_evidence(records, capture, 'verify_unpacking')
             raise
         answers.extend(body.get('answers', []))

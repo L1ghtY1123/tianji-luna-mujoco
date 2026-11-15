@@ -1,6 +1,6 @@
 {
   "id": "move_to_observe",
-  "description": "Plan and execute an explicit empty-hand dual-arm camera movement against a current observation map or an authorized retained scene. viewpoint=configured returns to the operator observation posture. Prefer this configured return for bounded recovery, followed in the graph by observe_scene, restoration of invalidated prerequisites and retry of the failed checkpoint. Decisions chooses the authored recovery branch; configured return requires no additional visual-limitation question. Empty hands, a valid observation-motion map, joint limits, collisions and execution checks remain required. wrist_tilt_positive/negative offset both sixth joints by +12/-12 degrees and still require one current visual-limitation judgment for the original failed skill and subject. Alternative viewpoints do not satisfy a required configured return and do not certify visibility. Capture at the reached viewpoint, then return control to the graph. Do not repeat an unchanged alternative viewpoint. This skill does not insert observe_scene, verification or retry. A new observation does not prove numerical planning infeasibility or partial motor execution has been repaired. Preserve original failure evidence through intermediate mapping. After release with unconfirmed destination semantics, observation motion requires the original completed release/open-gripper feedback, a current observation collision map containing the released target measured after that release. Obtain this map through graph-selected observe_scene and build_scene before moving. Do not use the retained pre-release map for this case. Destination acceptance remains unknown until verify_place succeeds; movement does not confirm placement.",
+  "description": "Explicitly plan and execute a configured observation pose or declared wrist alternative. For recovery the program must find missing current identity/geometry/image evidence, confirmed empty hands and a genuinely different pose. Failure/low probability alone is insufficient. All world/self collision, map freshness and execution feedback checks remain required. The graph owns subsequent observation.",
   "inputs": [
     "current_robot_feedback",
     "latest_collision_scene",
@@ -16,7 +16,7 @@
     "observation_pose_ready",
     "grasp_view_ready"
   ],
-  "capability": "Plan and execute an explicit empty-hand dual-arm camera movement against a current observation map or an authorized retained scene",
+  "capability": "Explicitly plan and execute a configured observation pose or declared wrist alternative",
   "outputs": [
     "observation_pose_ready",
     "grasp_view_ready",
@@ -66,5 +66,6 @@
       }
     }
   ],
-  "retry_safe": true
+  "retry_safe": true,
+  "captures_observation": false
 }

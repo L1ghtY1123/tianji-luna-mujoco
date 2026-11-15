@@ -1,25 +1,21 @@
 const GROUPS = {
-  shared: ['共享 IK 参数', '机械臂评估与 plan_grasp_batch 共用 IK 参数。IK 优化 seeds 与 LM 初始解 seeds 分别控制优化起点数和初始解生成预算；random seed 是复现随机序列的编号，不是搜索数量。'],
-  planner: ['cuRobo 规划参数', '按当前官方接口支持范围生效：seeds控制搜索预算，max attempts用于普通plan_pose；plan_grasp内部阶段使用官方默认。'],
   grasp: ['抓取 Approach / Lift', '设置抓取候选和接近、抓取、提升的几何条件。'],
-  place: ['放置 Approach / Lift', '设置放置接近与撤离条件。目标来自当前任务绑定；持物几何参与规划，路径仍须通过碰撞与观测覆盖检查。'],
+  place: ['放置区域与三段轨迹', 'XY 为配置正方形中心。Z 按物体最低点高于桌面 10 mm 或容器顶面 100 mm 计算。'],
   vla: ['VLA 输入区域', '设置桌面不可见正方形的中心世界坐标 X/Y 和边长，单位米。放置后用三相机 RGBD 实测物体位置核验区域；VLA 保留既有姿态，并要求双臂到达配置的起始位姿。Responses 会收到这些前提。'],
   filter: ['可见点云过滤（默认关闭）', '只处理 RGBD 实测点；统计或半径过滤不能保证去除密集浮岛。DBSCAN 仅诊断点簇，不按点簇大小或桌面连通性删除障碍。'],
-  observation: ['空手观察位姿 · 只读', 'A、B 臂各 7 个已标定参考关节角，用于计算观察 TCP 目标。校准值在此只读；运行仍须通过碰撞规划与 RGBD 覆盖检查。'],
   attachment: ['持物碰撞球', '允许1–31个球，默认24。覆盖实测及明确标注的尺寸先验补全，保留不确定度和余量；允许与同手夹爪组件接触，继续检查相机支架、上游、异臂和世界。'],
-  verification: ['持物位置判断', '完整闭合命令后比较实测位置与空夹基准；不使用力、电流或驱动状态。'],
-  execution: ['执行时间', 'time_scale 统一作用于抓取与放置轨迹；数值越大，执行越慢。停留时间不乘倍率。'],
+  verification: ['夹爪执行诊断', '位置与速度窗口用于执行稳定性诊断。抓取和放置结果由视觉核验。'],
+  execution: ['执行时间', '轨迹时间按配置倍率伸长，关节目标以 50 Hz 更新，夹爪开合时长单独配置。'],
 };
 
 const CATEGORIES = {
-  common: ['常用', '执行倍率、阶段停留与 VLA 输入位置。修改后需应用，下一次任务使用。'],
-  experimental: ['实验调参', '解锁后可修改求解预算、几何、坐标轴与过滤；当前生效值不会被默认值覆盖。'],
-  system: ['系统只读', '自碰撞状态与机器人观察标定保持当前生效值，网页不提供修改入口。'],
+  common: ['常用', '执行倍率、夹爪开合时长、容器释放区域与 VLA 输入位置。修改后需应用，下一次任务使用。'],
+  experimental: ['模型与观测配置', '按工作台调整几何、持物碰撞球与点云过滤设置。'],
 };
 
 export function planningFieldCategory(name, field) {
   if (name === 'self_collision_check' || field.group === 'observation' || name.startsWith('observation.')) return 'system';
-  return ['execution', 'vla'].includes(field.group) ? 'common' : 'experimental';
+  return ['execution', 'vla'].includes(field.group) || name.startsWith('container_release_') ? 'common' : 'experimental';
 }
 
 function choiceLabel(value, field) {
@@ -43,16 +39,16 @@ export function planningFieldMetadata(name, field) {
   };
   // Verified against the installed, pinned cuRobo SDK. These are interface-specific.
   const officialDefaults = {
-    ik_num_seeds: 'cuRobo batch 官方默认 16；独立 IK 默认 32，本项目显式对齐为 16',
+    ik_num_seeds: 'cuRobo 单问题官方默认 32',
     ik_seed_solver_num_seeds: 'cuRobo LM 官方默认 32',
-    trajopt_num_seeds: 'cuRobo batch 官方默认 2；单任务接口默认 4',
+    trajopt_num_seeds: 'cuRobo 单问题官方默认 4',
     ik_position_threshold_m: 'cuRobo IK 官方默认 5 mm',
     ik_rotation_threshold_rad: 'cuRobo IK 官方默认 0.05 rad（约 2.865°）',
   };
   return {
-    defaultValue: field.default === undefined ? '未由 schema 提供' : `${choiceLabel(field.default, field)}${unit}`,
+    defaultValue: field.default === undefined ? '未由 schema 提供' : `${displayPlanningValue(field.default, field)}${unit}`,
     range: choices ? choices.map(value => choiceLabel(value, field)).join(' / ') : bounds.length ? `${bounds.join('，')}${unit}` : '由后端校验',
-    source: planningFieldCategory(name, field) === 'system' && name !== 'self_collision_check'
+    source: field.official_default ? 'cuRobo v0.9.0 官方默认值' : planningFieldCategory(name, field) === 'system' && name !== 'self_collision_check'
       ? '项目标定 resources/observation_poses.json；范围来自机器人 URDF'
       : `项目 schema · src/luna_mujoco/planning_settings.py${officialDefaults[name] ? `；${officialDefaults[name]}（锁定 SDK）` : '；项目采用值，不代表所有官方接口默认'}`,
     impact: descriptions[name] ?? field.description ?? '应用后供下一次任务使用；Reset 保留已应用值。',
@@ -104,6 +100,7 @@ export function createPlanningSettingsEditor(container, { document: ownerDocumen
     const result = [];
     function visit(name, field) {
       const nested = field.$ref ? schema.$defs?.[field.$ref.split('/').at(-1)] : field;
+      if (field.readOnly || nested?.readOnly || planningFieldCategory(name, field) === 'system') return;
       if (nested?.properties) {
         for (const [childName, childField] of Object.entries(nested.properties)) {
           visit(name ? `${name}.${childName}` : childName, childField);
@@ -157,16 +154,13 @@ export function createPlanningSettingsEditor(container, { document: ownerDocumen
         const fields = element('div', 'planning-grid');
         for (const [name, field] of schemaEntries) {
           if ((field.group ?? 'planner') !== group || planningFieldCategory(name, field) !== categoryName) continue;
-          const readOnly = categoryName === 'system';
           const label = element('label', 'input-field planning-field');
           label.append(element('span', '', `${field.title ?? name}${field.unit ? ` / ${field.unit}` : ''}`));
           const choices = field.type === 'boolean' ? [true, false] : field.enum;
-          const input = element(readOnly ? 'output' : choices ? 'select' : 'input');
+          const input = element(choices ? 'select' : 'input');
           input.name = name;
-          input.disabled = readOnly || (advancedLocked && categoryName === 'experimental');
-          if (readOnly) {
-            input.textContent = choiceLabel(fieldValue(latest.settings, name), field);
-          } else if (choices) {
+          input.disabled = advancedLocked && categoryName === 'experimental';
+          if (choices) {
             for (const value of choices) {
               const text = field.choices?.[String(value)] ?? (value === true ? '启用' : value === false ? '关闭' : String(value));
               const option = element('option', '', text);
@@ -180,8 +174,8 @@ export function createPlanningSettingsEditor(container, { document: ownerDocumen
             if (field.minimum !== undefined) input.min = displayPlanningValue(field.minimum, field);
             if (field.maximum !== undefined) input.max = displayPlanningValue(field.maximum, field);
           }
-          input.value = readOnly ? choiceLabel(fieldValue(latest.settings, name), field) : displayPlanningValue(fieldValue(latest.settings, name), field);
-          if (!readOnly) input.addEventListener('input', () => { dirty = true; onChange(); });
+          input.value = displayPlanningValue(fieldValue(latest.settings, name), field);
+          input.addEventListener('input', () => { dirty = true; onChange(); });
           inputs.set(name, input);
           label.append(input);
           const metadata = planningFieldMetadata(name, field);
@@ -220,7 +214,7 @@ export function createPlanningSettingsEditor(container, { document: ownerDocumen
       advancedLocked = locked;
       for (const [name, field] of schemaEntries) {
         const fieldCategory = planningFieldCategory(name, field);
-        inputs.get(name).disabled = fieldCategory === 'system' || (advancedLocked && fieldCategory === 'experimental');
+        inputs.get(name).disabled = advancedLocked && fieldCategory === 'experimental';
       }
     },
     load(payload) {
@@ -246,12 +240,12 @@ export function createPlanningSettingsEditor(container, { document: ownerDocumen
     read() {
       if (!schema || !revision) throw new Error('算法参数尚未加载，请重新读取。');
       if (conflict) throw new Error('其他页面已更新算法参数，请重新读取后检查。');
-      const values = {};
+      const values = structuredClone(applied);
       for (const [name, field] of schemaEntries) {
         const text = inputs.get(name).value;
         // Preserve untouched SI values before parsing: degree rounding can cross a joint limit.
         const appliedValue = fieldValue(applied, name);
-        const selected = planningFieldCategory(name, field) === 'system' || text === displayPlanningValue(appliedValue, field)
+        const selected = text === displayPlanningValue(appliedValue, field)
           ? appliedValue : parsePlanningValue(text, field);
         setFieldValue(values, name, selected);
       }

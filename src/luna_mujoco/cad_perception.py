@@ -1,21 +1,18 @@
-"""Observed-instance CAD matching and measured validation of pose hypotheses."""
+"""User-declared CAD bindings and measured validation of pose hypotheses."""
 import hashlib
 import json
 import math
 import os
 from copy import deepcopy
 from pathlib import Path
-from typing import Literal, TypedDict
 
 import numpy as np
 import trimesh
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image
 from tianji_foundationpose.contracts import validate_pose
 
 from .cad_paths import cad_resource_root
 from .pose_estimation import CadPoseEstimator
-from .visual_api import VisualInventoryError
-from .visual_inventory import VisualInventory, choice, image_part
 
 RESOURCE_ROOT = Path(__file__).resolve().parents[2] / 'resources'
 
@@ -102,174 +99,30 @@ class CadCatalog:
             return np.asarray(image.convert('RGB')).copy()
 
 
+
+
+
+
+
+
+
+
 def _identity_silhouette(entry):
-    """Depth/table filtering narrows geometry, not the identity-bound RGB subject."""
+    """Keep the original silhouette for numerical FoundationPose input."""
     geometry = np.asarray(entry['mask'], dtype=bool)
     silhouette = np.asarray(entry.get('silhouette_mask', geometry), dtype=bool)
-    if (silhouette.ndim != 2 or silhouette.shape != geometry.shape
-            or np.any(geometry & ~silhouette)):
+    if silhouette.shape != geometry.shape or np.any(geometry & ~silhouette):
         raise ValueError('cad_mask_provenance_invalid')
     return silhouette
 
 
 def _mask_evidence(entry):
-    silhouette = _identity_silhouette(entry)
-    geometry = np.asarray(entry['mask'], dtype=bool)
-    return {'camera_id': entry['camera_id'],
-            'source': 'identity_bound_silhouette' if 'silhouette_mask' in entry else 'provided_geometry_mask',
-            'silhouette_pixels': int(np.count_nonzero(silhouette)),
-            'geometry_pixels': int(np.count_nonzero(geometry)),
-            'geometry_filtered_pixels': int(np.count_nonzero(silhouette & ~geometry)),
+    silhouette, geometry = _identity_silhouette(entry), np.asarray(entry['mask'], dtype=bool)
+    return {'camera_id': entry['camera_id'], 'source': 'identity_bound_silhouette',
+            'silhouette_pixels': int(silhouette.sum()), 'geometry_pixels': int(geometry.sum()),
+            'geometry_filtered_pixels': int((silhouette & ~geometry).sum()),
             'silhouette_sha256': hashlib.sha256(np.ascontiguousarray(silhouette).tobytes()).hexdigest(),
             'geometry_mask_sha256': hashlib.sha256(np.ascontiguousarray(geometry).tobytes()).hexdigest()}
-
-
-def _display_exposure(rgb, mask):
-    """Display-only uniform RGB gain; original RGBD and segmentation stay intact."""
-    level = float(np.quantile(np.max(rgb[mask], axis=1), .95))
-    gain = min(16., max(1., 128. / max(1., level)))
-    exposed = np.clip(np.rint(rgb.astype(float) * gain), 0, 255).astype(np.uint8)
-    return np.where(mask[..., None], exposed, np.full_like(rgb, 96)), gain
-
-
-def _comparison_sheet(rgb, mask, references):
-    """Keep subject/reference roles inside the image seen by the visual model."""
-    if mask.shape != rgb.shape[:2] or not mask.any():
-        raise ValueError('cad_match_mask_invalid')
-    rows, columns = np.nonzero(mask)
-    masked = np.where(mask[..., None], rgb, np.full_like(rgb, 96))
-    crop = masked[rows.min():rows.max() + 1, columns.min():columns.max() + 1]
-    sheet = Image.new('RGB', (768, 260 + 254 * len(references)), 'white')
-    draw = ImageDraw.Draw(sheet)
-
-    def paste(pixels, box):
-        x0, y0, x1, y1 = box
-        tile = ImageOps.contain(Image.fromarray(pixels), (x1 - x0, y1 - y0))
-        sheet.paste(tile, (x0 + (x1 - x0 - tile.width) // 2, y0 + (y1 - y0 - tile.height) // 2))
-
-    paste(rgb, (0, 24, 384, 260))
-    exposed, gain = _display_exposure(rgb, mask)
-    if gain >= 2:
-        exposed_crop = exposed[rows.min():rows.max() + 1, columns.min():columns.max() + 1]
-        paste(crop, (384, 44, 576, 260))
-        paste(exposed_crop, (576, 44, 768, 260))
-        draw.text((394, 25), 'S: RAW RGB', fill='black', font_size=14)
-        draw.text((582, 25), f'S: EXPOSURE x{gain:.2f}', fill='black', font_size=14)
-    else:
-        paste(crop, (384, 44, 768, 260))
-        draw.text((394, 25), 'S: RAW RGB', fill='black', font_size=14)
-    draw.text((8, 6), 'CURRENT SCENE - context only', fill='black', font_size=16)
-    draw.text((394, 6), 'S: CURRENT MASKED SUBJECT', fill='black', font_size=16)
-    for index, (label, preview) in enumerate(references):
-        top = 260 + 254 * index
-        draw.text((8, top + 8), label + ': CAD CATALOG REFERENCE', fill='black', font_size=16)
-        if preview is not None:
-            paste(preview, (0, top + 26, 768, top + 254))
-        else:
-            draw.text((8, top + 40), 'Preview unavailable; description supplied separately',
-                      fill='black', font_size=16)
-    return np.asarray(sheet)
-
-
-class CadCandidateProposal(TypedDict):
-    status: Literal['candidate', 'no_catalog_candidate', 'unknown']
-    asset_id: str | None
-    evidence: dict
-
-
-class CadModelMatcher(VisualInventory):
-    """Retrieve a model proposal for the identity-bound subject before FoundationPose."""
-
-    minimum_confidence = None
-
-    def match(self, capture, group, target, catalog, *, instruction):
-        choices, references, descriptions = {}, [], []
-        for index, record in enumerate(catalog.records.values(), 1):
-            label = 'R' + str(index)
-            choices[label] = {key: record.get(key) for key in ('asset_id', 'source_sha256', 'preview_sha256')}
-            preview = catalog.preview(record) if record.get('preview_sha256') else None
-            references.append((label, preview))
-            geometry = catalog.geometry(record['mesh_key'])
-            descriptions.append({'reference': label, 'display_name': record['display_name'],
-                'asset_id': record['asset_id'], 'segmentation_aliases': record.get('segmentation_aliases', []),
-                'description': record['description'],
-                'canonical_extent_m': np.ptp(geometry['vertices_m'], axis=0).tolist()})
-        points = np.asarray(target['points_world_m'], dtype=float)
-        measured = {**point_cloud_fingerprint(points),
-                    'world_axis_extent_m': np.ptp(points, axis=0).tolist(),
-                    'limitations': 'Partial visible surface only; world-axis extents depend on pose. '
-                                   'Occluded dimensions are lower bounds, not complete object dimensions.'}
-        content = [{'type': 'input_text', 'text': json.dumps({
-            'purpose': 'match_current_mask_to_catalog_model_before_foundationpose',
-            'observation_id': capture['observation_id'],
-            'generation': capture['generation'], 'entity_id': target['id'],
-            'observed_appearance': {key: target[key] for key in (
-                'kind', 'color', 'description', 'appearance_keywords', 'description_provenance') if key in target},
-            'measured_geometry': measured,
-            'sam_query_evidence': [{'camera_id': entry['camera_id'],
-                'queries': list(dict.fromkeys([entry.get('prompt', ''), *entry.get('prompt_proposals', [])]))}
-                for entry in group],
-            'catalog_references': descriptions,
-            'rules': 'Propose at most one plausible CAD candidate for S, the CURRENT MASKED SUBJECT '
-                     'at the upper right of each sheet. Select its CAD model, not its pose or task destination. '
-                      'Use the current visible rigid shape, subject description and measured dimensions. '
-                      'SAM query words may be synonyms, fallback terms or broad classes; they need not '
-                      'equal the catalog display name. Catalog aliases and SAM query evidence help interpret '
-                      'the words, but the CURRENT masked subject determines the asset candidate. '
-                     'Descriptions are entity proposals linked through confirmed identity, not CAD proof. '
-                     'The upper left is CURRENT RGB scene context. R1, R2 and any further R labels below '
-                     'are static CAD CATALOG reference views, not subjects. Gray pixels around S are excluded '
-                     'or occluded regions. RAW RGB preserves the measured colours. An optional EXPOSURE '
-                     'copy shows the SAME pixels multiplied by its labeled uniform RGB gain and clipped '
-                     'to [0,255]; it adds no detail, is not another observation, and is not evidence of '
-                     'the original material colour. Compare visible shape, allowing differences in viewpoint and '
-                     'clipping at the image boundary. All sheets show the same identity-confirmed subject '
-                     'from different cameras. Colour or an appearance label alone does not establish a match. '
-                     'Do not infer hidden dimensions from RGB. Select the matching reference from visible shape '
-                     'and size; FoundationPose estimates its pose separately. Report uncertainty honestly; '
-                     'the chosen asset is a model proposal, not a numerical fit certificate. Choose no_catalog_candidate when the observed '
-                     'subject is visibly inconsistent with all catalog shapes. Choose unknown when evidence '
-                     'is too ambiguous to propose one candidate or to exclude the catalog. Do not force '
-                     'a reference from colour, task goal, or the absence of other choices.'}, ensure_ascii=False)}]
-        for entry in group:
-            camera = entry['camera_id']
-            view = capture['views'][camera]
-            rgb = np.asarray(view['rgb'])
-            mask = _identity_silhouette(entry)
-            content.extend([{'type': 'input_text', 'text': 'CURRENT SUBJECT S, camera ' + camera},
-                            image_part(_comparison_sheet(rgb, mask, references))])
-        question = choice('cad_model', 'Which single CAD reference is a plausible retrieval candidate for S '
-                          '(the CURRENT MASKED SUBJECT in the upper right)? '
-                          'This selects the model for FoundationPose; it does not estimate pose. '
-                          'Choose no_catalog_candidate if all catalog shapes visibly differ, '
-                          'or unknown if retrieval is ambiguous.', list(choices) + ['no_catalog_candidate', 'unknown'])
-        payload = {'model': 'gpt-6-luna', 'input': [{'role': 'user', 'content': content}], 'questions': [question]}
-
-        def parse(body, evidence):
-            answers = body.get('answers')
-            if not isinstance(answers, list) or len(answers) != 1:
-                raise VisualInventoryError('cad_match_invalid_response')
-            answer = answers[0]
-            probability = answer.get('confidence')
-            value = answer.get('choice')
-            if (answer.get('name') != 'cad_model' or answer.get('type') != 'choice'
-                    or type(probability) not in (float, int) or not math.isfinite(probability)
-                    or not 0 <= probability <= 1 or value not in [item['value'] for item in question['choices']]):
-                raise VisualInventoryError('cad_match_invalid_response')
-            status = 'candidate' if value in choices else value
-            asset_id = choices[value]['asset_id'] if status == 'candidate' else None
-            return CadCandidateProposal(status=status, asset_id=asset_id, evidence={
-                    **evidence, 'answers': answers, 'role': 'cad_candidate_proposal', 'cad_confirmed': False,
-                    'known_facts': ['only_the_explicit_choice_is_proposed',
-                                    'current_foundationpose_required_before_cad_publication'],
-                    'diagnostic_checks': [{'name': 'cad_model', 'status': status,
-                        'choice': value, 'reported_confidence': probability,
-                        'confidence_role': 'retrieval_uncertainty_not_physical_fact_acceptance'}],
-                    'catalog_choices': choices,
-                    'camera_ids': list(dict.fromkeys(entry['camera_id'] for entry in group)),
-                    'presentation_version': 'subject_reference_sheet_v2'})
-
-        return self.request(payload, capture, 'match_cad_model', parse)
 
 
 def cad_tolerance_policy(geometry, configured_cap_m):
@@ -292,15 +145,15 @@ def point_cloud_fingerprint(points):
 
 
 class CadGeometryResolver:
-    def __init__(self, catalog, matcher, pose_estimator=None, *, tolerance_m=.015):
-        self.catalog, self.matcher, self.pose_estimator = catalog, matcher, pose_estimator
+    def __init__(self, catalog, pose_estimator=None, *, tolerance_m=.015):
+        self.catalog, self.pose_estimator = catalog, pose_estimator
         self.tolerance_m = tolerance_m
         self.confirmed_models = {}
-        self.unregistered_models = {}
+        self.subject_policy = json.loads((RESOURCE_ROOT / 'cad_subject_policy.json').read_text(encoding='utf-8'))
 
     @classmethod
-    def from_environment(cls, *, audit=None):
-        return cls(CadCatalog.from_file(), CadModelMatcher.from_environment(audit=audit),
+    def from_environment(cls):
+        return cls(CadCatalog.from_file(),
                    tolerance_m=float(os.getenv('LUNA_CAD_RESIDUAL_TOLERANCE_M', '.015')))
 
     def identity_constraints(self, generation):
@@ -325,8 +178,25 @@ class CadGeometryResolver:
                     or view['simulation_generation'] != capture['generation']):
                 raise ValueError('cad_capture_mismatch')
         generation = capture['generation']
+        color = target.get('color', 'unknown').strip().lower()
+        allowed_colors = self.subject_policy['allowed_subject_colors']
+        allowed_kinds = self.subject_policy['allowed_subject_kinds']
+        records = [record for asset_id, record in self.catalog.records.items()
+                   if color in allowed_colors.get(asset_id, [])
+                   and target.get('kind') in allowed_kinds.get(asset_id, [])]
+        cache_key = (generation, target['id'])
+        if not records:
+            self.confirmed_models.pop(cache_key, None)
+            result = deepcopy(target)
+            result.pop('cad', None)
+            result['cad_match'] = {'status': 'not_requested', 'geometry_policy': 'user_declared_tsdf',
+                'evidence': {**deepcopy(self.subject_policy), 'instance_id': target['id'],
+                            'confirmed_identity_color': color},
+                'observation_id': capture['observation_id'], 'generation': generation}
+            return result
         policy = target.get('geometry_policy', {})
-        if policy.get('mode') == 'unknown_obb':
+        # Read the former stored policy name while emitting only TSDF provenance.
+        if policy.get('mode') in {'unknown_tsdf', 'unknown_obb'}:
             quote = policy.get('instruction_quote')
             if (policy.get('source') != 'user_instruction_interpreted_by_responses'
                     or policy.get('instance_id') != target['id'] or not isinstance(quote, str)
@@ -335,64 +205,25 @@ class CadGeometryResolver:
             if (generation, target['id']) in self.confirmed_models:
                 raise ValueError('geometry_policy_conflicts_with_validated_cad')
             result = deepcopy(target)
-            result['cad_match'] = {'status': 'not_requested', 'geometry_policy': 'explicit_unknown_obb',
+            result['cad_match'] = {'status': 'not_requested', 'geometry_policy': 'explicit_unknown_tsdf',
                 'evidence': deepcopy(policy), 'observation_id': capture['observation_id'],
                 'generation': generation, 'identity_source': target.get('identity_source', 'preconfirmed_group')}
             return result
         self.confirmed_models = {key: value for key, value in self.confirmed_models.items()
                                  if key[0] == generation}
-        cache_key = (generation, target['id'])
-        catalog_fingerprint = hashlib.sha256(json.dumps(self.catalog.records, sort_keys=True).encode()).hexdigest()
-        self.unregistered_models = {key: value for key, value in self.unregistered_models.items()
-            if key[0] == generation and value['catalog_fingerprint'] == catalog_fingerprint}
+        if len(records) != 1:
+            raise ValueError('user_declared_cad_binding_ambiguous')
+        record = records[0]
         saved = self.confirmed_models.get(cache_key)
-        unregistered = self.unregistered_models.get(cache_key)
-        if saved and (saved['asset_id'] not in self.catalog.records or
-                      self.catalog.record(saved['asset_id'])['source_sha256'] != saved['source_sha256']):
+        if saved and (saved['asset_id'] != record['asset_id']
+                      or saved['source_sha256'] != record['source_sha256']):
             self.confirmed_models.pop(cache_key)
             saved = None
-        if saved:
-            match = {'status': 'candidate', 'asset_id': saved['asset_id'], 'evidence': deepcopy(saved['evidence'])}
-        elif unregistered:
-            match = {'status': 'no_catalog_candidate', 'asset_id': None,
-                     'evidence': deepcopy(unregistered['evidence'])}
-        else:
-            match = self.matcher.match(capture, group, target, self.catalog, instruction=instruction)
+        match = {'evidence': {**deepcopy(self.subject_policy), 'asset_id': record['asset_id'],
+            'instance_id': target['id'], 'confirmed_identity_color': color,
+            'observation_id': capture['observation_id'], 'generation': generation,
+            'role': 'user_declared_model_binding', 'current_foundationpose_required': True}}
         result = deepcopy(target)
-        if match['status'] == 'unknown':
-            error = ValueError('cad_retrieval_uncertain')
-            error.details = {'status': 'unknown', 'instance_id': target['id'],
-                'observation_id': capture['observation_id'], 'generation': generation,
-                'geometry_policy': 'unresolved_catalog_retrieval', 'match_evidence': match['evidence']}
-            raise error
-        if match['status'] == 'no_catalog_candidate':
-            evidence = match['evidence']
-            answers = evidence.get('answers', [])
-            answer = answers[0] if len(answers) == 1 else {}
-            probability = next((row.get('probability') for row in answer.get('probabilities', [])
-                                if row.get('value') == 'no_catalog_candidate'), None)
-            confidence = answer.get('confidence')
-            # Bind a confident no-catalog judgment to the immutable physical ID,
-            # just as a positive model binding is retained across viewpoints.
-            # Low-confidence retrieval proposals and unknowns remain uncached.
-            if (not unregistered and evidence.get('source') == 'openai_decisions'
-                    and evidence.get('request_hash') and evidence.get('observation_id') == capture['observation_id']
-                    and answer.get('type') == 'choice' and answer.get('choice') == 'no_catalog_candidate'
-                    and type(confidence) in (int, float) and .8 <= confidence <= 1
-                    and type(probability) in (int, float) and .8 <= probability <= 1):
-                self.unregistered_models[cache_key] = {'catalog_fingerprint': catalog_fingerprint,
-                                                        'evidence': deepcopy(evidence)}
-            result['cad_match'] = {'status': 'no_catalog_candidate', 'evidence': deepcopy(evidence),
-                'geometry_policy': 'measured_obb_approximation', 'catalog_fingerprint': catalog_fingerprint,
-                'historical_match_reused': unregistered is not None,
-                'match_source_observation_id': evidence.get('observation_id'),
-                'current_identity_binding': {'entity_id': target['id'], 'observation_id': capture['observation_id'],
-                    'generation': generation, 'source': target.get('identity_source', 'preconfirmed_group'),
-                    'evidence': deepcopy(target.get('identity_evidence', []))}}
-            return result
-        if match['status'] != 'candidate' or match['asset_id'] not in self.catalog.records:
-            raise ValueError('cad_candidate_proposal_invalid')
-        record = self.catalog.record(match['asset_id'])
         geometry = self.catalog.geometry(record['mesh_key'])
         tolerance_policy = cad_tolerance_policy(geometry, self.tolerance_m)
         tolerance_m = tolerance_policy['tolerance_m']

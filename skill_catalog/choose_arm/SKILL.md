@@ -1,11 +1,5 @@
 # choose_arm
 
-Choose among arms permitted by current geometry, measured robot state and offline workspace. Use the sole admissible arm directly; when several remain, Decisions proposes one. This proposal is not proof of grasp IK or trajectory feasibility. Known CAD grasps must come from the selected arm offline library. Do not impose a later processing capability arm on an earlier transfer.
+Qualify one arm whose position workspace contains both the measured source anchor and the estimated release TCP, using visible object height, measured source support and destination table or container rim plus the configured release margin. Recheck the exact release goal with actual grasp TCP feedback during plan_place. No common arm means failure. Pose IK and carried path remain numerical planning requirements. Lock the chosen arm for this transfer; recovery cannot change it. No Decisions or handover.
 
-Inputs, typed arguments, prerequisites, effects and recoverable results are defined in `contract.json` and the registered parameter schema. Responses authors normal and recovery routes; Decisions only selects existing branches. This skill executes only its selected operation. Current policy: `docs/cad-runtime-policy-20261102.md`.
-
-Require unique current measured target and destination geometry before numerical evaluation. Missing current identity/geometry returns unknown with observed_instance_missing_or_ambiguous. A changed viewpoint can leave a previously bound subject unassociated.
-
-Selection performs no physical motion and is retry_safe. A graph-selected recovery may revisit this node after refreshing current evidence and restoring its prerequisites. New arm selection still invalidates placement resolution and planning; generate arm-specific grasps before motion. Physical execute_grasp/execute_place/processing actions do not inherit this repeatability.
-
-选择问题接收同一目标此前的规划/执行失败、尝试臂和数值证据。Decisions 比较当前输入是否改变，并考虑其他合格臂。明确指定臂与数值可行域继续约束选择。
+参数、前提、效果、绑定和结果以同目录 contract.json 为准。所有跨技能恢复显式出现在 graph 中。

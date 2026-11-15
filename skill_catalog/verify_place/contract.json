@@ -1,6 +1,6 @@
 {
   "id": "verify_place",
-  "description": "Verify the bound completed transfer using its mode. For container_release with an entire destination region already authorized, the operator accepts checked release above that container and confirmed gripper opening as entry. Validate held/attachment identity, release endpoint, collision check, scene, generation, region and feedback bindings. Archive a post-release capture and a container_entry receipt with source=operator_container_release_rule and status=assumed_inside. This branch makes no Decisions request. Publish the measured destination container envelope as conservative occupancy for the released instance. Its individual settled pose remains unmeasured. Historical identity and processing lineage remain in temporal memory. A subsequent individual measurement replaces its envelope. The publication can support collision-checked empty-hand return to observation. For surface_setdown or an additional requested landing relationship, use one frozen three-camera RGB capture and one Decisions question per required support/containment or subregion relation. Approximate visual placement is accepted. Preserve unknown, refusal and definite rejection separately. Historical appearance crops use their own bound capture, camera and box. Do not require a visible marker or exact settled XYZ. No SAM3, CAD registration or OBB fitting occurs inside verification. After visual confirmation, publish the execution-based rigid prediction and invalidate individual geometry pending observation. Preserve separately accepted support facts when another required relation is unknown. Verification never moves or replays a transfer. Authored evidence recovery resumes this skill using the original release receipt. A single recovery edge executes directly. Alternatives may use Decisions. Graph authors the batch return and subsequent observe_scene. verify_task_completion separately checks task closure. Success establishes place_verification_completed. table_release_verified is true only for a visually confirmed transfer to the bound intermediate work area. The static null describes this conditional output. The dated confirmed visual region is retained for later identity association. Declare release_mode matching the executed destination binding. surface_setdown preserves incoming map readiness. The false scene_available from execute_place therefore remains false until explicit observation and mapping. A recheck after a current post-release map preserves that valid map. Its continuation must establish a current map before prepare_unpack or movement. container_release specializes those effects to runtime-dependent publication results. A mismatched declared mode is rejected before verification.",
+  "description": "verify_place 复用 object_held 正向题，只发送当前夹持接触区原始分辨率 RGB 与同次夹爪反馈。明确 no 取反为空爪成立，yes/unknown 不允许确认释放。之后 place_result 在 direct_success、inferred_success、failure、unknown 中选择。入盒任务以进入指定盒子为成功，控制台小方框只约束机器人释放位置，不约束盒内最终落点；桌面区域任务仍验收指定桌面区域。推测成功要求已确认持有目标、实际到达配置释放 XYZ（现有位置容差 5 mm）并释放、当前空爪，且没有交付失败的可见反证，不要求一定被遮挡。命令发出不等于实际到达；缺失绑定证据为 unknown，明确落在目的地外为 failure。当前三相机 RGB、释放前 RGB 与日期身份参考用于落点题；仅桌面任务投影 PLACEMENT_REGION。保留原始回答、执行推定身份、placement_outcome 与回执；推测入盒不伪造个体当前位姿，confidence 仅归档。",
   "requires": {
     "needs_place": true,
     "released": true,
@@ -16,15 +16,17 @@
     "target_id",
     "destination_id",
     "initial_visual_reference",
-    "placement_zone"
+    "placement_zone",
+    "same_capture_gripper_feedback"
   ],
-  "capability": "Confirm the bound transfer through the operator container-entry rule or required visual relations",
+  "capability": "Visual empty-gripper check and four-way placement outcome",
   "outputs": [
     "place_verification_completed",
     "execution_or_evidence_record",
     "table_release_verified",
     "scene_available",
-    "observation_motion_scene_ready"
+    "observation_motion_scene_ready",
+    "placement_outcome"
   ],
   "errors": [
     "unknown_or_unbound_entity",
@@ -66,5 +68,6 @@
         "observation_motion_scene_ready": null
       }
     }
-  ]
+  ],
+  "captures_observation": true
 }

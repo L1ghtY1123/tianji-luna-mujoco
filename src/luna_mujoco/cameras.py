@@ -111,15 +111,14 @@ class RgbdRenderer:
         elif self._owner_thread != current:
             raise RuntimeError("RGBD rendering and close must use the owning GL thread")
 
-    def capture(self, data, generation, arms, *, rgb_only=False):
+    def capture(self, data, generation, arms):
         self._check_thread()
         if self._closed:
             raise RuntimeError("RGBD renderer is closed")
         mujoco.mj_copyData(self._data, self.model, data)
         mujoco.mj_forward(self.model, self._data)
         capture_time = float(self._data.time)
-        prefix = "preview" if rgb_only else "rgbd"
-        observation_id = f"{prefix}-{generation}-{uuid.uuid4().hex}"
+        observation_id = f"rgbd-{generation}-{uuid.uuid4().hex}"
         telemetry = deepcopy(arms)
         joints = {arm: np.degrees(feedback["joints_rad"]).tolist() for arm, feedback in telemetry.items()}
         views = {}
@@ -133,9 +132,6 @@ class RgbdRenderer:
             renderer.disable_depth_rendering()
             renderer.update_scene(self._data, camera=CAMERA_NAMES[camera_id], scene_option=self._options)
             rgb = renderer.render().copy()
-            if rgb_only:
-                views[camera_id] = {"rgb": _immutable(rgb), "frame_id": observation_id}
-                continue
             renderer.enable_depth_rendering()
             try:
                 depth = renderer.render().copy()
@@ -152,9 +148,6 @@ class RgbdRenderer:
                 "T_world_camera": camera_pose(self.model, self._data, camera_id).tolist(),
                 "robot_joints_deg": deepcopy(joints), "registered_to": "rgb",
             }
-        if rgb_only:
-            return {"preview_frame_id": observation_id, "generation": generation, "time": capture_time,
-                    "views": views, "source": "rgb_preview"}
         return {"observation_id": observation_id, "generation": generation, "time": capture_time,
                 "arms": telemetry, "views": views, "source": "rgbd"}
 

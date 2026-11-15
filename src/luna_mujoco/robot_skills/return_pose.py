@@ -18,7 +18,7 @@ def release_allows_observation_motion(context, *, collision):
     # or location. Recovery still needs a current post-release obstacle map.
     return bool(target and target == execution.get('target_id') == attempt.get('target_id') == visual.get('target_id')
         and transfer.get('destination_id') == execution.get('destination_id') == visual.get('destination_id')
-        and all(physical.get(key) is True for key in ('success', 'open_confirmed', 'released', 'execution_completed'))
+        and all(physical.get(key) is True for key in ('success', 'release_commanded', 'released', 'execution_completed'))
         and physical.get('feedback_id') and visual.get('release_feedback_id') == physical['feedback_id']
         and scene.get('exclusion_state') == 'observation'
         and released_target_map_is_current(context, target, collision=collision))

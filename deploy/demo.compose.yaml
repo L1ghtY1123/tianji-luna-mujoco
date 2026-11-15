@@ -4,7 +4,7 @@ include:
 services:
   curobo:
     cpus: 1
-    image: jodell-curobo:0.2.0-guangyu
+    image: jodell-curobo:0.3.2-guangyu-curobo-v0.9.0
     pull_policy: never
     container_name: tianji-luna-curobo-guangyu
     gpus: all
@@ -64,7 +64,7 @@ services:
       LUNA_GRASPGEN_URL: http://127.0.0.1:8363
       LUNA_SAM3_URL: http://127.0.0.1:8362
       LUNA_FOUNDATIONPOSE_URL: http://127.0.0.1:8365
-      LUNA_GEOMETRY_MODE: cad_obb
+      LUNA_GEOMETRY_MODE: cad_esdf
       LUNA_CAD_ROOT: /opt/cad
       PYTHONPATH: /opt/jev/src:/opt/tianji-algorithms/services
       TIANJI_ALGORITHMS_ROOT: /opt/tianji-algorithms

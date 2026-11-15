@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import numpy as np
 
+from ..core.decisions import predicate_status
 from ..memory_contracts import ObjectRecord, ProductRegistration
 from ..vla_configuration import vla_processing_effect, vla_unpack_configuration
 from .evidence import unpack_table_support, validate_table_release_reference
@@ -25,12 +26,12 @@ def unpack_product_proposal(input_id, action, result, capture, *, owner_id, sour
             or visual.get('view_scope') != 'fused_current_three_rgb'
             or set(result.get('camera_ids', [])) != {'1', '2', '3'}
             or visual.get('required_judgments') != {'unpack_result': 'yes', 'wrapper_removed': 'yes'}
-            or type(visual.get('confidence')) not in (int, float) or not .8 <= visual['confidence'] <= 1.):
+            or predicate_status(visual.get('confidence')) != 'yes'):
         raise ValueError('product_requires_confirmed_visible_result')
     if source.id != input_id:
         raise ValueError('processing_source_identity_mismatch')
     from ..cameras import deproject_view
-    from ..visual_inventory import array_stamp, mask_box
+    from ..visual_identity import array_stamp, mask_box
 
     camera = measurement.get('camera_id')
     view = capture.get('views', {}).get(camera, {})
@@ -86,7 +87,7 @@ class ProcessingSkills:
                 raise ValueError('unpack_requires_verified_table_release_and_empty_hands')
             pending = {'target_id': release.get('target_id'),
                        'destination_id': release.get('destination_id'), 'verified': True}
-        work_area_id = self.task_inventory.get('work_area_id')
+        work_area_id = self.task_bindings.get('work_area_id')
         if (context.get('holding') or verification.get('success') is not True
                 or release.get('status') != 'at_destination' or release.get('target_id') != target
                 or release.get('destination_id') != work_area_id or not work_area_id
@@ -99,7 +100,7 @@ class ProcessingSkills:
     def _processing_work_area(self, context):
         destination = context.get('destination', {})
         reference = destination.get('placement_reference', {})
-        if destination.get('id') != self.task_inventory.get('work_area_id'):
+        if destination.get('id') != self.task_bindings.get('work_area_id'):
             raise ValueError('unpack_work_area_binding_changed')
         polygon = np.asarray(reference.get('region_polygon_world_xy_m'), float)
         floor = reference.get('floor_z_m')
@@ -114,7 +115,7 @@ class ProcessingSkills:
 
     def _processing_support(self, context):
         observation = context['observation']
-        support_id = (self.task_inventory.get('support_id')
+        support_id = (self.task_bindings.get('support_id')
                       or observation.get('demo_tables', {}).get('primary_table_id'))
         # Output is sampled over the supported tabletop, not the input square.
         # This comes only from measured table evidence, never the effect receipt.
@@ -184,7 +185,7 @@ class ProcessingSkills:
         """Keep the visual client outside the algorithm's archived arguments."""
         from .processing_evidence import verify_unpacking
 
-        return verify_unpacking(self.visual_inventory, capture, **kwargs)
+        return verify_unpacking(self.visual_identity, capture, **kwargs)
 
     async def _prepare_unpack(self, context):
         release = self._verified_processing_release(context)
@@ -239,7 +240,8 @@ class ProcessingSkills:
         step = self.state.get('current_step')
         if step is not None:
             step.setdefault('effect_commands', []).append('vla_unpack')
-        receipt = await asyncio.to_thread(self.unpack_effect.execute, work_area,
+        receipt = await asyncio.to_thread(self.simulation.run_motor, self.motion_epoch,
+            self.unpack_effect.execute, work_area,
             generation=self.state['generation'], target_id=self.state['target_id'], owner_id=self.run_id)
         self.check_generation()
         receipt.update(table_release_feedback_id=release['release_feedback_id'],
@@ -305,14 +307,14 @@ class ProcessingSkills:
             from ..object_memory import restored_object_record
 
             registration = unpack_product_proposal(target, action, result, capture, owner_id=self.run_id,
-                source=restored_object_record(self.world_inventory.get(target)), measurement=measured)
-            self.world_inventory.store_capture(capture)
-            product = self.world_inventory.register_product(registration.event_key, registration.attributes,
+                source=restored_object_record(self.object_database.get(target)), measurement=measured)
+            self.object_database.store_capture(capture)
+            product = self.object_database.register_product(registration.event_key, registration.attributes,
                 reference_masks={measured['camera_id']: measured['mask']})
             product = {**product, 'visual_membership': 'required'}
             # Adopt the committed physical facts before task bookkeeping can fail.
             # Otherwise the failure handler could write an older active input back.
-            self.object_memory.restore(tuple(restored_object_record(self.world_inventory.get(identifier))
+            self.object_memory.restore(tuple(restored_object_record(self.object_database.get(identifier))
                 for identifier in (target, product['id'])))
             support_id = work_area.get('table_id') or work_area.get('support_entity_id')
             if support_id:
@@ -325,7 +327,7 @@ class ProcessingSkills:
             product_record = restored_object_record(physical_product)
             self.object_memory.update(product_record)
             self.task_progress.register_product(product)
-            reference = context['visual_inventory_reference']
+            reference = context['identity_reference']
             reference.setdefault('product_references', {})[product['id']] = {
                 'observation_id': capture['observation_id'], 'generation': capture['generation'],
                 'verification_capture': copy.deepcopy(result['verification_capture']),
@@ -334,7 +336,7 @@ class ProcessingSkills:
                 'before_views': {camera: {'rgb': view['rgb']} for camera, view in before['views'].items()},
                 'views': {camera: {'rgb': view['rgb']} for camera, view in capture['views'].items()}}
             self.state['target_id'] = product['id']
-            self.sync_inventory(context)
+            self.sync_memory(context)
             observation_pose_ready = self.state['facts'].get('observation_pose_ready', False)
             self.reset_transfer(context)
             self.state['target_id'] = product['id']

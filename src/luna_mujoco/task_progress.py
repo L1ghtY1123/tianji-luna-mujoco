@@ -61,7 +61,7 @@ class TaskProgress:
                  requested_count=None, selection_order='explicit'):
         if requested_count is not None and (type(requested_count) is not int or requested_count < 1):
             raise ValueError('invalid_requested_count')
-        if selection_order not in {'inventory', 'explicit'}:
+        if selection_order not in {'visual', 'explicit'}:
             raise ValueError('invalid_selection_order')
         self.requested_count = requested_count
         self.selection_order = selection_order
@@ -77,7 +77,7 @@ class TaskProgress:
         self.failure = None
         self.relevance = {}
         self.ledger_revision = 0
-        self.inventory_initialized = False
+        self.objects_initialized = False
         self.membership = {}
         self.placement_requests = {}
 
@@ -184,8 +184,8 @@ class TaskProgress:
                 initial['measurement_observation_id'] = observation_id
         if self.records != before:
             self.ledger_revision += 1
-        if self.records and self.scope == 'single' and self.selection_order == 'inventory':
-            self.inventory_initialized = True
+        if self.records and self.scope == 'single' and self.selection_order == 'visual':
+            self.objects_initialized = True
 
     def register_entities(self, entities, memberships=None):
         """Initialize task-local records from identity metadata and explicit task membership."""
@@ -204,7 +204,7 @@ class TaskProgress:
                     'initial_parent_kind': parent.get('kind')}}
             self.membership[identifier] = membership
             self.ledger_revision += 1
-        self.inventory_initialized = True
+        self.objects_initialized = True
 
     def fail(self, identifier, stage, code, evidence):
         key = identifier or 'task'
@@ -219,7 +219,7 @@ class TaskProgress:
                         'counts_as_attempt': counted}
 
     def record_release(self, identifier, *, feedback_id, action_id=None):
-        """An open gripper is release evidence, not destination confirmation."""
+        """Record the scheduled release command and await visual destination evidence."""
         if not feedback_id:
             raise ValueError('release_requires_feedback')
         record = self.records[identifier]
@@ -283,7 +283,7 @@ class TaskProgress:
                 'requested_count': self.requested_count, 'selection_order': self.selection_order,
                 'transfer_index': self.transfer_index(),
                 'ledger_revision': self.ledger_revision,
-                'inventory_initialized': self.inventory_initialized,
+                'objects_initialized': self.objects_initialized,
                 'placement_regions': deepcopy(list(self.placement_requests.values())),
                 'objects': deepcopy(sorted(members.values(), key=lambda item: item['id'])),
                 'membership': dict(self.membership), 'unresolved_membership': unresolved,

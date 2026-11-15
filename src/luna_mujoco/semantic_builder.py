@@ -138,7 +138,7 @@ class ProjectSemanticBuilder:
                          and payload.get("mapping_mode", "semantic") == "semantic"))
         if demo_mapping:
             if payload.get('mapping_mode', 'semantic') != 'semantic':
-                raise ValueError('demo_inventory_semantic_mapping_required')
+                raise ValueError('demo_objects_semantic_mapping_required')
             semantic_only = True
         omit_background = semantic_only and self.instance_mapper is not None
         self.mapper.clear_instance_layers()
@@ -203,7 +203,7 @@ class ProjectSemanticBuilder:
                 instance_points.setdefault(name, {})[view.camera_id] = points
         timings["isolated_surfaces"] = (time.perf_counter() - stage) * 1000
         selected = payload["confirmed_instance_id"]
-        if payload.get('scene_policy') in {'head_all_instances', 'all_instances', 'selected_instances', 'demo_inventory'}:
+        if payload.get('scene_policy') in {'head_all_instances', 'all_instances', 'selected_instances', 'demo_objects'}:
             requested_instances = set().union(*(set(view['instance_masks']) for view in payload['views'].values()))
             empty_instances = sorted(name for name in requested_instances
                 if not any(len(points) for points in instance_points.get(name, {}).values()))

@@ -44,7 +44,7 @@ def optimizer_scene(model):
             raise ValueError('planning_mesh_source_mismatch')
         vertices, faces = _mesh(str(path), record['mesh_sha256'])
         # The pinned SDK caches Warp meshes by name, not path. These temporary
-        # SDK cache keys never change the map or the permanent inventory IDs.
+        # SDK cache keys never change the map or the permanent objects IDs.
         optimizer_name = name + '::optimizer::' + record['mesh_sha256']
         del result['mesh'][name]
         result['mesh'][optimizer_name] = {**geometry, 'vertices': vertices, 'faces': faces,

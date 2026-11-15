@@ -1,0 +1,29 @@
+{
+  "id": "prepare_failure_return",
+  "description": "Reserved terminal policy: freeze pending motion while preserving gripper commands, retain the original failure, establish a new motion epoch and classify actual observation-pose/held/empty/map state. Run exactly once after task recoveries are exhausted; never mark the task successful.",
+  "capability": "Reserved terminal policy: freeze pending motion while preserving gripper commands, retain the original failure, establish a new motion epoch and classify actual observation-pose/held/empty/map state. Run exactly once after task recoveries are exhausted; never mark the task successful.",
+  "requires": {},
+  "provides": [
+    "terminal_motion_stopped"
+  ],
+  "inputs": [
+    "terminal_failure_context",
+    "actual_robot_feedback",
+    "database_collision_scene"
+  ],
+  "outputs": [
+    "failure_return_result"
+  ],
+  "outcomes": [
+    "success",
+    "failure",
+    "unknown"
+  ],
+  "result_bindings": {},
+  "invalidates_observation": false,
+  "captures_observation": false,
+  "retry_safe": false,
+  "errors": [
+    "terminal_return_blocked"
+  ]
+}

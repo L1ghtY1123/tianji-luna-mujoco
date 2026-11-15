@@ -12,7 +12,7 @@ def _valid_model_container_bounds(layer, scene, identifier, name):
             ('mesh', 'published_cad_mesh_bounds', 'registered_cad'),
             ('cuboid', 'published_cuboid_bounds', 'observed_obb')}:
         return False
-    record = scene.get('inventory_map', {}).get('entities', {}).get(identifier, {})
+    record = scene.get('object_layers', {}).get('entities', {}).get(identifier, {})
     if (layer.get('instance_id') != identifier or type(layer.get('generation')) is not int
             or layer['generation'] != scene['generation']
             or not isinstance(layer.get('observation_id'), str) or not layer['observation_id']
@@ -59,7 +59,7 @@ def container_occupied_bounds(destination, scene, observation):
             or lower.shape != (3,) or upper.shape != (3,)
             or not np.isfinite(lower).all() or not np.isfinite(upper).all() or np.any(upper <= lower)):
         raise ValueError('drop_requires_complete_enabled_bin_occupancy')
-    evidence = {'source': 'published_inventory_container_occupancy_bounds', 'entity_id': identifier,
+    evidence = {'source': 'published_objects_container_occupancy_bounds', 'entity_id': identifier,
         'scene_token': scene['scene_token'], 'observation_id': scene['observation_id'],
         'generation': scene['generation'], 'layer_name': name, 'layer_names': [name],
         'minimum_world_m': lower.tolist(), 'maximum_world_m': upper.tolist(),
@@ -106,9 +106,13 @@ def container_transport_region(destination, scene, observation):
         polygon = np.asarray(reference['region_polygon_world_xy_m'], float)
     if polygon.ndim != 2 or polygon.shape[1] != 2 or len(polygon) < 3 or not np.isfinite(polygon).all():
         raise ValueError('drop_requires_finite_bin_and_carried_geometry')
-    center = (polygon.min(axis=0) + polygon.max(axis=0)) / 2
+    if reference.get('fixed_xy'):
+        polygon = np.asarray(reference['region_polygon_world_xy_m'], float)
+    center = (np.asarray(reference['position_world_m'][:2], float) if reference.get('fixed_xy')
+              else (polygon.min(axis=0) + polygon.max(axis=0)) / 2)
     return {'center_world_xy_m': center.tolist(), 'target_reference': 'finger_front',
-        'free_placement': True,
+        'free_placement': not reference.get('fixed_xy', False),
+        'fixed_xy': bool(reference.get('fixed_xy')),
         'polygon_world_xy_m': polygon.tolist(), 'source': region_source, 'placement_extent': extent,
         **({'support_provenance': copy.deepcopy(reference['region_measurement'])}
            if region_source.startswith('validated_cad_') else {}),
@@ -117,5 +121,3 @@ def container_transport_region(destination, scene, observation):
         'floor_z_m': float(reference['floor_z_m']),
         'occupied_top_z_m': evidence['maximum_world_m'][2],
         'observation_id': observation['observation_id'], 'occupancy': evidence}
-
-

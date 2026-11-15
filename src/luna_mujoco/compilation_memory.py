@@ -1,5 +1,4 @@
 """Persist compiler counterexamples independently of physical object memory."""
-import hashlib
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -7,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .core.recovery_coverage import observation_recovery_outcomes
+from .evidence_versions import evidence_digest, implementation_manifest
 
 AUTHORING_CONSTRAINTS = {
     'graph_edge_unknown_node': 'Declare every local node before wiring edges. Copy each endpoint from that scope node list.',
@@ -46,22 +46,9 @@ AUTHORING_CONSTRAINTS = {
     'graph_revision_remove_unknown_scope': 'Remove only a currently defined scope. Repair its callers in the same revision.',
 }
 
-SEMANTIC_FIELDS = ('arguments', 'requires', 'provides', 'planning_effects', 'failure_effects',
-                   'failure_preserves', 'outcomes', 'outcome_rules', 'argument_rules', 'result_bindings',
-                   'invalidates_observation', 'retry_safe', 'processing_effect')
-
-
-def catalog_fingerprint(catalog):
-    def semantics(value):
-        if isinstance(value, dict):
-            return {key: semantics(item) for key, item in value.items() if key not in {'description', 'title'}}
-        if isinstance(value, list):
-            return [semantics(item) for item in value]
-        return value
-
-    contracts = {name: {key: semantics(contract[key]) for key in SEMANTIC_FIELDS if key in contract}
-                 for name, contract in catalog.items()}
-    return hashlib.sha256(json.dumps(contracts, sort_keys=True).encode()).hexdigest()
+def catalog_fingerprint(catalog, context=None):
+    return evidence_digest({'catalog': catalog, 'implementation': implementation_manifest(),
+                            'configuration': context or {}})
 
 
 class CompilationMemory:
@@ -69,8 +56,11 @@ class CompilationMemory:
 
     def __init__(self, path):
         self.path = Path(path)
+        self.context = {}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as connection:
+            connection.execute('''CREATE TABLE IF NOT EXISTS evidence_versions (
+                fingerprint TEXT PRIMARY KEY, manifest_json TEXT NOT NULL)''')
             connection.execute('''CREATE TABLE IF NOT EXISTS compilation_failures (
                 request_hash TEXT PRIMARY KEY,
                 catalog_hash TEXT NOT NULL,
@@ -85,6 +75,20 @@ class CompilationMemory:
                 recorded_at TEXT NOT NULL,
                 evidence TEXT NOT NULL
             )''')
+
+    def bind_context(self, context):
+        # A task freezes this before its single Responses call. It contains only
+        # configured policy, never current measurements, IDs or credentials.
+        self.context = json.loads(json.dumps(context, allow_nan=False))
+
+    def _version(self, catalog):
+        fingerprint = catalog_fingerprint(catalog, self.context)
+        manifest = {'catalog': catalog, 'implementation': implementation_manifest(),
+                    'configuration': self.context}
+        with self.connection() as connection:
+            connection.execute('INSERT OR IGNORE INTO evidence_versions VALUES (?, ?)',
+                               (fingerprint, json.dumps(manifest, ensure_ascii=False, allow_nan=False)))
+        return fingerprint
 
     @contextmanager
     def connection(self):
@@ -126,7 +130,7 @@ class CompilationMemory:
             return
         with self.connection() as connection:
             connection.execute('INSERT OR IGNORE INTO compilation_failures VALUES (?, ?, ?, ?, ?, ?)',
-                (request_hash, catalog_fingerprint(catalog), observation_id, datetime.now(UTC).isoformat(),
+                (request_hash, self._version(catalog), observation_id, datetime.now(UTC).isoformat(),
                  source_run, json.dumps(examples, ensure_ascii=False)))
 
     def record_execution_failure(self, *, catalog, run_id, report):
@@ -141,19 +145,22 @@ class CompilationMemory:
             'known_facts': report.get('known_facts', []), 'unknowns': report.get('unknowns', [])}
         with self.connection() as connection:
             connection.execute('INSERT OR IGNORE INTO execution_failures VALUES (?, ?, ?, ?)',
-                (run_id, catalog_fingerprint(catalog), datetime.now(UTC).isoformat(),
+                (run_id, self._version(catalog), datetime.now(UTC).isoformat(),
                  json.dumps(evidence, ensure_ascii=False, allow_nan=False)))
 
     def snapshot(self, catalog):
-        fingerprint = catalog_fingerprint(catalog)
+        fingerprint = self._version(catalog)
         with self.connection() as connection:
             rows = connection.execute('''SELECT request_hash, observation_id, source_run, examples
-                FROM compilation_failures WHERE catalog_hash = ? ORDER BY recorded_at DESC, request_hash''',
+                FROM compilation_failures WHERE catalog_hash = ? ORDER BY recorded_at DESC, request_hash LIMIT 128''',
                 (fingerprint,)).fetchall()
             total = connection.execute('SELECT COUNT(*) FROM compilation_failures').fetchone()[0]
+            matching = connection.execute('SELECT COUNT(*) FROM compilation_failures WHERE catalog_hash=?',
+                                          (fingerprint,)).fetchone()[0]
             executions = connection.execute('''SELECT run_id, evidence FROM execution_failures
-                WHERE catalog_hash=? ORDER BY recorded_at DESC, run_id''', (fingerprint,)).fetchall()
+                WHERE catalog_hash=? ORDER BY recorded_at DESC, run_id LIMIT 128''', (fingerprint,)).fetchall()
         lessons = {}
+        example_signatures = {}
         for request_hash, observation_id, source_run, encoded in rows:
             for example in json.loads(encoded):
                 code = example['code'].removeprefix('Value error, ')
@@ -165,9 +172,24 @@ class CompilationMemory:
                     'constraint': AUTHORING_CONSTRAINTS.get(code, 'Satisfy the current graph schema and registered contracts.'),
                     'examples': []})
                 lesson['occurrences'] += 1
-                if len(lesson['examples']) < 2:
-                    lesson['examples'].append({**example, 'request_hash': request_hash,
-                        'observation_id': observation_id, 'source_run': source_run})
+                distinct_requirement = code in {'planning_precondition_not_satisfied',
+                    'unbound_policy_reference', 'graph_observation_recovery_missing'}
+                counterexample = example.get('counterexample', {})
+                signature = json.dumps({'skill': example.get('skill'),
+                    'legacy_condition': (example['error'].split(':', 2)[-1]
+                        if not counterexample and code != 'graph_observation_recovery_missing' else None),
+                    **{key: counterexample.get(key) for key in ('required', 'actual', 'required_bindings')}},
+                    sort_keys=True)
+                seen = example_signatures.setdefault(code, set())
+                if (distinct_requirement and signature not in seen and len(lesson['examples']) < 8
+                        or not distinct_requirement and len(lesson['examples']) < 2):
+                    seen.add(signature)
+                    retained = {**example, 'request_hash': request_hash,
+                        'observation_id': observation_id, 'source_run': source_run}
+                    if counterexample:
+                        retained['counterexample'] = {key: value for key, value in counterexample.items()
+                            if key != 'symbolic_path'}
+                    lesson['examples'].append(retained)
         execution_lessons = {}
         for run_id, encoded in executions:
             evidence = json.loads(encoded)
@@ -178,8 +200,12 @@ class CompilationMemory:
             if len(lesson['examples']) < 2:
                 lesson['examples'].append({'source_run': run_id, **evidence})
         return {'source': 'persisted_compiler_validation_failures', 'graph_version': 2,
-                'catalog_hash': fingerprint, 'matching_failed_requests': len(rows),
-                'excluded_other_contract_requests': total - len(rows),
+                'catalog_hash': fingerprint, 'matching_failed_requests': matching,
+                'selection': {'policy': 'same_implementation_contracts_and_configuration_recent_128',
+                    'retained_requests': len(rows), 'omitted_matching_requests': matching - len(rows),
+                    'max_examples_per_error': 8},
+                'implementation_sha256': implementation_manifest()['implementation_sha256'],
+                'excluded_other_version_requests': total - matching,
                 'execution_failures': {'matching_runs': len(executions),
                     'use': 'Historical terminal skill failures. Inspect relevant prerequisites and authored '
                            'recovery routes. Historical IDs and measurements are not current scene facts. '

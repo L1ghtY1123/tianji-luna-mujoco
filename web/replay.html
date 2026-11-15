@@ -38,16 +38,16 @@
             <div id="experiment-errors" class="inline-error" hidden></div>
             <details class="archive-management"><summary>实验管理与下载</summary>
             <form id="rename-form" class="name-form"><label for="experiment-name">实验名称</label><input id="experiment-name" maxlength="200" placeholder="未命名实验" /><button id="save-experiment" class="button primary" type="submit">保存名称</button><button id="discard-experiment" class="button danger" type="button" hidden>删除实验</button></form>
-            <div class="export-links"><a id="review-export" class="button" download>下载审阅 ZIP</a><a id="full-export" class="button" download>下载完整 ZIP</a><span class="muted">审阅包含视频与 JSON；大型数组和采样文件见完整包。</span></div>
+            <div class="export-links"><a id="review-export" class="button" download>下载审阅 ZIP</a><a id="full-export" class="button" download>下载完整 ZIP</a><span class="muted">审阅包包含视频与 JSON，完整包另含深度、掩码、点云和轨迹数组。</span></div>
             </details>
           </section>
           <section class="replay-view panel">
             <div class="tabs" role="tablist" aria-label="回放视图">
               <button id="tab-graph" role="tab" aria-controls="view-graph" aria-selected="true" data-view="graph">graph</button>
-              <button id="tab-inventory" role="tab" aria-controls="view-inventory" aria-selected="false" data-view="inventory" tabindex="-1">时间记忆数据库</button>
               <button id="tab-video" role="tab" aria-controls="view-video" aria-selected="false" data-view="video" tabindex="-1">视频</button>
-              <button id="tab-observations" role="tab" aria-controls="view-observations" aria-selected="false" data-view="observations" tabindex="-1">观测图</button>
-              <button id="tab-collision" role="tab" aria-controls="view-collision" aria-selected="false" data-view="collision" tabindex="-1">空间记忆</button>
+              <button id="tab-observations" role="tab" aria-controls="view-observations" aria-selected="false" data-view="observations" tabindex="-1">decisions</button>
+              <button id="tab-visual" role="tab" aria-controls="view-visual" aria-selected="false" data-view="visual" tabindex="-1">数据库</button>
+              <button id="tab-collision" role="tab" aria-controls="view-collision" aria-selected="false" data-view="collision" tabindex="-1">碰撞场景</button>
               <button id="tab-data" role="tab" aria-controls="view-data" aria-selected="false" data-view="data" tabindex="-1">原始数据</button>
             </div>
             <div id="replay-timeline" class="timeline">
@@ -60,21 +60,15 @@
                 <figure class="video-card"><figcaption><strong>主场景</strong><span id="scene-time" class="video-time">00:00:00.000</span></figcaption><div class="video-frame"><video id="scene-video" preload="auto" muted playsinline aria-label="主场景录制视频"></video><p id="scene-video-message" class="video-message">尚未载入视频</p></div><p id="scene-video-status" class="muted"></p></figure>
                 <figure class="video-card cameras-card"><figcaption><strong>三相机 · 左腕 / 头部 / 右腕</strong><span id="cameras-time" class="video-time">00:00:00.000</span></figcaption><div class="video-frame"><video id="cameras-video" preload="auto" muted playsinline aria-label="三相机水平拼接录制视频"></video><p id="cameras-video-message" class="video-message">尚未载入视频</p></div><p id="cameras-video-status" class="muted"></p></figure>
               </div>
-              <p class="view-note muted">两路视频共用任务时间轴。录制采样时刻、缺帧和编码详情可在「数据」中的 video-metadata.json 查看。</p>
+              <p class="view-note muted">两路视频共用任务时间轴。录制时间范围、缺帧与编码信息可在「原始数据」中的 video-metadata.json 查看。</p>
             </section>
             <section id="view-observations" class="tab-view" role="tabpanel" aria-labelledby="tab-observations" hidden>
-              <div class="section-heading"><h2>观测时刻</h2><span id="observation-count" class="badge">0 帧</span><button id="responses-reference" class="button">Responses 初始参考框</button></div>
-              <p class="view-note muted">按实际拍摄顺序列出，名称来自采集用途和关联技能。同一画面用于多次判断时仍只列一次；下方分别说明模型使用记录与图像标注。</p>
+              <div class="section-heading"><h2>Decisions</h2><span id="observation-count" class="badge">0 次请求</span></div>
               <label class="search-label" for="observation-select">选择观测时刻</label>
-              <div class="observation-controls"><select id="observation-select" disabled aria-label="选择观测帧与标注版本"></select><button id="observation-seek" class="button" disabled>定位任务时间</button></div>
-              <p id="observation-meta" class="view-note muted" aria-live="polite">本次实验未保存观测标注图。</p>
-              <details class="observation-use"><summary>采集用途与模型使用记录</summary>
-                <p id="observation-source" class="view-note muted"></p>
-                <p id="observation-analysis" class="view-note"></p>
-              </details>
-              <div class="annotation-revisions"><label for="observation-revision">同一画面的图像版本</label><select id="observation-revision"></select><p id="observation-reuse-note" class="inline-warning" hidden></p></div>
-              <div id="observation-cameras" class="observation-grid"></div>
-              <div id="observation-artifacts" class="artifact-links"></div>
+              <div class="observation-controls"><select id="observation-select" disabled aria-label="选择 Decisions 使用的观测"></select><button id="observation-seek" class="button" disabled>定位任务时间</button></div>
+              <p id="observation-meta" class="view-note muted" aria-live="polite"></p>
+              <label for="observation-model-call">Decisions 请求</label><select id="observation-model-call"></select>
+              <div id="observation-model-evidence" class="node-evidence" aria-live="polite"></div>
             </section>
             <section id="view-graph" class="tab-view" role="tabpanel" aria-labelledby="tab-graph" hidden>
               <section class="policy-panel">
@@ -89,16 +83,16 @@
               </div>
               </details>
             </section>
-            <section id="view-inventory" class="tab-view" role="tabpanel" aria-labelledby="tab-inventory" hidden>
+            <section id="view-visual" class="tab-view" role="tabpanel" aria-labelledby="tab-visual" hidden>
               <div class="section-heading"><h2>时间记忆数据库</h2></div>
               <p class="view-note muted">查看已提交的实例身份、观测、操作历史和输入／产物关系。</p>
-              <div id="inventory-origin" class="inventory-origin"></div>
-              <label class="search-label" for="inventory-snapshot">查看记忆时刻</label><select id="inventory-snapshot"></select>
-              <div id="inventory-board"></div>
-              <details class="legacy-inventory"><summary>任务结束时的原始记录</summary><section id="replay-object-list" class="object-list" hidden></section></details>
+              <div id="objects-origin" class="objects-origin"></div>
+              <label class="search-label" for="objects-snapshot">查看记忆时刻</label><select id="objects-snapshot"></select>
+              <div id="objects-board"></div>
+              <details class="legacy-objects"><summary>任务结束时的原始记录</summary><section id="replay-object-list" class="object-list" hidden></section></details>
             </section>
             <section id="view-collision" class="tab-view" role="tabpanel" aria-labelledby="tab-collision" hidden>
-              <h2>空间记忆</h2>
+              <h2>碰撞场景</h2>
           <p class="muted">拖动旋转，滚轮缩放；物体名称与颜色见下方图例。</p>
               <label for="collision-stage">选择碰撞几何版本</label><select id="collision-stage"></select>
               <p id="collision-status" class="muted" role="status"></p>
@@ -114,14 +108,6 @@
         </div>
       </section>
     </main>
-    <dialog id="observation-dialog" class="observation-dialog" aria-labelledby="observation-image-title">
-      <div class="section-heading"><h2 id="observation-image-title">观测图</h2><button id="observation-close" class="button">关闭</button></div>
-      <p id="observation-image-meta" class="muted"></p>
-      <div class="observation-image-controls actions"><button id="observation-raw" class="button" aria-pressed="true">实际采集 RGB</button><button id="observation-annotated" class="button" aria-pressed="false">程序结果叠加（非模型输入）</button><button id="observation-zoom-out" class="button" aria-label="缩小观测图">− 缩小</button><output id="observation-zoom-label">100%</output><button id="observation-zoom-in" class="button" aria-label="放大观测图">＋ 放大</button><button id="observation-zoom-fit" class="button">适合宽度</button><a id="observation-open-file" class="button" target="_blank" rel="noopener">打开归档叠加图 ↗</a></div>
-      <p id="observation-image-status" class="muted" role="status"></p>
-      <div id="observation-image-models" class="actions"></div>
-      <div class="observation-image-viewport"><img id="observation-image" alt="所选观测图" /></div>
-    </dialog>
     <dialog id="discard-dialog"><form method="dialog"><h2>删除所选实验？</h2><p id="discard-name"></p><p>该实验会从列表移入实验存储目录的 .trash 回收区，包含视频与原始数据。文件继续保留，可从本地回收区恢复。</p><div class="actions"><button class="button" value="cancel">保留记录</button><button class="button danger" value="discard">确认移入回收区</button></div></form></dialog>
     <dialog id="batch-discard-dialog" aria-labelledby="batch-discard-title"><form method="dialog"><h2 id="batch-discard-title">批量删除实验？</h2><p id="batch-discard-count"></p><ul id="batch-discard-names"></ul><p>所选实验会移入本地回收区，视频与原始数据仍保留。正在录制、编码或下载的记录不会删除。</p><div class="actions"><button class="button" value="cancel" autofocus>取消</button><button class="button danger" value="discard">确认删除所选</button></div></form></dialog>
     <script type="module" src="/src/replay.js"></script>

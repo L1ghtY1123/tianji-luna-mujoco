@@ -52,6 +52,8 @@ export function createCollisionSphereLayer() {
     { maximumRadiusM: Infinity, detail: 15, mesh: null, supportedRadiusM: 0 },
   ];
   let opacity = .65;
+  let contactArm = null;
+  let lastPayload = null;
   const position = new THREE.Vector3();
   const quaternion = new THREE.Quaternion();
   const scale = new THREE.Vector3();
@@ -71,6 +73,7 @@ export function createCollisionSphereLayer() {
     object,
     update(payload) {
       validateCollisionSpheres(payload);
+      lastPayload = payload;
       const spheresByGroup = groups.map(() => []);
       for (const sphere of payload.spheres) {
         const index = groups.findIndex(group => sphere.radius_m <= group.maximumRadiusM);
@@ -90,7 +93,7 @@ export function createCollisionSphereLayer() {
           group.supportedRadiusM = supportedRadiusM;
           group.mesh = new THREE.InstancedMesh(
             geometry,
-            new THREE.MeshStandardMaterial({ color: 0x5ac8ff, transparent: true, opacity, depthWrite: false, roughness: .56 }),
+            new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity, depthWrite: false, roughness: .56 }),
             spheres.length,
           );
           object.add(group.mesh);
@@ -101,10 +104,16 @@ export function createCollisionSphereLayer() {
           // The backend already applies the original YAML link buffer exactly once.
           scale.setScalar(sphere.radius_m);
           mesh.setMatrixAt(index, matrix.compose(position, quaternion, scale));
+          mesh.setColorAt(index, new THREE.Color(sphere.target_contact_arms?.includes(contactArm) ? 0xffa62b : 0x5ac8ff));
         });
         mesh.instanceMatrix.needsUpdate = true;
+        mesh.instanceColor.needsUpdate = true;
         mesh.computeBoundingSphere();
       });
+    },
+    setContactArm(arm) {
+      contactArm = arm;
+      if (lastPayload) this.update(lastPayload);
     },
     setOpacity(value) {
       opacity = value;

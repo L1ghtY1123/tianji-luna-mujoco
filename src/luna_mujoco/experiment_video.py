@@ -278,7 +278,28 @@ class VideoRecorder:
                 status = "partial"
             self._result = {**encoded, "video_status": status, "errors": errors,
                             "duration_s": duration, "streams": self._stats}
+            if all(kind in encoded.get('videos', {}) for kind in ('scene', 'cameras')):
+                try:
+                    self._discard_encoding_inputs()
+                except OSError as error:
+                    self._result['errors'].append('encoding_input_cleanup:' + type(error).__name__)
             return self._result
+
+    def _discard_encoding_inputs(self):
+        """Keep completed videos and their metadata after both encodes succeed."""
+        root = self.directory.resolve()
+        frames = root / 'videos' / 'camera_frames'
+        if not frames.is_symlink() and frames.is_dir() and frames.resolve().is_relative_to(root):
+            for path in frames.glob('*.jpg'):
+                path.unlink()
+            if not any(frames.iterdir()):
+                frames.rmdir()
+        for name in ('frames.jsonl.gz', 'videos/camera_frames.jsonl', 'videos/recording.json',
+                     'videos/result.json', 'videos/encoding.log', 'videos/scene.ffmpeg.log',
+                     'videos/cameras.ffmpeg.log'):
+            path = root / name
+            if path.resolve().is_relative_to(root) and not path.is_symlink():
+                path.unlink(missing_ok=True)
 
 
 def encode_videos(directory):

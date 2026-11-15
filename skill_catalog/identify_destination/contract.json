@@ -1,6 +1,6 @@
 {
   "id": "identify_destination",
-  "description": "Bind the destination and explicit release_mode for this transfer before grasp generation. surface_setdown gently releases near a support; container_release releases above an open container rim only when task semantics permit dropping. Geometry and the operator setting determine height, never model coordinates. Rebinding invalidates old grasp/placement plans. Bind an observed support/container or an operator-configured work area for the current transfer. Preserve the original location requirement. A designated/set/configured area means the workbench setting and uses its exact XY; do not search for or visually invent a marker. A normal table/container permits region-based placement. Intermediate destinations need explicit semantic permission. This does not choose a collision-free XYZ or plan a path. Missing current destination identity returns unknown with observed_instance_missing_or_ambiguous. Author a bounded observation recovery when its prerequisites can be established. Retained valid collision layers can support an observation-map update before changing viewpoint. The recovery returns to destination binding and does not replay completed manipulation. When checking semantic permission for a reference outside the declared destinations, supply selected placement mode plus both task work-area/final-destination references, their configurations and current measurements. A different reference name alone does not prove a different physical location.",
+  "description": "Bind a current measured destination, fixed operator region and explicit release mode. TaskSpec final destination, work area and allowed_intermediate_refs are compiled permission; do not ask Decisions for language interpretation at runtime. Unlisted staging destinations are rejected. Preserve configured TCP XY and grasp rotation; numerical measured support provides Z. Rebinding invalidates dependent plans. Missing current destination identity can return unknown for graph-declared observation repair. Support regions require surface_setdown. Containers require container_release at the configured TCP height above the measured rim. Gentle placement on a container floor is unsupported.",
   "inputs": [
     "destination_id",
     "target_id",
@@ -18,7 +18,7 @@
     "destination_selected",
     "destination_ready"
   ],
-  "capability": "Bind an observed support/container or an operator-configured work area for the current transfer",
+  "capability": "Bind a current measured destination, fixed operator region and explicit release mode",
   "outputs": [
     "destination_selected",
     "destination_ready",
@@ -36,7 +36,9 @@
     "missing_measurement_or_evidence",
     "service_or_execution_failure",
     "destination_kind_mismatch",
-    "container_release_requires_container"
+    "container_release_requires_container",
+    "observed_instance_missing_or_ambiguous",
+    "container_requires_container_release"
   ],
   "invalidates_observation": false,
   "planning_effects": {
@@ -49,7 +51,7 @@
     "arms_evaluated": false,
     "destination_is_container": null,
     "placement_zone_ready": false,
-    "placement_resolved": false
+    "same_arm_transfer_ready": false
   },
   "argument_rules": [
     {
@@ -89,5 +91,6 @@
       }
     }
   ],
-  "retry_safe": true
+  "retry_safe": true,
+  "captures_observation": false
 }

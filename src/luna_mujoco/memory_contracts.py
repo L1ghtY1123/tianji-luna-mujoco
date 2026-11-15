@@ -28,7 +28,7 @@ class ObjectRetirement(MemoryData):
 class ObjectMotionReceipt(MemoryData):
     entity_id: ObjectId
     # holding_confirmed remains readable in historical receipts, not emitted by current execution.
-    kind: Literal['lift_started', 'gripper_load_feedback', 'release_opened', 'holding_confirmed']
+    kind: Literal['lift_started', 'gripper_load_feedback', 'release_opened', 'release_commanded', 'holding_confirmed']
     arm: Literal['A', 'B']
     generation: int
     feedback_time_s: float
@@ -63,6 +63,7 @@ class ObjectRecord(MemoryData):
     visual_visibility: str | None = None
     observation_id: str | None = None
     last_position_measurement: PositionMeasurement | None = None
+    geometry_reference: dict[str, JsonValue] | None = None
     observed_support: dict[str, JsonValue] | None = None
     current_region: str | None = None
     confirmed_observation_id: str | None = None
@@ -133,26 +134,15 @@ class ProductRegistration(MemoryData):
 
 
 class CollisionUpdate(MemoryData):
-    requested_scope: Literal['global', 'local']
-    mapping_entity_ids: tuple[ObjectId, ...] = ()
+    requested_scope: Literal['global']
     strategy_source: str = Field(min_length=1)
     scope_reason: str = Field(min_length=1)
-
-    @model_validator(mode='after')
-    def coherent_scope(self):
-        if self.requested_scope == 'local' and not self.mapping_entity_ids:
-            raise ValueError('local_mapping_requires_object_entities')
-        if self.requested_scope == 'global' and self.mapping_entity_ids:
-            raise ValueError('global_mapping_has_no_selected_subset')
-        return self
-
 
 class CollisionLifecycle(MemoryData):
     required_entity_ids: tuple[ObjectId, ...] = ()
     invalidated_entity_ids: tuple[ObjectId, ...] = ()
     retired_entity_ids: tuple[ObjectId, ...] = ()
-    requested_scope: Literal['global', 'local'] | None = None
-    mapping_entity_ids: tuple[ObjectId, ...] = ()
+    requested_scope: Literal['global'] | None = None
     strategy_source: str | None = None
     scope_reason: str | None = None
     workspace_bounds: tuple[Vector3, Vector3] | None = None

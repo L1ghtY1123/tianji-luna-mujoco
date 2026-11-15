@@ -1,6 +1,6 @@
 {
   "id": "execute_grasp",
-  "description": "Execute the selected current approach/grasp trajectory, close the gripper, validate actual closure/start/collision state, then execute the planned lift. The first lift has no object attachment. Preserve partial physical effects on failure; never replay them as an ordinary retry. Prepare the execution-layer carrying collision model after successful lift and mechanical feedback checks. No visual holding judgment is requested. Record gripper events only as robot action evidence, never as object identity, location or processing state. Before lift, mark the prior current location as no longer guaranteed. Visual object location and processing checks remain separate. Gripper settling uses the full position-range and time-weighted RMS velocity window; a timeout includes measured window statistics. On failure expose recovery_needed=true; only the explicit recover_failed_grasp skill can reconcile confirmed empty-grasp failures. Decisions selects the authored bounded branch. MotionPlanBinding binds target, destination, arm, generation, observation, scene and settings; execution checks it before physical commands. During grasp descent and closure, the executing Link3 fingers and Link4 linkage may contact the selected target. Contact-link/environment, peer-arm, other-link/target and self-collision checks retain their configured clearance. Gripper joint-limit violations retain actual position, command, authored limits and settling statistics in failure evidence.",
+  "description": "Execute the bound approach, grasp, closure and Lift sequence with the detached grasp-planning robot and open-gripper model. Validate the actual sequence, closure limits, selected-target contact links, environment, peer arm and self-collision. Retain provisional holding evidence after Lift. verify_grasp confirms holding and inherits the confirmed target ID from the bound continuous execution before attachment. GraspGen TCP +Z is prefiltered to the world +X forward / -Z downward sector with a configurable lateral angle limit, default 30 degrees. Grasp Lift follows world +Z for 150 mm. Numerical endpoint orientation and sampled Lift FK checks enforce these constraints before execution.",
   "requires": {
     "plan_ready": true,
     "arm_selected": true,
@@ -17,7 +17,7 @@
     "collision_scene",
     "planning_settings"
   ],
-  "capability": "Execute the selected current approach/grasp trajectory, close the gripper, validate actual closure/start/collision state, then execute the planned lift",
+  "capability": "Execute the prechecked approach/grasp/lift sequence with scheduled closure, then await graph visual verification",
   "outputs": [
     "lifted",
     "execution_or_evidence_record"
@@ -29,7 +29,6 @@
     "missing_measurement_or_evidence",
     "service_or_execution_failure",
     "gripper_stability_timeout",
-    "grasp_not_held_after_lift",
     "gripper_position_outside_authored_limits"
   ],
   "invalidates_observation": true,
@@ -42,5 +41,6 @@
     "recovery_needed": true,
     "plan_ready": false,
     "observed": false
-  }
+  },
+  "captures_observation": false
 }

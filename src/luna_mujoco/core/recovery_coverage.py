@@ -12,10 +12,11 @@ def observation_recovery_outcomes(contract):
 
 
 def missing_observation_recovery(graph, catalog):
-    """Normal empty-hand identity/support checkpoints offer an observation route.
+    """Normal empty-hand identity/support checkpoints offer a fresh observation route.
 
     Follow explicit subgraph returns so a caller may own the recovery. Retry-only
     nodes are excluded: their failed result may terminate without another retry.
+    A fresh in-place capture qualifies; movement also invalidates reused captures.
     Ordinary capability validation separately checks whether every step is legal.
     """
     if not {'move_to_observe', 'observe_scene'} <= catalog.keys():
@@ -69,7 +70,8 @@ def missing_observation_recovery(graph, catalog):
             else:
                 if node['skill'] == 'move_to_observe':
                     moved = True
-                if moved and node['skill'] == 'observe_scene':
+                if (node['skill'] == 'observe_scene'
+                        and (moved or node.get('arguments', {}).get('capture_mode') == 'fresh')):
                     return True
                 outcomes = {'success'}
             pending.extend((scope, e['target'], stack, moved)

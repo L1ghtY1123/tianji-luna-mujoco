@@ -18,6 +18,8 @@
         <div class="sphere-summary"><strong id="sphere-count">正在读取碰撞球…</strong><span id="sphere-status" role="status" aria-live="polite">连接中</span></div>
         <div class="sphere-actions"><button id="toggle-follow" class="button secondary" type="button" aria-pressed="false">暂停跟随</button><button id="refresh-spheres" class="button secondary" type="button">刷新快照</button></div>
         <div class="sphere-display-options">
+          <label>抓取接触策略预览 <select id="contact-arm"><option value="A">A 臂</option><option value="B">B 臂</option></select></label>
+          <span id="contact-count"></span>
           <label><input id="show-spheres" type="checkbox" checked />显示碰撞球</label>
           <label><input id="show-meshes" type="checkbox" checked />显示场景网格</label>
           <label class="sphere-opacity-label" for="sphere-opacity">球不透明度 <output id="sphere-opacity-value" for="sphere-opacity">65%</output><input id="sphere-opacity" type="range" min="20" max="100" value="65" step="5" /></label>
@@ -29,7 +31,7 @@
         <div class="viewport-bottom"><span>左键旋转 · 右键平移 · 滚轮缩放</span><button id="home-view" class="view-button" type="button">⌖ 默认视角</button></div>
         <div class="axis-legend"><span class="axis-x">X</span><span class="axis-y">Y</span><span class="axis-z">Z↑</span></div>
       </section>
-      <footer class="sphere-notes"><p>蓝色球来自当前 YAML 碰撞配置，半径包含该 link 的 buffer。此页面用于核对几何覆盖；显示开夹爪副本，不改变主场景。</p><p id="sphere-source">正在读取配置来源…</p></footer>
+      <footer class="sphere-notes"><p>橙色为所选臂 Link3、Link4 球。官方 plan_grasp 在 IK 选姿、插入及抬升阶段临时停用这些 link；执行前校验仅豁免当前目标接触，并检查盒壁等环境物体。蓝色为其余球，半径包含 link buffer。此处预览张开夹爪的策略配置。</p><p id="sphere-source">正在读取配置来源…</p></footer>
     </main>
     <script type="module" src="/src/collision-sphere-page.js"></script>
   </body>

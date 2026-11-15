@@ -1,4 +1,4 @@
-"""Execute explicit edges and inventory-owned scopes, without changing model-authored topology."""
+"""Execute explicit edges and objects-owned scopes, without changing model-authored topology."""
 from copy import deepcopy
 
 from ..core.decisions import GraphDecisionRequest, GraphDecisionResult
@@ -39,7 +39,8 @@ class NativeGraphExecutor(ExecutionState):
                 raise ValueError('policy_execution_budget_exceeded')
             node = next(node for node in scope['nodes'] if node['id'] == identifier)
             self.event('policy_node_started', 'node 开始', {'subgraph_id': scope['id'], 'node_id': identifier,
-                'input_id': scope.get('input_id'), 'author': 'responses'})
+                'input_id': scope.get('input_id'),
+                'author': 'program' if scope['id'] == 'terminal_failure_return' else 'responses'})
             kind = node['type']
             if kind == 'skill':
                 # Distinct authored calls may reuse a physical operation. A loop
@@ -89,7 +90,7 @@ class NativeGraphExecutor(ExecutionState):
                                 if item['id'] == edge['target']), 'remaining_traversals': max(0,
                                 edge['max_traversals'] - traversals.get(edge['id'], 0))}
                                 for edge in scope['edges'] if edge['source'] == identifier]
-                request = GraphDecisionRequest(condition=node['condition'], bindings=deepcopy(self.bindings),
+                request = GraphDecisionRequest(condition=node['condition'], rule=node.get('rule', 'visual'), bindings=deepcopy(self.bindings),
                     choices=choices, branches=deepcopy(branches), last_result=deepcopy(self.last_result),
                     last_failure=deepcopy(self.last_failure))
                 judgment = await self.judge(request)

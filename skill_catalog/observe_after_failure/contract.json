@@ -1,0 +1,32 @@
+{
+  "id": "observe_after_failure",
+  "description": "Reserved terminal observation at stopped joints. Use Decisions alone to determine current holding. A visual no permits clearing provisional holding and sensing geometry for empty-hand return. Carrying return requires a previously verified current attachment. Unresolved holding or identity stops terminal motion. 持物和空爪题先对当前腕部 RGB 做任务目标外观提示的 SAM3 分割，将工作空间内候选的 C 编号、框和轮廓叠加到 RGB。候选不绑定永久 ID，Decisions 同时检查未标注的可见材料。SAM3 无匹配或服务错误保留原 RGB 交 Decisions，分割结果不能直接决定持物或空爪。历史参考保持原采集角色；没有有效的既有持物与 attachment 绑定时，失败收尾不猜测持物身份。当前默认不增加独立掩码图或深度图。失败收尾对两腕执行同样的候选标注。 持物与空爪题的 state 同时提供当前采集的夹爪反馈，实测归一化闭合程度与全闭目标命令分别标注。0 表示机械全开，1 表示机械全闭，该值不是夹持力。实际全开判未持物；动作结束后未全开且未全闭判持物；全闭不能单凭位置判断，要看 CURRENT 两指之间是否有材料，包含薄物、形变和深色物体。张开或闭合命令仅表示动作意图。实测归一化位置距机械端点 0.02 以内归为对应端点，其余归为 partially_closed。最终由 Decisions 综合图像与反馈判断，程序不做夹爪状态或运算。缺失或无效反馈明确标为不可用。持物身份保留原连续执行绑定的推定来源；夹爪反馈用于持物和空爪题。",
+  "capability": "Reserved terminal observation at stopped joints. Use Decisions alone to determine current holding. A visual no permits clearing provisional holding and sensing geometry for empty-hand return. Carrying return requires a previously verified current attachment. Unresolved holding or identity stops terminal motion.",
+  "requires": {
+    "terminal_motion_stopped": true
+  },
+  "provides": [
+    "terminal_failure_observed"
+  ],
+  "inputs": [
+    "terminal_failure_context",
+    "actual_robot_feedback",
+    "database_collision_scene",
+    "same_capture_gripper_feedback"
+  ],
+  "outputs": [
+    "failure_return_result"
+  ],
+  "outcomes": [
+    "success",
+    "failure",
+    "unknown"
+  ],
+  "result_bindings": {},
+  "invalidates_observation": false,
+  "captures_observation": true,
+  "retry_safe": false,
+  "errors": [
+    "terminal_return_blocked"
+  ]
+}

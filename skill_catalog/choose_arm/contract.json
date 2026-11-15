@@ -1,24 +1,28 @@
 {
   "id": "choose_arm",
-  "description": "Choose among arms permitted by current geometry, measured robot state and offline workspace. Use the sole admissible arm directly; when several remain, Decisions proposes one. This proposal is not proof of grasp IK or trajectory feasibility. Known CAD grasps must come from the selected arm offline library. Do not impose a later processing capability arm on an earlier transfer. Require a unique current measured target and the bound destination when present. Missing current identity/geometry returns unknown with observed_instance_missing_or_ambiguous before numerical evaluation. A changed viewpoint can leave a previously bound subject unassociated, so recovery may need to re-establish its current evidence. Selection performs no physical motion and is retry_safe; a graph-authored recovery may revisit it with current evidence and valid preconditions. Regenerate arm-specific grasps after changing the selected arm. The selection question includes a dated numerical failure for the same target when available. Compare the previously attempted arm and rejected inputs with current evidence, considering another eligible arm when the inputs have not improved. A new capture ID alone does not establish improvement. Preserve explicit arm constraints.",
+  "description": "Qualify one arm whose position workspace contains both the measured source anchor and the estimated release TCP, using visible object height, measured source support and destination table or container rim plus the configured release margin. Recheck the exact release goal with actual grasp TCP feedback during plan_place. No common arm means failure. Pose IK and carried path remain numerical planning requirements. Lock the chosen arm for this transfer; recovery cannot change it. No Decisions or handover.",
   "inputs": [
     "arm",
     "target_id",
     "destination_id",
     "current_observation",
     "workspace_evaluations",
-    "previous_same_target_failure"
+    "previous_same_target_failure",
+    "current_collision_scene",
+    "planning_settings"
   ],
   "requires": {
     "target_selected": true,
     "destination_selected": true,
-    "grasp_completed": false
+    "grasp_completed": false,
+    "scene_available": true
   },
   "provides": [
     "arm_selected",
-    "arms_evaluated"
+    "arms_evaluated",
+    "same_arm_transfer_ready"
   ],
-  "capability": "Choose among arms permitted by current geometry, measured robot state and offline workspace",
+  "capability": "Qualify one arm whose position workspace contains both the measured source anchor and the estimated release TCP, using visible object height, measured source support and destination table or container rim plus the configured release margin. Recheck the exact release goal with actual grasp TCP feedback during plan_place",
   "outputs": [
     "arm_selected",
     "arms_evaluated",
@@ -35,7 +39,7 @@
   "invalidates_observation": false,
   "retry_safe": true,
   "planning_effects": {
-    "placement_resolved": false,
     "place_plan_ready": false
-  }
+  },
+  "captures_observation": false
 }

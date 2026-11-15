@@ -1,6 +1,6 @@
 {
   "id": "generate_grasps",
-  "description": "Preserve the destination-bound release_mode in grasp candidate screening. Container release endpoints use the same rim and operator gap as later placement; support placement uses its support plane. Generate candidates for the bound target and selected arm. Known CAD loads that arm offline grasps in the source CAD frame and transforms them through the current FoundationPose pose; it does not call GraspGen. Unknown OBB objects use GraspGen online. Keep current observation/model/frame provenance. Generation does not prove IK, collision clearance, contact or path feasibility. A CAD/offline-library failure is explicit, not an automatic switch to GraspGen. Physical settings are owned by the operator/application, not Responses. This skill has no model tuning arguments. Unknown OBB GraspGen poses receive the configured local tool +Z insertion once before IK (default 0.01 m); preserve the executing arm orientation. CAD offline poses receive no insertion.",
+  "description": "For CAD use the execution-arm offline library with current FoundationPose and default extra insertion 0 mm; TSDF GraspGen poses use the actual arm front TCP with zero additional insertion. For unknown objects feed the current published TSDF surface point cloud to GraspGen and request one native 100-candidate pool per round. The graph may request one additional round after confirmed exhaustion. Remain bound to the same qualified execution arm, target, capture and scene. GraspGen TCP +Z is prefiltered to the world +X forward / -Z downward sector with a configurable lateral angle limit, default 30 degrees. Grasp Lift follows world +Z for 150 mm. Numerical endpoint orientation and sampled Lift FK checks enforce these constraints before execution. 所有 GraspGen 抓取按执行臂当前指端 TCP 选择较近的平行夹爪半转等价姿态，随后进入 IK 和完整碰撞检查。CAD 离线抓姿按库中 A/B 归属读取。 GraspGen model contact TCP is aligned with the actual gripper_front_A/B, with distinct left/right orientation transforms and zero extra insertion. Check the declared Robotiq model and base-to-contact 195 mm conversion; actual mount-to-front offset is 185 mm. Old grasp_insertion_m settings are retired. Keep forward/downward +Z sector and all actual-gripper geometry/collision checks.",
   "requires": {
     "target_selected": true,
     "arm_selected": true,
@@ -20,7 +20,7 @@
     "placement_request",
     "planning_settings"
   ],
-  "capability": "Generate candidates for the bound target and selected arm",
+  "capability": "For CAD use the execution-arm offline library with current FoundationPose and default extra insertion 0 mm; TSDF GraspGen poses use the actual arm front TCP with zero additional insertion",
   "outputs": [
     "grasps_ready",
     "execution_or_evidence_record"
@@ -36,8 +36,8 @@
   "invalidates_observation": false,
   "planning_effects": {
     "plan_ready": false,
-    "placement_resolved": false,
     "place_plan_ready": false
   },
-  "retry_safe": true
+  "retry_safe": true,
+  "captures_observation": false
 }

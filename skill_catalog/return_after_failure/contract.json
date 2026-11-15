@@ -1,0 +1,31 @@
+{
+  "id": "return_after_failure",
+  "description": "Reserved terminal numerical dual-arm return from actual joints to configured observation posture. Preserve verified holding and its attachment. For confirmed empty grippers, validate opening after joint return, then open and verify actual finger feedback. Plan and validate full robot, carried object, world/self collision and joint limits using cuRoboV2-Fast. Stop after measured return and preserve the original task failure. Unsafe or unavailable return is explicitly blocked.",
+  "capability": "Reserved terminal numerical dual-arm return from actual joints to configured observation posture. Preserve verified holding and its attachment. For confirmed empty grippers, validate opening after joint return, then open and verify actual finger feedback. Plan and validate full robot, carried object, world/self collision and joint limits using cuRoboV2-Fast. Stop after measured return and preserve the original task failure. Unsafe or unavailable return is explicitly blocked.",
+  "requires": {
+    "terminal_motion_stopped": true
+  },
+  "provides": [
+    "terminal_observation_returned"
+  ],
+  "inputs": [
+    "terminal_failure_context",
+    "actual_robot_feedback",
+    "database_collision_scene"
+  ],
+  "outputs": [
+    "failure_return_result"
+  ],
+  "outcomes": [
+    "success",
+    "failure",
+    "unknown"
+  ],
+  "result_bindings": {},
+  "invalidates_observation": true,
+  "captures_observation": false,
+  "retry_safe": false,
+  "errors": [
+    "terminal_return_blocked"
+  ]
+}

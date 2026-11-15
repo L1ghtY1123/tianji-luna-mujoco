@@ -97,6 +97,7 @@ class Contract(BaseModel):
     description: str
     capability: str = ''
     invalidates_observation: bool = True
+    captures_observation: bool = False
     retry_safe: bool = False
     processing_effect: bool = False
     inputs: list[str] = Field(default_factory=list)

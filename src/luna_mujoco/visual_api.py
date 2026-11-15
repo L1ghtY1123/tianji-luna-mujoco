@@ -11,8 +11,11 @@ from pathlib import Path
 
 import httpx
 
+from .core.decisions import predicate_status
+from .evidence_versions import DECISION_INPUT_VERSION, implementation_manifest
 
-class VisualInventoryError(ValueError):
+
+class VisualDecisionError(ValueError):
     def __init__(self, reason, *, evidence=None):
         super().__init__(reason)
         self.evidence = evidence or {}
@@ -31,8 +34,9 @@ def merge_decision_evidence(records, capture, purpose):
            for key in ('questions', 'answers', 'diagnostic_checks')}}
 
 
-def decision_diagnostic_checks(questions, answers, minimum_confidence):
-    """Describe the existing decision gate; never supply a missing model reason."""
+def decision_diagnostic_checks(questions, answers):
+    """Describe probability selection; confidence is audit evidence only."""
+    from .core.decisions import choice_value
     by_name = {answer.get('name'): answer for answer in answers if isinstance(answer, dict)}
     checks = []
     for question in questions:
@@ -42,26 +46,31 @@ def decision_diagnostic_checks(questions, answers, minimum_confidence):
         valid = (type(actual) in {int, float} and math.isfinite(actual) and 0 <= actual <= 1
                  and answer.get('type') == question.get('type'))
         status, reason = 'unknown', 'invalid_or_missing_answer'
+        selected = None
         if valid and not predicate and answer.get('choice') not in [
                 item['value'] for item in question.get('choices', [])]:
             valid, reason = False, 'invalid_answer_choice'
-        if valid and minimum_confidence is not None:
-            if predicate:
-                status = ('yes' if actual >= minimum_confidence else 'no'
-                          if actual <= round(1 - minimum_confidence, 12) else 'unknown')
-                reason = 'predicate_probability_uncertain' if status == 'unknown' else 'predicate_probability_gate'
-            else:
-                status = 'known' if actual >= minimum_confidence and answer.get('choice') != 'unknown' else 'unknown'
-                reason = ('model_selected_unknown' if answer.get('choice') == 'unknown' else
-                          'choice_confidence_below_threshold' if status == 'unknown' else 'confidence_gate')
+        if valid and predicate:
+            status = predicate_status(actual)
+            reason = 'equal_binary_probabilities' if status == 'unknown' else 'binary_probability_argmax'
+        if not predicate and answer.get('type') == 'choice':
+            try:
+                selected = choice_value(answer, [item['value'] for item in question.get('choices', [])])
+                status = 'unknown' if selected == 'unknown' else 'known'
+                reason = ('choice_probability_argmax' if 'probabilities' in answer else 'service_selected_choice') if status == 'known' else 'model_unknown_or_equal_maxima'
+                actual = next((row['probability'] for row in answer.get('probabilities', []) if row['value'] == selected), None)
+            except ValueError as error:
+                reason = str(error)
         if answer.get('type') == 'refusal':
             status, reason, actual = 'unknown', 'model_refusal', None
         checks.append({'name': question['name'], 'component': 'decisions',
             'question': question.get('instructions'), 'answer': deepcopy(answer),
-            'metric': 'predicate_probability' if predicate else 'decisions_confidence',
-            'actual': actual, 'threshold': minimum_confidence, 'comparison': '>=',
-            **({'negative_threshold': round(1 - minimum_confidence, 12), 'negative_comparison': '<='}
-               if predicate and minimum_confidence is not None else {}),
+            'metric': 'predicate_probability' if predicate else 'choice_probability_argmax',
+            'actual': actual, 'threshold': .5 if predicate else None,
+            'comparison': '>' if predicate else 'argmax',
+            **({'selected_value': selected, 'reported_confidence': answer.get('confidence')}
+               if not predicate else {}),
+            **({'negative_threshold': .5, 'negative_comparison': '<'} if predicate else {}),
             'status': status, 'reason': reason})
     return checks
 
@@ -130,7 +139,7 @@ class VisualAPI:
                 try:
                     body, evidence = VisualAPI.request(self, single, capture, purpose,
                         lambda body, evidence: (body, evidence), model_call=model_call)
-                except VisualInventoryError as error:
+                except VisualDecisionError as error:
                     error.evidence['completed_questions'] = merge_decision_evidence(records, capture, purpose)
                     raise
                 answers.extend(body.get('answers', []))
@@ -144,7 +153,7 @@ class VisualAPI:
             try:
                 return self._request_once(payload, capture, purpose, parse,
                                           model_call=model_call, transport_attempt=attempt)
-            except VisualInventoryError as error:
+            except VisualDecisionError as error:
                 transient = (error.evidence.get('http_status') in {429, 502, 503, 504}
                              or str(error) == self.error_prefix + '_transport_error')
                 if not transient or attempt == attempts or str(error) == 'visual_decisions_audit_failed':
@@ -156,32 +165,39 @@ class VisualAPI:
 
         image_selection = None
         if self.endpoint == '/v1/decisions':
-            from .visual_image_selection import compact_decision_images
+            from .visual_image_selection import bind_decision_images, decision_image_count
 
-            payload, image_selection = compact_decision_images(payload)
+            payload = bind_decision_images(payload, capture)
+            count = decision_image_count(payload)
+            image_selection = {'original_image_count': count, 'image_count': count, 'removed_image_count': 0}
             if len(payload.get('questions', [])) != 1:
-                raise VisualInventoryError('decisions_requires_one_question')
+                raise VisualDecisionError('decisions_requires_one_question')
             from .core.decisions import WireDecisionQuestion
             WireDecisionQuestion.model_validate(payload['questions'][0])
         key = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         if key in self.cache:
             result = self.cache[key]
-            if isinstance(result, VisualInventoryError):
+            if isinstance(result, VisualDecisionError):
                 raise result
             return parse(deepcopy(result['body']), deepcopy(result['evidence']))
         event = None
         evidence = {'source': self.source, 'observation_id': capture['observation_id'], 'request_hash': key,
+                    'evidence_input_version': DECISION_INPUT_VERSION,
+                    'implementation_sha256': implementation_manifest()['implementation_sha256'],
                     'component': 'decisions' if self.endpoint == '/v1/decisions' else self.source,
                     'stage': purpose, 'purpose': purpose, 'camera_ids': list(capture.get('views', {}))}
         if self.endpoint == '/v1/decisions':
             evidence.update(questions=diagnostic_evidence(payload.get('questions', []), self.api_key),
-                            known_facts=['decision_gate_uses_decisions_confidence_or_predicate_probability_not_sam3_score'],
+                            known_facts=['decision_uses_probability_argmax_without_confidence_threshold',
+                                         'sam3_score_is_not_a_decisions_probability'],
                             unknowns=['model_internal_reason_not_returned'])
         try:
             if not self.api_key:
-                raise VisualInventoryError(self.error_prefix + '_not_configured')
+                raise VisualDecisionError(self.error_prefix + '_not_configured')
             started = time.monotonic()
             event = {'endpoint': self.endpoint, 'request': deepcopy(payload), 'response': None,
+                     'evidence_input_version': DECISION_INPUT_VERSION,
+                     'implementation_sha256': evidence['implementation_sha256'],
                      'observation_id': capture['observation_id'], 'request_hash': key, 'purpose': purpose,
                      'elapsed_s': 0., 'http_status': None, 'error': None,
                      'call_id': uuid4().hex, 'transport_attempt': transport_attempt}
@@ -208,15 +224,14 @@ class VisualAPI:
                 event['response'] = {'invalid_body': 'non_json', 'size_bytes': len(response.content),
                                      'sha256': hashlib.sha256(response.content).hexdigest()}
             if response.status_code != 200:
-                raise VisualInventoryError(self.error_prefix + '_http_' + str(response.status_code))
+                raise VisualDecisionError(self.error_prefix + '_http_' + str(response.status_code))
             if not isinstance(body, dict):
-                raise VisualInventoryError(self.error_prefix + '_invalid_response')
+                raise VisualDecisionError(self.error_prefix + '_invalid_response')
             evidence.update(model=body.get('model'), usage=body.get('usage', {}))
             if self.endpoint == '/v1/decisions':
                 answers = body.get('answers')
                 evidence['diagnostic_checks'] = diagnostic_evidence(decision_diagnostic_checks(
-                    payload.get('questions', []), answers if isinstance(answers, list) else [],
-                    getattr(self, 'minimum_confidence', None)), self.api_key)
+                    payload.get('questions', []), answers if isinstance(answers, list) else []), self.api_key)
             evidence = diagnostic_evidence(evidence, self.api_key)
             result = parse(deepcopy(body), deepcopy(evidence))
             if isinstance(result, dict):
@@ -237,7 +252,7 @@ class VisualAPI:
                 evidence.update(transport_error_type=type(error).__name__, configured_timeout_s=self.timeout_s)
                 if event is not None:
                     event.update(transport_error_type=type(error).__name__, configured_timeout_s=self.timeout_s)
-            error = error if isinstance(error, VisualInventoryError) else VisualInventoryError(
+            error = error if isinstance(error, VisualDecisionError) else VisualDecisionError(
                 self.error_prefix + ('_transport_error' if isinstance(error, httpx.HTTPError) else '_invalid_response'))
             error.evidence = diagnostic_evidence({**evidence, **error.evidence}, self.api_key)
             if event is not None:
@@ -261,7 +276,7 @@ class VisualAPI:
                 try:
                     self.audit(event)
                 except (OSError, ValueError, TypeError, RuntimeError):
-                    error = VisualInventoryError('visual_decisions_audit_failed', evidence=evidence)
+                    error = VisualDecisionError('visual_decisions_audit_failed', evidence=evidence)
                     self.cache[key] = error
                     raise error from None
         return result

@@ -1,5 +1,7 @@
 # prepare_unpack
 
+Use the shared cuRoboV2-Fast v0.9.0 service for this skill's IK, motion planning and collision operations. Motion planning uses the pinned official solver defaults.
+
 The verified release must belong to the current input and configured VLA work area. This skill consumes that existing receipt; it cannot recreate a receipt cleared by identify_target or identify_destination. Bind the intended work area before its transfer. Geometry refresh alone does not require rebinding an unchanged target.
 
 

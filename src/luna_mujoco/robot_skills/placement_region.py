@@ -9,7 +9,7 @@ def measured_table_region(observation, table_id):
     cache = observation.get('demo_tables', {})
     measured = cache.get('tables', {}).get(table_id, {})
     if (entity.get('kind') != 'table' or not cache.get('source_observation_id')
-            or measured.get('source') != 'initial_inventory_ransac_table'
+            or measured.get('source') != 'initial_objects_ransac_table'
             or measured.get('inlier_count', 0) < 100):
         raise ValueError('measured_table_region_requires_identified_rgbd_support:' + table_id)
     model = measured.get('model', {})

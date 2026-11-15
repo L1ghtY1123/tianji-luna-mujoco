@@ -1,5 +1,5 @@
 import { createEventTitleResolver } from './model.js';
-import { inventoryTransformations } from './task-inventory.js';
+import { memoryTransformations } from './task-ledger.js';
 
 const SKILL_EVENTS = new Set(['skill_start', 'skill_complete', 'skill_error']);
 const CATEGORY_NAMES = { jev: '历史模型记录', skill: '技能程序', algorithm: '算法调用', system: '系统记录', subgraph: '技能阶段' };
@@ -118,7 +118,7 @@ export function buildExecutionGraph(events = []) {
 }
 
 const OBJECT_PHASES = {
-  observe: ['观测 / 清单', 'observe_scene', 'observe', 'bind_inventory'],
+  observe: ['观测 / 物体记录', 'observe_scene', 'observe', 'bind_objects'],
   target: ['目标 / 放置区', 'identify_target', 'identify_destination'],
   arm: ['执行臂选择', 'choose_arm'],
   map: ['场景建图', 'build_scene'],
@@ -138,7 +138,7 @@ const OBJECT_PHASES = {
 export function buildObjectTimeline(graph) {
   const groups = new Map();
   const progress = graph.events?.findLast(event => event.data?.task_progress)?.data.task_progress;
-  const transformations = inventoryTransformations(progress);
+  const transformations = memoryTransformations(progress);
   for (const node of graph.nodes) {
     const targets = [...new Set(node.events.map(event => event.target_id ?? event.data?.target_id
       ?? event.data?.result?.target_id).filter(value => typeof value === 'string' && value))];

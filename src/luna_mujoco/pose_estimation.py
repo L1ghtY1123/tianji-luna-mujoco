@@ -1,7 +1,7 @@
 """SAM3 -> FoundationPose pose estimates from frozen registered camera views.
 
 CAD poses are hypotheses only. This module never changes collision geometry,
-placement regions, inventory identity, or robot execution.
+placement regions, objects identity, or robot execution.
 """
 import numpy as np
 

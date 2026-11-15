@@ -196,16 +196,16 @@ def grasp_support_reference(observation, target_id, tcp, *, source_reference=Non
         if (table_source and inside_id is not None) or (not table_source and not inside_id):
             raise PlacementError('source_support_evidence_invalid', {'source_reference': deepcopy(source_reference)})
         if not table_source:
-            inventory = observation.get('inventory_state', {})
-            current_support = inventory.get('entities', {}).get(target_id, {}).get('observed_support')
+            objects = observation.get('object_memory_snapshot', {})
+            current_support = objects.get('entities', {}).get(target_id, {}).get('observed_support')
             confirmed_id = None
             if current_support is not None:
-                if (current_support.get('source') == 'openai_decisions'
+                if (current_support.get('source') in {'openai_decisions', 'measured_rgbd_geometry'}
                         and current_support.get('observation_id') == observation.get('observation_id')
                         and current_support.get('request_hash')):
                     confirmed_id = current_support.get('support_entity_id')
             else:
-                record = inventory.get('entities', {}).get(target_id, {})
+                record = objects.get('entities', {}).get(target_id, {})
                 transfers = record.get('transfers', [])
                 if transfers:
                     latest = transfers[-1]
@@ -259,18 +259,27 @@ def grasp_support_reference(observation, target_id, tcp, *, source_reference=Non
 
 
 def carrying_binding(observation, identifier, arm, scene_token, *, owner_id, state="held"):
-    from .object_obb import obb_in_tool, observed_object_obb
+    from .object_tsdf import tsdf_voxel_corners
 
     target = observed_object(observation, identifier)
-    points = measured_object_geometry(target)
-    if points.ndim != 2 or points.shape[1] != 3 or len(points) < 16 or not np.isfinite(points).all():
-        raise ValueError("holding_requires_observed_object_points")
+    if target.get('cad') is not None:
+        points = measured_object_geometry(target)
+        if len(points) < 16:
+            raise ValueError("holding_requires_observed_object_points")
+    else:
+        points = tsdf_voxel_corners(observation, target)
     tcp = rigid_matrix(observation["arms"][arm]["tcp"])
     inverse = np.linalg.inv(tcp)
     local = points @ inverse[:3, :3].T + inverse[:3, 3]
     provenance = {"source": "registered_rgbd_visible_surface",
                   "reference_observation_id": observation["observation_id"],
                   "instance_id": identifier, "point_count": len(local)}
+    if target.get('cad') is None:
+        provenance.update(source='curobo_tsdf_surface_voxels',
+            reference_generation=observation['generation'],
+            tsdf_voxel_size_m=target['tsdf_surface']['tsdf_voxel_size_m'],
+            surface_voxel_count=len(points) // 8,
+            geometry_coverage='observed_tsdf_surface_voxels')
     result = {"arm": arm, "owner_id": owner_id, "observation_id": observation["observation_id"],
             "generation": observation["generation"], "scene_token": scene_token,
             "instance_id": identifier, "frame": "gripper_front", "state": state,
@@ -281,6 +290,4 @@ def carrying_binding(observation, identifier, arm, scene_token, *, owner_id, sta
         from .carrying import cad_binding_in_tool
 
         result['cad_tool'] = cad_binding_in_tool(target, observation, tcp, local)
-    else:
-        result['obb_tool'] = obb_in_tool(observed_object_obb(target), tcp, local)
     return result
