@@ -61,7 +61,7 @@ class TaskProgress:
                  requested_count=None, selection_order='explicit'):
         if requested_count is not None and (type(requested_count) is not int or requested_count < 1):
             raise ValueError('invalid_requested_count')
-        if selection_order not in {'visual', 'explicit'}:
+        if selection_order not in {'visual', 'explicit', 'left_to_right', 'right_to_left'}:
             raise ValueError('invalid_selection_order')
         self.requested_count = requested_count
         self.selection_order = selection_order
@@ -233,21 +233,25 @@ class TaskProgress:
             self.ledger_revision += 1
 
     def confirm_visual_transfer(self, identifier, evidence):
+        from .surface_placement import placement_evidence_id
         record = self.records[identifier]
         release = record.get('visual_release', {})
+        if (evidence.get('target_id') != identifier or not evidence.get('release_feedback_id')
+                or evidence['release_feedback_id'] != record.get('release_feedback_id')):
+            return False
         region_matches = (not release.get('region_id')
                           or evidence.get('region_id') == release['region_id'])
         if release.get('confirmed_observation_id'):
             return (region_matches and record.get('destination_id') == release['destination_id']
                     and evidence.get('destination_id') == release['destination_id']
                     and bool(evidence.get('observation_id'))
-                    and evidence.get('source') == 'openai_decisions'
+                    and placement_evidence_id(evidence)
                     and evidence.get('status') == 'at_destination')
         record['destination_visual_evidence'] = deepcopy(evidence)
         confirmed = (region_matches and bool(record.get('release_feedback_id'))
                      and release.get('transfer_index') == self.transfer_index(identifier)
                      and release.get('destination_id') == record.get('destination_id')
-                     and evidence.get('source') == 'openai_decisions'
+                     and placement_evidence_id(evidence)
                      and evidence.get('status') == 'at_destination'
                      and evidence.get('destination_id') == record.get('destination_id')
                      and bool(evidence.get('observation_id')))

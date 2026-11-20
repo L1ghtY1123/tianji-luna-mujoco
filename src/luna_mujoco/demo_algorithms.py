@@ -2,27 +2,22 @@
 
 import hashlib
 import time
-import xml.etree.ElementTree as ET
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
 
-import mujoco
 import numpy as np
 import yaml
 
 from .algorithms import AlgorithmError, Algorithms
-from .demo_grasp import (
-    arm_wrist_reach,
-    prepare_grasp_candidates,
-)
-from .demo_gripper_quality import predict_gripper_compatibility
+from .demo_grasp import prepare_grasp_candidates
 from .demo_placement import (
     fixed_release_goal,
 )
 from .demo_sampling import grasp_candidate_count
 from .geometry import TCP_FRAMES, front_tcp_offset, rigid_matrix
-from .kinematics import robot_model
+from .kinematics import link_poses
+from .observation_geometry import SOURCE_BIN_MIN_XY_FRACTION
 from .placement import measured_object_geometry, observed_object
 from .planning_settings import PlanningSettings
 from .robot_skills.placement_selection import (
@@ -44,22 +39,6 @@ def registered_grasp_geometry(asset_id, mesh_key, source_sha256, mesh_sha256):
     # would incorrectly fill openings between the gripping pads.
     return np.unique(geometry['vertices_m'], axis=0)
 
-
-def verified_unpack_product(snapshot, target_id):
-    """Use verified capability lineage, never a scene-wide task stage, for this geometry policy."""
-    entity = snapshot.get('object_memory_snapshot', {}).get('entities', {}).get(target_id, {})
-    evidence = entity.get('creation_evidence', {})
-    source_id = entity.get('input_entity_id')
-    return (entity.get('id') == target_id and entity.get('processing_skill') == 'vla_unpack'
-        and entity.get('identity_source') == 'confirmed_current_product_creation'
-        and bool(source_id) and source_id != target_id and bool(entity.get('process_id'))
-        and evidence.get('source') == 'confirmed_unpack_process_output'
-        and evidence.get('processing_skill') == 'vla_unpack'
-        and evidence.get('output_entity_id') == target_id
-        and evidence.get('input_entity_id') == source_id
-        and evidence.get('process_id') == entity['process_id']
-        and type(evidence.get('generation')) is int and evidence['generation'] == snapshot.get('generation')
-        and all(evidence.get(key) for key in ('action_id', 'request_hash', 'observation_id')))
 
 
 class DemoAlgorithms(Algorithms):
@@ -97,58 +76,19 @@ class DemoAlgorithms(Algorithms):
                                  code="planning_fk_evidence_invalid") from error
 
     @staticmethod
-    def _grasp_pose_validation(nominal, achieved, snapshot, target_id, arm, settings):
-        from .demo_grasp import grasp_direction_evidence
-
-        target = np.asarray(observed_object(snapshot, target_id)["points_world_m"], dtype=float)
-        away = (target.mean(axis=0) - np.asarray(arm_wrist_reach(arm)["robot_base_world_m"]))[:2]
-        length = np.linalg.norm(away)
-        if not np.isfinite(away).all() or (length <= 1e-9 and settings['grasp_require_away_from_robot']):
-            raise AlgorithmError("FK direction has no measured robot-to-target reference",
-                                 code="planning_fk_evidence_invalid")
-        away = away / length if length > 1e-9 else np.zeros(2)
+    def _grasp_pose_validation(nominal, achieved, settings):
         position = float(np.linalg.norm(achieved[:3, 3] - nominal[:3, 3]))
         rotation = float(np.arccos(np.clip((np.trace(nominal[:3, :3].T @ achieved[:3, :3]) - 1) / 2, -1, 1)))
-        downward = float(-achieved[2, 2])
-        away_dot = float(achieved[:2, 2] @ away)
         reasons = []
         if position > settings["ik_position_threshold_m"] + 1e-9:
             reasons.append("nominal_position_tolerance_exceeded")
         if rotation > settings["ik_rotation_threshold_rad"] + 1e-9:
             reasons.append("nominal_rotation_tolerance_exceeded")
-        if downward < np.cos(np.deg2rad(settings['grasp_maximum_tilt_deg'])) - 1e-9:
-            reasons.append("achieved_tool_tilt_exceeded")
-        if settings['grasp_require_away_from_robot'] and away_dot < -1e-9:
-            reasons.append("achieved_tool_points_toward_robot")
-        sector = grasp_direction_evidence(achieved[:3, 2], settings['grasp_maximum_lateral_angle_deg'],
-            applied=observed_object(snapshot, target_id).get('cad') is None)
-        if sector['applied'] and not sector['forward_downward_passed']:
-            reasons.append('achieved_tool_outside_forward_down_sector')
-        if sector['applied'] and not sector['lateral_passed']:
-            reasons.append('achieved_tool_lateral_angle_exceeded')
         return {"accepted": not reasons, "reason": "accepted" if not reasons else ";".join(reasons),
-                'sector': sector,
                 "position_error_m": position, "rotation_error_rad": rotation,
                 "position_threshold_m": settings["ik_position_threshold_m"],
                 "rotation_threshold_rad": settings["ik_rotation_threshold_rad"],
-                "downward_dot": downward, "horizontal_away_from_robot_dot": away_dot,
-                "maximum_tilt_deg": settings['grasp_maximum_tilt_deg'],
-                "require_away_from_robot": settings['grasp_require_away_from_robot'],
-                "reference": "original_graspgen_tool_pose_with_arm_jaw_symmetry"}
-
-
-    def _gripper_quality(self, snapshot, target_id, achieved, arm, settings):
-        target = observed_object(snapshot, target_id)
-        geometry = self._completed_object_geometry(snapshot, target)
-        try:
-            evidence = predict_gripper_compatibility(geometry, achieved, arm=arm,
-                uncertainty_m=target["uncertainty_m"], margin_m=settings["attachment"]["margin_m"])
-        except (ValueError, KeyError, TypeError, OSError, ET.ParseError, yaml.YAMLError) as error:
-            raise AlgorithmError(f"invalid predicted gripper geometry: {error}",
-                                 code="grasp_gripper_prediction_invalid") from error
-        return {**evidence, "observation_id": snapshot["observation_id"],
-                "target_id": target_id, "measured_point_count": len(target["points_world_m"]),
-                "completion_provenance": deepcopy(target.get("geometry_completion"))}
+                "reference": "prepared_tianji_front_tcp_after_insertion_and_jaw_symmetry"}
 
 
     def _grasp_plan_evidence(self, candidate, item, phases, snapshot, target_id, arm, scene, settings):
@@ -157,20 +97,10 @@ class DemoAlgorithms(Algorithms):
         achieved = self._bound_tool_fk(endpoint, phases["grasp"]["positions_rad"][-1],
             [f"Joint{i}_{side}" for i in range(1, 8)], arm, scene)
         validation = self._grasp_pose_validation(rigid_matrix(candidate["nominal_T_world_tcp"]),
-            achieved, snapshot, target_id, arm, settings)
+            achieved, settings)
         if not validation["accepted"]:
             raise AlgorithmError("planned grasp endpoint violates the original nominal goal bounds",
                                  code="planning_grasp_endpoint_rejected", details=validation)
-        if verified_unpack_product(snapshot, target_id):
-            validation["gripper_prediction_applied"] = False
-            validation["gripper_prediction_reason"] = "verified_processing_product_uses_actual_attachment_checks"
-        else:
-            prediction = self._gripper_quality(snapshot, target_id, achieved, arm, settings)
-            validation["predicted_gripper_compatibility"] = prediction
-            if not prediction["accepted"]:
-                validation.update(accepted=False, reason=prediction["reason"])
-                raise AlgorithmError("planned grasp endpoint violates predicted gripper compatibility",
-                                     code="planning_grasp_endpoint_rejected", details=validation)
         return {key: deepcopy(candidate[key]) for key in (
             "nominal_T_world_tcp", "source_ik_fk", "fk_goal_validation", "ik",
             "source_batch", "source_index") if key in candidate} | {
@@ -205,8 +135,6 @@ class DemoAlgorithms(Algorithms):
         settings = PlanningSettings.model_validate(planning_settings or {})
         target = observed_object(snapshot, target_id)
         input_source = 'registered_cad' if target.get('cad') is not None else 'measured'
-        reach_context = {'robot_base_world_m': arm_wrist_reach(arm)['robot_base_world_m'],
-                         'measured_reference_world_m': np.asarray(target['points_world_m']).mean(axis=0)}
         result = super().generate_grasps(
             snapshot, target_id, arm=arm, candidate_count=candidate_count,
             progress=progress, cancelled=cancelled)
@@ -237,13 +165,20 @@ class DemoAlgorithms(Algorithms):
                 "measured_point_count": len(target["points_world_m"]),
                 "synthetic_point_count": 0}
         all_generated = result.pop('all_generated_candidates', result['candidates'])
-        candidates, accepted, evidence = prepare_grasp_candidates(all_generated,
+        prefer_top_entry = not offline and any(
+            item.get('relation') == 'above_observed_bin_floor'
+            and item.get('visible_xy_fraction', 0.) >= SOURCE_BIN_MIN_XY_FRACTION
+            for item in target.get('measured_relationships', []))
+        candidates, evidence = prepare_grasp_candidates(all_generated, prefer_top_entry=prefer_top_entry,
             planning_settings=settings.model_dump(),
-            robot_base_world_m=reach_context["robot_base_world_m"],
-            target_reference_world_m=reach_context["measured_reference_world_m"],
-            reference_tcp=snapshot.get('arms', {}).get(arm, {}).get('tcp'))
+            reference_tcp=snapshot.get('arms', {}).get(arm, {}).get('tcp'),
+            target_surface=None if offline else self._graspgen_object_points(snapshot, target),
+            cell_size=None if offline else target['tsdf_surface']['tsdf_voxel_size_m'])
+        if not candidates:
+            raise AlgorithmError('No TSDF grasp fits the Tianji pads and opening',
+                code='no_tianji_contact_candidate', details=evidence)
         replay = {"stage": "before_ik", "target_id": target_id, "sampling_round": sampling_round,
-            "all_generated_candidates": all_generated, "filter_all_generated": True,
+            "all_generated_candidates": all_generated, "prepare_all_generated": True,
             "requested_candidate_count": candidate_count, "raw_candidate_count": result["raw_candidate_count"],
             "measured_points_world_m": np.asarray(target["points_world_m"]).copy(),
             "T_world_cloud": result.get("T_world_cloud"), "candidates_before_ik": candidates,
@@ -254,27 +189,10 @@ class DemoAlgorithms(Algorithms):
                 if offline else None),
             "graspgen_input_cloud": deepcopy(result.get("cloud")),
             "measured_cloud_reference": deepcopy(result.get("measured_cloud_reference")),
-            "direction_filter": evidence}
-        if not accepted:
-            # The planner owns the shared bounded pool budget. A complete
-            # direction rejection is eligible for its next frozen pool too.
-            return {**result, 'candidates': [], 'candidate_count': 0,
-                    'downward_filter': evidence, 'candidate_replay': replay}
-        replay['goalset_candidate_indices'] = [candidate['index'] for candidate in accepted]
-        return {**result, 'candidates': accepted, 'candidate_count': len(accepted),
-                'downward_filter': evidence, 'candidate_replay': replay}
-
-    def publish_released_object(self, scene, target_id, grasp_tcp, release_tcp, after_capture_id, *,
-                                support_floor_z_m=None):
-        transform = rigid_matrix(release_tcp) @ np.linalg.inv(rigid_matrix(grasp_tcp))
-        payload = {"scene_token": scene["scene_token"], "generation": scene["generation"],
-            "target_id": target_id, "operation": "transfer", "exclusion_state": "released",
-            "source": "release_feedback_rigid_prediction", "after_capture_id": after_capture_id,
-            "T_new_world_from_old_world": transform.tolist()}
-        if support_floor_z_m is not None:
-            payload["support_floor_z_m"] = float(support_floor_z_m)
-        result = self.request("/perception/update", payload)
-        return {**scene, **result}
+            "candidate_preparation": evidence}
+        replay['goalset_candidate_indices'] = [candidate['index'] for candidate in candidates]
+        return {**result, 'candidates': candidates, 'candidate_count': len(candidates),
+                'candidate_preparation': evidence, 'candidate_replay': replay}
 
     def publish_container_occupancy(self, scene, receipt):
         result = self.request('/perception/update', {
@@ -288,7 +206,7 @@ class DemoAlgorithms(Algorithms):
     def measure_local_object(self, capture, work_area, appearance):
         from .local_object_obstacle import measure_object_obstacle
 
-        cameras = ['3', '2', '1']
+        cameras = ['3'] if appearance == 'unpacked' else ['3', '2', '1']
         attempts = []
         for camera_id in cameras:
             try:
@@ -313,7 +231,7 @@ class DemoAlgorithms(Algorithms):
             'source': 'current_rgbd_object_center_and_offline_workspace',
             'scope': 'position_workspace_only_grasp_pose_and_path_not_yet_planned'}
 
-    def invalidate_scene_entity(self, scene, target_id, action_id, source="mock_vla"):
+    def invalidate_scene_entity(self, scene, target_id, action_id, source="base_vla"):
         """Record geometry changed by an action; never invent replacement occupancy."""
         if (not isinstance(target_id, str) or not target_id
                 or not isinstance(action_id, str) or not action_id
@@ -382,34 +300,22 @@ class DemoAlgorithms(Algorithms):
         driver = prefix + "finger_joint"
         closed = kin["lock_joints"][driver]
         angles = (closed, 0.)
-        mimics = [(joint.get("name"), joint.find("mimic")) for joint in ET.parse(urdf_path).getroot()
-                  .findall("joint") if joint.find("mimic") is not None]
-        model = robot_model()
-        data = mujoco.MjData(model)
         spheres = []
         for angle in angles:
-            joints = dict(kin["lock_joints"])
-            joints[driver] = float(angle)
-            for name, mimic in mimics:
-                joints[name] = (joints[mimic.get("joint")] * float(mimic.get("multiplier", 1))
-                                + float(mimic.get("offset", 0)))
-            for name, value in joints.items():
-                data.qpos[int(model.joint(name).qposadr[0])] = value
-            mujoco.mj_fwdPosition(model, data)
-            tool_id = model.body(tool).id
-            tool_rotation = data.xmat[tool_id].reshape(3, 3)
-            for link in kin["collision_link_names"]:
-                if not link.startswith(prefix) and link != tool:
-                    continue
-                body = model.body(link).id
-                rotation = data.xmat[body].reshape(3, 3)
-                buffer = kin["collision_sphere_buffer"]
+            arms = deepcopy(observation['arms'])
+            arms[arm]['gripper_position_rad'] = float(angle)
+            selected = [link for link in kin['collision_link_names'] if link.startswith(prefix) or link == tool]
+            poses = link_poses(arms, list(dict.fromkeys([tool, *selected])))
+            tool_rotation = poses[tool][:3, :3]
+            for link in selected:
+                rotation = poses[link][:3, :3]
+                buffer = kin['collision_sphere_buffer']
                 if isinstance(buffer, dict):
                     buffer = buffer.get(link, 0.)
-                for sphere in kin["collision_spheres"][link]:
-                    center_world = data.xpos[body] + rotation @ np.asarray(sphere["center"])
-                    center_tool = tool_rotation.T @ (center_world - data.xpos[tool_id]) - front_tcp_offset(arm)
-                    radius = float(sphere["radius"]) + buffer
+                for sphere in kin['collision_spheres'][link]:
+                    center_world = poses[link][:3, 3] + rotation @ np.asarray(sphere['center'])
+                    center_tool = tool_rotation.T @ (center_world - poses[tool][:3, 3]) - front_tcp_offset(arm)
+                    radius = float(sphere['radius']) + buffer
                     spheres.append([*center_tool.tolist(), radius])
         return spheres
 

@@ -49,16 +49,20 @@ def validate_work_area(work_area):
 
 def table_release_reference(capture, evidence, owner_id):
     """Small immutable binding; RGBD stays in the existing private capture."""
+    from ..surface_placement import placement_evidence_id
     _require(isinstance(capture, dict) and isinstance(evidence, dict)
              and set(capture.get('views', {})) == {'1', '2', '3'}
              and bool(owner_id) and bool(capture.get('observation_id'))
-             and capture['observation_id'] == evidence.get('observation_id')
+             and capture.get('generation') == evidence.get('generation')
              and type(capture.get('generation')) is int
+             and bool(evidence.get('observation_id'))
+             and capture['time'] >= evidence['verification_time']
+             and capture['captured_perf_counter_ns'] > evidence['verification_perf_counter_ns']
              and evidence.get('status') == 'at_destination'
-             and evidence.get('source') == 'openai_decisions'
+             and placement_evidence_id(evidence)
              and evidence.get('identity_source') == 'execution_chain'
-             and evidence.get('placement_outcome') in {'direct_success', 'inferred_success'}
-             and all(evidence.get(key) for key in ('target_id', 'release_feedback_id', 'binding_id', 'request_hash')),
+             and evidence.get('placement_outcome') in {'execution_assumed', 'direct_success', 'inferred_success'}
+             and all(evidence.get(key) for key in ('target_id', 'release_feedback_id', 'binding_id')),
              'table_release_reference_invalid')
     images = {}
     for camera in ('2', '1', '3'):
@@ -70,8 +74,9 @@ def table_release_reference(capture, evidence, owner_id):
         images[camera] = {'rgb_sha256': hashlib.sha256(rgb.tobytes()).hexdigest(),
             'image_sha256': hashlib.sha256(base64.b64decode(encoded)).hexdigest(), 'shape': list(rgb.shape)}
     return {'source': 'confirmed_table_release_rgb', 'owner_id': owner_id,
+        'release_verification_id': evidence['observation_id'],
         **{key: capture.get(key) for key in ('observation_id', 'generation', 'time', 'captured_perf_counter_ns')},
-        **{key: evidence[key] for key in ('target_id', 'release_feedback_id', 'binding_id', 'request_hash')},
+        **{key: evidence[key] for key in ('target_id', 'release_feedback_id', 'binding_id', 'request_hash', 'measurement_hash', 'execution_evidence_id') if evidence.get(key)},
         'images': images}
 
 

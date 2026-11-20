@@ -5,6 +5,7 @@ from copy import deepcopy
 
 import numpy as np
 
+from .association_geometry import head_wrist_pair
 from .cameras import deproject_view
 from .core.decisions import predicate_status
 from .demo_geometry import fit_objects_table, supported_surface_points
@@ -21,11 +22,6 @@ from .visual_identity import VisualIdentity, mask_box
 class DemoVisualIdentity(VisualIdentity):
     """Associate current subjects while preserving unresolved identity evidence."""
 
-    def resolve(self, capture, detections, *, reference=None, entities=None, **kwargs):
-        entities = {key: value for key, value in current_memory_entities(reference, entities).items()
-                    if value.get('source') != 'configured_demo_region'}
-        return super().resolve(capture, detections, reference=reference, entities=entities, **kwargs)
-
     def _groups(self, detections, names, entities, judgments, evidence, *, purpose=None, reference=None,
                 progress=None):
         accepted = {judgments['identity_' + str(index)] for index in range(len(detections))
@@ -38,10 +34,12 @@ class DemoVisualIdentity(VisualIdentity):
         if purpose == 'verify_transfer' and pending_verification:
             required = pending_verification
         coverage = {'source': evidence['source'], 'observation_id': evidence['observation_id'],
-            'request_hash': evidence['request_hash'], 'purpose': purpose,
+            'request_hash': evidence.get('request_hash'), 'purpose': purpose,
             'selection_rule': 'probability_argmax',
             'required_entity_ids': sorted(required), 'accepted_entity_ids': sorted(accepted),
             'complete': required <= accepted}
+        if evidence['source'] == 'rgbd_instance_association':
+            coverage.update(selection_rule='committed_instance_groups', association_digest=evidence['association_digest'])
         unassociated = self._unresolved_identity_candidates(detections, names, judgments, evidence)
         retained = [index for index in range(len(detections))
                     if judgments['identity_' + str(index)] != 'unknown']
@@ -111,11 +109,7 @@ class DemoPerception(Perception):
 
     def verify_release(self, capture, binding, reference, instruction=""):
         from .demo_transfer_verification import verify_release_result
-        target = binding['target_id']
-        entities = {target: reference.get('entities', {}).get(target, {})}
-        evidence = self.prepare_gripper_evidence(capture, [binding['arm']], entities)
-        return verify_release_result(self.visual_identity, capture, binding, reference, instruction,
-                                     gripper_evidence=evidence)
+        return verify_release_result(self.visual_identity, capture, binding)
 
     def bootstrap(self, capture):
         raise PerceptionError('demo_initial_observation_required')
@@ -139,27 +133,6 @@ class DemoPerception(Perception):
                 'pixels_rc': _readonly(np.column_stack(np.nonzero(valid))),
                 'identity_status': 'unassociated_proposal'})
 
-    def _deduplicate_detections(self, detections):
-        unique = []
-        for detection in detections:
-            mask = np.asarray(detection['silhouette_mask'], bool)
-            duplicate = None
-            for previous in unique:
-                if previous['camera_id'] != detection['camera_id']:
-                    continue
-                other = np.asarray(previous['silhouette_mask'], bool)
-                if np.array_equal(other, mask):
-                    duplicate = previous
-                    break
-            if duplicate is None:
-                unique.append(detection | {'prompt_proposals': [detection['prompt']]})
-            else:
-                duplicate['prompt_proposals'].append(detection['prompt'])
-                duplicate['query_prompts'] = list(dict.fromkeys(
-                    duplicate.get('query_prompts', []) + detection.get('query_prompts', [])))
-        return unique
-
-
     def _filter_geometry_groups(self, groups, views, *, entities=None):
         for group in groups:
             for entry in group:
@@ -171,7 +144,8 @@ class DemoPerception(Perception):
                 support = self.demo_tables['tables'].get(support_id)
                 frame_id = views.get(entry['camera_id'], {}).get('frame_id')
                 if (support and frame_id and evidence.get('observation_id') == frame_id
-                        and evidence.get('source') == 'openai_decisions' and evidence.get('request_hash')):
+                        and ((evidence.get('source') == 'openai_decisions' and evidence.get('request_hash'))
+                             or (evidence.get('source') == 'measured_surface_placement' and evidence.get('measurement_hash')))):
                     model = support['model']
                     center = np.asarray(model['pose'][:2])
                     half = np.asarray(model['dims'][:2]) / 2
@@ -181,7 +155,8 @@ class DemoPerception(Perception):
                     entry['geometry_filter_evidence'] = {
                         'source': 'cached_measured_table_and_current_observed_support',
                         'support_entity_id': support_id, 'camera_id': entry['camera_id'],
-                        'observation_id': frame_id, 'request_hash': evidence['request_hash'],
+                        'observation_id': frame_id,
+                        **{k: evidence[k] for k in ('request_hash', 'measurement_hash') if evidence.get(k)},
                         'surface_height_m': support['surface_height_m'],
                         'footprint_center_xy_m': center.tolist(), 'footprint_half_size_m': half.tolist(),
                         'measurement_margin_m': .006, 'raw_point_count': len(points),
@@ -218,7 +193,7 @@ class DemoPerception(Perception):
             for camera, view in measurement['views'].items():
                 excluded = np.zeros(view['depth_m'].shape, bool)
                 for detection in detections if not historical else ():
-                    if detection['camera_id'] == camera:
+                    if detection['camera_id'] == camera and detection['kind'] != 'table':
                         excluded |= detection['mask']
                 if historical:
                     # These boxes only discard foreground from the historical table fit;
@@ -249,7 +224,7 @@ class DemoPerception(Perception):
                 lower, upper = seed[:, :2].min(0) - .02, seed[:, :2].max(0) + .02
                 masks = {}
                 for key, view in measurement['views'].items():
-                    if key == seed_camera:
+                    if not head_wrist_pair(seed_camera, key):
                         continue
                     mask = (~excluded_by_camera[key] & view['valid_depth']
                             & np.isfinite(view['depth_m']) & (view['depth_m'] > 0))
@@ -266,14 +241,24 @@ class DemoPerception(Perception):
             for identifier, entity in entities.items():
                 if entity.get('kind') != 'table':
                     continue
-                camera = entity['reference_camera_id']
+                dated = reference.get('identity_references', {}).get(identifier, {})
+                views = dated.get('views', {})
+                head_mask = views.get('3', {}).get('mask')
+                head_available = (dated.get('observation_id') == measurement['observation_id']
+                                  and head_mask is not None and np.count_nonzero(head_mask) >= 100)
+                if not head_available and entity.get('reference_camera_id') != '3':
+                    raise PerceptionError('table_head_reference_missing')
+                camera = '3'
                 view = measurement['views'][camera]
                 rows, columns = np.indices(view['depth_m'].shape)
                 height, width = rows.shape
-                box = entity['bbox']
+                box = mask_box(head_mask) if head_available else entity['bbox']
+                table_mask = views.get(camera, {}).get('mask')
                 seed_mask = ((columns >= box[0] * width) & (columns < box[2] * width)
                     & (rows >= box[1] * height) & (rows < box[3] * height)
                     & ~excluded_by_camera[camera] & view['valid_depth'])
+                if table_mask is not None:
+                    seed_mask &= table_mask
                 clean_seed = without_robot({camera: seed_mask})[camera]
                 tables[identifier] = fit_objects_table(view, box, ~clean_seed,
                     supplemental_points=lambda seed, normal, offset, seed_camera=camera:
@@ -309,10 +294,10 @@ class DemoPerception(Perception):
             observation['visual_reference']['initial_instance_boxes'] = {
                 camera: {identifier: mask_box(mask) for identifier, mask in view['instance_masks'].items()
                          if np.any(mask)} for camera, view in observation['views'].items()}
-        for camera, view in observation['views'].items():
+        for view in observation['views'].values():
             view['coverage_depth_m'] = _readonly(np.array(view['depth_m'], copy=True))
             view['coverage_valid_depth'] = _readonly(np.array(view['valid_depth'], copy=True))
-        observation['depth_policy'] = 'workspace_depth_with_task_instance_masks'
+        observation['depth_policy'] = 'full_view_depth_with_confirmed_instance_masks'
         observation['perception_timings_s']['task_depth_preparation'] = time.monotonic() - depth_started
         if progress:
             progress('observation_stage', '感知计算完成，更新观测记录',

@@ -2,23 +2,25 @@
 import asyncio
 from copy import deepcopy
 
-import numpy as np
+from .grasp_recovery import empty_grasp_evidence
+from .grasp_verification import GRIPPER_ENDPOINT_TOLERANCE_FRACTION, holding_from_feedback
+from .observation import stationary_feedback_rejection
 
-from ..core.decisions import JudgmentRequest
+
 from ..observation_motion import observation_poses
 
 
-def gripper_is_open(feedback, settings):
-    return (feedback.get('gripper_closed_command') is False
-            and abs(feedback['gripper_closed_fraction']) <= settings['holding_position_tolerance_fraction'])
+def gripper_is_open(feedback):
+    fraction = feedback.get('gripper_closed_fraction')
+    return type(fraction) in (int, float) and 0 <= fraction <= GRIPPER_ENDPOINT_TOLERANCE_FRACTION
 
 
 def return_mode(runner, context):
-    feedback = runner.simulation.robot_snapshot()
+    feedback = runner.simulation.joint_feedback(runner.state['generation'])
     holding = context.get('holding') or runner.holding_state
-    if (runner.is_observation_pose(context, feedback)
-            and (holding or all(gripper_is_open(arm, context['planning_settings'])
-                                for arm in feedback['arms'].values()))):
+    if (not feedback['active_commands'] and runner.is_observation_pose(context, feedback)
+            and ((holding and holding.get('verified') and holding.get('attached'))
+                 or not holding and all(gripper_is_open(feedback['arms'][arm]) for arm in ('A', 'B')))):
         return 'at_pose'
     if holding:
         if (holding.get('verified') is True and holding.get('attached') is True
@@ -33,12 +35,60 @@ def return_mode(runner, context):
     return 'refresh'
 
 
+def stopped_empty_hands(previous, current, stopped):
+    if not previous:
+        return None
+    proof, capture = previous
+    # The acknowledged stop is the sole command allowed between captures.
+    if (stopped.get('ok') is not True or stopped.get('robot_identity_changed') is not False
+            or stopped.get('previous_generation') != proof['generation']
+            or stopped.get('generation') != current.get('generation')
+            or capture.get('generation') != proof['generation']
+            or type(capture.get('command_revision')) is not int
+            or current.get('command_revision') != capture['command_revision'] + 1
+            or current.get('time', 0.) <= capture['time']
+            or any(not capture.get(k) or capture[k] != current.get(k) for k in ('session_id', 'bridge_instance_id'))):
+        return None
+    if not capture.get('manifest_revision') or capture['manifest_revision'] != current.get('manifest_revision'):
+        return None
+    peer = 'B' if proof['arm'] == 'A' else 'A'
+    if (stationary_feedback_rejection(capture, current)
+            or holding_from_feedback(current, peer)['status'] != 'no'):
+        return None
+    return {'judgments': {'failure_gripper_holds': {'status': 'no'}},
+            'evidence': {'source': 'verified_empty_grasp_and_stationary_stop', 'grasp': proof,
+                         'observation_id': current['observation_id'], 'peer_arm_open': peer}}
+
+
 async def prepare_failure_return(runner, context):
     if context.get('failure_return_attempted'):
         raise ValueError('terminal_return_already_attempted')
     context['failure_return_attempted'] = True
-    stopped = await asyncio.to_thread(runner.simulation.stop_motion)
+    proof = empty_grasp_evidence(runner, context)
+    prior = (proof, context['grasp_verification_sample']) if proof else context.get('last_empty_grasp')
+    if prior and all(prior[0].get(k) == v for k, v in (
+            ('owner_id', runner.run_id), ('arm', runner.state.get('arm')), ('target_id', runner.state.get('target_id')),
+            ('action_epoch', runner.observation_epoch), ('motion_epoch', runner.motion_epoch),
+            ('generation', runner.state['generation']))):
+        context['terminal_empty_grasp'] = prior
+    stopped = await asyncio.to_thread(runner.simulation.stop_motion, confirm_world=True)
+    if (stopped.get('ok') is not True or stopped['robot_identity_changed']
+            or stopped['previous_generation'] != runner.state['generation']):
+        raise ValueError('terminal_stop_identity_or_completion_unconfirmed')
     runner.motion_epoch = stopped['motion_epoch']
+    # Only this acknowledged stop may advance the run into a recovery
+    # generation. Old captures and collision maps remain invalid.
+    runner.state['generation'] = stopped['generation']
+    scene = runner.spatial_memory.scene
+    world = {**stopped['world'], 'run_id': runner.run_id}
+    if (scene and stopped['world_continuity_confirmed'] and scene.get('mapping_world') == world
+            and scene['generation'] == stopped['previous_generation']):
+        context['stopped_map_parent'] = {'scene_token': scene['scene_token'], 'world': world,
+            'previous_generation': stopped['previous_generation'], 'generation': stopped['generation']}
+    partial = (runner.state.get('partial_execution_failure') or {}).get('partial_execution', {})
+    target = runner.state.get('target_id')
+    uncertain = partial.get('skill') in {'execute_grasp', 'execute_place'} or runner.state['facts'].get('grasp_evidence_pending')
+    runner.spatial_memory.invalidate([target] if uncertain and target else [])
     runner.observation_epoch += 1
     context['terminal_motion_stopped'] = True
     runner._database_committed(runner.object_database.changes_since(runner.spatial_memory.database_revision))
@@ -52,22 +102,41 @@ async def prepare_failure_return(runner, context):
 
 
 async def observe_after_failure(runner, context):
-    from .grasp_verification import HOLDING_POSITION_RULE, gripper_evidence_context
+    from .grasp_verification import WRIST_CAMERAS, object_held_question
+    from ..visual_api import VisualDecisionError
 
     if not context.get('terminal_motion_stopped'):
         raise ValueError('terminal_motion_not_stopped')
-    capture = await runner.capture_observation(context, recovery=True)
-    runner.record_observation(capture, 'terminal_failure')
-    target = runner.state.get('target_id')
-    reference = context.get('identity_reference', {})
-    evidence = await runner.call_algorithm(runner.algorithms.prepare_gripper_evidence,
-        capture, ['A', 'B'], {target: reference.get('entities', {}).get(target, {})} if target else {})
-    result = await runner._judge(context, [JudgmentRequest(name='failure_gripper_holds', instructions=(
-        '至少一个机器人夹爪当前仍夹持着物体。逐个夹爪判断，有一个持物则本命题为真。'
-        + HOLDING_POSITION_RULE))],
-        include_task=False, reference={}, extra={'verification_scope': 'grasp_result',
-            'target_id': target, 'selected_arm': runner.state.get('arm'),
-            **gripper_evidence_context(capture, evidence)})
+    stopped = runner.state['failure_return']['motion_stopped']
+    state = runner.simulation.robot_snapshot(include_tcp=False, expected_generation=runner.state['generation'])
+    state['observation_id'] = 'stop-feedback-' + state['feedback_id']
+    result = stopped_empty_hands(context.get('terminal_empty_grasp'), state, stopped)
+    if result is None:
+        answers = {}
+        for arm in ('A', 'B'):
+            capture = await runner.sample_gripper(context, arm, stopped['stopped_time_s'], 'terminal_gripper')
+            measured = holding_from_feedback(capture, arm)
+            answer = {'status': measured['status'], 'source': measured['source'],
+                      'feedback_id': capture['feedback_id'], 'position': measured['reason']}
+            if measured['requires_visual'] and capture.get('views'):
+                wrist = WRIST_CAMERAS[arm]
+                try:
+                    decision = await runner._judge(context, [object_held_question(arm)],
+                        include_task=False, reference={}, verification_capture=capture,
+                        extra={'verification_scope': 'grasp_result', 'selected_arm': arm,
+                               'primary_wrist_camera_id': wrist, 'visual_camera_ids': [wrist], 'visual_modalities': ['rgb']})
+                except VisualDecisionError as error:
+                    answer.update(status='unknown', error=str(error))
+                else:
+                    answer.update(status=decision['judgments']['object_held']['status'], evidence=decision['evidence'])
+            elif capture.get('wrist_error'):
+                answer['wrist_error'] = capture['wrist_error']
+            answers[arm] = answer
+            if answer['status'] == 'yes':
+                break
+        statuses = {a['status'] for a in answers.values()}
+        presence = 'yes' if 'yes' in statuses else 'no' if statuses == {'no'} else 'unknown'
+        result = {'judgments': {'failure_gripper_holds': {'status': presence}}, 'evidence': {'arms': answers}}
     answer = result['judgments']['failure_gripper_holds']['status']
     context['failure_gripper_evidence'] = result
     result['holding_presence'] = {'status': answer, 'rule': 'measured_position_then_closed_gripper_vision'}
@@ -85,7 +154,7 @@ async def observe_after_failure(runner, context):
     context['failure_empty_confirmed'] = True
     runner.state['facts'].update(grasp_held=False, attached=False, recovery_needed=False)
     # This node explicitly owns observation; no movement or opening command is issued.
-    observed = await runner.observe(context, checkpoint='initial', capture=capture, recovery=True)
+    observed = await runner.observe(context, checkpoint='initial', recovery=True)
     context['failure_return_mode'] = 'empty'
     return {'success': True, 'observation_id': observed['observation_id'], 'empty_grippers': result}
 
@@ -95,10 +164,7 @@ async def build_failure_scene(runner, context):
         return {'success': True, 'source': 'current_verified_attachment_and_scene'}
     if context.get('failure_empty_confirmed') is not True:
         raise ValueError('terminal_empty_grippers_unconfirmed')
-    from ..memory_contracts import CollisionUpdate
 
-    strategy = await runner._mapping_strategy(context, {'exclusion_state': 'observation'})
-    runner.spatial_memory.request_update(CollisionUpdate.model_validate(strategy))
     return await runner.build_scene(context, 'observation')
 
 
@@ -122,25 +188,14 @@ async def return_after_failure(runner, context):
         goals = observation_poses(context['planning_settings'])
         plan = await runner.call_algorithm(runner.algorithms.plan_dual_observation_motion, observation, scene, goals,
             planning_settings=context['planning_settings'], terminal_return=True, carrying_binding=binding)
-        feedback = runner.simulation.robot_snapshot()
-        paths = {arm: np.asarray(plan['paths'][arm], dtype=float) for arm in ('A', 'B')}
-        if len(paths['A']) != len(paths['B']):
-            raise ValueError('terminal_return_trajectory_lengths_differ')
-        for arm in ('A', 'B'):
-            if np.max(np.abs(paths[arm][0] - feedback['arms'][arm]['joints_rad'])) > np.deg2rad(1.):
-                raise ValueError('terminal_return_start_changed')
-        paths = {arm: np.vstack((feedback['arms'][arm]['joints_rad'], paths[arm])).tolist() for arm in ('A', 'B')}
-        await runner.call_algorithm(runner.algorithms.validate_dual_observation, runner.measured_state(context),
-            scene, paths, planning_settings=context['planning_settings'], terminal_return=True, carrying_binding=binding)
-        await runner.verify_scene(context)
-        await runner.execution_stage(context, 'terminal_observation_return', runner.motor,
-            runner.simulation.execute_dual_trajectory, paths, plan['dt'], execution_settings=context['planning_settings'])
+        await runner.dispatch_observation_path(context, scene, plan, 'terminal_observation_return',
+                                               terminal_return=True, carrying_binding=binding)
     opening = {}
-    if not held and runner.is_observation_pose(context, runner.simulation.robot_snapshot()):
+    if not held and runner.is_observation_pose(context, runner.simulation.joint_feedback(runner.state['generation'])):
         for arm in ('A', 'B'):
             measured = runner.measured_state(context)
             feedback = measured['arms'][arm]
-            if gripper_is_open(feedback, context['planning_settings']):
+            if gripper_is_open(feedback):
                 continue
             check = await runner.call_algorithm(runner.algorithms.validate_execution, measured, arm, scene,
                 'open_grasp', {'positions_rad': [feedback['joints_rad']]},
@@ -149,10 +204,9 @@ async def return_after_failure(runner, context):
             command = await runner.execution_stage(context, 'terminal_empty_gripper_open', runner.motor,
                 runner.simulation.set_gripper, arm, False)
             opening[arm] = {'collision_check': check, 'command': command}
-    actual = runner.simulation.robot_snapshot()
-    empty_grippers_open = not held and all(gripper_is_open(arm, context['planning_settings'])
-                                          for arm in actual['arms'].values())
-    success = runner.is_observation_pose(context, actual) and (held is not None or empty_grippers_open)
+    actual = runner.simulation.joint_feedback(runner.state['generation'])
+    empty_grippers_open = not held and all(gripper_is_open(actual['arms'][arm]) for arm in ('A', 'B'))
+    success = not actual['active_commands'] and runner.is_observation_pose(context, actual) and (held is not None or empty_grippers_open)
     result = {'success': success, 'status': 'returned' if success else 'return_incomplete',
               'source': 'actual_joint_feedback', 'holding_preserved': held is not None, 'task_succeeded': False,
               'empty_grippers_open': empty_grippers_open, 'gripper_opening': opening,

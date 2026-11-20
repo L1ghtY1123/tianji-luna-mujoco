@@ -24,7 +24,7 @@ esac
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 export LUNA_UID="$(id -u)" LUNA_GID="$(id -g)"
 cd "$PROJECT_DIR"
-COMPOSE=(docker compose -f "$PROJECT_DIR/deploy/demo.compose.yaml")
+COMPOSE=(docker compose --env-file "$PROJECT_DIR/.env" -f "$PROJECT_DIR/deploy/demo.compose.yaml")
 case "$ACTION" in
   start)
     [[ -f .env ]] || cp .env.example .env

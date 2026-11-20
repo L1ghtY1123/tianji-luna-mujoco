@@ -55,8 +55,9 @@ class TaskSpec(StrictModel):
     visual_completion_conditions: tuple[str, ...] = Field(default=(), description=(
         'Only EXTRA current visual conditions not already proved by verify_grasp/verify_place/verify_unpack receipts. '
         'Do not repeat delivery, processing, count, ordering or robot posture. Empty for ordinary transfer/unpack tasks.'))
-    selection_order: Literal['visual', 'explicit'] = Field(description=(
-        'Use explicit only for a user-specified order represented by target_refs. Otherwise use visual: '
+    selection_order: Literal['visual', 'explicit', 'left_to_right', 'right_to_left'] = Field(description=(
+        'Use left_to_right or right_to_left for requested spatial execution order across multiple objects. '
+        'A single m-th object instead uses an ordinal selector and scope ids. Use explicit for ordered refs. Otherwise use visual: '
         'Decisions chooses an easier current object from database-backed candidates each round. '
         'An initial proposal order is not an execution queue.'))
     processing: tuple[str, ...] = Field(description=(

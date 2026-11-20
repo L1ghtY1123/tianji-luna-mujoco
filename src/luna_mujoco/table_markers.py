@@ -9,6 +9,7 @@ import numpy as np
 from scipy.ndimage import label
 from scipy.spatial import ConvexHull, QhullError, cKDTree
 
+from .association_geometry import head_wrist_pair
 from .cameras import deproject_view
 
 
@@ -87,7 +88,7 @@ def _view_regions(camera_id, view, table):
 
 
 def _overlapping_regions(first, second):
-    if first["color"] != second["color"] or first["camera_id"] == second["camera_id"]:
+    if first["color"] != second["color"] or not head_wrist_pair(first["camera_id"], second["camera_id"]):
         return False
     a, b = first["points"], second["points"]
     if len(a) < len(b):
@@ -103,7 +104,8 @@ def _measured_marker(group, capture):
     cameras = np.concatenate([np.full(len(entry["points"]), entry["camera_id"]) for entry in group])[indices]
     pixels = np.vstack([entry["pixels_rc"] for entry in group])[indices]
     centroid = points.mean(axis=0, dtype=np.float64)
-    reference_index = int(np.argmin(np.linalg.norm(points[:, :2] - centroid[:2], axis=1)))
+    head_indices = np.flatnonzero(cameras == '3')
+    reference_index = head_indices[np.argmin(np.linalg.norm(points[head_indices, :2] - centroid[:2], axis=1))]
     reference = points[reference_index].tolist()
     color = group[0]["color"]
     median = np.median(np.vstack([entry["rgb"] for entry in group]), axis=0) / 255
@@ -141,20 +143,14 @@ def detect_table_markers(capture, table):
     Callers install ``masks_by_camera`` as instance masks and exclude them from
     graspable source detections. This function never changes input sensor arrays.
     """
-    regions = []
-    for camera_id, view in capture["views"].items():
-        regions.extend(_view_regions(camera_id, view, table))
-    groups = []
-    for region in regions:
-        matches = [index for index, group in enumerate(groups)
-                   if any(_overlapping_regions(region, entry) for entry in group)]
-        if not matches:
-            groups.append([region])
-            continue
-        combined = [region]
-        for index in reversed(matches):
-            combined.extend(groups.pop(index))
-        groups.append(combined)
+    groups = [[region] for region in _view_regions('3', capture['views']['3'], table)]
+    for camera_id in ('2', '1'):
+        for region in _view_regions(camera_id, capture['views'][camera_id], table):
+            matches = [group for group in groups if _overlapping_regions(group[0], region)]
+            if len(matches) > 1:
+                raise ValueError("table_marker_color_ambiguous:" + region["color"])
+            if matches:
+                matches[0].append(region)
     colors = set()
     for group in groups:
         color = group[0]["color"]

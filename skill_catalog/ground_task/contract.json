@@ -1,0 +1,37 @@
+{
+  "invalidates_observation": false,
+  "retry_safe": true,
+  "captures_observation": false,
+  "outcomes": [
+    "success",
+    "failure",
+    "unknown"
+  ],
+  "id": "ground_task",
+  "description": "Ground the user's roles on a frozen three-camera capture. Associate each wrist to the head with calibrated geometry and commit confirmed scene instances. A fresh observation with history requires a Decisions identity verdict. Decisions binds each new task role to current registered IDs using the original instruction, Responses hints and measured robot-frame positions. Unique instances remain bound across moves. Unknown roles preserve committed physical IDs and request graph recovery.",
+  "capability": "Ground task references in frozen RGBD before any identity-dependent skill",
+  "inputs": [
+    "scene_inventory",
+    "compiled_selection_rules",
+    "frozen_rgbd",
+    "dated_identity_history"
+  ],
+  "requires": {
+    "capture_ready": true,
+    "grasp_held": false
+  },
+  "provides": [
+    "task_grounded"
+  ],
+  "outputs": [
+    "task_grounded",
+    "entity_ref_bindings",
+    "grounding_evidence"
+  ],
+  "errors": [
+    "task_grounding_unknown",
+    "grounding_capture_invalidated",
+    "grounding_database_revision_changed"
+  ],
+  "failure_preserves": []
+}

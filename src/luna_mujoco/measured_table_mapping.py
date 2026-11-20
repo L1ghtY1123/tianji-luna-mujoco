@@ -56,6 +56,7 @@ class MeasuredTableCache:
         self.diagnostics = {"cache_hit": False, "invalidation_reason": "reset"}
         self.demo_tables = None
         self.demo_signature = None
+        self.initial_demo_tables = None
 
     def build_demo(self, evidence, spheres, *, hard_clearance_m):
         """Reuse each initial objects table; never fit arbitrary background."""
@@ -66,9 +67,7 @@ class MeasuredTableCache:
                 or evidence.get('primary_table_id') not in evidence['tables']):
             raise ValueError('demo_initial_table_evidence_required')
         signature = hashlib.sha256(json.dumps(evidence, sort_keys=True, allow_nan=False).encode()).hexdigest()
-        if self.demo_tables is not None:
-            if signature != self.demo_signature:
-                raise ValueError('demo_table_objects_changed_requires_reset')
+        if self.demo_tables is not None and signature == self.demo_signature:
             for table in self.demo_tables.values():
                 if _robot_clearance(table, spheres) < hard_clearance_m - 1e-8:
                     raise ValueError('tabletop_robot_clearance_violated')
@@ -91,10 +90,42 @@ class MeasuredTableCache:
             if _robot_clearance(table, spheres) < hard_clearance_m - 1e-8:
                 raise ValueError('tabletop_robot_clearance_violated')
             tables[identifier] = table
+        if self.initial_demo_tables is not None:
+            # Reobserving a registered static surface changes capture IDs and RANSAC inliers.
+            # Compare actual faces to the first measurement, preventing cumulative drift.
+            if (tables.keys() != self.initial_demo_tables.keys()
+                    or evidence['primary_table_id'] != self.diagnostics['primary_table_id']):
+                raise ValueError('demo_table_objects_changed_requires_reset')
+            for identifier, current in list(tables.items()):
+                def faces(table):
+                    center = np.asarray(table.model['pose'][:3])
+                    half = np.asarray(table.model['dims']) / 2
+                    return np.array([center - half, center + half])
+                measured = faces(current)
+                baseline = faces(self.initial_demo_tables[identifier])
+                delta = np.abs(measured - baseline)
+                # A partially occluded edge can vary within the measured surface resolution.
+                # Keep the opposite edge anchored on each axis and preserve all prior occupancy.
+                fit = evidence['tables'][identifier].get('fit', {})
+                edge_tolerance = float(np.clip(fit.get('distance_threshold_m', .001), .001, .006))
+                if (not np.isfinite(edge_tolerance) or np.max(delta[:, :2]) > edge_tolerance
+                        or np.any(np.min(delta[:, :2], axis=0) > .001) or np.max(delta[:, 2]) > .001
+                        or np.dot(current.normal_xyz, self.initial_demo_tables[identifier].normal_xyz) < np.cos(np.deg2rad(1.))):
+                    raise ValueError('demo_table_objects_changed_requires_reset')
+                old = faces(self.demo_tables[identifier])
+                low, high = np.minimum(old[0], measured[0]), np.maximum(old[1], measured[1])
+                model = {**current.model, 'pose': [*((high + low) / 2).tolist(), 1, 0, 0, 0],
+                         'dims': (high - low).tolist()}
+                tables[identifier] = replace(current, model=model, height_m=float(high[2]))
+                if _robot_clearance(tables[identifier], spheres) < hard_clearance_m - 1e-8:
+                    raise ValueError('tabletop_robot_clearance_violated')
+        else:
+            self.initial_demo_tables = tables.copy()
         self.demo_tables, self.demo_signature = tables, signature
         self.table = tables[evidence['primary_table_id']]
         self.diagnostics = {'cache_hit': False, 'source_observation_id': evidence['source_observation_id'],
-                            'table_ids': list(tables), 'source': 'initial_objects_ransac_table',
+                            'table_ids': list(tables), 'primary_table_id': evidence['primary_table_id'],
+                            'source': 'initial_objects_ransac_table',
                             'tabletop_voxels': False, 'table_revision': signature[:24]}
         return self.table, {identifier: dict(table.model) for identifier, table in tables.items()}
 

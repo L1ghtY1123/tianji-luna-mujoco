@@ -27,54 +27,24 @@ class AlgorithmError(RuntimeError):
 
 
 def _proven_endpoint_rejection(proof):
-    from .demo_grasp import grasp_direction_evidence
-
     if (not isinstance(proof, dict) or proof.get('accepted') is not False
-            or proof.get('reference') != 'original_graspgen_tool_pose_with_arm_jaw_symmetry'):
+            or proof.get('reference') != 'prepared_tianji_front_tcp_after_insertion_and_jaw_symmetry'):
         return False
     fields = ('position_error_m', 'rotation_error_rad', 'position_threshold_m',
-              'rotation_threshold_rad', 'downward_dot', 'horizontal_away_from_robot_dot',
-              'maximum_tilt_deg')
+              'rotation_threshold_rad')
     if any(type(proof.get(key)) not in (int, float) or not np.isfinite(proof[key]) for key in fields):
         return False
-    position, rotation, pos_limit, rot_limit, downward, away, tilt = (proof[key] for key in fields)
+    position, rotation, pos_limit, rot_limit = (proof[key] for key in fields)
     if not (position >= 0 and 0 <= rotation <= np.pi and pos_limit > 0
-            and 0 < rot_limit <= np.pi and -1 <= downward <= 1 and -1 <= away <= 1
-            and 0 <= tilt <= 180):
+            and 0 < rot_limit <= np.pi):
         return False
     checks = {
         'nominal_position_tolerance_exceeded': position > pos_limit + 1e-9,
         'nominal_rotation_tolerance_exceeded': rotation > rot_limit + 1e-9,
-        'achieved_tool_tilt_exceeded': downward < np.cos(np.deg2rad(tilt)) - 1e-9,
-        'achieved_tool_points_toward_robot': proof.get('require_away_from_robot') is True and away < -1e-9,
     }
-    sector = proof.get('sector', {})
-    if not isinstance(sector, dict):
-        return False
-    try:
-        if type(sector.get('applied')) is not bool:
-            return False
-        computed = grasp_direction_evidence(sector.get('tool_z_world'),
-            sector.get('maximum_lateral_angle_deg'), applied=sector['applied'])
-    except (TypeError, ValueError):
-        return False
-    checks.update(
-        achieved_tool_outside_forward_down_sector=computed['applied'] and not computed['forward_downward_passed'],
-        achieved_tool_lateral_angle_exceeded=computed['applied'] and not computed['lateral_passed'])
     reasons = proof.get('reason')
     if not isinstance(reasons, str) or not reasons:
         return False
-    if reasons in {'predicted_noncontact_geometry_conflict', 'predicted_open_pad_clearance_conflict'}:
-        prediction = proof.get('predicted_gripper_compatibility', {})
-        if not isinstance(prediction, dict):
-            return False
-        field = ('minimum_padded_open_pad_gap_m' if reasons == 'predicted_open_pad_clearance_conflict'
-                 else 'minimum_padded_noncontact_gap_m')
-        gap = prediction.get(field)
-        return (prediction.get('accepted') is False and prediction.get('reason') == reasons
-                and prediction.get('source') == 'predicted_centered_jaw_width_on_frozen_cloud'
-                and bool(prediction.get('model_fingerprint')) and bool(prediction.get('points_world_sha256'))
-                and type(gap) in (float, int) and np.isfinite(gap) and gap < 0)
     return set(reasons.split(';')) == {reason for reason, rejected in checks.items() if rejected}
 
 
@@ -140,6 +110,16 @@ def determinate_grasp_failure(failure):
             and (failed_phase is None or not any(flags[failed_phase:])))
 
 
+def solver_payload(body):
+    if not body or 'planning_settings' not in body:
+        return body
+    # Jaw insertion is encoded in the TCP goals; Base applies the optional
+    # post-gripper dwell. Hash and send the same planner request.
+    settings = {k: v for k, v in body['planning_settings'].items()
+                if k not in {'rag_grasp_insertion_m', 'post_gripper_hold_s'}}
+    return {**body, 'planning_settings': settings}
+
+
 class Algorithms:
     def __init__(self, *, curobo_request=None, graspgen_client=None, perception=None, workspace_lookup=None,
                  cad_grasp_library=None):
@@ -165,6 +145,7 @@ class Algorithms:
                 self._client = None
 
     def _request(self, path, body=None):
+        body = solver_payload(body)
         started = time.perf_counter()
         try:
             with self._client_lock:
@@ -200,9 +181,17 @@ class Algorithms:
             error = result.get("error")
             if isinstance(error, dict):
                 raise AlgorithmError(f"cuRobo {path}: {error.get('message', 'service error')}",
-                                     code=error.get("code") or "algorithm_error", details=error.get("details"))
+                                     code=self._service_error_code(error), details=error.get("details"))
             raise AlgorithmError(f"cuRobo {path}: {error or f'HTTP {response.status_code}'}")
         return result
+
+    @staticmethod
+    def _service_error_code(error):
+        code = error.get("code")
+        message = error.get("message")
+        if code == "ValueError" and isinstance(message, str) and message.isascii() and message.isidentifier():
+            return message
+        return code or "algorithm_error"
 
     def health(self):
         result = {}
@@ -292,25 +281,31 @@ class Algorithms:
             entities = list(entities.values())
         objects = {entity['id']: entity for entity in entities}
         lifecycle = dict(snapshot.get('mapping_lifecycle', {}))
-        strategy = mapping_strategy(**{key: lifecycle[key] for key in
+        mapping_strategy(**{key: lifecycle[key] for key in
             ('requested_scope', 'strategy_source', 'scope_reason') if key in lifecycle})
         if exclusion_state in {'observation', 'selected'}:
             unresolved = snapshot.get('mapping_unresolved', [])
-            if strategy:
-                unseen_rows = [row for row in unresolved
-                    if row.get('status') == 'unseen' and not row.get('candidates')
-                    and row.get('previous_id') in objects
-                    and row['previous_id'] not in lifecycle.get('retired_entity_ids', [])]
-                unresolved = [row for row in unresolved if row not in unseen_rows]
+            unseen_rows = [row for row in unresolved
+                if row.get('status') == 'unseen' and not row.get('candidates')
+                and row.get('previous_id') in objects
+                and row['previous_id'] not in lifecycle.get('retired_entity_ids', [])]
+            unresolved = [row for row in unresolved if row not in unseen_rows]
             if unresolved:
                 raise AlgorithmError('semantic_scene_identity_unresolved', code='semantic_scene_identity_unresolved',
                     details={'unresolved': unresolved})
         views = {}
         coverage_views = {}
         camera_capture_metadata = {}
+        recovered = {}
+        if target is not None and target.get('cad') is None and held_surface is None and not head_only and not demo_background:
+            from .instance_masks import corroborated_target_masks
+            recovered = corroborated_target_masks(snapshot['views'], target_id)
         markers = {obj['id'] for obj in snapshot['objects'] if obj.get('kind') == 'marker'}
         for camera_id in (("3",) if head_only else ("1", "2", "3")):
             captured_view = snapshot["views"][camera_id]
+            if camera_id in recovered:
+                captured_view = {**captured_view, 'instance_masks': {**captured_view['instance_masks'],
+                                                                     target_id: recovered[camera_id]}}
             view = letterbox_view(captured_view)
             coverage_view = deepcopy(captured_view)
             coverage_view['depth_m'] = captured_view.get('coverage_depth_m', captured_view['depth_m'])
@@ -373,6 +368,9 @@ class Algorithms:
         if os.getenv('LUNA_GEOMETRY_MODE') == 'cad_esdf':
 
             visible_ids = set().union(*(set(view['instance_masks']) for view in views.values()))
+            if 'retained_visible_sources' in lifecycle:
+                lifecycle['retained_visible_sources'] = {key: frame for key, frame in lifecycle['retained_visible_sources'].items()
+                                                         if key in visible_ids}
             payload['geometry_objects'] = []
             for obj in snapshot['objects']:
                 if obj.get('kind') in {'table', 'marker'} or obj['id'] not in visible_ids:
@@ -386,6 +384,14 @@ class Algorithms:
             payload["demo_tables"] = snapshot.get("demo_tables")
         if held_surface is not None:
             payload["held_instance_id"] = target_id
+        radii = [float(np.linalg.norm(np.ptp(np.asarray(obj['points_world_m']), axis=0)))
+                 + obj.get('uncertainty_m', .005) + settings['attachment']['margin_m']
+                 for obj in snapshot['objects'] if obj.get('kind') not in {'bin', 'table', 'marker'}
+                 and len(obj.get('points_world_m', []))]
+        radius = max(radii, default=0.)
+        if target is not None:
+            radius = max(radius, float(np.linalg.norm(np.ptp(np.asarray(target['points_world_m']), axis=0)))
+                         + target.get('uncertainty_m', .005) + settings['attachment']['margin_m'])
         result = self.request("/perception/build", {**payload, "planning_settings": settings,
                             "instance_floor_heights_m": {obj['id']: float(obj['placement_reference']['floor_z_m'])
                                 for obj in snapshot['objects'] if obj.get('kind') == 'bin'
@@ -393,13 +399,13 @@ class Algorithms:
                             "camera_capture_metadata": camera_capture_metadata,
                             "checkpoint": snapshot.get("checkpoint"),
                             "full_observation_complete": snapshot.get('observation_pose_verified') is True,
-                            "mapping_max_sphere_radius_m": (0. if target is None else
-                                float(np.linalg.norm(np.ptp(np.asarray(target['points_world_m']), axis=0))
-                                      + target.get('uncertainty_m', .005) + settings['attachment']['margin_m'])),
+                            "mapping_max_sphere_radius_m": float(np.ceil(radius / .05) * .05),
                             "exclusion_state": exclusion_state, "gripper_joint_positions_rad": {
                                 arm: float(state["gripper_position_rad"])
                                 for arm, state in snapshot["arms"].items()},
                             "selected_surface_world_m": [] if target is None else np.asarray(target["points_world_m"]).tolist()})
+        result['corroborated_target_boundary_pixels'] = {camera: int(np.count_nonzero(
+            mask & ~snapshot['views'][camera]['instance_masks'][target_id])) for camera, mask in recovered.items()}
         for surface in result.get('tsdf_surfaces', {}).values():
             surface['points_world_m'] = np.asarray(surface['points_world_m'], dtype=np.float32)
         return {**result, "generation": snapshot["generation"], "target_id": target_id,
@@ -615,7 +621,7 @@ class Algorithms:
                        "scene_token": scene["scene_token"], "planning_settings": settings,
                        "trajectory_collision_clearance_m": settings["trajectory_collision_clearance_m"]}
             valid = [{**sampling, **{key: candidate[key] for key in
-                      ('source_batch', 'source_index', 'source', 'grasp_id', 'pair_id') if key in candidate},
+                      ('source_batch', 'source_index', 'source', 'grasp_id', 'pair_id', 'rag_contact', 'insertion_m') if key in candidate},
                       'candidate_index': candidate['index'], 'score': candidate['score'],
                       'T_world_tcp': poses[index].tolist(), 'nominal_T_world_tcp': poses[index].tolist()}
                      for index, candidate in enumerate(candidates)]
@@ -744,6 +750,7 @@ class Algorithms:
         if phase in ("close", "open", "open_grasp"):
             payload["gripper_start_position_rad"] = observation["arms"][arm]["gripper_position_rad"]
             payload["gripper_end_position_rad"] = gripper_end_position_rad
+        payload = solver_payload(payload)
         expected = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"),
                                             allow_nan=False).encode()).hexdigest()
         # Reuse only a proof for the identical final command and geometry.
@@ -813,7 +820,8 @@ class Algorithms:
         if result.get("scene_token") != scene["scene_token"] or result.get("attached") is not (carrying_binding is not None):
             raise AlgorithmError("dual observation returned stale or attached trajectory")
         return {"paths": {a: np.deg2rad(result["trajectories"][a]).tolist() for a in ("A", "B")},
-                "dt": result["sample_dt_s"], "scene_token": scene["scene_token"]}
+                "dt": result["sample_dt_s"], "scene_token": scene["scene_token"],
+                **{key: result[key] for key in ("planning_time_s", "request_timings", "transport_timings") if key in result}}
 
     def validate_dual_observation(self, observation, scene, paths, *, planning_settings=None,
                                   terminal_return=False, carrying_binding=None):
@@ -894,9 +902,19 @@ class Algorithms:
         remaining_candidates = list(candidates)
         measured_start = np.asarray(snapshot["arms"][arm]["joints_rad"], dtype=float)
         goalset_limit = settings['grasp_goalset_size']
-        candidate_groups = {candidate['candidate_index']: index // goalset_limit + 1
-                            for index, candidate in enumerate(candidates)}
-        chunks = [candidates[start:start + goalset_limit] for start in range(0, len(candidates), goalset_limit)]
+        # Keep each approach and jaw-width preference in its own goalset so
+        # the solver can fall back only after it exhausts the preferred group.
+        from itertools import groupby
+        chunks = []
+        def grasp_group(candidate):
+            contact = candidate.get('rag_contact', {})
+            return contact.get('top_entry'), contact.get('width_band'), contact.get('centre_band')
+
+        for _, band in groupby(candidates, key=grasp_group):
+            band = list(band)
+            chunks.extend(band[i:i+goalset_limit] for i in range(0, len(band), goalset_limit))
+        candidate_groups = {c['candidate_index']: group for group, chunk in enumerate(chunks, 1) for c in chunk}
+        original_group_count = len(chunks)
         for batch_index, chunk in enumerate(chunks, 1):
             check_cancelled()
             request = {**request_base, "goal_matrices_world":
@@ -905,7 +923,7 @@ class Algorithms:
                           "batch_count": len(chunks), "goalset_limit": goalset_limit,
                           "request_index": batch_index,
                           "candidate_group_index": candidate_groups[chunk[0]['candidate_index']],
-                          "candidate_group_count": (len(candidates) + goalset_limit - 1) // goalset_limit,
+                          "candidate_group_count": original_group_count,
                           "candidate_indices": [candidate["candidate_index"] for candidate in chunk],
                           "duration_s": 0., "success_count": 0}
             if progress is not None:
@@ -1019,6 +1037,7 @@ class Algorithms:
                     continue
                 check_cancelled()
                 best = {"candidate_index": candidate["candidate_index"], "score": candidate["score"],
+                        "insertion_m": candidate.get("insertion_m"),
                         "T_world_tcp": candidate["T_world_tcp"], "phases": phases,
                         "joint_travel_rad": travel, "command_checks": checks, **goal_evidence}
                 if destination_id is not None:

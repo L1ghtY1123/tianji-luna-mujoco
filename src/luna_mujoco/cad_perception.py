@@ -169,13 +169,48 @@ class CadGeometryResolver:
                 'instance_id': identifier, 'generation': generation}
         return result
 
+    def candidate_pose(self, capture, candidate):
+        """Register a model hypothesis before any instance ID exists."""
+        hints = candidate.get('retrieval_hypotheses') or [candidate]
+        records = [row for asset_id, row in self.catalog.records.items()
+            if any(hint.get('color') in self.subject_policy['allowed_subject_colors'].get(asset_id, [])
+                and hint.get('kind') in self.subject_policy['allowed_subject_kinds'].get(asset_id, []) for hint in hints)]
+        declared = {h['asset_id'] for h in hints if h.get('asset_id')
+                    and h.get('scene_quote') == candidate.get('scene_quote')}
+        if declared:
+            records = [self.catalog.record(code) for code in sorted(declared)]
+        provenance = {'candidate_id': candidate['candidate_id'], 'observation_id': capture['observation_id'],
+            'generation': capture['generation'], 'camera_id': candidate['camera_id'],
+            'calibration_id': candidate['calibration_id'], 'mask_sha256': candidate['mask_sha256'],
+            'usage': 'model_and_pose_hypothesis_not_instance_identity', 'official_pose_score': None}
+        if len(records) != 1 or candidate['depth_evidence']['status'] != 'measured':
+            return {**provenance, 'status': 'unavailable', 'reason': 'eligible_model_and_depth_required'}
+        record = records[0]
+        try:
+            geometry = self.catalog.geometry(record['mesh_key'])
+            estimated, pose, _, validation = self._estimate_view(capture,
+                {'points_world_m': candidate['points']}, candidate, record, geometry)
+            world = geometry['vertices_m'] @ pose[:3, :3].T + pose[:3, 3]
+            candidate['_pose_world_points'] = world
+            from .association_geometry import head_wrist_pair, reproject_surface
+            return {**provenance, 'status': 'estimated', 'asset_id': record['asset_id'],
+                'mesh_sha256': geometry['mesh_sha256'], 'source_sha256': record['source_sha256'],
+                'estimated': estimated, 'validation': validation,
+                'bounds_world_m': [world.min(0).tolist(), world.max(0).tolist()],
+                'projection_by_camera': {camera: reproject_surface(world, view,
+                    candidate['silhouette_mask'] if camera == candidate['camera_id'] else np.zeros_like(view['valid_depth']))
+                    for camera, view in capture['views'].items()
+                    if camera == candidate['camera_id'] or head_wrist_pair(camera, candidate['camera_id'])}}
+        except (ValueError, RuntimeError, OSError) as error:
+            return {**provenance, 'status': 'failed', 'asset_id': record['asset_id'], 'reason': str(error)}
+
     def resolve(self, capture, group, target, *, instruction):
         if not group or any(entry.get('entity_id') != target['id'] for entry in group):
             raise ValueError('cad_identity_binding_required')
         for entry in group:
             view = capture['views'][entry['camera_id']]
             if (view['frame_id'] != capture['observation_id'] or view['camera_id'] != entry['camera_id']
-                    or view['simulation_generation'] != capture['generation']):
+                    or view['robot_generation'] != capture['generation']):
                 raise ValueError('cad_capture_mismatch')
         generation = capture['generation']
         color = target.get('color', 'unknown').strip().lower()
@@ -184,6 +219,9 @@ class CadGeometryResolver:
         records = [record for asset_id, record in self.catalog.records.items()
                    if color in allowed_colors.get(asset_id, [])
                    and target.get('kind') in allowed_kinds.get(asset_id, [])]
+        declared = (target.get('segmentation_query') or {}).get('asset_id')
+        if declared:
+            records = [self.catalog.record(declared)]
         cache_key = (generation, target['id'])
         if not records:
             self.confirmed_models.pop(cache_key, None)
@@ -238,13 +276,12 @@ class CadGeometryResolver:
             view = capture['views'][entry['camera_id']]
             entry['valid_depth_count'] = int(np.count_nonzero(_identity_silhouette(entry)
                 & view['valid_depth'] & np.isfinite(view['depth_m']) & (view['depth_m'] > 0)))
-        ranked = sorted(candidates.values(), key=lambda item: (-item['valid_depth_count'], item['camera_id']))
-        eligible = [entry for entry in ranked if entry['valid_depth_count'] > 32]
-        if not eligible:
-            raise ValueError('cad_pose_depth_insufficient')
-        view_estimation = {'policy': 'best_depth_view_foundationpose_direct',
-            'eligible_camera_ids': [entry['camera_id'] for entry in eligible],
-            'selected_camera_id': None, 'attempts': []}
+        entry = candidates.get('3')
+        if entry is None or entry['valid_depth_count'] <= 32:
+            raise ValueError('cad_pose_head_depth_insufficient')
+        view_estimation = {'policy': 'head_camera_foundationpose',
+            'eligible_camera_ids': [camera for camera, row in candidates.items() if row['valid_depth_count'] > 32],
+            'selected_camera_id': '3', 'attempts': []}
         seed = saved.get('pose_seed') if saved else None
         motion_history = capture.get('cad_motion_context')
         motion_context = deepcopy(motion_history.get(target['id'])) if isinstance(motion_history, dict) else None
@@ -255,13 +292,11 @@ class CadGeometryResolver:
                 and seed['observation_id'] != capture['observation_id']
                 and seed['capture_time'] < capture['time']):
             tracking_seed = {**seed, 'instance_id': target['id'], 'source_sha256': record['source_sha256']}
-        entry = eligible[0]
         estimated, pose, source_pose, validation = self._estimate_view(
             capture, target, entry, record, geometry, tracking_seed=tracking_seed)
         view_estimation['attempts'].append({'camera_id': entry['camera_id'],
             'valid_depth_count': entry['valid_depth_count'], 'status': validation['status'],
             'pose_evidence': deepcopy(estimated), 'pose_validation': deepcopy(validation)})
-        view_estimation['selected_camera_id'] = entry['camera_id']
         mask_evidence = [_mask_evidence(item) for item in group]
         view = capture['views'][view_estimation['selected_camera_id']]
         match_evidence = deepcopy(match['evidence'])
@@ -307,14 +342,23 @@ class CadGeometryResolver:
         view = capture['views'][entry['camera_id']]
         estimator = self.pose_estimator or CadPoseEstimator()
         options = {'tracking_seed': tracking_seed} if tracking_seed is not None else {}
+        hypothesis = entry.get('pose_hypothesis') or {}
+        reuse = (hypothesis.get('status') == 'estimated'
+            and hypothesis.get('observation_id') == capture['observation_id']
+            and hypothesis.get('generation') == capture['generation']
+            and hypothesis.get('camera_id') == entry['camera_id']
+            and hypothesis.get('calibration_id') == view['calibration_id']
+            and hypothesis.get('mask_sha256') == hashlib.sha256(_identity_silhouette(entry).tobytes()).hexdigest()
+            and hypothesis.get('mesh_sha256') == geometry['mesh_sha256']
+            and hypothesis.get('source_sha256') == record['source_sha256'])
         try:
-            estimated = estimator.estimate_instance(view, _identity_silhouette(entry), entry['score'],
+            estimated = deepcopy(hypothesis['estimated']) if reuse else estimator.estimate_instance(view, _identity_silhouette(entry), entry['score'],
                 model_id=record['model_id'], mask_capture_id=view['frame_id'], mask_camera_id=view['camera_id'], **options)
         except (ValueError, RuntimeError, OSError) as error:
             raise ValueError('cad_pose_estimation_failed:' + str(error)) from error
         if (estimated['source_sha256'] != record['source_sha256'] or estimated['model_id'] != record['model_id']
                 or estimated['capture_id'] != view['frame_id'] or estimated['camera_id'] != view['camera_id']
-                or estimated['simulation_generation'] != capture['generation']
+                or estimated['robot_generation'] != capture['generation']
                 or estimated['calibration_id'] != view['calibration_id']):
             raise ValueError('cad_pose_provenance_mismatch')
         source_from_canonical = validate_pose(estimated['T_source_canonical_m'])

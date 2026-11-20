@@ -49,9 +49,9 @@ def vla_unpack_configuration(settings=None):
         'input_orientation': 'preserve_existing_grasp_orientation',
         'preparation_joints_deg': preparation,
         'visibility_requirement': ('Both arms must reach the fixed VLA preparation joints before the effect. '
-            'The output is random within the configured right tabletop region. '
+            'Base executes the configured VLA service; the requested output region is intent only. '
             'Visibility still requires current three-camera verification. '
             'The effect invalidates the map; an unverified hidden output cannot authorize a blind recovery motion.'),
         'output_region': capability['output_region'],
-        'post_effect_arm_configuration': 'unchanged_from_preparation; no automatic arm return',
+        'post_effect_arm_configuration': 'read_measured_feedback_from_base; no assumed pose',
         'output_position': 'unknown_until_current_visual_measurement'}

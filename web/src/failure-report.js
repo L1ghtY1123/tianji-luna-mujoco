@@ -32,7 +32,26 @@ function recordedFailure(run, events) {
 export function failureSummary(run = {}, events = []) {
   const { report, end, failures, succeeded } = recordedFailure(run, events);
   if (succeeded) return '';
-  if (report) return report.summary || report.code || '失败报告未记录结论';
+  if (report) {
+    const original = report.original_task_failure;
+    const step = original?.partial_execution ?? run.failed_step ?? end.failed_step;
+    const skill = original?.skill ?? step?.skill ?? report.skill ?? report.stage;
+    const code = original?.error_code ?? report.code;
+    const invocation = original?.invocation_id ?? step?.invocation_id;
+    const service = invocation && events.find(event => event.kind === 'algorithm_error'
+      && (event.invocation_id ?? event.data?.invocation_id) === invocation);
+    const details = run.error_details ?? end.error_details;
+    const validation = details?.validation_errors?.[0];
+    const detail = service?.data?.error ?? original?.details?.message ?? original?.message
+      ?? details?.message ?? (typeof validation === 'string' ? validation : validation?.message);
+    const cause = code === 'grounding_capture_invalidated' ? original?.details?.reason ?? details?.reason : null;
+    const descriptions = {robot_not_idle:'静止检查未通过', robot_feedback_unavailable:'未取得当前机器人反馈',
+      robot_feedback_error:'机器人反馈异常', command_state_unavailable:'缺少运动指令状态'};
+    const causeLabel = cause && (descriptions[cause] ? `${descriptions[cause]} (${cause})` : cause);
+    const parts = [skill, code, detail, causeLabel].filter(Boolean);
+    const label = [...new Set(parts)].join(' · ');
+    return label && report.summary && !detail ? `${label}。${report.summary}` : label || report.summary || '失败报告未记录结论';
+  }
   const failure = run.failure ?? end.failure ?? failures.at(-1)?.data;
   const conclusion = run.conclusion?.brief || run.error_summary || run.conclusion?.summary
     || end.conclusion?.brief || end.error_summary || end.conclusion?.summary

@@ -61,6 +61,11 @@ export function createReplayCloud(container, { points = [], candidates = [], col
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   container.append(renderer.domElement);
   const controls = new OrbitControls(camera, renderer.domElement);
+  // Unmodified scrolling belongs to the replay page. Use Ctrl + wheel to zoom the view.
+  function pageScroll(event) {
+    if (!event.ctrlKey) event.stopImmediatePropagation();
+  }
+  renderer.domElement.addEventListener('wheel', pageScroll, {capture: true, passive: true});
   controls.minDistance = .02;
   controls.maxDistance = 20;
   const geometry = new THREE.BufferGeometry();
@@ -105,6 +110,12 @@ export function createReplayCloud(container, { points = [], candidates = [], col
   resize(); fit();
   return {
     fit,
+    setLayerVisible(name, visible) {
+      for (const child of collision.children) {
+        if (child.name === name || child.name.startsWith(name + ':')) child.visible = visible;
+      }
+      render();
+    },
     setCandidates(rows) {
       if (disposed) return;
       lines.geometry.dispose();
@@ -113,6 +124,7 @@ export function createReplayCloud(container, { points = [], candidates = [], col
     },
     dispose() {
       disposed = true;
+      renderer.domElement.removeEventListener('wheel', pageScroll, true);
       observer.disconnect(); controls.dispose();
       cloud.geometry.dispose(); cloud.material.dispose();
       lines.geometry.dispose(); lines.material.dispose();

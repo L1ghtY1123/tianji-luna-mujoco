@@ -2,14 +2,20 @@
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.gzip import GZipMiddleware
 
 from .archive_evidence import read_array_preview
 
 
 class SaveExperimentRequest(BaseModel):
     name: str | None = Field(default=None, max_length=120)
+
+
+class ReplayEventsResponse(JSONResponse):
+    async def __call__(self, scope, receive, send):
+        await GZipMiddleware(super().__call__, minimum_size=16384, compresslevel=1)(scope, receive, send)
 
 
 class ArchiveFileResponse(FileResponse):
@@ -94,8 +100,8 @@ def experiment_router(store):
             raise HTTPException(503, "experiment_storage_unavailable") from error
 
     @router.get("")
-    async def list_experiments():
-        return {"root": str(store.root), "experiments": await call(store.list)}
+    async def list_experiments(indexed_sizes_only: bool = False):
+        return {"root": str(store.root), "experiments": await call(store.list, not indexed_sizes_only)}
 
     @router.get("/{identifier}")
     async def get_experiment(identifier: str):
@@ -103,7 +109,9 @@ def experiment_router(store):
 
     @router.get("/{identifier}/events")
     async def events(identifier: str):
-        return {"events": await call(store.events, identifier)}
+        def read_events():
+            return ReplayEventsResponse({"events": store.events(identifier)})
+        return await call(read_events)
 
     @router.get("/{identifier}/arrays")
     async def array_preview(identifier: str, path: str, key: str,

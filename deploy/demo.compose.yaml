@@ -4,7 +4,7 @@ include:
 services:
   curobo:
     cpus: 1
-    image: jodell-curobo:0.3.2-guangyu-curobo-v0.9.0
+    image: tianji-algorithm-curobo
     pull_policy: never
     container_name: tianji-luna-curobo-guangyu
     gpus: all
@@ -45,7 +45,7 @@ services:
       start_period: 180s
   web:
     cpus: 1.5
-    image: tianji-luna-mujoco:0.7.0-cad-distance-guangyu
+    image: tianji-luna:0.8.1-guangyu
     pull_policy: never
     container_name: tianji-luna-web-guangyu
     init: true
@@ -60,6 +60,9 @@ services:
       LUNA_DECISIONS_CONFIG_FILE: /opt/jev/openai-config/decisions.json
       LUNA_DECISIONS_TIMEOUT_S: ${LUNA_DECISIONS_TIMEOUT_S:-90}
       LUNA_EXPERIMENT_DIR: /opt/jev/data/experiments
+      LUNA_BASE_URL: ${LUNA_BASE_URL:-http://127.0.0.1:8000}
+      LUNA_BASE_PUBLIC_URL: ${LUNA_BASE_PUBLIC_URL:-http://127.0.0.1:8000}
+      LUNA_SIMULATION_SCENE_URL: ${LUNA_SIMULATION_SCENE_URL:-}
       LUNA_CUROBO_URL: http://127.0.0.1:8352
       LUNA_GRASPGEN_URL: http://127.0.0.1:8363
       LUNA_SAM3_URL: http://127.0.0.1:8362
@@ -74,10 +77,10 @@ services:
     - ${OPENAI_CONFIG_DIR:-/home/guangyu/.config/openai-client}:/opt/jev/openai-config:ro
     - ../.env:/opt/jev/.env:ro
     - ../data:/opt/jev/data
-    - ../data/render_meshes:/opt/jev/assets/render_meshes
     - ../src:/opt/jev/src:ro
     - ../skill_catalog:/opt/jev/skill_catalog:ro
     - ../resources:/opt/jev/resources:ro
+    - ../assets:/opt/jev/assets:ro
     - ../../CAD:/opt/cad:ro
     - ../web:/opt/jev/web:ro
     - ./run-demo.sh:/opt/jev/deploy/run-demo.sh:ro

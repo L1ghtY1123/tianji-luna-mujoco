@@ -72,7 +72,7 @@ def decode_mapping_payload(payload):
     lifecycle = payload.get('mapping_lifecycle', {})
     if (not isinstance(lifecycle, dict) or set(lifecycle) - {
             'required_entity_ids', 'invalidated_entity_ids', 'retired_entity_ids', 'workspace_bounds',
-            'max_retained_voxel_bytes', 'requested_scope', 'strategy_source', 'scope_reason'}):
+            'max_retained_voxel_bytes', 'requested_scope', 'strategy_source', 'scope_reason', 'previous_scene_token'}):
         raise ValueError('mapping_lifecycle_invalid')
     from .collision_objects import mapping_strategy
     strategy = mapping_strategy(**{key: lifecycle[key] for key in
@@ -152,7 +152,6 @@ def decode_mapping_payload(payload):
     decoded["planning_settings"] = settings
     decoded["mapping_collision_policy"] = {name: settings[name] for name in
         ("trajectory_collision_clearance_m", "optimizer_collision_activation_distance_m")}
-    decoded["experimental_semantic_only_mapping"] = settings.get("experimental_semantic_only_mapping", False)
     decoded["full_observation_complete"] = full_observation
     decoded["mapping_max_sphere_radius_m"] = radius
     decoded['instance_floor_heights_m'] = floors

@@ -33,7 +33,10 @@ class RawRobotDepthBoundary:
         self.device_cfg = DeviceCfg()
         normalized = self.update_feedback(feedback)
         config = articulated_segmentation_config(normalized, urdf_path=urdf_path, asset_root_path=asset_root_path)
-        self.kinematics = Kinematics(KinematicsCfg.from_data_dict(config, device_cfg=self.device_cfg))
+        import xml.etree.ElementTree as ET
+        self.link_names = [link.get('name') for link in ET.parse(urdf_path).getroot().findall('link')]
+        self.kinematics = Kinematics(KinematicsCfg.from_data_dict(
+            config, tool_frames=self.link_names, device_cfg=self.device_cfg))
         self.robot_segmenters = {}
 
     @property

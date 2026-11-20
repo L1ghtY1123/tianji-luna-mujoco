@@ -10,8 +10,8 @@ Decisions 只看必要视觉事实；每次 HTTP 一个问题，使用有效区�
 | 跨时刻关联 | 当前三相机完整标注 RGB、上次 P0/P1 实例的完整标注 RGB 和有日期操作历史 | P 编号 / no_match / reject / unknown，确认后由程序继承永久 ID |
 | 历史身份恢复 | 近期对应未解决时追加更早已确认参考及档案归属，保留裁剪与独立掩码图 | 永久 ID / new_instance / reject / unknown |
 | 用户声明的 CAD 绑定 | 已确认身份的类别和颜色 | 程序绑定黑件／蓝盒 CAD，随后用 SAM3 与 RGBD 配准 |
-| verify_grasp | 执行臂当前局部腕 RGB、初始同腕 RGB、同次反馈 | 只询问 object_held；确认持物后由程序从连续执行绑定继承目标 ID |
-| verify_place | 空爪题采用当前、初始和前次持物的同腕 RGB，落点题采用当前三相机和目标、目的地参考 | 视觉确认未持物后，判断当前落点与投影区域或指定容器的关系 |
+| verify_grasp | 实测夹爪开度，全闭时使用当前夹持区 RGB | 确认持物后继承抓取目标 ID |
+| verify_place | 实测释放位置与夹爪开度，全闭时使用当前夹持区 RGB | 到位释放且空爪后登记选定目的地 |
 | 下一目标（多个合格输入） | 带框过滤 RGB、每个 ID 的描述 | 一次 choice，优先容易抓取；单候选或用户明确顺序时不调用 |
 | 当前支撑未确定 | 带框过滤 RGB、支撑候选 | 各必要支撑关系独立 predicate；数值证据明确时不调用 |
 | 新物体任务归属未知 | 新主体当前原图及编译输入要求 | 一次 predicate，已接受结果任务内复用 |
@@ -37,9 +37,9 @@ state 是 input 中的结构化文字，由程序按当前问题投影观测、�
 
 Decisions 官方单题允许 2–255 个 choice 选项，本项目接口与该上限一致，超过时明确拒绝而不截断数据库 ID。[官方 API 参考](https://developers.openai.com/api/reference/resources/decisions/methods/create)
 
-verify_grasp 在 Lift 后只调用一次 Decisions 判断是否持物，输入执行臂当前局部腕部 RGB、初始同腕 RGB 和同次夹爪反馈，不做夹爪状态或运算，也不调用 SAM3。明确未持物允许空抓恢复；请求异常、拒答或证据不足保留 unknown。确认持物后，程序核对连续抓取记录的目标、执行臂、运行、代次、来源观测、场景及动作版本，继承抓取前已确认目标的永久 ID，再建立 attachment。identity_binding 明确标记 continuous_grasp_execution 和 visual_identity_verified=false；这属于执行过程推定身份。执行记录不一致时保留持物结果与身份未确定状态，不建立 attachment。历史参考保留用于抓取前关联与放置核验，正常主线不再单独做抓后身份题。
+verify_grasp 在 Lift 后读取同次实测夹爪开度。全开判为空爪，中间开度判为持物，仅全闭时由 Decisions 查看当前腕相机夹持区判断是否持物。确认持物后，将本次完成抓取的目标永久 ID 绑定到夹爪并建立 attachment。空抓可进入恢复，反馈缺失或执行记录不一致时保留待定。
 
-verify_place 使用与 verify_grasp 相同的 object_held 正向题，输入当前、初始抓取前和前次持物的同腕 RGB 及同次夹爪反馈。明确 no 转换为空爪成立；yes 为空爪不成立，unknown 保留 unknown。原始持物回答与逻辑取反得到的 target_released 分别归档，不另问否定或释放动作题。视觉确认空爪后，place_result 在 direct_success、inferred_success、failure、unknown 中选择。直接确认成功要求当前清楚识别目标位于指定区域。推测成功要求目标因堆叠或容器遮挡不可见、先前已确认持有目标、实际在指定区域释放、当前确认空爪，且图像未发现区域外掉落证据。缺失必要证据返回 unknown，明确反证返回 failure。两类成功均完成交付，数据库、回执和回放保留 placement_outcome。推测成功保留容器成员关系与占据范围，个体当前位姿继续标为未测量。位置题使用当前三相机 RGB、释放前 RGB 和带日期目标及目的地参考，state 提供已验证动作链。配置子区域以 PLACEMENT_REGION 投影到当前 RGB。原始回答与程序验收结果独立归档，confidence 仅归档。
+verify_place 使用本次搬运已绑定的物体 ID 和目的地 ID。释放时检查机器人实测 TCP 是否到达配置释放 XYZ（位置容差 5 mm），释放后按实测开度判断空爪，仅全闭时由 Decisions 查看当前夹持区。到位、释放且空爪即登记已放到指定桌面位置或盒中，结果为 execution_assumed。回执记录目标、目的地和实际释放位置，物体最终静止位姿保留为未测量。
 
 身份不会通过容器跟踪、三维投影或深度阈值自动继承。当前完全相同的同相机 mask 字节仅作输入去重。数值定位、几何与碰撞在视觉身份接受后独立执行。
 

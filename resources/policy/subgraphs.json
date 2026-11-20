@@ -13,7 +13,8 @@
       },
       "requires": {
         "grasp_held": false,
-        "recovery_needed": false
+        "recovery_needed": false,
+        "task_grounded": true
       },
       "success": {
         "observed": true,
@@ -97,7 +98,7 @@
       "dependencies": []
     },
     "return_observe_v1": {
-      "description": "From existing measured empty-hand evidence, publish an observation-motion map, return to configured pose, acquire fresh RGBD and remap. No target or destination rebinding.",
+      "description": "Acquire the current empty-hand scene, update the observation-motion collision map and return to the configured pose.",
       "arguments": {
         "type": "object",
         "properties": {},
@@ -105,14 +106,12 @@
         "additionalProperties": false
       },
       "requires": {
-        "observed": true,
         "grasp_held": false,
-        "recovery_needed": false
+        "recovery_needed": false,
+        "task_grounded": true
       },
       "success": {
-        "observed": true,
-        "observation_pose_ready": true,
-        "observation_motion_scene_ready": true
+        "observation_pose_ready": true
       },
       "failure": "Return failure with the last skill result and its physical effects; do not replay completed effects.",
       "unknown": "Return unknown with existing evidence; no automatic retry or motion.",
@@ -123,7 +122,15 @@
         "nodes": [
           {
             "type": "skill",
-            "id": "step_0_build_scene",
+            "id": "observe_here",
+            "skill": "observe_scene",
+            "arguments": {
+              "capture_mode": "reuse_current"
+            }
+          },
+          {
+            "type": "skill",
+            "id": "map_here",
             "skill": "build_scene",
             "arguments": {
               "exclusion_state": "observation",
@@ -132,27 +139,10 @@
           },
           {
             "type": "skill",
-            "id": "step_1_move_to_observe",
+            "id": "return",
             "skill": "move_to_observe",
             "arguments": {
               "viewpoint": "configured"
-            }
-          },
-          {
-            "type": "skill",
-            "id": "step_2_observe_scene",
-            "skill": "observe_scene",
-            "arguments": {
-              "capture_mode": "fresh"
-            }
-          },
-          {
-            "type": "skill",
-            "id": "step_3_build_scene",
-            "skill": "build_scene",
-            "arguments": {
-              "exclusion_state": "observation",
-              "reason": "Refresh measured observation-motion collision scene"
             }
           },
           {
@@ -174,7 +164,7 @@
             "reason": "Scope unknown"
           }
         ],
-        "entry": "step_0_build_scene",
+        "entry": "observe_here",
         "on_failure": {
           "target": "failure",
           "max_traversals": 1
@@ -186,37 +176,27 @@
         "edges": [
           {
             "sources": [
-              "step_0_build_scene"
+              "observe_here"
             ],
             "outcomes": [
               "success"
             ],
-            "target": "step_1_move_to_observe",
+            "target": "map_here",
             "max_traversals": 1
           },
           {
             "sources": [
-              "step_1_move_to_observe"
+              "map_here"
             ],
             "outcomes": [
               "success"
             ],
-            "target": "step_2_observe_scene",
+            "target": "return",
             "max_traversals": 1
           },
           {
             "sources": [
-              "step_2_observe_scene"
-            ],
-            "outcomes": [
-              "success"
-            ],
-            "target": "step_3_build_scene",
-            "max_traversals": 1
-          },
-          {
-            "sources": [
-              "step_3_build_scene"
+              "return"
             ],
             "outcomes": [
               "success"
@@ -238,7 +218,8 @@
       },
       "requires": {
         "recovery_needed": true,
-        "arm_selected": true
+        "arm_selected": true,
+        "task_grounded": true
       },
       "success": {
         "grasp_held": false,
@@ -320,7 +301,7 @@
       "dependencies": []
     },
     "single_arm_transfer_v1": {
-      "description": "Single-arm object grasp/place with an explicit entry observe_scene node using reuse_current. The observation skill reuses a valid current capture or acquires a fresh capture through its normal version and feedback checks. Admit only an arm whose workspace contains BOTH the measured source and fixed release TCP; no handover or arm switch. Regenerate and replan once on the same arm. Empty grasp and placement uncertainty first use a fresh observation in place; return motion requires an explicit program evidence check. All effects and bounded recovery stay visible. Support regions use surface_setdown. Open containers use container_release at the configured TCP height above the measured rim. Gentle placement on a container floor is unsupported. For one specifically identified object use TaskSpec scope=ids and its exact target ref. For all/count, including count=1, call only after select_target and bind target_id=$selected; the template does not select a collection member.",
+      "description": "Single-arm object grasp/place with an explicit entry observe_scene node using reuse_current. The observation skill reuses a valid current capture or acquires a fresh capture through its normal version and feedback checks. Admit only an arm whose workspace contains BOTH the measured source and fixed release TCP; no handover or arm switch. Regenerate and replan once on the same arm. Empty grasp and placement uncertainty first use a fresh observation in place; return motion requires an explicit program evidence check. All effects and bounded recovery stay visible. Support regions use surface_setdown. Open containers use container_release at the configured TCP height above the measured rim. Gentle placement on a container floor is unsupported. For one specifically identified object use TaskSpec scope=ids and its exact target ref. For all/count, including count=1, call only after select_target and bind target_id=$selected; the template does not select a collection member. Success ends at the verified delivery receipt.",
       "arguments": {
         "anyOf": [
           {
@@ -384,13 +365,12 @@
       "requires": {
         "grasp_held": false,
         "recovery_needed": false,
-        "needs_place": true
+        "needs_place": true,
+        "task_grounded": true
       },
       "success": {
         "released": true,
-        "place_verification_completed": true,
-        "observed": true,
-        "observation_motion_scene_ready": true
+        "place_verification_completed": true
       },
       "failure": "Return failure with the last skill result and its physical effects; do not replay completed effects.",
       "unknown": "Return unknown with existing evidence; no automatic retry or motion.",
@@ -778,23 +758,6 @@
             }
           },
           {
-            "type": "skill",
-            "id": "post_observe",
-            "skill": "observe_scene",
-            "arguments": {
-              "capture_mode": "fresh"
-            }
-          },
-          {
-            "type": "skill",
-            "id": "post_map",
-            "skill": "build_scene",
-            "arguments": {
-              "exclusion_state": "observation",
-              "reason": "Synchronize current database geometry"
-            }
-          },
-          {
             "type": "router",
             "id": "empty_view_choice",
             "condition": "Return to configured observation pose only when current evidence is missing and movement is legal",
@@ -1002,26 +965,6 @@
           {
             "sources": [
               "verify_place"
-            ],
-            "outcomes": [
-              "success"
-            ],
-            "target": "post_observe",
-            "max_traversals": 1
-          },
-          {
-            "sources": [
-              "post_observe"
-            ],
-            "outcomes": [
-              "success"
-            ],
-            "target": "post_map",
-            "max_traversals": 1
-          },
-          {
-            "sources": [
-              "post_map"
             ],
             "outcomes": [
               "success"
@@ -1266,7 +1209,7 @@
             "outcomes": [
               "success"
             ],
-            "target": "post_observe",
+            "target": "success",
             "max_traversals": 1
           },
           {
@@ -1306,7 +1249,7 @@
             "outcomes": [
               "success"
             ],
-            "target": "post_observe",
+            "target": "success",
             "max_traversals": 1
           },
           {
@@ -1596,6 +1539,110 @@
           "arguments": {}
         }
       ]
+    },
+    "ground_task_v1": {
+      "description": "Ground the compiled task on the frozen initial RGBD; on unknown capture fresh RGBD once and retry explicitly. No movement or geometry publication. All nodes remain visible after expansion.",
+      "arguments": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "requires": {
+        "capture_ready": true,
+        "grasp_held": false
+      },
+      "success": "Task references have accepted RGBD identities; continue with observe_scene for geometry.",
+      "failure": "Return failure with the last skill result and its physical effects; do not replay completed effects.",
+      "unknown": "Return unknown with existing evidence; no automatic retry or motion.",
+      "body": {
+        "id": "body",
+        "input_id": null,
+        "task": null,
+        "nodes": [
+          {
+            "id": "ground",
+            "type": "skill",
+            "skill": "ground_task",
+            "arguments": {}
+          },
+          {
+            "id": "capture",
+            "type": "skill",
+            "skill": "capture_scene",
+            "arguments": {
+              "capture_mode": "fresh"
+            }
+          },
+          {
+            "id": "reground",
+            "type": "skill",
+            "skill": "ground_task",
+            "arguments": {}
+          },
+          {
+            "type": "end",
+            "id": "success",
+            "status": "success",
+            "reason": "Scope success"
+          },
+          {
+            "type": "end",
+            "id": "failure",
+            "status": "failure",
+            "reason": "Scope failure"
+          },
+          {
+            "type": "end",
+            "id": "unknown",
+            "status": "unknown",
+            "reason": "Scope unknown"
+          }
+        ],
+        "entry": "ground",
+        "on_failure": {
+          "target": "failure",
+          "max_traversals": 1
+        },
+        "on_unknown": {
+          "target": "unknown",
+          "max_traversals": 1
+        },
+        "edges": [
+          {
+            "sources": [
+              "ground",
+              "reground"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "success",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "ground"
+            ],
+            "outcomes": [
+              "unknown"
+            ],
+            "target": "capture",
+            "max_traversals": 1
+          },
+          {
+            "sources": [
+              "capture"
+            ],
+            "outcomes": [
+              "success"
+            ],
+            "target": "reground",
+            "max_traversals": 1
+          }
+        ]
+      },
+      "dependencies": []
     }
   }
 }

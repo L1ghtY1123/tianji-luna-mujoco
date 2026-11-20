@@ -49,10 +49,12 @@ class ObjectRecord(MemoryData):
     appearance_keywords: tuple[str, ...] = ()
     segmentation_query: dict[str, JsonValue] | None = None
     initial_parent_id: ObjectId | None = None
+    initial_reference: dict[str, JsonValue] | None = None
     reference_camera_id: Literal['1', '2', '3'] | None = None
     reference_observation_id: str | None = None
     bbox: tuple[float, float, float, float] | None = None
     identity_source: str | None = None
+    registration_basis: str | None = None
     identity_request_hash: str | None = None
     current_identity_proposal: dict[str, JsonValue] | None = None
     asset_id: str | None = None
@@ -134,15 +136,16 @@ class ProductRegistration(MemoryData):
 
 
 class CollisionUpdate(MemoryData):
-    requested_scope: Literal['global']
+    requested_scope: Literal['global', 'local']
     strategy_source: str = Field(min_length=1)
     scope_reason: str = Field(min_length=1)
 
 class CollisionLifecycle(MemoryData):
     required_entity_ids: tuple[ObjectId, ...] = ()
     invalidated_entity_ids: tuple[ObjectId, ...] = ()
+    changed_by_operation_ids: tuple[ObjectId, ...] = ()
     retired_entity_ids: tuple[ObjectId, ...] = ()
-    requested_scope: Literal['global'] | None = None
+    requested_scope: Literal['global', 'local'] | None = None
     strategy_source: str | None = None
     scope_reason: str | None = None
     workspace_bounds: tuple[Vector3, Vector3] | None = None

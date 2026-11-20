@@ -10,7 +10,7 @@ from .collision_objects import layer_entity, require_native_objects_geometry
 from .geometry import rigid_matrix
 
 SCENE_INVALIDATION_SOURCES = frozenset({
-    'mock_vla', 'verified_drop_action_bounds', 'drop_release_action_bounds',
+    'base_vla', 'verified_drop_action_bounds', 'drop_release_action_bounds',
     'verified_release_action',
 })
 
@@ -43,17 +43,12 @@ def prepare_scene_update(scene, grids, model, request):
     if operation == 'container_entry':
         container = request.get('container_id')
         record = scene.get('object_layers', {}).get('entities', {}).get(container, {})
-        if (policy != 'released' or request.get('source') != 'visual_container_entry'
+        if (policy != 'released' or request.get('source') not in {'bound_container_release', 'visual_container_entry'}
                 or record.get('status') not in {'observed', 'retained'}
                 or not request.get('after_capture_id')):
             raise ValueError('container_occupancy_evidence_invalid')
         if not request.get('receipt_id') or not request.get('binding_id'):
             raise ValueError('container_entry_receipt_missing')
-        for layers in updated_model.values():
-            for layer_name in list(layers):
-                if layer_entity(layer_name) == request['target_id']:
-                    del layers[layer_name]
-        updated_grids = [grid for grid in grids if layer_entity(grid.name) != request['target_id']]
         evidence.update(source=request['source'], container_id=container,
                         entry_receipt_id=request['receipt_id'], measured=False,
                         object_pose_measured=False, geometry_invalidated=True)
@@ -111,10 +106,6 @@ def prepare_scene_update(scene, grids, model, request):
                     layer.pop("maximum_world_m", None)
                     layer.update(status="unavailable", invalidation_reason="release_prediction_requires_fresh_bounds")
             identity["collision_layer_bounds"] = bounds
-    if operation == 'container_entry':
-        from .collision_mapping import collision_layer_bounds
-
-        identity['collision_layer_bounds'] = collision_layer_bounds(updated_grids, updated_model, identity)
     return identity, updated_grids, updated_model
 
 
@@ -126,9 +117,10 @@ def updated_preview(preview, identity, request, model=None):
     collision = result.get('collision_scene', {})
     collision['scene_token'] = identity['scene_token']
     if request['operation'] == 'container_entry' and model is not None:
-        name = 'semantic_instance::' + request['target_id']
-        collision.setdefault('mesh_layers', {}).pop(name, None)
-        collision['cuboid_layers'] = [row for row in collision.get('cuboid_layers', []) if row['name'] != name]
-        collision['voxel_layers'] = [row for row in collision.get('voxel_layers', []) if row['name'] != name]
+        disabled = set(identity['disabled_obstacle_names'])
+        layers = [*collision.get('mesh_layers', {}).values(), *collision.get('voxel_layers', []),
+                  *collision.get('cuboid_layers', [])]
+        for layer in layers:
+            layer['enabled'] = layer['name'] not in disabled
         collision['coverage'] = deepcopy(identity['coverage'])
     return result

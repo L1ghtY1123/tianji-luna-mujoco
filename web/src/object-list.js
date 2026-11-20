@@ -37,8 +37,7 @@ export function createObjectList(container, {document: ownerDocument = globalThi
         if (runId) {
           const link = ownerDocument.createElement('a');
           link.className = 'button'; link.textContent = '全宽查看任务图 ↗';
-          link.href = `/replay.html?run=${encodeURIComponent(runId)}&view=graph&standalone=1`;
-          link.target = '_blank'; link.rel = 'noopener';
+          link.href = `/#replay?run=${encodeURIComponent(runId)}&view=graph&standalone=1`;
           details.append(link);
         }
         details.append(tree);

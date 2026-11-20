@@ -1,0 +1,176 @@
+{
+  "operation": "retag-existing-images-no-build",
+  "images": [
+    {
+      "name": "tianji-luna:0.8.1-guangyu",
+      "image_id": "sha256:985aa90acad1c12fe03efe33daa8eb932ae46f0bb433857844f3be2f838a0e41",
+      "previous_name": "tianji-luna-mujoco:0.8.1-base-bridge-guangyu",
+      "created": "2026-11-16T13:03:53.849086975+08:00",
+      "provenance_labels": {
+        "com.docker.compose.project": "tianji-jev-mujoco-web-guangyu",
+        "com.docker.compose.service": "web",
+        "com.docker.compose.version": "5.2.0",
+        "org.opencontainers.image.owner": "guangyu",
+        "org.opencontainers.image.title": "tianji-jev-mujoco-guangyu"
+      },
+      "purpose": "current isolated Luna stack",
+      "repo_digests": [
+        "tianji-luna@sha256:985aa90acad1c12fe03efe33daa8eb932ae46f0bb433857844f3be2f838a0e41"
+      ]
+    },
+    {
+      "name": "jodell-console:0.2.0",
+      "image_id": "sha256:0ea21fcaa67cbbdc4cb15eee8de14913d32530778e22adab387ee4d5e055752f",
+      "previous_name": "jodell-console:0.2.0",
+      "created": "2026-11-09T18:25:51.361330879+08:00",
+      "provenance_labels": {
+        "jodell.build.owner": "guangyu",
+        "jodell.build.purpose": "shared-console",
+        "org.opencontainers.image.revision": "36a7334b210649343a6ea5f67fbd3d42d44f6476",
+        "org.opencontainers.image.title": "guangyu tianji_base test runtime"
+      },
+      "purpose": "current isolated Luna stack",
+      "repo_digests": [
+        "jodell-console@sha256:0ea21fcaa67cbbdc4cb15eee8de14913d32530778e22adab387ee4d5e055752f"
+      ]
+    },
+    {
+      "name": "tianji-simulation:0.1.0-guangyu",
+      "image_id": "sha256:86c041c74314247a80a00953378c4c8b5a02787fbf47587829ebab655679b348",
+      "previous_name": "tianji-mujoco-twin:0.1.0-xuan-cameras",
+      "created": "2026-10-28T17:33:06.887196781+08:00",
+      "provenance_labels": {
+        "org.opencontainers.image.description": "Isolated Marvin M6 controller-compatible MuJoCo twin",
+        "org.opencontainers.image.title": "Tianji Marvin MuJoCo digital twin",
+        "org.opencontainers.image.version": "0.1.0",
+        "tianji.component": "mujoco-twin"
+      },
+      "purpose": "current isolated Luna stack",
+      "repo_digests": [
+        "tianji-mujoco-twin@sha256:86c041c74314247a80a00953378c4c8b5a02787fbf47587829ebab655679b348",
+        "tianji-simulation@sha256:86c041c74314247a80a00953378c4c8b5a02787fbf47587829ebab655679b348"
+      ]
+    },
+    {
+      "name": "tianji-algorithm-curobo",
+      "image_id": "sha256:63d527fe4dbd23175fd34715bca97d750c0f46db7696ee29afbce807b522a044",
+      "previous_name": "jodell-curobo:0.3.2-guangyu-curobo-v0.9.0",
+      "created": "2026-11-10T04:06:58.284549961+08:00",
+      "provenance_labels": {
+        "guangyu.task": "joint-limits-collision-20261009",
+        "jodell.audit": "table-diagnosis-20260924",
+        "jodell.audit-owner": "guangyu",
+        "jodell.owner": "guangyu",
+        "org.opencontainers.image.revision": "42498cf4e7d0d6fbd4ef9fbcec1243c00c888a83",
+        "org.opencontainers.image.source": "https://github.com/NVlabs/curobo",
+        "org.opencontainers.image.version": "0.9.0"
+      },
+      "purpose": "current isolated Luna stack",
+      "repo_digests": [
+        "tianji-algorithm-curobo@sha256:63d527fe4dbd23175fd34715bca97d750c0f46db7696ee29afbce807b522a044"
+      ]
+    },
+    {
+      "name": "tianji-algorithm-sam3",
+      "image_id": "sha256:185489379ad9db87ad9bab9d6fe66def14c2af7f13902c3f52bc6eeac6844fb0",
+      "previous_name": "jodell-sam3:0.2.0-guangyu",
+      "created": "2026-09-23T12:44:49.59602915Z",
+      "provenance_labels": {
+        "org.opencontainers.image.version": "24.04"
+      },
+      "purpose": "current isolated Luna stack",
+      "repo_digests": [
+        "tianji-algorithm-sam3@sha256:185489379ad9db87ad9bab9d6fe66def14c2af7f13902c3f52bc6eeac6844fb0"
+      ]
+    },
+    {
+      "name": "tianji-algorithm-graspgen",
+      "image_id": "sha256:47c4755a5598f1c7aac055040d9fa189d6bf0745c07f8fd804c6f55e4fd5fee4",
+      "previous_name": "jodell-graspgen:0.2.0-guangyu",
+      "created": "2026-09-24T02:13:57.494266204Z",
+      "provenance_labels": null,
+      "purpose": "current isolated Luna stack",
+      "repo_digests": [
+        "tianji-algorithm-graspgen@sha256:47c4755a5598f1c7aac055040d9fa189d6bf0745c07f8fd804c6f55e4fd5fee4"
+      ]
+    },
+    {
+      "name": "tianji-algorithm-foundationpose",
+      "image_id": "sha256:59375529ad8866ee9839bed02a6faf04ced6d713102c6f73b196fdb89c2bce62",
+      "previous_name": "jodell-foundationpose:0.2.2-guangyu",
+      "created": "2026-10-27T16:32:19.345414125+08:00",
+      "provenance_labels": {
+        "org.opencontainers.image.source": "https://github.com/NVlabs/FoundationPose",
+        "org.opencontainers.image.title": "Jodell FoundationPose guangyu",
+        "tianji.foundationpose.commit": "a1b694b83e633c2cb6115b9063d940a687759392"
+      },
+      "purpose": "current isolated Luna stack",
+      "repo_digests": [
+        "tianji-algorithm-foundationpose@sha256:59375529ad8866ee9839bed02a6faf04ced6d713102c6f73b196fdb89c2bce62"
+      ]
+    }
+  ],
+  "naming_policy": {
+    "shared_algorithms": "tianji-algorithm-<algorithm> (Docker implicit latest)",
+    "real_console": "jodell-console:0.2.0",
+    "private_runtime": "<component>:<major.minor.patch>-guangyu",
+    "date_tags_allowed": false
+  },
+  "removed": {
+    "removed_sam6d_image_id": "sha256:eedab7dfb04b7b438a1cca0e0f36cc8fb760ea800f9002f40aee29309e5d6fd8",
+    "removed_sam6d_tags": [
+      "jodell-sam6d:0.2.1-guangyu",
+      "tianji-algorithm-sam6d:2026.11.16-guangyu"
+    ],
+    "removed_aliases": [
+      "tianji-luna:2026.11.16-guangyu",
+      "tianji-base:2026.11.16-guangyu",
+      "tianji-simulation:2026.11.16-guangyu",
+      "tianji-algorithm-curobo:2026.11.16-guangyu",
+      "tianji-algorithm-curobo:2026.10.09-guangyu",
+      "tianji-algorithm-sam3:2026.11.16-guangyu",
+      "tianji-algorithm-graspgen:2026.11.16-guangyu",
+      "tianji-algorithm-foundationpose:2026.11.16-guangyu"
+    ],
+    "runtime_cleanup": {
+      "aliases": {
+        "tianji-algorithm-curobo": "sha256:63d527fe4dbd23175fd34715bca97d750c0f46db7696ee29afbce807b522a044",
+        "tianji-algorithm-sam3": "sha256:185489379ad9db87ad9bab9d6fe66def14c2af7f13902c3f52bc6eeac6844fb0",
+        "tianji-algorithm-graspgen": "sha256:47c4755a5598f1c7aac055040d9fa189d6bf0745c07f8fd804c6f55e4fd5fee4",
+        "tianji-algorithm-foundationpose": "sha256:59375529ad8866ee9839bed02a6faf04ced6d713102c6f73b196fdb89c2bce62"
+      },
+      "removed_containers": [
+        "tianji-demo-curobo-guangyu",
+        "tianji-demo-foundationpose-guangyu",
+        "tianji-demo-graspgen-guangyu",
+        "tianji-demo-sam3-guangyu",
+        "tianji-demo-web-guangyu"
+      ],
+      "removed_tags": [
+        "jodell-curobo:0.2.0-guangyu",
+        "jodell-sam3:0.2.0-guangyu",
+        "jodell-graspgen:0.2.0-guangyu",
+        "jodell-foundationpose:0.2.2-guangyu",
+        "tianji-algorithm-curobo:0.2.0",
+        "tianji-luna-mujoco:0.7.0-cad-distance-guangyu",
+        "tianji-algorithm-curobo:0.9.0",
+        "tianji-algorithm-sam3:0.2.0",
+        "tianji-algorithm-graspgen:0.2.0",
+        "tianji-algorithm-foundationpose:0.2.2",
+        "jodell-console:0.2.0-guangyu"
+      ],
+      "removed_image_ids": [
+        "sha256:5801d3b043fdd88756aab285bd101a0112945a459399a68daa6b980ae0a014a3",
+        "sha256:b6e5c212a5c7b886e273ac9003a04628dfe1f7bb3a3da083a0e6d891f0b70f42"
+      ]
+    }
+  },
+  "latest_audit": {
+    "evidence": "data/acceptance/luna-scene-ownership/image-decisions.json",
+    "guangyu_related_image_ids": 7,
+    "independently_redundant_owned_images": 0,
+    "new_images_built": 0,
+    "newly_removed_image_ids": [],
+    "all_algorithm_container_references_bare": true
+  }
+}

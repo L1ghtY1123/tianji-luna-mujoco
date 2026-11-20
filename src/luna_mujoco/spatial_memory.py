@@ -1,11 +1,40 @@
 """Published collision scene and its source, version and validity state."""
 from copy import deepcopy
 
+import numpy as np
+
 from .memory_contracts import (
     CollisionLifecycle,
     CollisionSnapshot,
     CollisionUpdate,
 )
+
+
+def local_geometry_change(anchor, points, views):
+    """Compare current depth to the last published geometry of this same physical ID."""
+    from .association_geometry import projected_depth_masks
+
+    points = np.asarray(points, dtype=float)
+    points = points[np.isfinite(points).all(axis=1)] if points.ndim == 2 and points.shape[1] == 3 else []
+    # A missing face, changed centroid or a different number of pixels is common in a wrist view.
+    tolerance_m, minimum_fraction, minimum_pixels = .02, .60, 30
+    if len(points) < minimum_pixels:
+        return None
+    lower, upper = np.asarray(anchor['bounds'])
+    beyond_face = np.maximum(np.mean(points < lower - tolerance_m, axis=0),
+                             np.mean(points > upper + tolerance_m, axis=0)).max()
+    if beyond_face >= minimum_fraction:
+        return {'reason': 'surface_beyond_published_bounds', 'fraction': float(beyond_face),
+                'reference_observation_id': anchor['observation_id'], 'tolerance_m': tolerance_m}
+    for camera, view in views.items():
+        projected, visible, supported, _ = projected_depth_masks(anchor['surface_samples'], view, tolerance_m)
+        seen = int(projected.sum())
+        cleared = int((visible & ~supported).sum())
+        if seen >= minimum_pixels and cleared >= minimum_pixels and cleared / seen >= minimum_fraction:
+            return {'reason': 'depth_sees_through_previous_surface', 'camera_id': camera,
+                    'fraction': cleared / seen, 'reference_observation_id': anchor['observation_id'],
+                    'tolerance_m': tolerance_m}
+    return None
 
 
 class SpatialMemory:
@@ -18,6 +47,17 @@ class SpatialMemory:
         self._lifecycle = CollisionLifecycle()
         self._database_revision = 0
         self._object_states = {}
+        self._geometry_anchors = {}
+
+    def geometry_history(self, generation):
+        if self._scene.get('generation') != generation:
+            return {}
+        invalid = set(self._lifecycle.invalidated_entity_ids) | set(self._lifecycle.changed_by_operation_ids)
+        records = self._scene.get('object_layers', {}).get('entities', {})
+        return {key: deepcopy(anchor) for key, anchor in self._geometry_anchors.items()
+                if anchor.get('generation') == generation and key not in invalid
+                and records.get(key, {}).get('status') in {'observed', 'retained'}}
+
 
     @property
     def database_revision(self):
@@ -28,6 +68,7 @@ class SpatialMemory:
         geometry_fields = ('kind', 'status', 'asset_id', 'geometry_policy',
                            'last_motion_receipt', 'transport_status', 'container_entry', 'input_entity_id', 'output_entity_id')
         invalid = []
+        physically_changed = []
         for change in changes:
             if change['revision'] <= self._database_revision:
                 continue
@@ -39,24 +80,20 @@ class SpatialMemory:
             self._object_states[identifier] = state
             geometry_changed = previous is None or any(
                 previous.get(key) != state.get(key) for key in geometry_fields)
-            if previous is not None:
-                # A new capture identifier alone does not move an obstacle.
-                before = previous.get('geometry_reference') or {}
-                after = state.get('geometry_reference') or {}
-                old_cad, new_cad = before.get('cad') or {}, after.get('cad') or {}
-                if old_cad or new_cad:
-                    geometry_changed |= old_cad.get('T_world_object') != new_cad.get('T_world_object')
-                else:
-                    geometry_changed |= before.get('points_sha256') != after.get('points_sha256')
-                geometry_changed |= (previous.get('last_position_measurement') or {}).get('position_world_m') != (
-                    state.get('last_position_measurement') or {}).get('position_world_m')
+            if geometry_changed and state.get('kind') != 'marker':
+                physically_changed.append(identifier)
+            reference = state.get('geometry_reference') or {}
+            change = reference.get('local_geometry_change') or {}
+            anchor = self._geometry_anchors.get(identifier)
+            if anchor and change.get('reference_observation_id') == anchor['observation_id']:
+                geometry_changed = True
             if state.get('kind') != 'marker' and geometry_changed:
                 invalid.append(identifier)
         if self._scene:
             self._scene.update(database_revision=self._database_revision,
                                object_states=deepcopy(self._object_states))
         if invalid:
-            self.invalidate(invalid)
+            self.invalidate(invalid, changed_by_operation=physically_changed)
 
     def accept_attachment(self, identifier, evidence):
         if (evidence.get('attached') is not True or evidence.get('instance_id') != identifier
@@ -108,7 +145,7 @@ class SpatialMemory:
         self.replace_geometry(scene, previous_scene_token=previous_scene_token)
         self._lifecycle = CollisionLifecycle.model_validate(self._lifecycle.model_dump() | {
             'invalidated_entity_ids': sorted(set(self._lifecycle.invalidated_entity_ids)
-                                             | {receipt['target_id'], receipt['destination_id']})})
+                                             | {receipt['target_id']})})
         self._refresh_required = (scene.get('coverage', {}).get('objects_complete') is not True
                                   or bool(self._lifecycle.invalidated_entity_ids))
 
@@ -125,9 +162,11 @@ class SpatialMemory:
             'required_entity_ids': sorted(set(required_ids) - set(retired_ids)),
             'retired_entity_ids': sorted(set(retired_ids))})
 
-    def invalidate(self, identifiers):
+    def invalidate(self, identifiers, *, changed_by_operation=None):
+        physical = identifiers if changed_by_operation is None else changed_by_operation
         self._lifecycle = CollisionLifecycle.model_validate(self._lifecycle.model_dump() | {
-            'invalidated_entity_ids': sorted(set(self._lifecycle.invalidated_entity_ids) | set(identifiers))})
+            'invalidated_entity_ids': sorted(set(self._lifecycle.invalidated_entity_ids) | set(identifiers)),
+            'changed_by_operation_ids': sorted(set(self._lifecycle.changed_by_operation_ids) | set(physical))})
         self._refresh_required = True
 
     def accept_publication(self, scene, observation, *, exclusion_state, database_revision=None):
@@ -137,6 +176,10 @@ class SpatialMemory:
                 or scene.get('generation') != observation['generation'] or not scene.get('scene_token')
                 or scene.get('exclusion_state') != exclusion_state):
             raise ValueError('collision_publication_source_mismatch')
+        scope = self._lifecycle.requested_scope
+        if (scene.get('mapping_strategy', {}).get('requested_scope') != scope
+                or scene.get('object_layers', {}).get('previous_scene_token') != self._scene.get('scene_token')):
+            raise ValueError('collision_publication_scope_or_parent_changed')
         records = scene.get('object_layers', {}).get('entities', {})
         measured_tables = {identifier for identifier, state in self._object_states.items()
                            if state.get('kind') == 'table' and scene.get('table_collision_enabled') is True}
@@ -144,16 +187,32 @@ class SpatialMemory:
                      if identifier not in self._lifecycle.retired_entity_ids
                      and identifier not in measured_tables
                      and records.get(identifier, {}).get('status') != 'observed']
-        if (scene.get('object_layers', {}).get('rebuild_policy') == 'replace_from_current_observation'
-                and scene.get('coverage', {}).get('objects_complete') is True):
-            remaining = []
+        layers = scene.get('collision_layer_bounds', {}).get('layers', {})
+        anchors = {key: value for key, value in self._geometry_anchors.items() if key in records}
+        for obj in observation.get('objects', []):
+            key = obj['id']
+            if records.get(key, {}).get('status') != 'observed':
+                continue
+            layer = layers.get('semantic_instance::' + key, {})
+            bounds = np.asarray([layer.get('minimum_world_m'), layer.get('maximum_world_m')], dtype=float)
+            points = np.asarray(obj.get('points_world_m', []))
+            anchors.pop(key, None)
+            if (bounds.shape != (2, 3) or not np.isfinite(bounds).all() or points.ndim != 2
+                    or points.shape[1] != 3 or not len(points)):
+                continue
+            samples = points[::max(1, (len(points) + 511) // 512)]
+            anchors[key] = {'observation_id': observation['observation_id'], 'generation': observation['generation'],
+                'bounds': bounds.tolist(), 'surface_samples': samples.tolist(),
+                'cad': deepcopy(obj.get('cad')), 'placement_reference': deepcopy(obj.get('placement_reference'))}
+        self._geometry_anchors = anchors
         self._scene = deepcopy(scene)
         self._scene.update(database_revision=self._database_revision,
                            object_states=deepcopy(self._object_states))
         self._source_observation = {key: deepcopy(observation[key]) for key in
                                     ('observation_id', 'generation', 'time') if key in observation}
         self._lifecycle = CollisionLifecycle.model_validate(self._lifecycle.model_dump() | {
-            'invalidated_entity_ids': remaining})
+            'invalidated_entity_ids': remaining,
+            'changed_by_operation_ids': sorted(set(self._lifecycle.changed_by_operation_ids) & set(remaining))})
         self._refresh_required = scene.get('coverage', {}).get('objects_complete') is False or bool(remaining)
         if self._lifecycle.requested_scope == 'global' and not self._refresh_required:
             self._initialized = True

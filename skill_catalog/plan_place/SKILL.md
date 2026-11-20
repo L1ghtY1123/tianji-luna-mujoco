@@ -1,5 +1,7 @@
 # plan_place
 
+放置从释放点正上方 150 mm 沿世界 −Z 下降，开爪后沿世界 +Z 上撤 150 mm。
+
 Plan approach and placement with official BatchMotionPlanner.plan_grasp using the attached object, then plan retreat with official plan_pose using open detached gripper geometry. Preserve the fixed release goal and grasp rotation. Apply official cuRobo v0.9.0 solver defaults and validate all three execution trajectories and the opening sweep. Return the bound three-stage plan for execute_place.
 
 Use the shared cuRoboV2-Fast v0.9.0 service and its official solver defaults. Inputs, prerequisites, effects, capture permissions and outcomes are defined in `contract.json`.

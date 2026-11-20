@@ -267,7 +267,7 @@ export function createPointcloudLayer(ownerDocument) {
 // This panel reads an already-built observation. Display controls never capture
 // RGBD, run filtering, or write to the scene or planning settings.
 export function createPointcloudPanel(container, status, {
-  document: ownerDocument = globalThis.document, request, onOverlay, onEnvironmentVisible,
+  document: ownerDocument = globalThis.document, request, onOverlay,
 } = {}) {
   let open = false;
   let visible = false;
@@ -275,7 +275,6 @@ export function createPointcloudPanel(container, status, {
   let revision = 0;
   let inFlight = null;
   let payload = null;
-  let environmentVisible = true;
   let showObbs = true;
   const layer = createPointcloudLayer(ownerDocument);
 
@@ -306,15 +305,12 @@ export function createPointcloudPanel(container, status, {
   visibilityButton.type = 'button';
   visibilityButton.disabled = true;
   visibilityButton.ariaPressed = 'false';
-  const environmentButton = element('button', 'button secondary', '隐藏仿真物体');
-  environmentButton.type = 'button';
-  environmentButton.ariaPressed = 'false';
   const obbButton = element('button', 'button secondary', '隐藏 OBB 线框');
   obbButton.type = 'button';
   obbButton.ariaPressed = 'true';
   obbButton.hidden = true;
-  controls.append(modeLabel, refreshButton, visibilityButton, environmentButton, obbButton);
-  const environmentNote = element('p', 'helper-text', '隐藏仿真物体后，仅保留机器人、相机与所选叠层；测量地图中的桌面碰撞体仍显示。');
+  controls.append(modeLabel, refreshButton, visibilityButton, obbButton);
+  const environmentNote = element('p', 'helper-text', '机器人由实测关节驱动；环境仅显示 RGBD 点云或感知建立的碰撞场景，不加载仿真物体。');
   const counts = element('p', 'pointcloud-counts');
   const sample = element('p', 'helper-text');
   const legend = element('p', 'pointcloud-legend');
@@ -374,12 +370,6 @@ export function createPointcloudPanel(container, status, {
     renderOverlay();
   }
 
-  function setEnvironmentVisible(value) {
-    environmentVisible = Boolean(value);
-    environmentButton.textContent = environmentVisible ? '隐藏仿真物体' : '显示仿真物体';
-    environmentButton.ariaPressed = String(!environmentVisible);
-    onEnvironmentVisible?.(environmentVisible);
-  }
 
   function refresh() {
     if (inFlight) return inFlight;
@@ -464,7 +454,6 @@ export function createPointcloudPanel(container, status, {
   mode.addEventListener('change', renderOverlay);
   refreshButton.addEventListener('click', () => void refresh());
   visibilityButton.addEventListener('click', () => setVisible(!visible));
-  environmentButton.addEventListener('click', () => setEnvironmentVisible(!environmentVisible));
   obbButton.addEventListener('click', () => {
     showObbs = !showObbs;
     obbButton.textContent = showObbs ? '隐藏 OBB 线框' : '显示 OBB 线框';
@@ -479,7 +468,6 @@ export function createPointcloudPanel(container, status, {
       open = Boolean(value);
       if (open) return refresh();
       setVisible(false);
-      setEnvironmentVisible(true);
       return Promise.resolve();
     },
     setGeneration(value) {
@@ -487,9 +475,8 @@ export function createPointcloudPanel(container, status, {
       generation = value;
       revision += 1;
       clear();
-      setEnvironmentVisible(true);
       status.textContent = '等待当前场景在观察节点完成点云建图。';
     },
-    dispose() { open = false; revision += 1; clear(); setEnvironmentVisible(true); },
+    dispose() { open = false; revision += 1; clear(); },
   };
 }

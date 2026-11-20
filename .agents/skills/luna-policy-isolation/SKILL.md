@@ -3,13 +3,15 @@ name: luna-policy-isolation
 description: Use when modifying, debugging, extending, or reviewing tianji-luna-mujoco task planning, robot skills, visual decisions, objects mapping, placement, or cuRoboV2-Fast integration. Preserves the ownership boundary between Responses, Decisions, and physical skills.
 ---
 
+只有双臂及三相机采集时的实测关节均在配置观测位姿 1° 范围内，才建立全局碰撞场景。其他位姿更新局部场景。局部更新关联同一实验、同一代次的上一版地图，补入当前可见的障碍和空间体素。未见且无移动记录的物体沿用原碰撞层。操作或观测已使位置失效的物体保留旧障碍并等待重测。首次局部观测只初始化部分地图。
+
 # Luna 任务策略隔离
 
 本 skill 指导 Codex 开发，不是机器人运行时能力。先阅读项目 [AGENTS.md](../../../AGENTS.md) 和 README；AGENTS 是当前要求的唯一合同，本文不累积历史覆盖条款。不使用 JEV runtime 或 sub-agent。
 
 | 层 | 职责 | 边界 |
 |---|---|---|
-| Responses | 初始实例、任务要求及完整图，可绑定固定子图接口或编写自定义 body，模板与显式路由组由程序展开，每个任务只允许一次 Responses，校验失败即终止 | 归档原始输出与完整校验结果，通过后执行 |
+| Responses | 全场景提案、独立任务要求及完整图，可绑定固定子图接口或编写自定义 body，模板与显式路由组由程序展开，每个任务只允许一次 Responses，校验失败即终止 | 归档原始输出与完整校验结果，通过后执行 |
 | Decisions | 必要视觉事实；已知状态与数值恢复由程序处理 | 有类型输出，按概率最大项取值，confidence 仅归档；不把动作提议当事实，不替代数值安全检查 |
 | Memory | 时间记忆数据库保存实例和历史，空间记忆保存碰撞场景及其版本和有效性 | 原始观测、测量缓存及配置区域归执行层；时间记忆拒绝任务进度和当前碰撞有效性字段 |
 | Runtime | 按 edge 执行、永久 ID 与参数绑定、事实版本、账本和已声明路径审计 | 不暗中移动、观测、换臂、建图或重播成功动作 |
@@ -17,12 +19,12 @@ description: Use when modifying, debugging, extending, or reviewing tianji-luna-
 
 ## 修改检查
 
-实例关联只覆盖自然语言任务中的目标、来源、目的地、加工区域及其必要支撑。场景描述用于定位和消歧。初始 Responses 提出任务实例，Decisions 先在描述参考相机的当前带标签 RGB 中选择一个掩码，再仅为这些选中主体关联其他相机掩码。其他同类掩码可作为选择项和画面上下文，额外可见物体不自动登记。后续观测使用任务实例的已确认带日期参考选择当前掩码，再关联其余视角并继承永久 ID。近期参考不足时使用更早的确认参考。all/count 任务按目标描述发现新增任务输入，确认新身份后登记。跨相机候选沿用源掩码的 SAM3 原检索词及别名召回，其他类别掩码保留为图像上下文；检索归属不证明身份。跨相机对应由 Decisions 比较同次带标签 RGB 与各候选独立的标定深度测量，提供固定世界坐标中的可见表面中心、范围、有效深度比例和空间关系。程序拒绝同次观测中明显分离的匹配，保留模型原始回答及独立拒绝依据，并检查同相机唯一性和传递分组一致性。先关联再融合，不做跨相机轮廓投影。跨时刻主体选择、归属复核和历史身份题同时接收有日期的深度测量与执行回执；历史腕图使用当时标定，并提供逐候选空间比较；相同观测 ID 与代次代表同一冻结采集，已确认身份的明显空间矛盾排除候选。真正跨时刻只使用位置先验，搬运后的身份不受原位置硬筛选。释放推定与当前实测位置分开记录。各主体先独立选择暂定掩码；跨相机物理分组后，使用当前多视角及日期参考做一次主体复核，允许选择其他掩码或明确不匹配；改变物理组时重新归组一次。复核不把初选当作已确认身份；同一物体存在多个归属提案时，用竞争描述和日期参考共同裁决，败选主体最多重选一次。已裁定掩码保留所属主体标签并从重选项排除，未解决冲突不提交。剩余候选仍需视觉确认，容器与内容物按各自掩码区分。历史选主体只发送包含该主体标注的参考视图。Decisions 的当前三相机 RGB 同时标明已确认视角，state 保存对应关系及来源。历史记录仅登记任务涉及的物体。碰撞场景覆盖工作空间内的可见几何，已匹配 CAD 使用 CAD，桌面使用实测 cuboid，其余使用 TSDF/ESDF。额外物体通过匿名深度建图，无需 Responses 命名或 SAM3 分割。已完成入盒物体保留入盒历史。直接确认和推测入盒统一保留永久 ID 与成功入盒历史；已完成交付的盒内物体不再逐件重新关联或 CAD 配准，当前可见内容物统一使用匿名 TSDF，盒子本体仍用 CAD。入盒历史不生成当前个体碰撞几何。每次 build_scene 都从当前观测重建整个工作空间：当前 CAD 位姿来自 SAM3 与 FoundationPose，其他可见几何来自当前 RGBD 的 TSDF/ESDF，桌面 cuboid 保留实测缓存。不选择局部范围，不合并历史物体碰撞几何或旧 TSDF 体素。历史身份与操作记录独立保留，未观测空间不因此被证明为空。测试任务不限定程序能力，也不产生任务专属建图规则。
+实例关联消费同次完整三相机 RGBD。任务必须含场景段。Responses 仅定位声明的物体并输出清单、用户选择条件和目的地区域。SAM3 文本/框提示产生候选；同图近似掩码先去重，Decisions 判断部件归属。头相机按声明检索，两腕各用可见框或头部深度投影检索。程序分别检验头部与每只腕部的双向对应，必要时补充 CAD 位姿与深度。冲突及单独腕部观测保持待定。历史重识别比较相关 ID。已确认的同一冻结采集可以复用身份。有历史记录的每次新采集都由 Decisions 结合带日期的参考、当前度量及实际动作判断。程序先登记物理 ID，再由 Decisions 按原始指令从本帧相容的已登记 ID 中选择目标、来源、支撑和目的地。角色待定时保留已登记实例。详见 docs/rgbd-grounding.md。
 
 1. 追踪实际入口、contract、handler、模型输入、结果消费方与回放。只描述真实能力和前提，不用命名把旧 steps 包装成 graph。
 2. graph 只接受当前 version=2；共享 subgraph 可循环处理运行时选中的输入，物体记录保存身份与历史。独立任务 subgraph 为可选表达。node ID 是控制节点，CAD asset ID 是模型，均不替代永久实例 ID。
 3. 修改 questions 时分别核对 CAD 选择、实例身份、可见性、支撑、目标区域与全局完成。没有参考图片就不能声称图片存在；三相机证据可在公共输入或 question.instructions 内，日志需完整计数。
-4. verify_place 沿用 verify_grasp 的持物与目标身份记录，默认搬运中持续持物，不新增搬运中核验。释放后先读实际关节位置：全开为空爪，中间位置仍持物；仅全闭时调用 object_held 判断。确认空爪后，place_result 在 direct_success、inferred_success、failure、unknown 中选择。桌面与入盒统一验收实际到达配置释放 XYZ 并张开夹爪；控制台小方框只约束机器人释放位置，不要求物体最终落点位于小方框内。直接确认表示看见物体放在指定桌面支撑或进入指定盒子。推测成功要求已确认持有目标、实际到达配置释放 XYZ（现有位置容差 5 mm）并释放、当前空爪，且没有交付失败的可见反证，不要求一定被遮挡。命令发出不等于实际到达；缺失绑定证据为 unknown，明确落在目的地外为 failure。当前三相机 RGB、释放前 RGB 与日期身份参考用于放置结果题，不投影释放小方框作为视觉验收边界。盒内同形物体不要求区分新旧，可依据执行证据选择推测成功。保留原始回答、执行推定身份、placement_outcome 与回执；推测入盒不伪造个体当前位姿，confidence 仅归档。
+4. verify_place 沿用 verify_grasp 的持物与目标身份记录，默认搬运中持续持物，不新增搬运中核验。释放后先读实际关节位置：全开为空爪，中间位置仍持物；仅全闭时调用 object_held 判断。实测空爪后，程序可用同帧多视角 SAM3、标定 RGBD、抓取前尺寸和释放前空桌面，直接确认唯一目标已进入指定桌面区域并接触该桌面，记录 measurement_hash。几何证据不足或目标为容器时，由 Decisions 判定 direct_success、inferred_success、failure、unknown。桌面与入盒统一验收实际到达配置释放 XYZ 并张开夹爪；控制台小方框只约束机器人释放位置，不要求物体最终落点位于小方框内。直接确认表示看见物体放在指定桌面支撑或进入指定盒子。推测成功要求已确认持有目标、实际到达配置释放 XYZ（现有位置容差 5 mm）并释放、当前空爪，且没有交付失败的可见反证，不要求一定被遮挡。命令发出不等于实际到达；缺失绑定证据为 unknown，明确落在目的地外为 failure。当前三相机 RGB、释放前 RGB 与日期身份参考用于放置结果题，不投影释放小方框作为视觉验收边界。盒内同形物体不要求区分新旧，可依据执行证据选择推测成功。保留原始回答、执行推定身份、placement_outcome 与回执；推测入盒不伪造个体当前位姿，confidence 仅归档。
 5. 批处理每件交付后优先在当前位置重新观测并选择当前输入；只有程序确认必要信息缺失时才沿 graph 回观测位姿补观测。all/count 使用共享子图，初始数量不限制运行时成员。all 以最新观测确认来源盒已空结束本批，count 按请求数量验收。最终双臂回位由实际关节反馈验收。VLA 起始姿态仍属于加工技能前提。
 6. CAD/TSDF/cuboid 绑定永久 ID；SAM3 生成候选，Decisions 匹配目录，FoundationPose 估计位姿。当前位姿来源和坐标有效即直接使用，不恢复 ICP 或吻合门槛。仿真真值不进入感知或规划。
 7. 放置 XY 使用控制台正方形中心，旋转保持实际抓取姿态。末端 Z = 实测桌面或盒口最高点 Z + 物体高度 + 控制台高度余量。物体高度来自同次 CAD/TSDF 几何竖直范围及来源支撑，独立于碰撞球。默认余量 20 mm，含为保守附着包络增加的 10 mm。若抓取 TCP 高于物体顶部，使用较大的 TCP 到来源支撑面偏移避免低估。实际物体底面另按抓取偏移校验，假设搬运中物体不滑移。碰撞几何独立检查目标及轨迹，不搜索目标高度。选臂时用可见高度估计，抓取后用已绑定 CAD/TSDF 再检查同一臂。
@@ -32,7 +34,7 @@ description: Use when modifying, debugging, extending, or reviewing tianji-luna-
 
 模型 prompt、技能合同和观测恢复边界参见 `docs/native-graph-implementation.md`、`docs/luna-skills-guide.md`。历史报告仅是当时的证据，不作为当前实现要求。
 
-当前视觉输入及调用边界统一遵循 [工作空间过滤与视觉判断](../../../docs/raw-decisions-20261111.md)。候选框由当前 SAM3 掩码计算，模型接收有效范围过滤 RGB；实例关联使用有日期参考与物理历史。
+当前视觉输入及调用边界统一遵循 [完整视野与视觉判断](../../../docs/raw-decisions-20261111.md)。候选框由当前 SAM3 掩码计算，模型接收完整视野 RGB；实例关联使用有日期参考与物理历史。
 
 
 当前统一失败收尾遵循 [终止失败回位](../../../docs/terminal-failure-return-20261111.md)：具体恢复耗尽或未处理异常均执行显式固定收尾图，从实际关节规划回观测位姿并停止，保留原任务失败；不安全或无法确认的回位报告 blocked。
@@ -42,32 +44,34 @@ description: Use when modifying, debugging, extending, or reviewing tianji-luna-
 
 Unknown-object GraspGen sampling uses one native 100-candidate pool per round, with one graph-controlled additional round. Each cuRoboV2-Fast grasp request contains the configured grasp_goalset_size ranked candidates. Fully rejected candidates are removed, later batches remain available, and the first grasp that passes all numerical checks ends planning. After a confirmed table release, voxel geometry retains its occupied cells with stale provenance until graph-controlled RGBD remapping.
 
-Attachment follows completed Lift and Decisions holding presence and continuous execution identity inheritance. Planning and executing the entire grasp sequence use the detached robot and the official grasp-planning open-gripper model, with a separate closure check. The executing Link3/Link4 links retain the selected-target contact policy during grasp and Lift. Other robot/environment and self-collision checks remain active. Successful verification prepares carrying geometry for later transport and placement. The earlier pre-Lift virtual carrying and opening-range path sweep implementation has been removed.
+Attachment follows completed Lift, confirmed holding and the target ID bound to this grasp. Planning and executing the entire grasp sequence use the detached robot and the official grasp-planning open-gripper model, with a separate closure check. Both Link3 fingers and both Link4 links of the executing gripper may contact the selected target during grasp, closure and Lift. The palm and the other arm retain their target checks. Other robot/environment and self-collision checks remain active. Successful verification prepares carrying geometry for later transport and placement. The earlier pre-Lift virtual carrying and opening-range path sweep implementation has been removed.
 
-Responses 每个任务只调用一次，解析或图校验失败立即结束编译。固定模板由程序展开，逐物体子图的 completion_pose 在输出 schema 中限定为空，最终回位由根任务声明。执行采用三倍时间伸长和五次 Hermite 插值。MuJoCo 关节目标以 50 Hz 更新，物理积分与跟踪误差检查按原物理步运行。
+Responses 每个任务只调用一次，解析或图校验失败立即结束编译。固定模板由程序展开，逐物体子图的 completion_pose 在输出 schema 中限定为空，最终回位由根任务声明。执行采用三倍时间伸长和五次 Hermite 插值。轨迹经 Base 执行，关节与夹爪到位以 Base 实测回执为准。
 
-verify_grasp 在 Lift 后先读取同次实际关节位置：全开为未持物，中间位置为持物；仅全闭时调用一次 Decisions，输入当前夹持接触区原始分辨率 RGB 和实测反馈，不调用 SAM3。明确未持物允许空抓恢复；请求异常、拒答或证据不足保留 unknown。确认持物后，程序核对连续抓取记录的目标、执行臂、运行、代次、来源观测、场景及动作版本，继承抓取前已确认目标的永久 ID，再建立 attachment。identity_binding 明确标记 continuous_grasp_execution 和 visual_identity_verified=false；这属于执行过程推定身份。执行记录不一致时保留持物结果与身份未确定状态，不建立 attachment。历史参考保留用于抓取前关联与放置核验，正常主线不再单独做抓后身份题。
+抓取从目标沿末端 −Z 后退 150 mm 处接近，沿末端 +Z 进给，Lift 沿固定世界 +Z 提升 150 mm。放置从释放点正上方 150 mm 沿世界 −Z 下降，开爪后沿世界 +Z 上撤 150 mm。
 
-未知物体的 attachment 使用抓取前已发布的同次多相机 TSDF 表面体素，将每个体素的八个角点按闭爪时实际 TCP 转到夹爪坐标，再生成覆盖全部体素的碰撞球。放置足迹沿用同一组体素角点。来源绑定采集、代次、永久 ID 和体素尺寸，缺失或过期时报告失败。已知 CAD attachment 使用已配准 CAD。Lift 完成、持物判定成立且连续执行绑定通过后建立 attachment，身份按执行记录继承。
+verify_grasp 在 Lift 后读取同次实测夹爪开度。全开判为空爪，中间开度判为持物，仅全闭时由 Decisions 查看当前腕相机夹持区判断是否持物。确认持物后，将本次完成抓取的目标永久 ID 绑定到夹爪并建立 attachment。空抓可进入恢复，反馈缺失或执行记录不一致时保留待定。
 
-GraspGen 候选先按真实末端 +Z 在世界坐标中的朝向筛选，允许世界 +X 前方至 −Z 下方的扇区，偏离世界 XZ 平面的左右角度默认最多 30°，控制台可调范围 0–45°。CAD 使用离线抓姿。规划完成后对实际抓取端点 FK 再核对相同朝向条件。抓取 Lift 显式指定世界 +Z 150 mm，并用公开 FK 检查每个规划插值点的横向偏移和提升高度，采用已有 IK 位置容差 5 mm。方向筛选证据、逐候选通过结果和 Lift 位移核验随规划归档。Lift 完成并通过持物核验后建立 attachment。
+未知物体的 attachment 使用抓取前已发布的同次多相机 TSDF 表面体素，将每个体素的八个角点按闭爪时实际 TCP 转到夹爪坐标，再生成覆盖全部体素的碰撞球。放置足迹沿用同一组体素角点。来源绑定采集、代次、永久 ID 和体素尺寸，缺失或过期时报告失败。已知 CAD attachment 使用已配准 CAD。Lift 完成、持物判定成立且连续执行绑定通过后建立 attachment，采用本次抓取绑定的目标 ID。
 
-Decisions 输入以实际发送图片的顺序编号，每张图标明相机角色、观测 ID、代次、时刻、CURRENT/历史/静态目录角色及归一化框坐标约定。当前图片与请求采集绑定检查通过后才发送。跨相机选项描述给出 C 标签、相机和该图中的框坐标，相邻时刻 P 选项给出历史采集及对应图像位置。初始分组和 CAD 选项分别描述当前标签与目录标签。裁剪和单主体掩码元数据只列出本图主体。支撑关系问题与实际发送的 RGB 轮廓一致，放置核验提供目标和目的地的带日期参考，逐物体完成条件绑定对应目标及子任务。回放同时显示选项代码、完整选项概率分布及单独的 confidence 字段。
+GraspGen 候选先转换到实际 Tianji TCP。保留末端 +Z 从机器人正前到正下的整个 90° 扇区，允许相对前下平面的左右偏角至 45°。夹爪绕自身 +Z 的半转不改变接近方向。CAD 使用离线抓姿。可行性由 cuRobo 的 IK、机器人自身及环境碰撞、实际 FK 与目标位姿误差检查决定。抓取 Lift 仍沿世界 +Z 150 mm，并用公开 FK 检查插值点的横向偏移和提升高度。Lift 完成并通过持物核验后建立 attachment。
+
+Decisions 输入以实际发送图片的顺序编号，每张图标明相机角色、观测 ID、代次、时刻、CURRENT/历史/静态目录角色及归一化框坐标约定。当前图片与请求采集绑定检查通过后才发送。跨相机选项描述给出 C 标签、相机和该图中的框坐标，相邻时刻 P 选项给出历史采集及对应图像位置。初始分组和 CAD 选项分别描述当前标签与目录标签。裁剪和单主体掩码元数据只列出本图主体。支撑关系问题与实际发送的 RGB 轮廓一致，放置核验读取本次执行绑定的目标和目的地，逐物体完成条件绑定对应目标及子任务。回放同时显示选项代码、完整选项概率分布及单独的 confidence 字段。
 
 固定 single_arm_transfer_v1 在入口显式执行 observe_scene，capture_mode 为 reuse_current，由现有采集版本和关节反馈检查决定复用或新采集，然后进入 identify_target。模板入口要求空手、无需恢复且仍需交付。observed 与 grasp_view_ready 由入口观测建立，全部节点和失败边在展开 graph 中可见。
 
-持物判断中，实际全开判未持物；动作结束后未全开且未全闭判持物；全闭不能单凭位置判断，要看 CURRENT 两指之间是否有材料，包含薄物、形变和深色物体。state 说明接近闭合时仍可持物、背景与遮挡的区别、深色材料及历史图片角色。verify_grasp、verify_place 和失败收尾共用实测位置优先、全闭才看图的规则。抓后身份从连续执行绑定继承，明确记录推定来源，不另发身份题。
+持物判断中，实际全开判未持物；动作结束后未全开且未全闭判持物；全闭不能单凭位置判断，要看 CURRENT 两指之间是否有材料，包含薄物、形变和深色物体。state 说明接近闭合时仍可持物、背景与遮挡的区别、深色材料及历史图片角色。verify_grasp、verify_place 和失败收尾共用实测位置优先、全闭才看图的规则。持物后沿用本次抓取的目标 ID。
 
 所有 GraspGen 抓取按执行臂当前指端 TCP 选择较近的平行夹爪半转等价姿态，随后进入 IK 和完整碰撞检查。CAD 离线抓姿按库中 A/B 归属读取。
 
 CAD 模型绑定采用 resources/cad_subject_policy.json 中的用户场景声明。已确认身份的 black/object 绑定黑色工件 CAD，blue/bin 绑定蓝盒 CAD，其余身份使用 TSDF。程序按该声明绑定模型并保留来源，FoundationPose 使用当前 SAM3 掩码和 RGBD 估计位姿。
 
-持物和空爪题使用同次 TCP 与相机标定生成的 11 cm 夹持接触区 RGB，保留原始像素分辨率，不加入历史整幅腕图。当前图保持工作空间过滤、不依赖 SAM3、不带物体标签；投影不可用时退回完整当前腕图。失败收尾对两腕使用相同规则。历史参考仍用于实例身份与放置落点核验。
+持物和空爪题使用同次 TCP 与相机标定生成的 11 cm 夹持接触区 RGB，保留原始像素分辨率，不加入历史整幅腕图。当前图保持原始像素、不依赖 SAM3、不带物体标签；投影不可用时退回完整当前腕图。失败收尾对两腕使用相同规则。历史参考用于跨时刻实例关联。
 
-持物与空爪题的 state 同时提供当前采集的夹爪反馈，实测归一化闭合程度与全闭目标命令分别标注。0 表示机械全开，1 表示机械全闭，该值不是夹持力。实际全开判未持物；动作结束后未全开且未全闭判持物；全闭不能单凭位置判断，要看 CURRENT 两指之间是否有材料，包含薄物、形变和深色物体。张开或闭合命令仅表示动作意图。实测归一化位置距机械端点 0.02 以内归为对应端点，其余归为 partially_closed。程序直接判定全开与中间位置，仅全闭时由 Decisions 看图判断；程序判定独立记录来源，不伪造模型回答。缺失或无效反馈明确标为不可用。夹爪反馈仅用于持物和空爪题；抓后身份记录为连续执行推定。
+持物与空爪题的 state 同时提供当前采集的夹爪反馈，实测归一化闭合程度与全闭目标命令分别标注。0 表示机械全开，1 表示机械全闭，该值不是夹持力。实际全开判未持物；动作结束后未全开且未全闭判持物；全闭不能单凭位置判断，要看 CURRENT 两指之间是否有材料，包含薄物、形变和深色物体。张开或闭合命令仅表示动作意图。实测归一化位置距机械端点 0.02 以内归为对应端点，其余归为 partially_closed。程序直接判定全开与中间位置，仅全闭时由 Decisions 看图判断；程序判定独立记录来源，不伪造模型回答。缺失或无效反馈明确标为不可用。夹爪反馈仅用于持物和空爪题；持物后沿用本次抓取的目标 ID。
 
-2026-11-14 验证修正：初始及历史描述按其 SAM3 主词及别名检索候选，再由 Decisions 确认身份；全局重建输出当前采集的全部未知任务实例 TSDF 表面。持物/空爪输入使用根据自身 TCP 与相机标定确定的当前局部 RGB，持物题不发送历史整图；局部投影不可用时退回完整腕图，默认不新增深度图。桌面落点题显示指定区域；入盒按整个目的容器验收，配置小方框仅约束释放位置。
+初始与后续观测均通过 RGBD 关联链，提案框不直接登记身份；全局重建输出当前采集的全部未知任务实例 TSDF 表面。持物/空爪输入使用根据自身 TCP 与相机标定确定的当前局部 RGB，持物题不发送历史整图；局部投影不可用时退回完整腕图，默认不新增深度图。放置核验使用配置 XYZ 和空爪回执。
 
-初始编排必须声明 support_table_refs，引用 entities 中实际可见且参与支撑测量的 table；配置区域不是桌子实体。程序通过当前或缓存实测桌面多边形，唯一绑定控制台区域及支撑高度。用户明确指定的机器人左右通过 robot_relative_side 单独编译；初始候选以同帧 RGBD 标定坐标核对（+X 向前、+Y 机器人左侧、-Y 右侧），再交 Decisions 选择。此约束只用于初始定位，不限制已确认永久 ID 之后的位置。
+初始编排必须声明 support_table_refs，引用 task_selectors 中实际可见且参与支撑测量的 table；配置区域不是桌子实体。程序通过当前或缓存实测桌面多边形，唯一绑定控制台区域及支撑高度。Responses 保留方向、序号和用户原话。Decisions 在当前标注图和基座测量上判断对应的永久 ID，机器人左为 +Y、右为 −Y。证据不清时保持未知，特定目标绑定后可跨位置沿用。
 
-当前有限任务边界与证据实现见 [可靠性修正](../../../docs/scoped-reliability-20261115.md)。未知物体 GraspGen 不再额外沿 Z 伸入；模型接触 TCP 显式转换到 A/B 指端，旧 grasp_insertion_m 保存值退役。当前只要求同臂覆盖来源与固定目的地、固定 CAD。物理记忆提交使用独立 PhysicalMemoryWriter，历史失败按实现/合同/子图/配置版本筛选，较早身份参考每实体最多 3 次采集。
+当前有限任务边界与证据实现见 [可靠性修正](../../../docs/scoped-reliability-20261115.md)。TSDF 抓姿先将模型接触 TCP 转为执行臂 RAG 指端，再沿局部 +Z 应用 rag_grasp_insertion_m（默认 10 mm，可调 0–20 mm），在 IK 前用实测表面核对开口与指垫。当前只要求同臂覆盖来源与固定目的地、固定 CAD。物理记忆提交使用独立 PhysicalMemoryWriter，历史失败按实现/合同/子图/配置版本筛选，较早身份参考每实体最多 3 次采集。

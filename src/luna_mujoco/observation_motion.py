@@ -10,6 +10,36 @@ import numpy as np
 from .geometry import rigid_matrix
 
 
+def collision_mapping_scope(observation, feedback, settings, *, initialized=False):
+    from .collision_objects import OBSERVATION_POSE_TOLERANCE_DEG, observation_pose_errors_deg
+
+    if not observation.get('observation_id') or observation.get('generation') != feedback.get('generation'):
+        raise ValueError('collision_mapping_capture_generation_changed')
+    requested_full = observation.get('full_collision_survey', False)
+    source = {'capture_id': observation['observation_id'], 'generation': observation['generation']}
+    if initialized and not requested_full:
+        return ({'requested_scope': 'local', 'strategy_source': 'spatial_memory',
+                 'scope_reason': 'Update changed layers in the existing collision map'}, source)
+    targets = observation_poses(settings)
+    def errors(sample):
+        return observation_pose_errors_deg({a: v.get('joints_rad') for a, v in sample['arms'].items()}, targets)
+    captured, live = errors(observation), errors(feedback)
+    exposures = {camera: observation_pose_errors_deg(view['robot_joints_deg'], targets, degrees=True)
+                 for camera, view in observation['views'].items()}
+    global_pose = (set(exposures) == {'1', '2', '3'} and
+                   all(max(row.values()) <= OBSERVATION_POSE_TOLERANCE_DEG
+                       for row in (captured, live, *exposures.values())))
+    if requested_full and not global_pose:
+        raise ValueError('global_collision_map_requires_configured_observation_pose')
+    scope = 'global' if global_pose else 'local'
+    return ({'requested_scope': scope, 'strategy_source': 'measured_observation_pose',
+             'scope_reason': ('Both arms at the configured observation pose for all three exposures and publication'
+                              if global_pose else 'Partial observation updates registered collision memory')},
+            {'capture_id': observation['observation_id'], 'generation': observation['generation'],
+             'tolerance_deg': OBSERVATION_POSE_TOLERANCE_DEG, 'captured_error_deg': captured,
+             'live_error_deg': live, 'camera_error_deg': exposures})
+
+
 def matching_instances(observation, attributes, *, destination=False):
     result = []
     for obj in observation.get("objects", []):

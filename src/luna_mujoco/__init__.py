@@ -1,1 +1,1 @@
-"""Responses-programmed MuJoCo workbench with Decisions verification."""
+"""Responses-programmed Base robot workbench with Decisions verification."""

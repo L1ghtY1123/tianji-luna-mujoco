@@ -6,7 +6,7 @@ def occupancy_record(request, previous=None):
     return {**deepcopy(previous or {}), 'status': 'stale', 'source': 'container_contents_pending',
         'container_id': request['container_id'], 'entry_receipt_id': request['receipt_id'],
         'release_binding_id': request['binding_id'], 'object_pose_measured': False,
-        'layer_names': []}
+        'layer_names': list((previous or {}).get('layer_names', ()))}
 
 
 def published_container_occupancy(entity, container, scene, invalidated_ids=()):

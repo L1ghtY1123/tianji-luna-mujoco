@@ -20,6 +20,7 @@ from .schema import (
 from .sensor_context import rgbd_context
 
 BOOTSTRAP_FACTS = {
+    'capture_ready': True, 'task_grounded': False,
     'observed': False, 'objects_ready': False,
     'observation_pose_ready': True, 'grasp_view_ready': False, 'needs_place': True,
     'target_selected': False, 'destination_selected': False, 'arm_selected': False,
@@ -44,6 +45,8 @@ class ResponsesBudget:
 
 class ResponsesCompiler(VisualAPI):
     endpoint = '/v1/responses'
+    model = 'gpt-6.2-sol'
+    reasoning_effort = 'low'
     source = 'openai_responses_proposal'
     error_prefix = 'responses'
     maximum_timeout_s = 600.
@@ -65,11 +68,13 @@ class ResponsesCompiler(VisualAPI):
         for identifier, asset in (known_assets or {}).items():
             size = asset.get('size_m')
             if (not isinstance(identifier, str) or not identifier or not isinstance(asset.get('label'), str)
-                    or not isinstance(size, (list, tuple)) or len(size) != 3
+                    or size is not None and (not isinstance(size, (list, tuple)) or len(size) != 3
                     or any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
-                           for value in size)):
+                           for value in size))):
                 raise ValueError('invalid_configured_asset')
-            self.known_assets[identifier] = {'label': asset['label'], 'size_m': list(size)}
+            self.known_assets[identifier] = {'label': asset['label']}
+            if size is not None:
+                self.known_assets[identifier]['size_m'] = list(size)
         self.initial_facts = dict(BOOTSTRAP_FACTS if initial_facts is None else initial_facts)
         self.budget = budget if budget is not None else ResponsesBudget()
         self.original_task = None
@@ -109,7 +114,10 @@ class ResponsesCompiler(VisualAPI):
             return self._initial_plan.model_copy(deep=True)
         catalog = skill_catalog(self.registry)
         regions = self.configured_regions if configured_regions is None else configured_regions
-        context = {'instruction': instruction, 'skill_catalog': catalog,
+        from ..core.scene_scope import scene_sections
+
+        scene, action = scene_sections(instruction)
+        context = {'declared_scene_text': scene, 'requested_action_text': action, 'instruction': instruction, 'skill_catalog': catalog,
             'skill_instructions': self._skill_instructions(catalog), 'configured_regions': regions,
             'known_assets': self.known_assets, 'initial_facts': self.initial_facts,
             'scene_context': self.scene_context,
@@ -154,12 +162,15 @@ class ResponsesCompiler(VisualAPI):
             'Configured spatial references already have immutable IDs. Copy them byte-for-byte from '
             'configured_reference_ids into TaskSpec and skill/template arguments. Never replace '
             'hyphens with underscores, translate, shorten or create an alias. Visual entity refs '
-            'must instead be declared in entities. A configured region is not a new entity.')
+            'must instead be declared in task_selectors. A configured region is not a new entity.')
         if self.compilation_memory is not None:
             context['compilation_memory'] = self.compilation_memory.snapshot(catalog)
         schema = response_schema(model, catalog)
         root_task = deepcopy(schema['$defs']['TaskSpec'])
-        root_task['properties']['instruction']['enum'] = [context['instruction']]
+        # Strict schema enum literals cannot contain a newline. Preserve the exact
+        # multiline user instruction in the request and verify it after parsing.
+        root_task['properties']['instruction']['description'] = (
+            'Copy instruction verbatim including scene paragraph, punctuation and line breaks.')
         schema['$defs']['InitialTaskSpec'] = root_task
         for task_schema in (schema['$defs']['TaskSpec'], root_task):
             for name in ('source_ref', 'destination_ref', 'work_area_ref'):
@@ -176,35 +187,28 @@ class ResponsesCompiler(VisualAPI):
         schema['$defs']['ObjectTaskSpec'] = object_task
         schema['$defs']['Subgraph']['anyOf'][0]['properties']['task'] = {'$ref': '#/$defs/ObjectTaskSpec'}
 
-        entity_schema = schema['$defs']['EntityProposal']
-        entity_schema['properties'].pop('bbox')
-        entity_schema['required'].remove('bbox')
-
-        schema['$defs']['EntityProposal']['properties']['asset_id'] = (
-            {'anyOf': [{'type': 'string', 'enum': list(self.known_assets)}, {'type': 'null'}]}
-            if self.known_assets else {'type': 'null'})
-        known_ids = list(context.get('object_memory', {}))
-        schema['$defs']['EntityProposal']['properties']['existing_id'] = (
-            {'anyOf': [{'type': 'string', 'enum': known_ids}, {'type': 'null'}]}
-            if known_ids else {'type': 'null'})
+        scene_asset_ids = [code for code in self.known_assets if code in context['declared_scene_text']]
+        schema['$defs']['DeclaredObject']['properties']['asset_id'] = (
+            {'anyOf': [{'type': 'string', 'enum': scene_asset_ids}, {'type': 'null'}]}
+            if scene_asset_ids else {'type': 'null'})
         self.budget.reserve()
         content = [{'type': 'input_text', 'text': json.dumps({
             **context, 'observation_id': capture['observation_id'], 'generation': capture.get('generation')}, ensure_ascii=False)}]
         content.extend(reference_content(self.memory_reference, current_capture=capture))
-        for camera in ('2', '3', '1'):
+        for camera in ('3', '2', '1'):
             rgb = capture['views'][camera]['rgb']
             height, width = rgb.shape[:2]
             content.extend([{'type': 'input_text', 'text': json.dumps({
                 'camera_id': camera, 'width_px': width, 'height_px': height,
                 'camera_role': {'1': 'right wrist, arm B', '2': 'left wrist, arm A', '3': 'head'}[camera],
                 'world_axes': '+X robot-forward, +Y robot-left, -Y robot-right, +Z up',
-                'workspace_filter_source': capture.get('workspace_filter', {}).get('source'),
-                'black_outside_workspace_is_unobserved': bool(capture.get('workspace_filter'))})}, image_part(rgb)])
+                'input_scope': 'full_camera_frame',
+                'reachability': 'checked_separately_after_visual_grounding'})}, image_part(rgb)])
         content.append({'type': 'input_text', 'text': FINAL_GRAPH_CHECK})
-        payload = {'model': 'gpt-6-luna', 'input': [
+        payload = {'model': self.model, 'input': [
                    {'role': 'developer', 'content': [{'type': 'input_text', 'text': json.dumps(protocol, ensure_ascii=False)}]},
                    {'role': 'user', 'content': content}],
-                   'reasoning': {'effort': 'high'}, 'max_output_tokens': 64000,
+                   'reasoning': {'effort': self.reasoning_effort}, 'max_output_tokens': 64000,
                    'text': {'format': {'type': 'json_schema', 'name': 'robot_policy',
                                       'strict': True, 'schema': schema}}}
         rejected_text = ''
@@ -273,15 +277,19 @@ class ResponsesCompiler(VisualAPI):
                 revision_allowed = True
                 validate_control_flow(result)
                 revision_allowed = False
-                for entity in result.entities:
+                for entity in result.task_selectors:
                     if (entity.geometry_policy == 'unknown_tsdf'
                             and entity.geometry_policy_instruction not in context['instruction']):
                         raise ValueError('geometry_policy_instruction_not_supplied:' + entity.ref)
                     if entity.ref in context['configured_regions']:
                         raise ValueError('configured_region_is_not_visual_entity:' + entity.ref)
-                    if entity.asset_id is not None and entity.asset_id not in self.known_assets:
-                        raise ValueError('unknown_configured_asset:' + entity.asset_id)
-                known = {entity.ref for entity in result.entities} | set(context['configured_regions'])
+                for declared in result.declared_objects:
+                    if result.task.supported and declared.asset_id and declared.asset_id not in self.known_assets:
+                        raise ValueError('场景中声明的 CAD 代号不在当前 CAD 目录：' + declared.asset_id)
+                for region in result.destination_regions:
+                    if region.source == 'configured' and region.ref not in context['configured_regions']:
+                        raise ValueError('unknown_configured_region:' + region.ref)
+                known = {entity.ref for entity in result.task_selectors} | set(context['configured_regions'])
                 graph = result.graph.model_dump(mode='json')
                 for scope in (graph, *graph['subgraphs']):
                     for node in scope['nodes']:

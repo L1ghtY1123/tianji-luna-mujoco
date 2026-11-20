@@ -131,16 +131,7 @@ class ProjectSemanticBuilder:
             distances.append(float(policy["ik_collision_activation_distance_m"]))
         if not np.isfinite(distances).all() or min(distances) < 0:
             raise ValueError("mapping collision distances must be finite and nonnegative")
-        semantic_only = (payload.get('scene_policy') in {'head_all_instances', 'all_instances', 'selected_instances'} or (
-                         payload.get("experimental_semantic_only_mapping") is True
-                         and payload.get("full_observation_complete") is True
-                         and not payload.get("observation_only")
-                         and payload.get("mapping_mode", "semantic") == "semantic"))
-        if demo_mapping:
-            if payload.get('mapping_mode', 'semantic') != 'semantic':
-                raise ValueError('demo_objects_semantic_mapping_required')
-            semantic_only = True
-        omit_background = semantic_only and self.instance_mapper is not None
+        # Unnamed visible surfaces are anonymous obstacles, irrespective of task membership.
         self.mapper.clear_instance_layers()
         prepared, background_groups, robot_groups = [], [], []
         camera_metrics, timings = {}, {}
@@ -179,8 +170,7 @@ class ProjectSemanticBuilder:
         stage = time.perf_counter()
         cropped = []
         for view in prepared:
-            result = view if demo_mapping else (crop_instance_samples(view, crop_model) if omit_background else
-                                               self.segmenter.crop_semantic_observation(view, crop_model))
+            result = view if demo_mapping else self.segmenter.crop_semantic_observation(view, crop_model)
             camera_metrics[view.camera_id].update(
                 background_point_count=int(result.background_point_count),
                 removed_workspace_background_point_count=int(view.background_point_count - result.background_point_count),
@@ -250,7 +240,7 @@ class ProjectSemanticBuilder:
             bounds = MappingBounds(center_m=(.55, 0., .8), extent_m=(1.1, 2., 1.6),
                                    minimum_m=(0., -1., 0.), maximum_m=(1.1, 1., 1.6))
         self.mapper.configure_mapping_bounds(bounds)
-        if table.support_plane is not None and not omit_background and not demo_mapping:
+        if table.support_plane is not None and not demo_mapping:
             remaining = []
             for view in prepared:
                 result = self.segmenter.separate_support_observation(view, table.support_plane)
@@ -260,40 +250,15 @@ class ProjectSemanticBuilder:
                 remaining.append(result)
             prepared = remaining
         for view in prepared:
-            camera_metrics[view.camera_id]["removed_unclassified_background_point_count"] = (
-                int(view.background_point_count) if semantic_only else 0)
-        if semantic_only and not omit_background:
-            empty = []
-            for view in prepared:
-                source = view.camera_observation
-                depth = source.depth_image
-                observation = type(source)(depth_image=depth.new_tensor(np.zeros(depth.shape)),
-                    intrinsics=source.intrinsics, pose=source.pose, depth_to_meter=1.)
-                empty.append(replace(view, camera_observation=observation,
-                    background_points_base_m=np.empty((0, 3), dtype=np.float32), background_point_count=0))
-            prepared = empty
-        # The frozen public adapter exposes instance grids only alongside its
-        # background grid. Build an empty one once, then reuse that exact empty
-        # allocation. A raw/background build or reset invalidates it by identity.
-        empty_cache_hit = bool(semantic_only and self.empty_background_result is not None
-                               and self.mapper.esdf_grid is self.empty_background_grid)
-        if omit_background:
-            from tianji_curobo.volumetric_mapper import EsdfIntegrationResult
-            integration = EsdfIntegrationResult(struct.pack('<I', 0), 0, 0, 1, 1, None, surface_voxel_size_m=.02)
-        elif empty_cache_hit:
-            integration = self.empty_background_result
-        else:
-            integration = self.mapper.integrate_multiview(prepared, table_model=crop_model)
-            self.empty_background_result = integration if semantic_only else None
-            self.empty_background_grid = self.mapper.esdf_grid if semantic_only else None
-        self.diagnostics = {"semantic_only_active": semantic_only, 'background_grid_omitted': omit_background,
+            camera_metrics[view.camera_id]["removed_unclassified_background_point_count"] = 0
+        integration = self.mapper.integrate_multiview(prepared, table_model=crop_model)
+        self.diagnostics = {"semantic_only_active": False, 'background_grid_omitted': False,
             'scene_policy': payload.get('scene_policy', 'legacy'), 'camera_ids': list(payload['views']),
             'included_instance_ids': list(instance_metrics),
-            'background_drop_policy': 'discard_all_unlisted_and_tabletop_returns' if demo_mapping else
-                                      'all_nonsemantic_including_support' if omit_background else 'separate_measured_support',
+            'background_drop_policy': 'retain_anonymous_workspace_depth',
             'demo_mapping': demo_mapping, 'unobserved_space': 'unknown',
             'workspace_bounds_m': {'minimum': list(bounds.minimum_m), 'maximum': list(bounds.maximum_m)},
-            "empty_background_cache_hit": empty_cache_hit,
+            "empty_background_cache_hit": False,
             "table_cache": dict(self.table_cache.diagnostics), "instance_padding_m": padding_m,
             "minimum_padding_m": minimum_padding_m, "padding_rounding_m": padding_m - minimum_padding_m,
             "max_sphere_radius_m": radius, "collision_distance_m": max(distances), "boundary_margin_m": .02,
@@ -313,11 +278,10 @@ class ProjectSemanticBuilder:
         if self.instance_mapper is None:
             self.scene_voxel_grids = list(self.mapper.scene_voxel_grids)
         else:
-            self.scene_voxel_grids = ([] if omit_background else [self.mapper.esdf_grid]) + list(self.instance_mapper.grids)
+            self.scene_voxel_grids = [self.mapper.esdf_grid] + list(self.instance_mapper.grids)
         scene_data = create_mixed_esdf_scene(self.scene_type, self.scene_voxel_grids, scene_model)
         timings["build_total"] = (time.perf_counter() - started) * 1000
-        if not empty_cache_hit and not omit_background:
-            timings.update(self.mapper.timings_ms)
+        timings.update(self.mapper.timings_ms)
         return SemanticEsdfCandidate(
             observation_set_id=payload["observation_set_id"], selected_instance_id=selected,
             selection_generation=payload["selection_generation"], scene_data=scene_data,

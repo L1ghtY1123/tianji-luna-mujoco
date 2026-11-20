@@ -50,14 +50,15 @@ def release_memory_changes(entity, execution, attempt, result):
         'pre_release_measurement_observation_id': (entity.get('last_position_measurement') or {}).get('observation_id')}
     changes = {}
     visual = result.get('visual_evidence', {})
-    bound_visual = (visual.get('source') == 'openai_decisions' and visual.get('observation_id')
+    from ..surface_placement import placement_evidence_id
+    bound_visual = (placement_evidence_id(visual) and visual.get('observation_id')
         and visual.get('target_id') == target and visual.get('destination_id') == execution['destination_id']
-        and visual.get('release_feedback_id') == feedback and visual.get('request_hash'))
+        and visual.get('release_feedback_id') == feedback)
     if bound_visual:
         if not same_release:
             changes.update(current_region=None, confirmed_observation_id=None, observed_support=None)
         release['assessment'] = {key: deepcopy(visual[key]) for key in (
-            'observation_id', 'generation', 'request_hash', 'judgments', 'diagnostic_checks',
+            'observation_id', 'generation', 'request_hash', 'measurement_hash', 'execution_evidence_id', 'source', 'judgments', 'diagnostic_checks',
             'support_entity_id', 'placement_outcome') if key in visual}
         judgments = visual.get('judgments', {})
         support = visual.get('support_entity_id')
@@ -65,8 +66,9 @@ def release_memory_changes(entity, execution, attempt, result):
                 and judgments.get('place_result') == 'yes' and judgments.get('target_released') == 'yes'):
             changes['observed_support'] = {
                 'support_entity_id': support, 'observation_id': visual['observation_id'],
-                'generation': visual.get('generation'), 'request_hash': visual['request_hash'],
-                'source': 'openai_decisions', 'judgments': {
+                'generation': visual.get('generation'),
+                **{k: visual[k] for k in ('request_hash', 'measurement_hash') if visual.get(k)},
+                'source': visual['source'], 'judgments': {
                     'place_result': 'yes', 'target_released': 'yes'},
                 'scope': 'support_only_not_requested_subregion_completion'}
     confirmed = result.get('success') is True and visual.get('status') == 'at_destination' and bound_visual
@@ -97,6 +99,8 @@ def measurement_reference(measured, observation):
     reference = {'observation_id': observation['observation_id'], 'generation': observation['generation'],
                  'points_sha256': hashlib.sha256(points.tobytes()).hexdigest(),
                  'point_count': len(points), 'cad': measured.get('cad')}
+    if measured.get('local_geometry_change'):
+        reference['local_geometry_change'] = measured['local_geometry_change']
     return json.loads(json.dumps(reference, default=lambda value: value.tolist(), allow_nan=False))
 
 

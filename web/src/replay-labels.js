@@ -1,5 +1,6 @@
 // Display names come only from archived objects. They never rebind an instance.
 export const SKILL_LABELS = {
+  capture_scene: '采集同步 RGBD', ground_task: 'RGBD 任务定位与身份登记',
   observe_scene: '三相机观测', select_target: '选择待处理物体',
   identify_target: '绑定当前物体', identify_destination: '确定目标区域',
   choose_arm: '选择执行臂', build_scene: '更新空间记忆',

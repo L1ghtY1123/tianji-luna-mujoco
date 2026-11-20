@@ -16,6 +16,7 @@ class NativeGraphExecutor(ExecutionState):
         self.nonrepeatable_invocations = set()
         self.call_path = []
         self.last_failure = None
+        self.unresolved_failures = {}
 
     def event(self, kind, title, data):
         if self.emit is not None:
@@ -31,6 +32,8 @@ class NativeGraphExecutor(ExecutionState):
     async def _scope(self, scope):
         identifier = scope['entry']
         traversals = {}
+        # All failures inside a successfully recovered subgraph are resolved together.
+        scope_key = (*self.call_path, scope['id'], scope.get('input_id'))
         while True:
             if self.check_cancelled is not None:
                 self.check_cancelled()
@@ -64,7 +67,10 @@ class NativeGraphExecutor(ExecutionState):
                 if status in {'failure', 'unknown'}:
                     self.last_failure = {**deepcopy(result), 'node_id': identifier,
                                          'skill': node['skill'], 'arguments': deepcopy(arguments)}
+                    key = (scope_key, node['skill'], repr(sorted(arguments.items())))
+                    self.unresolved_failures.setdefault(key, deepcopy(self.last_failure))
                 if status == 'success':
+                    self.unresolved_failures.pop((scope_key, node['skill'], repr(sorted(arguments.items()))), None)
                     if (self.last_failure and self.last_failure.get('skill') == node['skill']
                             and self.last_failure.get('arguments') == arguments):
                         self.last_failure = None
@@ -114,7 +120,7 @@ class NativeGraphExecutor(ExecutionState):
                 result = {'status': node['status'], 'success': node['status'] == 'success', 'reason': node['reason']}
                 status = node['status']
                 if status == 'success' and scope.get('input_id') is not None and self.after_target:
-                    checked = await self.after_target(scope['input_id'])
+                    checked = await self.after_target(self.bind(scope['input_id']))
                     if isinstance(checked, dict) and result_status(checked) != 'success':
                         result = {**checked, 'status': 'unknown', 'success': False}
                         status = 'unknown'
@@ -133,6 +139,10 @@ class NativeGraphExecutor(ExecutionState):
                 **({'outcome_evidence': outcome} if outcome else {}),
                 **({'judgment': deepcopy(result)} if kind == 'router' else {})})
             if kind == 'end' and status == node['status']:
+                if status == 'success':
+                    for key in tuple(self.unresolved_failures):
+                        if key[0] == scope_key:
+                            self.unresolved_failures.pop(key)
                 return result
             selected = next((edge for edge in scope['edges']
                              if edge['source'] == identifier and edge['on'] == status), None)
@@ -155,10 +165,10 @@ class NativeGraphExecutor(ExecutionState):
             identifier = selected['target']
 
     async def _subgraph(self, scope):
-        task = scope['task']
+        task = self.bind(scope['task'])
         if task is None:
             return await self._scope(scope)
-        identifier = scope['input_id']
+        identifier = self.bind(scope['input_id'])
         targets = list(self.resolve_target_ids()) if self.resolve_target_ids else self.target_ids
         pending = self.is_target_pending is None or self.is_target_pending(identifier)
         if identifier not in targets or not pending:
@@ -173,11 +183,11 @@ class NativeGraphExecutor(ExecutionState):
             if self.before_target:
                 await self.before_target(identifier, targets.index(identifier))
             self.event('object_task_started', 'subgraph 开始', {'subgraph_id': scope['id'], 'input_id': identifier, 'task_spec': task})
-            result = await self._scope(scope)
+            result = await self._scope({**scope, 'input_id': identifier})
             if result_status(result) == 'success':
                 self.event('object_task_completed', 'subgraph 完成', {'subgraph_id': scope['id'], 'input_id': identifier})
             return result
         finally:
-            self.bindings = outer_bindings
+            self.bindings = {key: self.bind(value) for key, value in outer_bindings.items()}
             if self.object_task_context:
                 await self.object_task_context(None)

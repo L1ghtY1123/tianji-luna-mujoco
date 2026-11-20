@@ -89,6 +89,35 @@ def image_content(array, **metadata):
     return [{'type': 'input_text', 'text': json.dumps(metadata, ensure_ascii=False)}, image_part(array)]
 
 
+def subject_detail_content(capture, camera, label, mask, *, role='current'):
+    """Matched RGB/mask crops keep small subjects legible without resizing pixels."""
+    from .visual_identity import mask_box
+
+    view = capture['views'][camera]
+    mask = np.asarray(mask, dtype=bool)
+    height, width = mask.shape
+    source_box = mask_box(mask)
+    left, top, right, bottom = source_box
+    x1, y1 = max(0, int(left * width) - 8), max(0, int(top * height) - 8)
+    x2, y2 = min(width, int(np.ceil(right * width)) + 8), min(height, int(np.ceil(bottom * height)) + 8)
+    detail_mask = mask[y1:y2, x1:x2]
+    boxes = {label: mask_box(detail_mask)}
+    # A text badge can cover an entire small/thin subject. The adjacent metadata
+    # names this single subject and its mask supplies its exact pixels.
+    rgb = view['rgb'][y1:y2, x1:x2]
+    common = {'role': role, 'camera_id': camera, 'camera_role': CAMERA_ROLES[camera],
+        'observation_id': capture['observation_id'], 'generation': capture['generation'],
+        'time_s': capture.get('time'), 'subject': label, 'subject_boxes': boxes,
+        'subject_mask_labels': [label], 'crop_pixels': [x1, y1, x2, y2],
+        'source_image_size_px': [width, height], 'source_subject_box': source_box,
+        'box_coordinates': 'normalized [left, top, right, bottom] in THIS cropped image',
+        'input_scope': view.get('scope_source', 'full_camera_frame'),
+        'annotation': 'Unscaled, unpainted RGB detail. Subject label is in metadata; the binary mask uses identical coordinates.'}
+    return [*image_content(rgb, modality='rgb', excluded_pixels='unobserved', **common),
+        *image_content(detail_mask.astype(np.uint8) * 255, modality='mask',
+            white='subject', black='other_pixels', **common)]
+
+
 def gripper_detail_content(capture, arm):
     """Camera-calibrated close view of the hand; no object identity is assumed."""
     camera = {'A': '2', 'B': '1'}[arm]
@@ -138,7 +167,7 @@ def capture_content(capture, *, modalities=('rgb',), masks=None, boxes=None, rol
             if np.any(mask):
                 from .visual_identity import mask_box
                 subject_boxes[subject] = mask_box(mask)
-        common.update(input_scope=view.get('scope_source', 'strict_workspace_mask'),
+        common.update(input_scope=view.get('scope_source', 'full_camera_frame'),
                       excluded_pixels='unobserved', subject_boxes=subject_boxes,
                       box_coordinates='normalized [left, top, right, bottom], origin at image top-left, x right, y down',
                       image_direction='Image left/right is local to this camera view. Robot left/right is named in camera_role.',
@@ -214,7 +243,7 @@ def reference_content(reference, *, modalities=('rgb',), current_capture=None, i
                 frame_capture = initial
                 view = {**view, **initial['views'][camera]}
             mask = view.get('mask')
-            box = mask_box(mask) if mask is not None and np.any(mask) else (
+            box = mask_box(mask) if mask is not None and np.any(mask) else view.get('bbox',
                 stored.get('bbox') if camera == primary_camera else None)
             if labelled_only and box is None:
                 continue

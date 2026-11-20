@@ -1,0 +1,20 @@
+.scene-page { color-scheme: dark; font-family: system-ui, sans-serif; color: #e4edf4; background: #0c121a; }
+.scene-page { margin: 0; }
+.scene-page header { display: flex; align-items: center; gap: 24px; padding: 18px 32px; border-bottom: 1px solid #2b3949; }
+.scene-page h1 { font-size: 22px; margin: 0; } .scene-page a { color: #64e0c0; } .scene-page #scene-revision { margin-left: auto; color: #9cadbf; }
+.scene-page main { max-width: 1260px; margin: 24px auto; padding: 0 24px 32px; }
+.scene-page p { color: #acbdce; line-height: 1.65; } .scene-page .scene-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.scene-page button, .scene-page select, .scene-page input { font: inherit; color: inherit; background: #172331; border: 1px solid #3b4c60; border-radius: 6px; padding: 8px 10px; }
+.scene-page button { cursor: pointer; } .scene-page button:disabled, .scene-page input:disabled { opacity: .5; cursor: default; } .scene-page .primary { background: #195c50; border-color: #64e0c0; }
+.scene-page #scene-scene-status { min-height: 28px; color: #64e0c0; } .scene-page #scene-scene-status.error { color: #ff9e9e; }
+.scene-page #scene-scene-objects { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.scene-page .object-card { background: #111d29; border: 1px solid #2b3949; border-radius: 10px; padding: 18px; }
+.scene-page h2 { font-size: 16px; margin: 0 0 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; overflow-wrap: anywhere; }
+.scene-page h2 button { font-size: 12px; flex-shrink: 0; } .scene-page .field-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.scene-page .field-grid label { display: flex; flex-direction: column; gap: 6px; color: #aabacc; font-size: 13px; } .scene-page input { min-width: 0; width: auto; }
+.scene-page .note { font-size: 13px; margin-top: 24px; } @media(max-width: 600px) { .scene-page header { padding: 16px; gap: 12px; flex-wrap: wrap; } .scene-page main { padding: 0 16px; } .scene-page #scene-revision { margin-left: 0; } }
+.scene-page fieldset { border: 0; margin: 18px 0; padding: 0; min-width: 0; }
+.scene-page fieldset:disabled { opacity: .55; }
+.scene-page .scene-toolbar { margin-bottom: 24px; } .scene-page #scene-object-count { width: 65px; }
+.scene-page .check-field { display: inline-flex; align-items: center; gap: 8px; margin: 18px 18px 18px 0; }
+.scene-page .field-grid { margin-top: 18px; } .scene-page input[type=color] { width: 100%; height: 36px; padding: 3px; }

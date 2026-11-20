@@ -1,4 +1,4 @@
-"""Measured gripper state, closed-hand vision and inherited target identity."""
+"""Separate post-Lift gripper presence from the identity of the held subject."""
 
 import math
 
@@ -49,14 +49,9 @@ def inherit_grasp_identity(holding, execution, capture, *, target_id, arm, owner
     if (type(completed) not in (int, float) or not math.isfinite(completed)
             or type(current) not in (int, float) or not math.isfinite(current) or current < completed):
         raise ValueError('grasp_identity_capture_precedes_execution')
-    reference = holding.get('identity_reference', {}).get('identity_references', {}).get(target_id, {})
-    if (not reference.get('observation_id') or not reference.get('request_hash')
-            or reference.get('source') != 'openai_decisions'
-            or reference.get('generation') != capture['generation']):
-        raise ValueError('grasp_target_reference_missing')
-    return {'source': 'continuous_grasp_execution', 'target_id': target_id, **expected,
+    return {'source': 'continuous_grasp_execution', 'outcome': 'execution_assumed', 'target_id': target_id, **expected,
             'source_observation_id': holding['observation_id'],
-            'reference_observation_id': reference['observation_id'],
+            'reference_observation_id': holding['observation_id'],
             'holding_observation_id': capture['observation_id'],
             'scene_token': holding['scene_token'], 'motion_epoch': motion_epoch, 'action_epoch': action_epoch,
             'completed_feedback_time_s': completed, 'visual_identity_verified': False,
@@ -68,6 +63,7 @@ def gripper_feedback_state(capture, arm):
     feedback = capture.get('arms', {}).get(arm, {})
     fraction = feedback.get('gripper_closed_fraction')
     result = {'observation_id': capture['observation_id'], 'generation': capture.get('generation'),
+              'measured_time_s': feedback.get('gripper_measured_time_s'),
               'time_s': capture.get('time'), 'arm': arm,
               'interpretation': HOLDING_POSITION_RULE}
     if type(fraction) in (int, float) and math.isfinite(fraction) and 0 <= fraction <= 1:

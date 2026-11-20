@@ -1,4 +1,5 @@
 """Registered CAD, measured table cuboids and unknown TSDF/ESDF through public scene inputs."""
+import hashlib
 import struct
 import time
 from copy import deepcopy
@@ -95,6 +96,8 @@ class HybridGeometryMapper:
         self.table_cache = MeasuredTableCache()
         self.scene_type = scene_type
         self.catalog = catalog
+        self.previous_instances = {}
+        self.pending_instances = {}
         from .instance_mapping import InstanceMapper
 
         self.instance_mapper = InstanceMapper(self.capture_segmenter)
@@ -104,7 +107,13 @@ class HybridGeometryMapper:
         self.tsdf_surfaces = {}
         self.diagnostics = {}
 
+    def commit_observation(self):
+        self.previous_instances = self.pending_instances
+        self.workspace_mapper.previous_blocks = self.workspace_mapper.pending_blocks
+
     def reset(self):
+        self.previous_instances = {}
+        self.pending_instances = {}
         self.capture_segmenter.begin_capture(None)
         self.table_cache.reset()
         self.instance_mapper.cache.clear()
@@ -186,8 +195,32 @@ class HybridGeometryMapper:
                                       for view in prepared} for identifier in unknown}
         radius = max(float(np.max(spheres[:, 3])), float(decoded.get('mapping_max_sphere_radius_m', 0.)))
         padding = radius + hard_clearance + self.instance_mapper.esdf_voxel_size_m
-        geometries = self.instance_mapper.build(prepared, instance_points, padding_m=padding, table_model=None)
+        prior = self.previous_instances if decoded.get('mapping_lifecycle', {}).get('previous_scene_token') else {}
+        signatures, reuse = {}, {}
+        for identifier in sorted(unknown):
+            # The per-instance TSDF depends on measured rays, calibration and grid padding.
+            # Equal IDs or equal centroids cannot establish equal geometry.
+            digest = hashlib.sha256(np.float64(padding).tobytes())
+            for view in prepared:
+                array = np.ascontiguousarray(instance_points[identifier][view.camera_id])
+                digest.update(str((view.camera_id, array.shape, array.dtype.str)).encode())
+                digest.update(array.tobytes())
+                camera = decoded['views'][view.camera_id]
+                for field in ('left_intrinsics', 'rgb_intrinsics', 'left_to_rgb', 'T_base_left_camera'):
+                    digest.update(repr(camera.get(field)).encode() if isinstance(camera.get(field),dict)
+                                  else np.ascontiguousarray(camera.get(field, [])).tobytes())
+                samples = (view.instance_depth_samples or {}).get(identifier)
+                if samples is not None:
+                    for sample in samples:
+                        digest.update(np.ascontiguousarray(sample).tobytes())
+            signatures[identifier] = digest.hexdigest()
+            if identifier in prior and prior[identifier][0] == signatures[identifier]:
+                reuse[identifier] = prior[identifier]
+        changed = {key: value for key, value in instance_points.items() if key not in reuse}
+        geometries = self.instance_mapper.build(prepared, changed, padding_m=padding, table_model=None)
         grids = list(self.instance_mapper.grids)
+        by_name = {grid.name: grid for grid in grids}
+        self.pending_instances = {}
         self.tsdf_surfaces = {}
         for row in decoded['geometry_objects']:
             identifier = row['id']
@@ -196,13 +229,20 @@ class HybridGeometryMapper:
             _require(count > 0 and all(np.isfinite(points).all() for points in groups), 'semantic_instance_depth_empty')
             kind = 'mesh' if row.get('cad') is not None else 'voxel'
             if identifier in unknown:
-                geometry = geometries[identifier]
+                if identifier in reuse:
+                    _, geometry, grid, surface_points = reuse[identifier]
+                    grids.append(grid)
+                else:
+                    geometry = geometries[identifier]
+                    grid = by_name[geometry.name]
+                    surface_points = self.instance_mapper.surfaces[identifier]
+                self.pending_instances[identifier] = (signatures[identifier], geometry, grid, surface_points)
                 model['voxel'][geometry.name] = {**dict(geometry.model), 'instance_id': identifier,
                     'observation_id': decoded['observation_set_id'], 'generation': decoded['selection_generation'],
                     'geometry_source': 'curobo_tsdf_esdf'}
                 self.tsdf_surfaces[identifier] = {'source': 'curobo_tsdf_surface', 'frame': 'world',
                     'observation_id': decoded['observation_set_id'], 'generation': decoded['selection_generation'],
-                    'points_world_m': self.instance_mapper.surfaces[identifier],
+                    'points_world_m': surface_points,
                     'tsdf_voxel_size_m': self.instance_mapper.voxel_size_m,
                     'esdf_voxel_size_m': self.instance_mapper.esdf_voxel_size_m}
             metrics[identifier] = {'geometry': kind, 'input_point_count': count, 'filtered_point_count': count,
@@ -226,6 +266,7 @@ class HybridGeometryMapper:
             "included_instance_ids": list(metrics), "table_cache": deepcopy(self.table_cache.diagnostics),
             "background_drop_policy": "discard_robot_table_and_outside_workspace", "unobserved_space": "unknown",
             "workspace_mapping": deepcopy(self.workspace_mapper.diagnostics),
+            "instance_reuse": {"reused_tsdf_ids": sorted(reuse), "rebuilt_tsdf_ids": sorted(changed)},
             "workspace_bounds_m": {"minimum": list(bounds.minimum_m), "maximum": list(bounds.maximum_m)}}
         candidate = SemanticEsdfCandidate(observation_set_id=decoded["observation_set_id"],
             selected_instance_id=decoded["confirmed_instance_id"], selection_generation=decoded["selection_generation"],

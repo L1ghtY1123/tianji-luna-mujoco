@@ -58,14 +58,32 @@ def require_native_objects_geometry(model):
         raise ValueError('scene_geometry_policy_requires_rebuild:' + ','.join(sorted(forbidden)))
 
 
+OBSERVATION_POSE_TOLERANCE_DEG = 1.0
+
+
+def observation_pose_errors_deg(joints, targets, *, degrees=False):
+    """Maximum absolute joint error on each arm against the configured observation pose."""
+    errors = {}
+    for arm in ('A', 'B'):
+        measured = np.asarray(joints.get(arm), dtype=float)
+        goal = np.asarray(targets.get(arm), dtype=float)
+        if (measured.shape != (7,) or goal.shape != (7,)
+                or not np.isfinite(measured).all() or not np.isfinite(goal).all()):
+            raise ValueError('mapping_requires_measured_dual_arm_joints')
+        measured_deg = measured if degrees else np.rad2deg(measured)
+        errors[arm] = float(np.max(np.abs(measured_deg - np.rad2deg(goal))))
+    return errors
+
+
 def mapping_strategy(requested_scope=None, strategy_source=None, scope_reason=None):
-    """All callers rebuild the current workspace; local/subset updates are unsupported."""
     if requested_scope is None and strategy_source is None and scope_reason is None:
-        return None
-    if (requested_scope != 'global' or strategy_source != 'sole_permitted_scope'
+        return {'requested_scope': 'local', 'strategy_source': 'unverified_pose',
+                'scope_reason': 'No complete observation-pose evidence supplied'}
+    if (requested_scope not in {'global', 'local'} or (strategy_source != 'measured_observation_pose'
+            and (requested_scope, strategy_source) != ('local', 'spatial_memory'))
             or not isinstance(scope_reason, str) or not scope_reason.strip()):
-        raise ValueError('mapping_strategy_requires_global_rebuild')
-    return {'requested_scope': 'global', 'strategy_source': strategy_source, 'scope_reason': scope_reason}
+        raise ValueError('invalid_collision_mapping_scope')
+    return {'requested_scope': requested_scope, 'strategy_source': strategy_source, 'scope_reason': scope_reason}
 
 
 def copy_grid(grid, **changes):
@@ -106,21 +124,38 @@ def freeze_objects_scene(scene):
     return deepcopy(identity), frozen, deepcopy(model)
 
 
+def require_parent_generation(previous, identity, stopped_parent):
+    if previous['generation'] == identity['generation']:
+        if stopped_parent is not None:
+            raise ValueError('unexpected_collision_memory_stop_receipt')
+        return
+    world = identity.get('mapping_world')
+    if (not isinstance(world, dict) or set(world) != {'run_id', 'session_id', 'bridge_instance_id', 'geometry_revision'}
+            or not all(isinstance(v, str) and v for v in world.values()) or previous.get('mapping_world') != world
+            or identity['generation'] - previous['generation'] not in (1, 2)
+            or stopped_parent != {'scene_token': previous['scene_token'], 'world': world,
+                'previous_generation': previous['generation'], 'generation': identity['generation']}):
+        raise ValueError('collision_memory_parent_generation_changed')
+
+
 def reconcile_objects(previous, identity, grids, model, *, required_entity_ids=(),
-                        invalidated_entity_ids=(), retired_entity_ids=(), workspace_bounds=None,
+                        invalidated_entity_ids=(), changed_by_operation_ids=(), retired_entity_ids=(), workspace_bounds=None,
                         max_retained_voxel_bytes=DEFAULT_MAX_RETAINED_VOXEL_BYTES,
-                        requested_scope=None, strategy_source=None, scope_reason=None):
+                        requested_scope=None, strategy_source=None, scope_reason=None, previous_scene_token=None,
+                        retained_visible_sources=None, stopped_parent=None, mapping_world=None):
     """Publish current geometry; delivery receipts stay in the object database."""
     require_native_objects_geometry(model)
     identity, model, grids = deepcopy(identity), deepcopy(model), list(grids)
     strategy = mapping_strategy(requested_scope, strategy_source, scope_reason)
-    if strategy:
-        identity['mapping_strategy'] = strategy
+    identity['mapping_strategy'] = strategy
+    if mapping_world is not None:
+        identity['mapping_world'] = deepcopy(mapping_world)
+    local = strategy['requested_scope'] == 'local'
     if not isinstance(max_retained_voxel_bytes, int) or max_retained_voxel_bytes <= 0:
         raise ValueError('objects_voxel_byte_budget_invalid')
     retired = set(retired_entity_ids)
     if any(not isinstance(item, str) or not item or '::' in item
-           for item in (*required_entity_ids, *retired, *invalidated_entity_ids)):
+           for item in (*required_entity_ids, *retired, *invalidated_entity_ids, *changed_by_operation_ids)):
         raise ValueError('objects_entity_ids_invalid')
     observed = {entity for layers in model.values() for name in layers
                 if (entity := layer_entity(name)) is not None}
@@ -139,16 +174,68 @@ def reconcile_objects(previous, identity, grids, model, *, required_entity_ids=(
                        'layer_names': [name for layers in model.values() for name in layers
                                        if layer_entity(name) == entity]}
                for entity in observed}
+    required = (set(required_entity_ids) | observed) - retired
+    retained, stale = [], []
+    previous_identity = {}
+    invalidated = set(invalidated_entity_ids) | set(changed_by_operation_ids)
+    retained_visible = retained_visible_sources or {}
+    if not isinstance(retained_visible, dict) or retained_visible and (
+            not local or not previous_scene_token or set(retained_visible) & (observed | retired | invalidated)):
+        raise ValueError('local_retained_geometry_invalid')
+    if previous_scene_token:
+        if previous is None or previous[0].get('scene_token') != previous_scene_token:
+            raise ValueError('collision_memory_parent_changed')
+        previous_identity, old_grids, old_model = previous
+        require_parent_generation(previous_identity, identity, stopped_parent)
+        if local:
+            for name, table in old_model.get('cuboid', {}).items():
+                identifier = name.removeprefix('semantic_table::')
+                if name.startswith('semantic_table::') and identifier not in retired:
+                    model.setdefault('cuboid', {}).setdefault(name, deepcopy(table))
+        old_layers = previous_identity.get('object_layers', {})
+        old_records = old_layers.get('entities', {})
+        for identifier, origin in retained_visible.items():
+            record = old_records.get(identifier, {})
+            if (not origin or record.get('last_observation_id') != origin
+                    or record.get('last_generation') != identity['generation']
+                    or record.get('status') not in {'observed', 'retained'}
+                    or not any('semantic_instance::' + identifier in layers for layers in old_model.values())):
+                raise ValueError('local_retained_geometry_source_changed')
+        required.update((set(old_layers.get('required_entity_ids', ())) | set(old_records)) - retired)
+        for entity in observed & old_records.keys():
+            records[entity]['first_observation_id'] = old_records[entity].get('first_observation_id', identity['observation_id'])
+        for entity in sorted(required - observed - retired):
+            record = old_records.get(entity)
+            if not record:
+                continue
+            names = {name for group in old_model.values() for name in group if layer_entity(name) == entity}
+            if not names:
+                continue
+            for kind, layers in old_model.items():
+                model.setdefault(kind, {}).update({name: deepcopy(layers[name]) for name in names & layers.keys()})
+            grids.extend(grid for grid in old_grids if grid.name in names)
+            records[entity] = deepcopy(record)
+            retained.append(entity)
+            if entity in invalidated or record.get('status') not in {'observed', 'retained'}:
+                records[entity].update(status='stale', invalidation_reason='location_requires_new_measurement')
+                stale.append(entity)
+            else:
+                records[entity].update(status='retained', source='collision_memory')
+                records[entity].pop('invalidation_reason', None)
     published_bytes = voxel_bytes(grids)
     if published_bytes > max_retained_voxel_bytes:
         raise ValueError('objects_voxel_byte_budget_exceeded')
-    required = set(required_entity_ids) or observed
     missing = sorted(required - set(records))
     identity['object_layers'] = {'entities': records, 'required_entity_ids': sorted(required),
         'retained_voxel_bytes': published_bytes, 'max_retained_voxel_bytes': max_retained_voxel_bytes,
-        'retired_entity_ids': sorted(retired), 'rebuild_policy': 'replace_from_current_observation'}
-    identity['coverage'] = {'objects_complete': not missing,
-        'missing_entity_ids': missing, 'stale_entity_ids': [],
+        'retained_visible_sources': dict(retained_visible), 'retired_entity_ids': sorted(retired), 'retained_obstacle_ids': retained,
+        'observed_entity_ids': sorted(observed), 'previous_scene_token': previous_scene_token,
+        'rebuild_policy': ('refresh_global_scene' if not local else
+                           'patch_local_scene' if previous_scene_token else 'initialize_local_scene')}
+    identity['global_observation_id'] = (previous_identity.get('global_observation_id') if local
+                                         else identity['observation_id'])
+    identity['coverage'] = {'objects_complete': not missing and not stale,
+        'missing_entity_ids': missing, 'stale_entity_ids': stale,
         'workspace_status': 'partial' if workspace_bounds is not None else 'unknown',
         'configured_workspace_bounds': deepcopy(workspace_bounds),
         'full_environment_coverage': False, 'camera_count_is_completeness_proof': False,

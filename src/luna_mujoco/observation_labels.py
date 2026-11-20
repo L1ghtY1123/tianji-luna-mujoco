@@ -29,8 +29,24 @@ IDENTITY_NAMES = {'openai_decisions': 'Decisions 已关联 ID',
                   'mixed_decisions_measured_container': 'Decisions 与 RGBD 对应关联 ID'}
 
 
+def proposal_box_labels(capture, proposals):
+    items = []
+    for proposal in proposals:
+        if proposal.bbox is None:
+            continue
+        left, top, right, bottom = proposal.bbox
+        items.append({'id': proposal.proposal_id, 'camera_id': proposal.camera_id,
+            'label': proposal.proposal_id, 'name': proposal.description, 'role': 'proposal',
+            'status': 'unverified', 'box_source': 'openai_responses', 'geometry_status': 'not_measured',
+            'x': left, 'y': top, 'width': right-left, 'height': bottom-top})
+    return {'observation_id': capture['observation_id'], 'generation': capture.get('generation'),
+        'analysis_status': 'proposed', 'overlay_scope': 'capture_identity_geometry',
+        'image_source': 'captured_rgb', 'overlay_source': 'responses_boxes',
+        'used_as_model_input': False, 'items': items}
+
+
 def registered_reference_labels(capture, reference):
-    """Summarize accepted initial identities using their same-capture SAM3 masks."""
+    """Summarize accepted identities using capture-bound boxes or measured masks."""
     items = []
     for identifier, record in reference.get('identity_references', {}).items():
         if record.get('observation_id') != capture['observation_id']:
@@ -39,20 +55,25 @@ def registered_reference_labels(capture, reference):
         name = COLORS.get(entity.get('color'), '') + KINDS.get(entity.get('kind'), '物体')
         for camera, view in record.get('views', {}).items():
             mask = view.get('mask')
-            if mask is None or camera not in capture['views'] or not np.any(mask):
+            if camera not in capture['views']:
                 continue
-            rows, columns = np.nonzero(mask)
-            height, width = mask.shape
+            if mask is not None and np.any(mask):
+                from .visual_identity import mask_box
+
+                box, source = mask_box(mask), 'associated_instance_mask'
+            else:
+                box, source = view.get('bbox'), 'responses_box_confirmed_by_decisions'
+            if box is None:
+                continue
+            left, top, right, bottom = box
             items.append({'id': identifier, 'camera_id': camera, 'name': name,
-                'role': 'reference', 'status': 'associated', 'box_source': 'associated_instance_mask',
+                'role': 'reference', 'status': 'associated', 'box_source': source,
                 'identity_source': 'openai_decisions', 'geometry_status': 'not_measured',
                 'label': f'ID {identifier} {name} · Decisions 已关联',
-                'x': float(columns.min() / width), 'y': float(rows.min() / height),
-                'width': float((columns.max() + 1 - columns.min()) / width),
-                'height': float((rows.max() + 1 - rows.min()) / height)})
+                'x': left, 'y': top, 'width': right-left, 'height': bottom-top})
     return {'observation_id': capture['observation_id'], 'generation': capture.get('generation'),
         'analysis_status': 'analyzed', 'overlay_scope': 'capture_identity_geometry',
-        'image_source': 'captured_rgb', 'overlay_source': 'confirmed_registration_masks',
+        'image_source': 'captured_rgb', 'overlay_source': 'confirmed_registration_references',
         'used_as_model_input': False, 'items': items}
 
 

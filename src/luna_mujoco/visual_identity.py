@@ -1,7 +1,6 @@
 """Associate current measured subjects with permanent instance memory."""
 import hashlib
 import math
-from contextlib import nullcontext
 from copy import deepcopy
 
 import numpy as np
@@ -10,16 +9,10 @@ from .core.decisions import choice_value
 from .visual_api import VisualAPI, VisualDecisionError
 
 
-def candidate_query_terms(candidate):
-    """Original retrieval membership survives SAM3 fallback and merged proposals."""
-    return {str(query).strip().casefold() for query in [candidate.get('prompt', ''),
-        *candidate.get('query_prompts', []), *candidate.get('prompt_proposals', [])] if query}
-
-
 def choice(name, instructions, values):
     meanings = {
         'new_instance': 'A distinct physical object whose permanent identity has not yet been registered.',
-        'reject': 'The queried segmentation represents background or robot geometry.',
+        'reject': 'Not a distinct valid instance: background, robot, mixed objects, an isolated fragment, or a duplicate group.',
         'unknown': 'The supplied evidence cannot determine the answer.',
     }
     return {'type': 'choice', 'name': name, 'instructions': instructions,
@@ -45,25 +38,6 @@ def array_stamp(value):
     array = np.ascontiguousarray(value)
     return {'sha256': hashlib.sha256(array.tobytes()).hexdigest(),
             'shape': list(array.shape), 'dtype': array.dtype.str}
-
-
-def candidate_identity_evidence(candidate, identifier, evidence):
-    """Keep each accepted candidate bound to the request that actually answered it."""
-    name = evidence.get('candidate_question_names', {}).get(candidate, 'identity_' + candidate.removeprefix('candidate-'))
-    answer = next(row for row in evidence['answers'] if row['name'] == name)
-    comparison = next((row for row in reversed(evidence.get('identity_comparison_records', []))
-        if any(question['name'] == name for question in row.get('questions', []))), {})
-    return {'source': 'openai_decisions', 'entity_id': identifier, 'candidate': candidate,
-        'camera': evidence['candidate_provenance'][candidate]['camera'],
-        'observation_id': evidence['observation_id'], 'generation': evidence['generation'],
-        'request_hash': evidence.get('question_requests', {}).get(name, {}).get('request_hash', evidence['request_hash']),
-        'answer': deepcopy(answer),
-        'identity_binding': {key: deepcopy(value) for key, value in comparison.items() if key in {
-            'identity_stage', 'current_instance_label', 'previous_observation_id',
-            'previous_instance_owners', 'permanent_id_inheritance', 'archive_owners'}},
-        'original_decisions_answers': [deepcopy(row) for row in evidence['original_decisions_answers'] if row['name'] == name],
-        'questions': [deepcopy(row) for row in evidence.get('questions', []) if row['name'] == name],
-        'candidate_provenance': deepcopy(evidence['candidate_provenance'][candidate])}
 
 
 def reference_content(reference, *, current_capture=None, per_instance=False):
@@ -94,16 +68,9 @@ class VisualIdentity(VisualAPI):
     source = 'openai_decisions'
     error_prefix = 'visual_decisions'
 
-    def __init__(self, *, register_instance=None, load_identity_archive=None,
-                 registration_transaction=nullcontext, **kwargs):
+    def __init__(self, *, load_identity_archive=None, **kwargs):
         super().__init__(**kwargs)
-        self.register_instance = register_instance
         self.load_identity_archive = load_identity_archive
-        self.registration_transaction = registration_transaction
-
-    def resolve(self, capture, detections, *, instruction, entities=None, **kwargs):
-        from .identity_association import associate_instances
-        return associate_instances(self, capture, detections, instruction=instruction, entities=entities, **kwargs)
 
     def _groups(self, detections, names, entities, judgments, evidence, *, purpose=None, reference=None,
                 progress=None):

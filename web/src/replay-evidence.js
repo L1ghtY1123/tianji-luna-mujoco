@@ -156,30 +156,18 @@ export function candidateRows(replay) {
   if (replay.stage === 'raw_graspgen') {
     return (replay.all_generated_candidates ?? []).map(candidate => ({
       index: candidate.index, score: candidate.score, matrix: candidate.T_world_tcp, status: 'unknown',
-      reason: replay.filter_all_generated || candidate.index < replay.requested_candidate_count
+      reason: replay.prepare_all_generated || candidate.index < replay.requested_candidate_count
         ? '进入本轮预筛选' : '超出本轮采样池预算，未送入预筛选',
       sourceBatch: candidate.source_batch, sourceIndex: candidate.source_index,
     }));
   }
   if (replay.stage === 'before_ik') {
-    const evidence = new Map((replay.direction_filter?.candidate_evidence ?? []).map(row => [row.candidate_index, row]));
-    return (replay.candidates_before_ik ?? []).map(candidate => {
-      const row = evidence.get(candidate.index);
-      const evaluated = typeof row?.accepted === 'boolean' || (typeof row?.tilt_passed === 'boolean' && typeof row?.away_from_robot_passed === 'boolean');
-      const accepted = row?.accepted ?? (row?.tilt_passed && row?.away_from_robot_passed);
-      const dot = value => Number.isFinite(value) ? value.toFixed(4) : '未记录';
-      const budgetLimited = replay.pre_budget_eligible_indices?.includes(candidate.index)
-        && !replay.pre_ik_eligible_indices?.includes(candidate.index);
-      return { index: candidate.index, score: candidate.score, matrix: candidate.T_world_tcp,
-        beforeInsertion: candidate.T_world_tcp_before_insertion,
-        status: budgetLimited ? 'unknown' : Array.isArray(replay.pre_ik_eligible_indices)
-          ? replay.pre_ik_eligible_indices.includes(candidate.index) ? 'passed' : 'failed'
-          : evaluated ? accepted ? 'passed' : 'failed' : 'unknown',
-        reason: (row?.sector ? `向前 ${dot(row.sector.forward_dot)} · 向下 ${dot(row.sector.downward_dot)} · 左右偏角 ${dot(row.sector.lateral_angle_deg)}°`
-          : row ? `向下 ${dot(row.downward_dot)} · 离机器人 ${dot(row.horizontal_away_from_robot_dot)}` : '')
-          + (budgetLimited ? ' · 预筛选通过，超出本轮 IK 数量上限，未提交' : ''),
-      };
-    });
+    return (replay.candidates_before_ik ?? []).map(candidate => ({
+      index: candidate.index, score: candidate.score, matrix: candidate.T_world_tcp,
+      beforeInsertion: candidate.T_world_tcp_before_insertion,
+      status: 'unknown',
+      reason: '已完成 TCP 与夹爪对称处理；可行性由后续 IK 和碰撞检查判定',
+    }));
   }
   const items = new Map((replay.response?.items ?? []).map(item => [item.candidate_index, item]));
   return (replay.request?.goal_matrices_world ?? []).map((matrix, localIndex) => {
@@ -331,6 +319,16 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
           .filter(part => part.type === 'input_text').map(part => {
             try { return JSON.parse(part.text); } catch { return part.text; }
           });
+        const grounding = texts.find(text => text && typeof text === 'object' && text.proposal_overlap);
+        if (grounding) {
+          const metrics = element('details');
+          metrics.append(element('summary', '任务定位：提案框、当前分组与同图 IoU'),
+            element('p', '方向以机器人固定坐标系为准。IoU 仅作证据；无框显示 null，0 表示已比较但不重叠。候选编号和分组编号不是永久 ID。', 'muted'),
+            element('pre', JSON.stringify({ selection: grounding.selection, groups: grounding.groups,
+              proposal_labels: grounding.proposal_labels, overlap: grounding.proposal_overlap,
+              mask_pairs: grounding.mask_pairs, references: grounding.resolved_references }, null, 2), 'candidate-detail'));
+          model.append(metrics);
+        }
         state.append(element('summary', 'state 与图片元数据'),
           element('pre', JSON.stringify(texts, null, 2), 'candidate-detail'));
         const questions = element('details');
@@ -344,12 +342,14 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
         if (objects.task_bindings) renderTaskBindings(model, objects.task_bindings);
         model.append(element('p', objects.task_spec?.reason ?? objects.task?.reason ?? '模型已返回结构化场景与程序。'));
         const entities = element('details');
-        entities.append(element('summary', `Responses 提议的实体 · ${objects.entities?.length ?? 0} 项`));
-        for (const entity of objects.entities ?? []) entities.append(element('p', `${entity.id ?? entity.ref} · ${entity.description ?? entity.kind}`));
+        const inventory = objects.scene_inventory ?? objects.entities ?? [];
+        entities.append(element('summary', `场景提案 · ${inventory.length} 项`));
+        for (const entity of inventory) entities.append(element('p', `${entity.proposal_id ?? entity.id ?? entity.ref} · 相机 ${entity.camera_id ?? '—'} · ${entity.description ?? entity.kind}`));
+        for (const selector of objects.task_selectors ?? []) entities.append(element('p', `任务引用 ${selector.ref} · ${selector.requested_attributes}`));
         const program = element('details');
         program.append(element('summary', '查看 Responses 编排（包含尚未执行的步骤）'));
         const tree = element('div', '', 'policy-tree');
-        const graph = objects.policy_graph;
+        const graph = objects.policy_graph ?? objects.graph;
         if (graph) renderPolicyGraph(tree, graph);
         else tree.append(element('p', '未归档 policy_graph；以下为原始模型输出，不重建历史编排。', 'muted'));
         program.append(tree, element('pre', JSON.stringify(graph ?? objects, null, 2), 'candidate-detail'));
@@ -416,7 +416,7 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
     for (const [index, image] of evidence.images.entries()) {
       const figure = element('figure');
       const link = element('a');
-      link.href = fileUrl(runId, image.path); link.target = '_blank'; link.rel = 'noopener';
+      link.href = fileUrl(runId, image.path); link.dataset.previewImage = '';
       const img = element('img'); img.src = link.href; img.alt = `${image.label} · 输入 ${index + 1}`; img.loading = 'lazy';
       link.append(img);
       const metadata = element('details');
@@ -465,10 +465,10 @@ export function createReplayEvidence(container, { request, fileUrl, document = c
       item.append(element('p', `执行臂：${replay.arm === 'A' ? '左臂 A' : replay.arm === 'B' ? '右臂 B' : '归档未记录'}。每个位姿显示完整 XYZ 工具坐标轴：X 红、Y 绿、Z 蓝；坐标方向来自归档矩阵，不额外生成候选。`, 'muted'));
       if (round) item.append(element('p', '候选编号保留本轮原始索引；不同轮次的同一编号表示不同候选。', 'muted'));
       item.append(element('p', replay.stage === 'raw_graspgen'
-        ? replay.filter_all_generated
-          ? `完整归档并预筛选全部 ${rows.length} 个生成位姿，筛后最多 ${replay.requested_candidate_count} 个进入 IK；此阶段还没有 IK 或轨迹判定。`
+        ? replay.prepare_all_generated
+          ? `完整归档并准备全部 ${rows.length} 个生成位姿，最多 ${replay.requested_candidate_count} 个进入 IK；此阶段还没有 IK 或轨迹判定。`
           : `完整归档 ${rows.length} 个生成位姿，本轮最多选择 ${replay.requested_candidate_count} 个进入预筛选；此阶段还没有 IK 或轨迹判定。`
-        : `${rows.filter(row => row.status === 'passed').length} 通过 · ${rows.filter(row => row.status === 'failed').length} 未通过 · ${rows.filter(row => row.status === 'unknown').length} 未记录判定${replay.stage === 'before_ik' ? '（预筛选包含方向和已归档名义可达性，不代表 IK 或路径可行）' : ''}`, 'muted'));
+        : `${rows.filter(row => row.status === 'passed').length} 通过 · ${rows.filter(row => row.status === 'failed').length} 未通过 · ${rows.filter(row => row.status === 'unknown').length} 未记录判定${replay.stage === 'before_ik' ? '（预处理不限制工具 Z 朝向，不代表 IK 或路径可行）' : ''}`, 'muted'));
       if (replay.stage === 'after_ik') item.append(element('p', replay.candidate_filters === undefined
         ? '后置筛选未归档：此处仅原始 IK 结果，最终可用性未记录。'
         : '此处显示已归档 IK 后筛选的最终可用性（eligible）；原始 IK 结果和筛选证据保留在详情。缺失、重复或损坏的筛选判定保持未知。', 'muted'));

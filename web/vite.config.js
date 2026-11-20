@@ -6,7 +6,7 @@ const websocketUrl = backendUrl.replace(/^http/, 'ws');
 export default defineConfig({
   build: {
     assetsDir: 'web-assets',
-    rollupOptions: { input: ['index.html', 'collision-spheres.html', 'replay.html', 'workspaces.html'] },
+    rollupOptions: { input: ['index.html'] },
   },
   server: {
     proxy: {

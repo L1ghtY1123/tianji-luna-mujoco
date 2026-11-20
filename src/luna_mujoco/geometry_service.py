@@ -174,6 +174,7 @@ class GeometryRuntime(CuroboRuntime):
         self.geometry_grids = None
         self.geometry_model = None
         self._reachability_solvers = {}
+        self.robot_geometry_lock = threading.RLock()
         self.planning_settings = PlanningSettings()
         self.geometry_solver_profile = None
         self.effective_config = {}
@@ -487,6 +488,9 @@ class GeometryRuntime(CuroboRuntime):
             previous = ((self.geometry_scene, self.geometry_grids, self.geometry_model)
                         if self.geometry_scene is not None and self.geometry_grids is not None
                         and self.geometry_model is not None else self._collision_archive)
+            parent = decoded.get('mapping_lifecycle', {}).get('previous_scene_token')
+            if parent and (not previous or previous[0].get('scene_token') != parent):
+                raise ValueError('collision_memory_parent_changed')
             self._collision_archive = freeze_objects_scene(previous)
             if old is None or any(old.get(field) != identity.get(field) for field in ("generation", "target_id")):
                 self.logical_carrying_binding = None
@@ -587,6 +591,8 @@ class GeometryRuntime(CuroboRuntime):
                 # Publish explicit unavailability rather than relabel raw points.
                 published_preview["collision_scene"] = {"status": "unavailable", "reason": str(error),
                     **{key: identity[key] for key in ('scene_token', 'observation_id', 'generation')}}
+            if hybrid:
+                self.perception_mapper.commit_observation()
             self.pointcloud_preview = published_preview
         from .collision_archive import freeze_collision_snapshot
 
@@ -1125,6 +1131,14 @@ class GeometryRuntime(CuroboRuntime):
 
 def run_operation(runtime, path, payload):
     """Validate settings once, then dispatch to the existing typed GPU boundary."""
+    if path == '/tools/robot_geometry':
+        from tianji_curobo.robot_geometry import serve_robot_geometry
+        with runtime.robot_geometry_lock:
+            if not hasattr(runtime, 'observation_robot_geometry'):
+                runtime.observation_robot_geometry = create_feedback_segmenter(
+                    robot_config_path=runtime._robot_config_path, urdf_path=runtime._urdf_path,
+                    asset_root_path=runtime._asset_root_path, feedback=payload['gripper_positions_rad']).sdk_boundary
+            return serve_robot_geometry(runtime.observation_robot_geometry, payload)
     if path == '/tools/prepare_observation_memory':
         return runtime.prepare_observation_memory()
     if path == '/tools/evaluate_reachability':
@@ -1429,13 +1443,14 @@ def main():
                 with collect_timings() as timings:
                     with timed_stage('request_read_decode'):
                         payload = json.loads(self.rfile.read(length))
+                    queue_lock = (runtime.robot_geometry_lock if self.path == '/tools/robot_geometry' else operation_lock)
                     with timed_stage('operation_queue'):
-                        operation_lock.acquire()
+                        queue_lock.acquire()
                     try:
                         with timed_stage('operation'):
                             result = run_operation(runtime, self.path, payload)
                     finally:
-                        operation_lock.release()
+                        queue_lock.release()
                 self.send_json(200, result, timings=timings)
             except Exception as error:
                 self.close_connection = True  # Parsing errors may leave unread bytes on this connection.

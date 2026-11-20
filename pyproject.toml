@@ -5,15 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tianji-luna-mujoco"
 version = "0.1.0"
-description = "Responses skill programs and Decisions verification with MuJoCo physics"
+description = "Luna task planning and verification through tianji_base"
 requires-python = ">=3.12"
 dependencies = [
   "tianji-algorithm-services==0.2.2",
   "pydantic>=2.10,<3",
   "jsonschema>=4.23,<5",
   "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-dotenv>=1.1,<2",
-  "numpy>=2,<3", "scipy>=1.15,<2", "mujoco==3.10.0", "trimesh>=4.6,<5", "rtree==1.4.1",
-  "httpx>=0.28,<1", "msgpack>=1.1,<2", "PyYAML>=6,<7", "websockets>=14,<17", "Pillow>=11,<13"
+  "numpy>=2,<3", "scipy>=1.15,<2", "trimesh>=4.6,<5", "rtree==1.4.1",
+  "httpx>=0.28,<1", "msgpack>=1.1,<2", "PyYAML>=6,<7", "websockets>=14,<17", "Pillow>=11,<13", "playwright>=1.56,<2"
 ]
 
 [project.optional-dependencies]

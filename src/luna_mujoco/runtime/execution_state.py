@@ -40,6 +40,7 @@ def bind_failure_context(result, *, skill, arguments, state):
     if arm not in {'A', 'B'}:
         arm = state.get('arm')
     result = {'skill': skill, 'arguments': deepcopy(arguments),
+              'invocation_id': (state.get('current_step') or {}).get('invocation_id'),
               'target_id': arguments.get('target_id') or state.get('target_id'),
               'destination_id': arguments.get('destination_id') or state.get('destination_id'),
               'arm': arm, **result}
@@ -59,6 +60,7 @@ class ExecutionState:
         if len(set(self.target_ids)) != len(self.target_ids):
             raise ValueError('duplicate_policy_target')
         self.bindings = deepcopy(bindings)
+        self.entity_refs = {}
         self.result_bindings = {name: dict(validate_result_bindings(value))
                                 for name, value in (result_bindings or {}).items()}
         self.output_names = {name for outputs in self.result_bindings.values() for name in outputs}
@@ -73,13 +75,28 @@ class ExecutionState:
         self.results = {}
         self.last_result = None
 
-    def bind(self, value):
-        if isinstance(value, str) and value.startswith('$'):
-            if value not in self.bindings or self.bindings[value] is None:
-                raise ValueError('unbound_policy_reference:' + value)
-            return deepcopy(self.bindings[value])
+    def update_entity_refs(self, references):
+        self.entity_refs = deepcopy(references)
+        # Variables may have been bound before ground_task completed inside a scope.
+        for key, value in list(self.bindings.items()):
+            if isinstance(value, str) and value in self.entity_refs:
+                self.bindings[key] = self.bind(value)
+
+    def bind(self, value, _resolving=frozenset()):
+        if isinstance(value, str) and (value in self.entity_refs or value.startswith('$')):
+            if value in _resolving:
+                raise ValueError('cyclic_policy_reference:' + value)
+            if value in self.entity_refs:
+                result = self.entity_refs[value]
+                if not isinstance(result, str):
+                    raise ValueError('collection_reference_requires_select_target:' + value)
+            else:
+                if value not in self.bindings or self.bindings[value] is None:
+                    raise ValueError('unbound_policy_reference:' + value)
+                result = deepcopy(self.bindings[value])
+            return self.bind(result, _resolving | {value})
         if isinstance(value, dict):
-            return {key: self.bind(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self.bind(item) for item in value]
+            return {key: self.bind(item, _resolving) for key, item in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [self.bind(item, _resolving) for item in value]
         return value

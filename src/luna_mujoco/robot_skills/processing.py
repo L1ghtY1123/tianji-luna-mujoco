@@ -37,7 +37,7 @@ def unpack_product_proposal(input_id, action, result, capture, *, owner_id, sour
     view = capture.get('views', {}).get(camera, {})
     mask = np.asarray(measurement.get('mask'))
     points = np.asarray(measurement.get('points_world_m'))
-    if (measurement.get('source') != 'current_rgbd_object_surface'
+    if (camera != '3' or measurement.get('source') != 'current_rgbd_object_surface'
             or measurement.get('appearance') != 'unpacked'
             or any(measurement.get(key) != capture.get(key) for key in ('observation_id', 'generation'))
             or (measurement.get('component_evidence') or {}).get('new_candidate_count') != 1
@@ -81,9 +81,9 @@ class ProcessingSkills:
         release = verification.get('visual_evidence', {})
         pending = context.get('pending_transfer')
         if pending is None:
-            from .evidence import table_release_reference
-            expected = table_release_reference(context.get('post_place_capture'), release, self.run_id)
-            if context.get('post_place_verification_input') != expected:
+            from ..surface_placement import placement_evidence_id
+            if (not placement_evidence_id(release) or
+                    context.get('release_execution_evidence', {}).get('owner_id') != self.run_id):
                 raise ValueError('unpack_requires_verified_table_release_and_empty_hands')
             pending = {'target_id': release.get('target_id'),
                        'destination_id': release.get('destination_id'), 'verified': True}
@@ -93,7 +93,7 @@ class ProcessingSkills:
                 or release.get('destination_id') != work_area_id or not work_area_id
                 or pending.get('target_id') != target or pending.get('destination_id') != work_area_id
                 or pending.get('verified') is not True or not release.get('release_feedback_id')
-                or context.get('post_place_capture', {}).get('generation') != self.state['generation']):
+                or release.get('generation') != self.state['generation']):
             raise ValueError('unpack_requires_verified_table_release_and_empty_hands')
         return release
 
@@ -229,10 +229,16 @@ class ProcessingSkills:
         if (preparation.get('target_id') != self.state['target_id']
                 or preparation.get('release_feedback_id') != release['release_feedback_id']
                 or preparation.get('generation') != self.state['generation']):
-            raise ValueError('mock_unpack_requires_completed_vla_pose')
+            raise ValueError('unpack_requires_completed_vla_pose')
         if context.get('processing_action'):
             raise ValueError('processing_action_already_dispatched')
         area = self._vla_input_requirements(context)
+        self._require_vla_preparation(context)
+        from .evidence import table_release_reference
+        before = await self.capture_observation(context)
+        context['pre_unpack_reference'] = table_release_reference(before, release, self.run_id)
+        context['pre_unpack_capture'] = before
+        self.record_observation(before, 'pre_unpack')
         self._require_vla_preparation(context)
         polygon = np.asarray(area['region_polygon_world_xy_m'])
         work_area = {**area, 'size_m': float(np.ptp(polygon[:, 0]))}
@@ -251,7 +257,9 @@ class ProcessingSkills:
         self.state['facts'].update(scene_ready=False, scene_available=False, observation_map_ready=False)
         # The effect invalidates prior object poses. New map publication belongs
         # to the graph; the effect receipt supplies no measured geometry.
-        self.emit('mock_vla_completed', '模拟 VLA：粉色包装变为黑色内件', receipt)
+        if receipt.get('completed') is not True:
+            raise ValueError('base_vla_completion_unconfirmed')
+        self.emit('base_vla_completed', 'Base VLA 执行完成，等待视觉核验', receipt)
         return {'success': True, 'receipt': receipt, 'rgbd_remapped': False}
 
     async def _verify_unpack(self, context):
@@ -261,8 +269,8 @@ class ProcessingSkills:
             raise ValueError('unpack_requires_bound_processing_action')
         release = self._verified_processing_release(context)
         context.pop('fine_capture', None)
-        before = context.get('post_place_capture')
-        reference = context.get('post_place_verification_input')
+        before = context.get('pre_unpack_capture')
+        reference = context.get('pre_unpack_reference')
         work_area = self._processing_support(context)
         capture = await self.capture_observation(context)
         context.update(post_unpack_capture=capture, latest_capture=capture)

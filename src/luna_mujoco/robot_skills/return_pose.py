@@ -81,7 +81,7 @@ async def return_to_initial_pose(runner, context):
     if not release_allows_observation_motion(context, collision=runner.spatial_memory.collision_snapshot()):
         raise ValueError('observation_release_evidence_insufficient')
     reference = context['initial_joint_reference']
-    snapshot = runner.simulation.robot_snapshot()
+    snapshot = runner.simulation.joint_feedback(runner.state['generation'])
     if snapshot.get('generation') != reference['generation']:
         raise ValueError('initial_pose_reference_stale')
     proof = initial_pose_verdict(reference, snapshot)
@@ -90,7 +90,7 @@ async def return_to_initial_pose(runner, context):
     # Share the checked dual-arm joint planner, never replay an earlier path.
     prepare_empty_hand_motion_scene(context, collision=runner.spatial_memory.collision_snapshot())
     result = await runner.move_to_observe(context, joint_goals=reference['joints_rad'])
-    proof = initial_pose_verdict(reference, runner.simulation.robot_snapshot())
+    proof = initial_pose_verdict(reference, runner.simulation.joint_feedback(runner.state['generation']))
     if not proof['success']:
         raise ValueError('initial_pose_unconfirmed')
     return {**result, 'success': True, 'already_at_initial_pose': False, 'pose_verification': proof}

@@ -1,6 +1,6 @@
 {
   "id": "build_scene",
-  "description": "Rebuild collision geometry across the full workspace from the current registered observation on every call. Use measured table cuboids, currently registered CAD, and current TSDF/ESDF for all remaining visible geometry. Anonymous obstacles require no identity association. Apply the strict workspace mask. Replace previous object geometry and TSDF cells; retain permanent identity and operation history separately in the database. There is no local/global selector or object subset. Unknown target surfaces retain current capture provenance for GraspGen. A full rebuild does not certify unseen space as empty.",
+  "description": "Initialize a full map when needed or explicitly requested by observe_scene(full_collision_survey=true). A full map requires both arms at the configured pose for all three exposures and publication. With an existing complete map, patch by permanent ID even at the observation pose. Rebuild new or moved obstacles using FoundationPose for registered CAD and masked-depth TSDF for unknown shapes. Retain stationary layers with their original capture, including visible partial surfaces. Keep a moved but unseen layer stale and update only measured anonymous workspace cells.",
   "inputs": [
     "current_objects_observation",
     "selected_target_if_requested",
@@ -32,7 +32,7 @@
   ],
   "invalidates_observation": false,
   "planning_effects": {
-    "collision_map_initialized": true,
+    "collision_map_initialized": null,
     "scene_available": true,
     "scene_ready": null,
     "views_ready": null,

@@ -65,6 +65,9 @@ def archive_value(directory, name, value):
                 'dtype': str(item.dtype), 'shape': list(item.shape)}
 
     def convert(item):
+        from dataclasses import fields, is_dataclass
+        if is_dataclass(item) and not isinstance(item, type):
+            return convert({field.name: getattr(item, field.name) for field in fields(item)})
         if isinstance(item, BaseModel):
             return convert(item.model_dump(mode='json'))
         if isinstance(item, np.ndarray):
@@ -392,9 +395,7 @@ class ExperimentStore:
                            'assets/marvin_urdf/marvin_with_grippers.urdf')
             config = {**config, 'robot_model_sha256': {name:
                 hashlib.sha256((source_root / name).read_bytes()).hexdigest() for name in model_paths}}
-            calibration = source_root / "resources/cameras/calibration.json"
-            if calibration.exists():
-                config["camera_calibration"] = json.loads(calibration.read_text(encoding="utf-8"))
+            config['camera_calibration_source'] = 'per_view_frozen_tianji_base_capture'
             archive_value(directory, "config", config)
             session = ExperimentSession(directory, manifest, simulation, self.video_factory)
         except Exception as error:
@@ -444,7 +445,7 @@ class ExperimentStore:
             return {**manifest, "files": files, "size_bytes": sum(item["size_bytes"] for item in files),
                     "busy": bool(session and session.busy)}
 
-    def list(self):
+    def list(self, measure_unindexed=True):
         with self._lock:
             result = []
             for parent in (self.root, self.root / ".pending"):
@@ -453,8 +454,20 @@ class ExperimentStore:
                 for path in parent.iterdir():
                     if re.fullmatch(r"[a-f0-9]{32}", path.name) and (path / "manifest.json").is_file():
                         try:
-                            item = self.get(path.name)
-                            item.pop("files")
+                            directory = self._directory(path.name)
+                            manifest_path = directory / "manifest.json"
+                            item = json.loads(manifest_path.read_text(encoding="utf-8"))
+                            files = item.pop("files", None)
+                            session = self.sessions.get(path.name)
+                            item["busy"] = bool(session and session.busy)
+                            if item.get("finalized") and isinstance(files, list) and not item["busy"]:
+                                item["size_bytes"] = manifest_path.stat().st_size + sum(
+                                    row["size_bytes"] for row in files if row["path"] != "manifest.json")
+                            elif measure_unindexed:
+                                item = self.get(path.name)
+                                item.pop("files")
+                            else:
+                                item["size_bytes"] = None
                             result.append(item)
                         except (OSError, ValueError):
                             continue

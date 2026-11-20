@@ -2,6 +2,7 @@
 from copy import deepcopy
 
 import numpy as np
+from scipy.ndimage import label as connected_components
 
 from .cameras import deproject_view
 
@@ -18,8 +19,12 @@ DEPTH_INSTRUCTIONS = (
     'candidate_history_relations separates these same-capture constraints from historical position priors.')
 
 
+def head_wrist_pair(left, right):
+    return (left == '3' and right in ('1', '2')) or (right == '3' and left in ('1', '2'))
+
+
 def candidate_depth_evidence(capture, candidate):
-    """Summarize already calibrated, workspace-filtered per-mask world points."""
+    """Summarize calibrated, measured per-mask world points in the full view."""
     points = np.asarray(candidate.get('points', []), dtype=float)
     mask = np.asarray(candidate.get('silhouette_mask', []), dtype=bool)
     mask_pixels = int(np.count_nonzero(mask))
@@ -28,6 +33,13 @@ def candidate_depth_evidence(capture, candidate):
         'capture_time_s': capture.get('time'), 'camera_id': candidate['camera_id'],
         'calibration_id': capture.get('views', {}).get(candidate['camera_id'], {}).get('calibration_id'),
         'scope': 'visible_surface_only', 'mask_pixel_count': mask_pixels, 'status': 'unavailable'}
+    if mask.ndim == 2 and mask_pixels:
+        components, count = connected_components(mask)
+        rows, columns = np.nonzero(mask)
+        box_pixels = (int(rows.max()) - int(rows.min()) + 1) * (int(columns.max()) - int(columns.min()) + 1)
+        evidence.update(mask_component_count=count,
+            largest_mask_component_pixels=int(np.bincount(components.ravel())[1:].max()),
+            mask_bbox_fill_fraction=mask_pixels / box_pixels)
     if points.ndim != 2 or points.shape[1] != 3:
         return evidence
     points = points[np.isfinite(points).all(axis=1)]
@@ -38,7 +50,8 @@ def candidate_depth_evidence(capture, candidate):
     bounds = np.quantile(points, [.02, .98], axis=0)
     evidence.update(status='measured' if len(points) >= 30 and fraction >= .5 else 'insufficient',
         visible_surface_center_world_m=np.median(points, axis=0).tolist(),
-        visible_bounds_world_m=bounds.tolist(), bounds_quantiles=[.02, .98])
+        visible_bounds_world_m=bounds.tolist(), bounds_quantiles=[.02, .98],
+        full_visible_bounds_world_m=[points.min(axis=0).tolist(), points.max(axis=0).tolist()])
     return evidence
 
 
@@ -71,9 +84,6 @@ def reference_depth_evidence(reference):
         if any(key not in view for key in ('mask', 'depth_m', 'valid_depth', 'intrinsics', 'T_world_camera')):
             continue
         mask = np.asarray(view['mask'], dtype=bool)
-        scope = view.get('effective_mask', view.get('workspace_mask'))
-        if scope is not None:
-            mask = mask & np.asarray(scope, dtype=bool)
         candidate = {'camera_id': camera, 'silhouette_mask': mask, 'points': deproject_view(view, mask)}
         result[camera] = candidate_depth_evidence(reference, candidate)
     return result
@@ -118,6 +128,8 @@ def candidate_history_relation(current, history):
     comparisons = []
     for frame in history['dated_references']:
         for camera, previous in frame['depth_by_camera'].items():
+            if camera != current.get('camera_id') and not head_wrist_pair(camera, current.get('camera_id')):
+                continue
             if current.get('status') != 'measured' or previous.get('status') != 'measured':
                 continue
             if current.get('generation') != previous.get('generation'):

@@ -1,5 +1,7 @@
 # 相机内外参参考核查（2026-10-27）
 
+> 历史标定核查。2026-11-16 已将本文提及的 Luna `resources/cameras/` 原始资源迁到 Base 的 `extensions/cameras/mujoco-camera/defaults/provenance/`；当前运行标定及采集路径见 [Base 接入说明](base-integration.md)。下文是当时数据与实验的记录。
+
 问题在标定资源的设备身份混用：三路外参已经更新为 D405 / Gemini 335Lg 的实测结果，内参仍来自 2026-09 的芯明 VirtualCamera。MuJoCo 渲染适配器本来就在使用完整内参，没有只保留 fovy。本次仅修正资源及相机回归，未修改相机代码、MuJoCo SDK 或参考项目。
 
 ## 来源与实际配置

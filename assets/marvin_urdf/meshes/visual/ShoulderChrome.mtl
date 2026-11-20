@@ -1,0 +1,8 @@
+newmtl ShoulderChrome
+Kd 0.6200 0.6300 0.6350
+Ka 0 0 0
+Ks 0.1 0.1 0.1
+Ns 40
+d 1
+illum 2
+

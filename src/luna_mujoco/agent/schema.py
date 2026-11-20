@@ -1,87 +1,111 @@
 """Data-only task and bounded policy graph contracts shared by model and runtime."""
 from copy import deepcopy
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, ValidationInfo, field_validator, model_validator
+from pydantic import BeforeValidator, Field, ValidationInfo, field_validator, model_validator
 
 from ..core.graph import Graph, StrictModel, TaskSpec
+from ..core.grounding import SelectionRule, relation_refs
 
 
-class EntityProposal(StrictModel):
-    ref: str = Field(min_length=1)
-    existing_id: str | None = Field(default=None, description=(
-        'Existing permanent instance ID from object_memory when the current subject matches its dated '
-        'reference. Null for a proposed new instance. Never invent an ID or reuse another same-kind instance.'))
-    kind: Literal['table', 'bin', 'marker', 'cube', 'sphere', 'cylinder', 'object']
-    color: str = Field(description=(
-        'Short ENGLISH color adjective, e.g. pink, blue, black or unknown. '
-        'Used literally in SAM3 appearance fallback prompts; never localize this field. '
-        'Human-facing description may use the user language.'))
-    description: str = Field(description=(
-        'Describe visible color and shape, plus the location that distinguishes this individual in '
-        'reference_camera_id. Name that camera when using image-left/right/upper/lower. '
-        'For similar objects, specify their separate positions relative to visible neighbors. '
-        'Do not use only one object/another object, task role, or a future destination as identification.'))
-    bbox: list[float] | None = Field(default=None, min_length=4, max_length=4, description=(
-        'SAM3-measured subject box populated after compilation, normalized to [0,1].'))
-    reference_camera_id: Literal['1', '2', '3'] = Field(description=(
-        'Choose the initial camera that shows this individual largest and most clearly separated from '
-        'similar neighbors. Prefer a complete view over a clipped or occluded fragment when available. '
-        'This is a description anchor only. SAM3 segments every appearance class in ALL three cameras.'))
-    robot_relative_side: Literal['left', 'right'] | None = Field(default=None, description=(
-        'Initial robot-relative location explicitly specified by the user for THIS subject. '
-        'Copy the requested left/right meaning, never infer it from image-left/right. '
-        'The calibrated world frame has +X forward, +Y robot-left, -Y robot-right. '
-        'Null when the user does not specify a robot-relative side. This initial selection constraint '
-        'does not restrict the future position of a permanent identity.'))
-    parent_ref: str | None
-    membership: Literal['required', 'excluded', 'unknown']
-    mentioned_in_task: bool = Field(default=False, description=(
-        'True only when this physical instance is involved in the requested TASK as a target, source, '
-        'destination, processing object or required support. Objects mentioned only in a SCENE '
-        'DESCRIPTION remain false. Scene context does not authorize instance tracking.'))
-    segmentation_prompt: str = Field(description=(
-        'Short English visual noun phrase for SAM3, even when the user task is Chinese. '
-        'Reuse one class-wide primary phrase for instances sharing kind and color, covering all of them. '
-        'For example green block or blue box. Keep individual locations in description.'))
-    appearance_keywords: tuple[str, ...] = Field(default=(), max_length=8, description=(
-        'Visible appearance descriptors: color, shape, texture, pattern or material when observable. '
-        'Proposals, not verified identity; do not invent hidden properties or task roles.'))
-    segmentation_aliases: tuple[str, ...] = Field(default=(), max_length=2, description=(
-        'Up to two distinct short English visual noun phrases, e.g. pink rectangular block, pink package. '
-        'Backup phrases only. Try in order only after the preceding phrase returned no masks, '
-        'and stop at the first result. Omit location, task relations and unsupported properties.'))
-    asset_id: str | None = Field(default=None, description=(
-        'Optional model identity from the configured known_assets catalog. Null when unrecognized. '
-        'An asset identifies declared dimensions, never current position or orientation.'))
-    geometry_policy: Literal['auto', 'unknown_tsdf'] = Field(default='auto', description=(
-        'unknown_tsdf only when the USER explicitly declares this subject unknown/unmodeled/no CAD. '
-        'Otherwise auto uses runtime Decisions CAD retrieval. An unrecognized appearance alone is not such a declaration.'))
-    geometry_policy_instruction: str | None = Field(default=None, description=(
-        'Exact nonempty quote from the user instruction supporting unknown_tsdf; null for auto. '
-        'This is a representation requirement, not visual identity or a CAD match.'))
+def normalize_color(value):
+    if not isinstance(value, str):
+        return value
+    names = {'黑': 'black', '白': 'white', '蓝': 'blue', '粉': 'pink', '粉红': 'pink',
+             '红': 'red', '绿': 'green', '黄': 'yellow', '橙': 'orange', '灰': 'gray',
+             '棕': 'brown', '褐': 'brown', '紫': 'purple', 'grey': 'gray'}
+    value = value.strip().casefold()
+    return names.get(value.removesuffix('色'), value)
 
-    @field_validator('geometry_policy', mode='before')
-    @classmethod
-    def stored_geometry_policy(cls, value):
-        return 'unknown_tsdf' if value == 'unknown_obb' else value
+
+ColorName = Annotated[str, BeforeValidator(normalize_color)]
+
+
+class CameraBox(StrictModel):
+    camera_id: Literal['1', '2', '3']
+    bbox: list[float] = Field(min_length=4, max_length=4, description=(
+        'Visible subject bounds [left, top, right, bottom], normalized to [0,1] in this camera. '
+        'Origin is the image top-left; x increases rightward and y downward.'))
 
     @model_validator(mode='after')
     def valid_box(self):
-        if self.geometry_policy == 'unknown_tsdf' and (
-                not self.geometry_policy_instruction or not self.geometry_policy_instruction.strip()
-                or self.asset_id is not None):
-            raise ValueError('unknown_geometry_requires_instruction_and_no_asset')
-        if self.bbox is not None:
-            x1, y1, x2, y2 = self.bbox
-            if not 0 <= x1 < x2 <= 1 or not 0 <= y1 < y2 <= 1:
-                raise ValueError('invalid_rgb_box')
-        if self.kind not in {'table', 'marker'} and not self.segmentation_prompt.strip():
-            raise ValueError('missing_segmentation_prompt')
-        if any(not value.strip() or len(value) > 256
-               for value in (*self.appearance_keywords, *self.segmentation_aliases)):
-            raise ValueError('invalid_appearance_description')
+        x1, y1, x2, y2 = self.bbox
+        if not 0 <= x1 < x2 <= 1 or not 0 <= y1 < y2 <= 1:
+            raise ValueError('invalid_rgb_box')
         return self
+
+
+class DeclaredObject(StrictModel):
+    scene_quote: str = Field(min_length=1, description='Exact distinguishing noun phrase from the explicit scene paragraph including its attributes.')
+    kind: Literal['table', 'bin', 'marker', 'object']
+    color: ColorName = Field(description='English color name explicitly stated in scene_quote, else unknown. Keep the original wording in color_quote.')
+    color_quote: str | None = Field(default=None, description='Exact color word from scene_quote, or null if unspecified.')
+    declared_count: int | None = Field(default=None, ge=1, description='Explicit object count in scene_quote, else null.')
+
+    segmentation_prompt: str = Field(min_length=1, max_length=256, description='Short natural English object noun with declared visual qualifiers. CAD is metadata: use black mechanical part for a black CAD object. Omit articles and inferred colors.')
+    asset_id: str | None = Field(default=None, description='Exact CAD repository code explicitly named for this subject, else null.')
+    initially_on_table: bool = Field(default=False, description='True only when the scene explicitly says this item rests on a table initially.')
+
+    @model_validator(mode='after')
+    def explicit_color(self):
+        if self.color == 'unknown' and self.color_quote is None:
+            return self
+        if self.color == 'unknown' or not self.color_quote or self.color_quote not in self.scene_quote:
+            raise ValueError('declared_color_requires_scene_quote')
+        return self
+
+
+class SceneProposal(StrictModel):
+    """One camera's unverified physical surface; never a task selector or permanent ID."""
+    scene_quote: str = Field(min_length=1)
+    proposal_id: str = Field(min_length=1)
+    camera_id: Literal['1', '2', '3']
+    bbox: list[float] | None = Field(default=None, description='Normalized xyxy in this camera, or null when uncertain.')
+    description: str = Field(description='Observed appearance in this camera.')
+    visibility: Literal['visible', 'partial', 'uncertain'] = 'visible'
+
+    @model_validator(mode='after')
+    def valid_box(self):
+        if self.bbox is not None:
+            CameraBox(camera_id=self.camera_id, bbox=self.bbox)
+        return self
+
+
+class TaskSelector(StrictModel):
+    """User requirements independent of the scene's observed appearance hypotheses."""
+    scene_quote: str = Field(min_length=1)
+    ref: str = Field(min_length=1)
+    selection: SelectionRule
+    requested_attributes: str = Field(description=(
+        'A self-contained description of only appearance/category constraints requested by the user. '
+        'Use container/receptacle for a box used to hold objects; include the noun, not just its color. '
+        'Never add model-inferred shape. '
+        'A required supporting table may use table surface.'))
+    instruction_quote: str = Field(default='', description='Exact user phrase for this role, including relative, ordinal and other qualifiers. Empty only for an implicit support/reference.')
+    kind: Literal['table', 'bin', 'marker', 'object'] = Field(description=(
+        'User-requested broad semantic type: bin for a container/receptacle, table for a support surface, '
+        'marker for a marker. Use object when the user does not require one of these types. '
+        'Observed shape is not a required type; put only explicitly requested shape in requested_attributes.'))
+    color: ColorName = Field(default='unknown', description=(
+        'English name of the color required by the USER, or unknown for unrestricted color. Never copy an observed color '
+        'when the instruction does not require it.'))
+    appearance_constraints: tuple[str, ...] = Field(default=(), description=(
+        'Additional USER-requested appearance tests beyond kind and color, e.g. printed text, material '
+        'or explicitly requested shape. Empty for just a box/container, a table, or a pink object. '
+        'Position, containment, count and rank belong in selection, not here.'))
+    segmentation_prompt: str = Field(min_length=1, max_length=256)
+    segmentation_aliases: tuple[str, ...] = Field(default=(), max_length=2)
+    proposal_refs: tuple[str, ...] = Field(default=(), description='Optional inventory hints, not proven identities.')
+    geometry_policy: Literal['auto', 'unknown_tsdf'] = 'auto'
+    geometry_policy_instruction: str | None = None
+
+
+class DestinationRegion(StrictModel):
+    """Spatial references are not physical objects."""
+    ref: str
+    source: Literal['configured', 'visual']
+    support_ref: str
+    boxes: list[CameraBox] = Field(default_factory=list)
 
 
 def object_task_specs(graph):
@@ -114,10 +138,14 @@ def validate_batch_policy(graph, task):
 
 
 class InitialPlan(StrictModel):
-    entities: list[EntityProposal] = Field(min_length=1, max_length=1024)
+    declared_objects: list[DeclaredObject] = Field(min_length=1, max_length=128)
+    scene_inventory: list[SceneProposal] = Field(min_length=0, max_length=1024,
+        description='Visible instances of declared_objects only. Skip undeclared or unseen objects.')
+    task_selectors: list[TaskSelector] = Field(min_length=1, max_length=1024)
+    destination_regions: list[DestinationRegion] = Field(default_factory=list)
     support_table_refs: list[str] = Field(description=(
         'Refs of the visible TABLE entities needed for workspace collision geometry and requested '
-        'source/destination support measurements. Declare each as kind=table in entities, including '
+        'source/destination support measurements. Declare each as kind=table in task_selectors, including '
         'when destination_ref is a configured unmarked region. Supported manipulation requires at '
         'least one measured table. A configured region ID cannot substitute for a table entity.'))
     task: TaskSpec
@@ -133,22 +161,77 @@ class InitialPlan(StrictModel):
 
     @model_validator(mode='after')
     def coherent_entities(self):
-        refs = {entity.ref for entity in self.entities}
-        if len(refs) != len(self.entities):
+        from ..core.scene_scope import scene_sections
+
+        scene, _ = scene_sections(self.task.instruction)
+        declared = {d.scene_quote: d for d in self.declared_objects}
+        if len(declared) != len(self.declared_objects) or any(q not in scene for q in declared):
+            raise ValueError('scene_class_requires_unique_exact_scene_quote')
+        for d in self.declared_objects:
+            if d.asset_id and d.asset_id not in scene:
+                raise ValueError('declared_cad_id_requires_scene_quote')
+        by_id = {p.proposal_id: p for p in self.scene_inventory}
+        if any(p.scene_quote not in declared for p in self.scene_inventory):
+            raise ValueError('proposal_outside_declared_scene')
+        for row in self.task_selectors:
+            scope = declared.get(row.scene_quote)
+            kind = row.kind if row.kind in {'table', 'bin', 'marker'} else 'object'
+            if scope is None or scope.kind != kind:
+                raise ValueError('物体或选择器不在声明的场景中，请补充场景段。')
+            if scope.color != 'unknown' and row.color not in {'unknown', scope.color}:
+                raise ValueError('scene_color_conflicts_with_declaration')
+        for selector in self.task_selectors:
+            if any(p in by_id and by_id[p].scene_quote != selector.scene_quote for p in selector.proposal_refs):
+                raise ValueError('proposal_hint_outside_selector_scope')
+        refs = {entity.ref for entity in self.task_selectors}
+        if len(refs) != len(self.task_selectors):
             raise ValueError('duplicate_scene_reference')
-        tables = {entity.ref for entity in self.entities if entity.kind == 'table'}
+        dependencies = {entity.ref: relation_refs(entity.selection.predicate) for entity in self.task_selectors}
+        if any(not values <= refs or key in values for key, values in dependencies.items()):
+            raise ValueError('invalid_selection_reference')
+        resolved = set()
+        while dependencies:
+            ready = {key for key, values in dependencies.items() if values <= resolved}
+            if not ready:
+                raise ValueError('cyclic_selection_relations')
+            resolved.update(ready)
+            dependencies = {key: value for key, value in dependencies.items() if key not in ready}
+        tables = {entity.ref for entity in self.task_selectors if entity.kind == 'table'}
         if (self.task.supported and not self.support_table_refs
                 or len(set(self.support_table_refs)) != len(self.support_table_refs)
                 or not set(self.support_table_refs) <= tables):
             raise ValueError('declared_support_table_required')
-        for entity in self.entities:
-            if entity.parent_ref is not None and (entity.parent_ref not in refs or entity.parent_ref == entity.ref):
-                raise ValueError('invalid_parent_reference')
+        proposals = {p.proposal_id for p in self.scene_inventory}
+        if len(proposals) != len(self.scene_inventory):
+            raise ValueError('duplicate_scene_proposal')
+        source_tables = [s.ref for s in self.task_selectors if s.kind == 'table' and s.selection.role == 'source']
+        for selector in self.task_selectors:
+            if not selector.instruction_quote and source_tables == [selector.ref]:
+                def explicitly_on(predicate):
+                    return (predicate.op == 'on' and predicate.ref == selector.ref
+                            or predicate.op == 'and' and any(explicitly_on(t) for t in predicate.terms))
+                for target in self.task_selectors:
+                    if target.selection.role == 'target' and explicitly_on(target.selection.predicate):
+                        phrase = next((s for s in ('桌面上', '桌子上', 'on the tabletop', 'on the table')
+                                       if s in target.instruction_quote and s in self.task.instruction), None)
+                        if phrase:
+                            selector.instruction_quote = phrase
+                            break
+            if not set(selector.proposal_refs) <= proposals:
+                raise ValueError('unknown_scene_proposal_hint')
+            if selector.instruction_quote and selector.instruction_quote not in self.task.instruction:
+                raise ValueError('selector_quote_not_in_user_instruction')
+            if not selector.instruction_quote and selector.selection.role not in {'support', 'reference'}:
+                raise ValueError(f'requested_selector_requires_user_quote:{selector.ref}:{selector.selection.role}')
+            if selector.geometry_policy == 'unknown_tsdf' and (
+                    not selector.geometry_policy_instruction
+                    or selector.geometry_policy_instruction not in self.task.instruction):
+                raise ValueError('geometry_policy_quote_not_in_user_instruction')
         if not set(self.task.target_refs) <= refs:
             raise ValueError('unknown_task_target')
-        if any(entity.ref in self.task.target_refs and entity.membership == 'excluded'
-               for entity in self.entities):
-            raise ValueError('task_target_membership_conflict')
+        for region in self.destination_regions:
+            if region.support_ref not in refs:
+                raise ValueError('unknown_region_support')
         return self
 
 

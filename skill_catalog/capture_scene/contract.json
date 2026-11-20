@@ -1,0 +1,37 @@
+{
+  "invalidates_observation": false,
+  "retry_safe": true,
+  "captures_observation": true,
+  "outcomes": [
+    "success",
+    "failure",
+    "unknown"
+  ],
+  "id": "capture_scene",
+  "description": "Acquire or reuse one synchronized stable three-camera RGBD group through Base. This skill only captures and archives sensor evidence. It does not segment, assign IDs, build a map or move the robot. For missing initial grounding evidence, explicitly use capture_mode=fresh before ground_task.",
+  "capability": "Capture synchronized RGBD without identity registration or movement",
+  "inputs": [
+    "actual_robot_feedback",
+    "base_rgbd"
+  ],
+  "requires": {
+    "grasp_held": false
+  },
+  "provides": [
+    "capture_ready"
+  ],
+  "outputs": [
+    "capture_ready",
+    "observation_id"
+  ],
+  "planning_effects": {
+    "observed": false,
+    "scene_ready": false,
+    "source_support_current": false
+  },
+  "errors": [
+    "incomplete_camera_group",
+    "camera_not_stable",
+    "stale_generation_or_observation"
+  ]
+}

@@ -1,5 +1,5 @@
 const STATUS_NAMES = { active: '活动实例', observed: '已观测', selected: '已选择', consumed: '已消耗', removed: '已移除', completed: '已完成' };
-const PLACEMENT_NAMES = { direct_success: '直接确认成功', inferred_success: '推测成功', failure: '失败', unknown: '证据不足' };
+const PLACEMENT_NAMES = { execution_assumed: '按执行记录确认', direct_success: '直接确认成功', inferred_success: '推测成功', failure: '失败', unknown: '证据不足' };
 
 export function isTaskLedger(progress) {
   return Boolean(progress && Array.isArray(progress.selected_input_ids) && progress.transformations

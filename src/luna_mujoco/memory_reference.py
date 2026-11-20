@@ -11,7 +11,7 @@ def select_identity_history(history, entity):
     for event in reversed(history):
         state = event.get('state', {})
         observation_id = state.get('reference_observation_id')
-        confirmed = (event.get('kind') in {'instance_registered', 'processing_result'}
+        confirmed = (event.get('kind') in {'instance_registered', 'instance_rgbd_grounded', 'scene_instance_confirmed', 'processing_result'}
                      or event.get('kind') == 'observe_scene' and event.get('evidence', {}).get('status') == 'success')
         if (not confirmed or not observation_id or observation_id in seen
                 or not state.get('identity_request_hash') or not state.get('bbox')
@@ -38,6 +38,16 @@ def bound_identity_coverage_source(observation):
             and visual.get('evidence', {}).get('identity_derivation') == 'no_current_identity_candidates'
             and not visual.get('evidence', {}).get('questions')):
         return True
+    if coverage.get('source') == 'rgbd_instance_association':
+        evidence = visual.get('evidence', {})
+        return (evidence.get('source') == coverage['source']
+                and evidence.get('registration_basis') == 'scene_association_v3'
+                and observation['observation_id'] == evidence.get('observation_id')
+                and observation.get('generation') == evidence.get('generation')
+                and coverage.get('selection_rule') == 'committed_instance_groups'
+                and bool(coverage.get('association_digest'))
+                and coverage['association_digest'] == evidence.get('association_digest')
+                and set(coverage.get('accepted_entity_ids', ())) <= set(evidence.get('committed_group_ids', {}).values()))
     return coverage.get('source') == 'openai_decisions'
 
 

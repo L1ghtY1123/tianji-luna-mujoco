@@ -1,23 +1,15 @@
-"""Model proposals update instance memory independently of executable task graphs."""
+"""Commit accepted RGBD physical identities atomically, outside perception/model calls."""
 from copy import deepcopy
 
-import numpy as np
-
-from ..core.decisions import choice_value, predicate_status
+from ..core.grounding import identity_provenance
 from ..object_memory import restored_object_record
-from ..visual_api import VisualDecisionError
+from ..visual_identity import mask_box
 
 
 class ObjectRegistrar:
-    """Register model proposals and expose permanent memory independently of task control."""
-
-    source = 'openai_responses_proposal'
-
-    def __init__(self, memory, judgments):
+    def __init__(self, memory, judgments=None):
         self.memory = memory
-        self.judgments = judgments
         self.world_key = None
-        self.audit = None
 
     def entities(self):
         return {row['id']: restored_object_record(row).model_dump(mode='json', exclude_none=True)
@@ -26,247 +18,152 @@ class ObjectRegistrar:
     def reference(self):
         return self.memory.reference(self.entities())
 
-    @staticmethod
-    def workspace_samples(capture, camera, *, subject=None, bbox=None):
-        view = capture['views'][camera]
-        valid = np.asarray(view['valid_depth'], dtype=bool)
-        if 'workspace_mask' not in view:
-            raise VisualDecisionError('registration_requires_workspace_filtered_capture')
-        mask = np.asarray(view['workspace_mask'], dtype=bool) & valid
-        if subject is not None:
-            mask = mask & np.asarray(subject['silhouette_mask'], dtype=bool)
-        elif bbox is not None:
-            height, width = mask.shape
-            left, top, right, bottom = np.asarray(bbox) * [width, height, width, height]
-            mask = mask[max(0, int(top)):min(height, int(np.ceil(bottom))),
-                        max(0, int(left)):min(width, int(np.ceil(right)))]
-        return int(np.count_nonzero(mask))
-
-    def bind_proposals(self, proposals, capture, *, instruction, proposal_observations=None):
-        """Resolve proposed subjects against permanent memory before allocating IDs."""
-        proposals = list(proposals)
-        memory = self.entities()
-        observations = proposal_observations or {}
-        if observations and any(observations.get(key) != capture.get(key)
-                                for key in ('observation_id', 'generation')):
-            raise VisualDecisionError('registration_observation_binding_mismatch')
-        subjects = observations.get('subjects', [])
-        current_references = {}
-        refs = {proposal.ref for proposal in proposals}
-        if len(refs) != len(proposals):
-            raise VisualDecisionError('duplicate_scene_reference')
-        for proposal in proposals:
-            if proposal.existing_id is not None and proposal.existing_id not in memory:
-                raise VisualDecisionError('unknown_existing_instance:' + proposal.existing_id)
-            if proposal.parent_ref is not None and (
-                    proposal.parent_ref == proposal.ref or proposal.parent_ref not in refs | memory.keys()):
-                raise VisualDecisionError('invalid_parent_reference')
-            if (proposal.geometry_policy == 'unknown_tsdf'
-                    and proposal.geometry_policy_instruction not in instruction):
-                raise VisualDecisionError('geometry_policy_instruction_not_supplied')
-        self.judgments.audit = self.audit
-        groups, association_evidence, unassociated = self._associate_proposals(proposals, capture, subjects)
-        identifiers, entities, unresolved = {}, {}, []
-        new_identifiers = set()
-        confirmations = {}
-        resolved = []
-        # Complete cross-camera association and historical comparison before allocating any ID.
-        for proposal in proposals:
-            group = groups.get(proposal.ref, [])
-            if not group:
-                unresolved.append({'proposal': proposal.model_dump(mode='json'), 'status': 'unknown',
-                    'reason': 'initial_multiview_identity_unresolved',
-                    'evidence': association_evidence.get(proposal.ref, [])})
-                continue
-            from ..visual_identity import mask_box
-            subject = max(group, key=lambda row: row['geometry']['point_count'])
-            proposal = proposal.model_copy(update={'bbox': mask_box(subject['silhouette_mask']),
-                'reference_camera_id': subject['camera_id']})
-            evidence = association_evidence[proposal.ref]
-            judged = {'evidence': {**evidence[-1], 'compared_instance_ids': [],
-                'identity_comparison_requests': {row['candidate_id']: row['request_hash'] for row in evidence},
-                'cross_camera_candidate_ids': [row['candidate_id'] for row in group]}}
-            identifier = None
-            if memory:
-                identifier, judged = self._confirm_proposal(proposal, capture, memory,
-                    subject=subject, current_subjects=group,
-                    excluded_ids=[row[3] for row in resolved if row[3] is not None])
-            if identifier in {'unknown', 'reject'}:
-                unresolved.append({'proposal': proposal.model_dump(mode='json'),
-                    'status': 'rejected' if identifier == 'reject' else 'unknown',
-                    'reason': 'instance_registration_unconfirmed', 'evidence': judged})
-                continue
-            if identifier is None and not any(self.workspace_samples(capture, row['camera_id'], subject=row)
-                                              for row in group):
-                unresolved.append({'proposal': proposal.model_dump(mode='json'), 'status': 'rejected',
-                    'reason': 'new_instance_outside_workspace'})
-                continue
-            resolved.append((proposal, group, subject, identifier, judged))
-        existing_matches = [row[3] for row in resolved if row[3] is not None]
-        conflicts = {identifier for identifier in existing_matches if existing_matches.count(identifier) > 1}
+    def commit_grounding(self, capture, grounding, *, expected_revision):
+        """Caller fences robot command/generation/cancellation; SQLite fences memory revision."""
+        observation = grounding.observation
+        if (observation.observation_id != capture['observation_id']
+                or observation.generation != capture['generation']):
+            raise ValueError('grounding_capture_mismatch')
+        groups = {group.group_id: group for group in grounding.groups}
+        matches = {match.group_id: match for match in grounding.history_matches}
+        selected = {match.group_id for match in grounding.history_matches if match.outcome in {'existing', 'new'}}
+        metadata = grounding.evidence.get('scene', {}).get('physical_metadata', {})
+        owners, candidate_owners = {}, {}
+        for identifier in selected:
+            if identifier not in groups or identifier not in matches:
+                raise ValueError('selected_group_without_history_match')
+            group, match = groups[identifier], matches[identifier]
+            if group.observation_id != observation.observation_id:
+                raise ValueError('group_capture_mismatch')
+            for index in group.candidate_indices:
+                if index in candidate_owners:
+                    raise ValueError('candidate_assigned_to_multiple_groups')
+                candidate_owners[index] = identifier
+                candidate = observation.candidates[index]
+                if candidate['depth_evidence'].get('status') != 'measured':
+                    raise ValueError('registration_requires_measured_view')
+                if (candidate['observation_id'] != observation.observation_id
+                        or candidate['generation'] != observation.generation
+                        or candidate['silhouette_mask'].shape != capture['views'][candidate['camera_id']]['depth_m'].shape):
+                    raise ValueError('candidate_capture_mismatch')
+            if (match.outcome not in {'existing', 'new'} or group.geometry_evidence.get('status') != 'measured'
+                    or group.geometry_evidence.get('correspondence_status') != 'confirmed'):
+                raise ValueError('selected_group_without_measured_identity')
+            if match.entity_id is not None:
+                if match.entity_id in owners:
+                    raise ValueError('duplicate_permanent_group_identity')
+                owners[match.entity_id] = identifier
+            cameras = [observation.candidates[i]['camera_id'] for i in group.candidate_indices]
+            if len(cameras) != len(set(cameras)):
+                raise ValueError('group_camera_conflict')
+        group_ids, entities, events, masks = {}, {}, [], {camera: {} for camera in capture['views']}
         with self.memory.transaction():
+            prior = self.memory.grounding_ids(selected)
+            if (not selected or set(prior) != selected) and self.memory.revision != expected_revision:
+                raise ValueError('grounding_database_revision_changed')
+            stored = self.entities()
             self.memory.store_capture(capture)
-            for proposal, group, subject, identifier, judged in resolved:
-                if identifier in conflicts:
-                    unresolved.append({'proposal': proposal.model_dump(mode='json'), 'status': 'unknown',
-                        'reason': 'multiple_initial_groups_match_one_existing_id', 'evidence': judged})
+            for group_id in sorted(selected):
+                group, match = groups[group_id], matches[group_id]
+                if group_id in prior:
+                    identifier = prior[group_id]
+                    if match.entity_id is not None and match.entity_id != identifier:
+                        raise ValueError('grounding_replay_identity_conflict')
+                    group_ids[group_id], entities[identifier] = identifier, stored[identifier]
                     continue
-                confirmation = judged['evidence']
-                item = {'kind': proposal.kind, 'color': proposal.color,
-                    'description': proposal.description, 'bbox': proposal.bbox,
-                    'appearance_keywords': list(proposal.appearance_keywords),
-                    'reference_camera_id': proposal.reference_camera_id,
-                    'reference_observation_id': capture['observation_id'],
-                    'identity_source': self.source, 'world_key': self.world_key,
-                    'roles': ['table', 'collision'] if proposal.kind == 'table' else ['target_region']
-                        if proposal.kind == 'marker' else ['container', 'collision']
-                        if proposal.kind == 'bin' else ['collision']}
-                if subject is not None and subject['geometry'].get('centroid_world_m') is not None:
-                    item['last_position_measurement'] = {
-                        'observation_id': capture['observation_id'],
-                        'position_world_m': subject['geometry']['centroid_world_m'],
-                        'source': 'current_sam3_depth_visible_surface_centroid'}
-                if confirmation is not None:
-                    item.update(identity_source='openai_decisions',
-                                identity_request_hash=confirmation['request_hash'])
-                if proposal.kind not in {'table', 'marker'}:
-                    item['segmentation_query'] = {'kind': proposal.kind, 'color': proposal.color,
-                        'prompt': proposal.segmentation_prompt, 'aliases': list(proposal.segmentation_aliases)}
+                members = [observation.candidates[i] for i in group.candidate_indices]
+                primary = next((row for row in members if row['camera_id'] == '3'
+                                and row['depth_evidence']['status'] == 'measured'), None)
+                if primary is None:
+                    raise ValueError('registration_requires_measured_head_mask')
+                identifier = match.entity_id
+                if identifier is not None and identifier not in stored:
+                    raise ValueError('historical_instance_no_longer_active')
+                item = deepcopy(stored.get(identifier, {}))
+                item.pop('id', None)
                 if identifier is None:
-                    identifier = self.memory.allocate(self.world_key + ':' + capture['observation_id']
-                        + ':' + proposal.ref, item)
-                    new_identifiers.add(identifier)
-                if identifier in entities:
-                    raise VisualDecisionError('duplicate_instance_proposal:' + identifier)
-                item = {**deepcopy(memory.get(identifier, item)), 'id': identifier,
-                        'visual_membership': proposal.membership,
-                        'current_identity_proposal': {'observation_id': capture['observation_id'],
-                            'camera_id': proposal.reference_camera_id, 'bbox': list(proposal.bbox),
-                            'description': proposal.description, 'source': self.source}}
-                if subject is not None and subject['geometry'].get('centroid_world_m') is not None:
-                    item['last_position_measurement'] = {
-                        'observation_id': capture['observation_id'],
-                        'position_world_m': subject['geometry']['centroid_world_m'],
-                        'source': 'current_sam3_depth_visible_surface_centroid'}
-                if confirmation is not None:
-                    item.update(identity_source='openai_decisions',
-                                identity_request_hash=confirmation['request_hash'])
-                    confirmations[identifier] = {key: deepcopy(confirmation[key]) for key in
-                        ('request_hash', 'compared_instance_ids', 'identity_comparison_requests') if key in confirmation}
-                if proposal.asset_id is not None:
-                    item.update(asset_id=proposal.asset_id, asset_source='configured_catalog_responses_proposal')
-                if proposal.geometry_policy == 'unknown_tsdf':
-                    item['geometry_policy'] = {'mode': 'unknown_tsdf', 'instance_id': identifier,
-                        'source': 'user_instruction_interpreted_by_responses',
-                        'instruction_quote': proposal.geometry_policy_instruction}
-                identifiers[proposal.ref] = identifier
-                entities[identifier] = item
-                if subject is not None:
-                    from ..workspace import retain_instance_masks
-                    retain_instance_masks(capture, {row['camera_id']: {identifier: row['silhouette_mask']} for row in group})
-                if confirmation is not None and subject is not None:
-                    camera = subject['camera_id']
-                    view = capture['views'][camera]
-                    item.update(reference_observation_id=capture['observation_id'],
-                                reference_camera_id=camera, bbox=list(proposal.bbox))
-                    current_references[identifier] = {
-                        'observation_id': capture['observation_id'], 'generation': capture['generation'],
-                        'time': capture['time'], 'camera_id': camera, 'rgb': view['rgb'],
-                        'bbox': list(proposal.bbox), 'source': 'openai_decisions',
-                        'request_hash': confirmation['request_hash'],
-                        'views': {row['camera_id']: {**{key: capture['views'][row['camera_id']][key] for key in (
-                            'rgb', 'depth_m', 'valid_depth', 'intrinsics', 'T_world_camera')},
-                            'mask': row['silhouette_mask']} for row in group}}
-                memory[identifier] = deepcopy(item)
-            for proposal in proposals:
-                if proposal.ref not in identifiers:
-                    continue
-                identifier = identifiers[proposal.ref]
-                parent = identifiers.get(proposal.parent_ref)
-                if proposal.parent_ref in memory:
-                    parent = proposal.parent_ref
-                entities[identifier]['current_identity_proposal']['parent_id'] = parent
-                if identifier in new_identifiers:
-                    entities[identifier]['initial_parent_id'] = parent
-                if identifier in confirmations:
-                    self.memory.record(identifier, 'registration:' + capture['observation_id'] + ':'
-                        + confirmations[identifier]['request_hash'], 'instance_registered',
-                        restored_object_record(entities[identifier]).model_dump(mode='json', exclude={'id'}, exclude_none=True),
-                        {'observation_id': capture['observation_id'], 'source': 'openai_decisions',
-                         **confirmations[identifier]})
-            if capture.get('registered_instance_masks'):
-                self.memory.store_instance_masks(capture, {
-                    'observation_id': capture['observation_id'], 'generation': capture['generation'],
-                    'views': {camera: {'identity_masks': masks}
-                              for camera, masks in capture['registered_instance_masks'].items()}})
-            return {'identifiers': identifiers, 'entities': entities, 'unresolved_proposals': unresolved,
-                    'identity_references': current_references, 'unassociated_candidates': unassociated}
+                    attributes = metadata.get(group_id)
+                    if attributes is None:
+                        raise ValueError('physical_attributes_missing')
+                    kind, color = attributes['kind'], attributes['color']
+                    item.update(kind=kind, color=color, description=attributes.get('description', ''),
+                        roles=['table', 'collision'] if kind == 'table' else
+                              ['container', 'collision'] if kind == 'bin' else ['collision'],
+                        world_key=self.world_key, appearance_keywords=[],
+                        segmentation_query=attributes.get('segmentation_query',
+                            {'kind': kind, 'color': color, 'prompt': color + ' ' + kind, 'aliases': []}))
+                elif item.get('kind') == 'table':
+                    current = metadata.get(group_id, {})
+                    if current.get('attribute_evidence', {}).get('color_source') == 'measured_head_tabletop_rgb':
+                        item.update(color=current['color'], description=current['description'])
+                # Keep later wrist queries bound to this task's actual declared subject,
+                # including when an existing ID came from a different description.
+                scope_hint = next((hint for row in members for hint in row.get('retrieval_hypotheses', [])
+                    if row.get('scene_quote') and hint.get('scene_quote') == row['scene_quote']), None)
+                if scope_hint:
+                    item['segmentation_query'] = {'kind': scope_hint['kind'], 'color': scope_hint['color'],
+                        'scene_quote': scope_hint['scene_quote'], 'asset_id': scope_hint.get('asset_id'), 'prompt': scope_hint['prompt'], 'aliases': []}
+                provenance = identity_provenance(match)
+                item.update(reference_camera_id=primary['camera_id'], reference_observation_id=observation.observation_id,
+                    bbox=mask_box(primary['silhouette_mask']), identity_source=provenance['source'],
+                    registration_basis='scene_association_v3', visibility='visible', observation_id=observation.observation_id,
+                    identity_request_hash=provenance['request_hash'],
+                    current_identity_proposal={'source': 'confirmed_rgbd_group',
+                        'observation_id': observation.observation_id, 'generation': observation.generation,
+                        'boxes': {row['camera_id']: mask_box(row['silhouette_mask']) for row in members},
+                        'group_id': group_id})
+                item['last_position_measurement'] = {
+                    'observation_id': observation.observation_id,
+                    'position_world_m': group.geometry_evidence['visible_surface_center_world_m'],
+                    'source': 'current_rgbd_group_visible_surface'}
+                if identifier is None:
+                    item['initial_reference'] = {key: deepcopy(item[key]) for key in (
+                        'reference_camera_id', 'reference_observation_id', 'bbox', 'identity_request_hash',
+                        'current_identity_proposal', 'world_key')}
+                    identifier = self.memory.allocate(str(self.world_key) + ':' + group_id, item)
+                entities[identifier] = {'id': identifier, **item}
+                group_ids[group_id] = identifier
+                for row in members:
+                    masks[row['camera_id']][identifier] = row['silhouette_mask']
+                events.append((identifier, 'rgbd-grounding:' + group_id, 'instance_rgbd_grounded', item,
+                    {'registration_basis': 'scene_association_v3', 'group_id': group_id,
+                     'observation_id': observation.observation_id, 'generation': observation.generation,
+                     'candidate_ids': [row['candidate_id'] for row in members],
+                     'geometry': group.geometry_evidence, 'history_match': match.evidence,
+                     'physical_attributes': metadata.get(group_id)}))
+            self.memory.store_instance_masks(capture, {'observation_id': observation.observation_id,
+                'generation': observation.generation, 'views': {camera: {'identity_masks': value}
+                                                               for camera, value in masks.items()}})
+            visible_ids = set(group_ids.values())
+            for identifier, previous in stored.items():
+                if identifier not in visible_ids and previous.get('visibility') != 'unseen':
+                    events.append((identifier, 'scene-unseen:' + observation.observation_id,
+                        'scene_visibility', {'visibility': 'unseen'},
+                        {'observation_id': observation.observation_id, 'reason': 'not_confirmed_in_current_scene',
+                         'old_pose_is_current_measurement': False}))
+            self.memory.record_many(events)
+            entities = self.entities()
+        return {'entities': entities, 'group_ids': group_ids,
+                'unresolved_candidates': grounding.evidence.get('scene', {}).get('unresolved_groups', []),
+                'missing_tracks': grounding.evidence.get('scene', {}).get('missing_tracks', []),
+                'coverage': observation.coverage}
 
-    def _associate_proposals(self, proposals, capture, candidates):
-        """Locate requested task subjects, then associate only their camera masks."""
-        from ..subject_assignment import select_subject_groups
-        from ..task_subjects import select_task_subject
-
-        def select(identifier, entity, established, excluded, *, current_groups=None):
-            return select_task_subject(self.judgments, capture, candidates, identifier, entity,
-                established_subjects=established, excluded_indices=excluded, current_groups=current_groups)
-
-        selected, selection_records, camera_groups, correspondence = select_subject_groups(
-            self.judgments, capture, candidates,
-            {proposal.ref: proposal.model_dump(mode='json') for proposal in proposals}, select)
-        groups, evidence = {}, {}
-        for proposal in proposals:
-            index = selected.get(proposal.ref)
-            indices = next((group for group in camera_groups if index in group), [])
-            records = selection_records[proposal.ref]
-            evidence[proposal.ref] = records
-            if not indices:
-                continue
-            groups[proposal.ref] = [candidates[member] for member in indices]
-            evidence[proposal.ref] = [{**records[-1], 'candidate_id': row['candidate_id'],
-                'camera_id': row['camera_id'], 'description_ref': proposal.ref,
-                'task_subject_selection_requests': records,
-                'current_correspondence_requests': correspondence} for row in groups[proposal.ref]]
-        return groups, evidence, []
-
-    def _confirm_proposal(self, proposal, capture, memory, *, subject, current_subjects, excluded_ids=()):
-        """Use the same temporal comparison and archive recovery as scene observations."""
-        from ..temporal_identity import choose_identity
-        from ..visual_api import merge_decision_evidence
-
-        identifier, answer, records = choose_identity(self.judgments, capture, current_subjects,
-            memory, self.memory.reference(memory), 'registration_identity',
-            archive_loader=self.memory.identity_archive, excluded_ids=excluded_ids)
-        evidence = merge_decision_evidence(records, capture, 'instance_registration')
-        evidence.update(compared_instance_ids=list(memory),
-            identity_comparison_requests={key: records[-1]['request_hash'] for key in memory},
-            identity_comparison_records=records,
-            original_answer=answer)
-        return (None if identifier == 'new_instance' else identifier), {'evidence': evidence}
-
-    def register_observed(self, capture, subject, evidence):
-        """Allocate an ID only after Decisions confirms a new external physical instance."""
-        from ..visual_identity import mask_box
-        if not self.workspace_samples(capture, subject['camera_id'], subject=subject):
-            raise VisualDecisionError('no_valid_workspace_depth')
-        answer = evidence['answer']
-        confirmed = (predicate_status(answer.get('probability')) == 'yes' if answer.get('type') == 'predicate'
-                     else choice_value(answer) == 'new_instance' if answer.get('type') == 'choice' else False)
-        if not confirmed or 'compared_instance_ids' not in evidence:
-            raise VisualDecisionError('new_instance_confirmation_required')
-        camera = subject['camera_id']
-        box = mask_box(subject['silhouette_mask'])
-        color = subject.get('color', 'unknown')
-        item = {'kind': 'object', 'color': color,
-            'description': f'Observed {color} object in camera {camera}, box {box}.',
-            'reference_camera_id': camera, 'reference_observation_id': capture['observation_id'],
-            'bbox': box, 'world_key': self.world_key, 'roles': ['collision'],
-            'identity_source': 'openai_decisions', 'identity_request_hash': evidence['request_hash'],
-            'segmentation_query': {'kind': 'object', 'color': color, 'prompt': subject['prompt']},
-            'visibility': 'visible'}
-        key = self.world_key + ':' + capture['observation_id'] + ':' + answer['name']
-        self.memory.store_capture(capture)
-        identifier = self.memory.allocate(key, item)
-        self.memory.record(identifier, 'registered:' + capture['observation_id'], 'instance_registered',
-                           item, {**evidence, 'observation_id': capture['observation_id']})
-        return {'id': identifier, **item}
+    def apply_geometry_policies(self, selectors, identifiers, *, expected_revision):
+        policies = [s for s in selectors if s.geometry_policy == 'unknown_tsdf' and s.ref in identifiers]
+        if not policies:
+            return
+        with self.memory.transaction():
+            if self.memory.revision != expected_revision:
+                raise ValueError('grounding_database_revision_changed')
+            entities = self.entities()
+            events = []
+            for selector in policies:
+                ids = identifiers[selector.ref]
+                for identifier in ids if isinstance(ids, list) else [ids]:
+                    policy = {'mode': 'unknown_tsdf', 'instance_id': identifier,
+                              'source': 'user_instruction_interpreted_by_responses',
+                              'instruction_quote': selector.geometry_policy_instruction}
+                    if entities[identifier].get('geometry_policy') != policy:
+                        events.append((identifier, 'instruction-geometry:' + selector.ref, 'geometry_policy_bound',
+                            {'geometry_policy': policy}, {'selector_ref': selector.ref}))
+            self.memory.record_many(events)

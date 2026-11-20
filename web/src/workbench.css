@@ -1,0 +1,18 @@
+.workbench-page [hidden] { display: none !important; }
+.workbench-nav { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 24px; border-bottom: 1px solid var(--border); background: #101923; }
+.workbench-nav a { padding: 9px 16px; border-radius: 6px; color: #afc7d6; text-decoration: none; }
+.workbench-nav a[aria-current=page] { color: #96ebd8; background: #1c3937; box-shadow: inset 0 -2px #64e0c0; }
+.workbench-nav a:focus-visible { outline: 2px solid #64e0c0; }
+.workbench-panel { min-width: 0; }
+#panel-replay { flex: 1 1 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
+.workbench-panel .base-twin-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.diagnostic-panel [data-id=viewport] { position: absolute; inset: 0; }
+.diagnostic-panel .sphere-viewport { min-height: 540px; height: calc(100vh - 420px); }
+.diagnostic-panel .sphere-workspace > h2 { font-size: 20px; color: #c1d6e4; }
+.base-console-frame { width: 100%; height: calc(100vh - 190px); min-height: 600px; border: 0; background: white; }
+#panel-base > p { padding: 12px 24px; }
+.workbench-error { color: #ffaaa0; padding: 20px; }
+#media-preview { max-width: 96vw; max-height: 96vh; padding: 16px; background: #101923; border: 1px solid #456577; color: #dce9f4; }
+#media-preview img { display: block; max-width: 90vw; max-height: 82vh; object-fit: contain; margin-top: 12px; }
+#media-preview::backdrop { background: #000b; }
+@media(max-width: 600px) { .workbench-nav { padding: 8px; gap: 4px; } .workbench-nav a { padding: 8px; font-size: 16px; } }

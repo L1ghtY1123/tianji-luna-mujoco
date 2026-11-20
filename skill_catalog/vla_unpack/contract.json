@@ -1,7 +1,7 @@
 {
   "id": "vla_unpack",
   "processing_effect": true,
-  "description": "Invoke the configured processing capability for its bound input at the workbench input region and required starting posture. Its MuJoCo implementation replaces the package with a separate product; simulator truth stays inside the effect implementation. The action receipt does not prove the product exists visually. verify_unpack separately confirms the effect and creates the product ID. Preserve partial effects; do not blindly repeat processing. The configured effect accepts a pink wrapped input and expects a distinct black product; its shared effect definition is supplied to initial Responses and processing Decisions. Only confirmed disappearance and output appearance retire the input and register its product.",
+  "description": "Acquire the before-processing RGBD reference for the verified release, then invoke the configured processing capability at the workbench input region and required starting posture. Its MuJoCo implementation replaces the package with a separate product; simulator truth stays inside the effect implementation. The action receipt does not prove the product exists visually. verify_unpack separately confirms the effect and creates the product ID. Preserve partial effects; do not blindly repeat processing. The configured effect accepts a pink wrapped input and expects a distinct black product; its shared effect definition is supplied to initial Responses and processing Decisions. Only confirmed disappearance and output appearance retire the input and register its product.",
   "capability": "Invoke the configured processing capability for its bound input at the workbench input region and required starting posture",
   "inputs": [
     "verified_table_release",
@@ -35,5 +35,5 @@
     "at_initial_pose": false,
     "observation_pose_ready": false
   },
-  "captures_observation": false
+  "captures_observation": true
 }

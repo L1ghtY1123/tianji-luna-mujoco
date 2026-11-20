@@ -34,6 +34,7 @@ export function runEvidence(run) {
   const geometry = prepared?.attachment_geometry ?? prepared?.collision_evidence?.attachment_geometry;
   return {
     facts: run.facts ?? {},
+    grounding: run.grounding ?? null,
     observation_budget: run.observation_budget ?? null,
     decision_budget: run.decision_budget ?? null,
     scene: run.scene_evidence ?? null,

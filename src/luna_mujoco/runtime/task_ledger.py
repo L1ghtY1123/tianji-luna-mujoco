@@ -17,7 +17,7 @@ class PolicyTaskProgress(TaskProgress):
 
     def configure_task(self, task_spec, selected_ids, *, object_tasks=None):
         self.task_spec = task_spec
-        self.selection_order = 'explicit' if task_spec.selection_order == 'explicit' else 'visual'
+        self.selection_order = task_spec.selection_order
         self.object_tasks = dict(object_tasks or {})
         self.input_ids = list(selected_ids)
 
@@ -115,7 +115,7 @@ class PolicyTaskProgress(TaskProgress):
         self.ledger_revision += 1
 
     def confirm_container_transfer(self, identifier, evidence):
-        """Accept visually confirmed entry bound to the numerical release receipt."""
+        """Record the target container from the bound release receipt."""
         from ..demo_transfer_verification import valid_container_entry
 
         record = self.records[identifier]

@@ -177,7 +177,7 @@ def graspgen_tcp_binding(model, arm):
         'model_gripper': model['gripper_model'], 'model_pose_frame': model['pose_frame'],
         'T_model_base_model_tcp': model_tcp.tolist(),
         'T_model_tcp_robot_front': alignment.tolist(), 'T_robot_mount_robot_front': mount_front.tolist(),
-        'additional_insertion_m': 0.,
+        'execution_gripper': 'tianji_rag100_050', 'closing_axis': 'x', 'approach_axis': 'z',
         'semantics': 'Service applies model base +Z 195mm once. Coincide model contact TCP with '
             'the selected arm front TCP; its URDF mount is 185mm behind it. '
             'Different jaw geometry still requires actual-robot contact and collision checks.'}

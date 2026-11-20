@@ -1,0 +1,24 @@
+newmtl PivotPinSteel
+Kd 0.5450 0.5500 0.5550
+Ka 0 0 0
+Ks 0.1 0.1 0.1
+Ns 40
+d 1
+illum 2
+
+newmtl FastenerSteel
+Kd 0.5600 0.5650 0.5700
+Ka 0 0 0
+Ks 0.1 0.1 0.1
+Ns 40
+d 1
+illum 2
+
+newmtl GripperGlossBlack
+Kd 0.0300 0.0300 0.0310
+Ka 0 0 0
+Ks 0.1 0.1 0.1
+Ns 40
+d 1
+illum 2
+

@@ -27,11 +27,6 @@ def grasp_search_evidence(evidence):
                         'driver_limit_rad', 'contact_probe_rad'):
                 if key in detail:
                     record[key] = deepcopy(detail[key])
-            prediction = detail.get('predicted_gripper_compatibility')
-            if isinstance(prediction, dict):
-                record['gripper_prediction'] = {key: deepcopy(prediction[key]) for key in (
-                    'accepted', 'reason', 'padding_m', 'minimum_padded_open_pad_gap_m',
-                    'minimum_padded_noncontact_gap_m') if key in prediction}
             failures.append(record)
         row['failures'] = failures
         rounds.append(row)
@@ -89,7 +84,9 @@ def outcome_state(result):
     # Result-level IDs, status and reason belong to the skill's public outcome.
     # Free-form exception messages can contain serialized candidate trajectories.
     summary = scalar_fields(result)
-    summary.pop('message', None)
+    message = summary.pop('message', None)
+    if isinstance(message, str) and result.get('success') is False:
+        summary['message'] = message.splitlines()[0][:480] if message else ''
     if isinstance(result.get('arguments'), dict):
         summary['arguments'] = deepcopy(result['arguments'])
     if isinstance(result.get('partial_execution'), dict):
@@ -101,6 +98,11 @@ def outcome_state(result):
               'target_id', 'destination_id', 'observation_id', 'request_hash', 'retryable',
               'binding_id', 'release_feedback_id', 'region_id', 'layout_revision')
     details = {key: deepcopy(evidence[key]) for key in fields if key in evidence}
+    if isinstance(evidence.get('camera_errors'), list):
+        details['camera_errors'] = [scalar_fields(row) for row in evidence['camera_errors'] if isinstance(row, dict)]
+        details['synchronization'] = scalar_fields(evidence.get('synchronization', {}))
+        if 'attempts' in evidence:
+            details['attempts'] = evidence['attempts']
     if isinstance(evidence.get('settling'), dict):
         details['settling'] = scalar_fields(evidence['settling'])
         for key in ('closed_command', 'elapsed_s', 'position_rad', 'command_position_rad'):

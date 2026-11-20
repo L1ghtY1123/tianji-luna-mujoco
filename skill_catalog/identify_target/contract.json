@@ -4,7 +4,8 @@
   "requires": {
     "observed": true,
     "recovery_needed": false,
-    "grasp_held": false
+    "grasp_held": false,
+    "task_grounded": true
   },
   "provides": [
     "target_selected",

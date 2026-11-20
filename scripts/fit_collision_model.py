@@ -198,7 +198,7 @@ def main(argv=None):
     if output.is_relative_to(Path(curobo.__file__).resolve().parent):
         raise ValueError("Output must not modify the installed cuRobo SDK")
     setup_logger("warn")
-    torch.set_num_threads(4)
+    torch.set_num_threads(1)
     output.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2))
     for name in names:

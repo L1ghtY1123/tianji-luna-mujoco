@@ -49,7 +49,7 @@ def completion_obligations(snapshot, memory):
                 evidence = record[name]
                 summary[name] = {key: deepcopy(evidence[key]) for key in (
                     'status', 'source', 'identity_source', 'request_hash', 'observation_id', 'generation',
-                    'destination_id', 'target_id', 'region_id', 'binding_id',
+                    'destination_id', 'target_id', 'region_id', 'binding_id', 'release_feedback_id', 'execution_evidence_id',
                     'reason', 'confidence', 'answers', 'placement_outcome') if key in evidence}
         result['objects'].append(summary)
     return result

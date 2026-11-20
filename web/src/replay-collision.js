@@ -38,13 +38,15 @@ export async function loadCollisionStage(event, load) {
   return {...snapshot, mesh_layers: Object.fromEntries(layers)};
 }
 
-export function createCollisionReplay(document, {load}) {
-  const select = document.getElementById('collision-stage');
-  const status = document.getElementById('collision-status');
-  const container = document.getElementById('collision-preview');
-  const entities = document.getElementById('collision-entities');
+export function createCollisionReplay(root, {load}) {
+  const document = root.ownerDocument;
+  const byId = id => root.querySelector(`[data-id="${id}"]`);
+  const select = byId('collision-stage');
+  const status = byId('collision-status');
+  const container = byId('collision-preview');
+  const entities = byId('collision-entities');
   let stages = [], viewer = null, version = 0, colorFor = createCollisionColors(), labels = new Map();
-  const details = document.querySelector('#collision-details pre');
+  const details = root.querySelector('[data-id="collision-details"] pre');
   async function show() {
     const current = ++version;
     viewer?.dispose(); viewer = null;
@@ -88,7 +90,11 @@ export function createCollisionReplay(document, {load}) {
         const color = voxel ? (layer.enabled ? (layer.role === 'background' ? '#4bdcca' : '#ffb05c') : '#8a92a3') : colorFor(layer);
         const swatch = document.createElement('i'); swatch.className = 'collision-swatch'; swatch.style.color = color;
         if (layer.enabled) swatch.style.background = color; else swatch.style.borderStyle = 'dashed';
-        row.prepend(swatch);
+        const toggle = document.createElement('input');
+        toggle.type = 'checkbox'; toggle.checked = true;
+        toggle.setAttribute('aria-label', '显示' + label);
+        toggle.addEventListener('change', () => viewer?.setLayerVisible(layer.name, toggle.checked));
+        row.prepend(toggle, swatch);
         entities.append(row);
       }
     } catch (error) { if (current === version) status.textContent = error.message; }

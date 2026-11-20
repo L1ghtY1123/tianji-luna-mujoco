@@ -3,6 +3,8 @@ from copy import deepcopy
 
 import numpy as np
 
+from ..memory_reference import bound_identity_coverage_source
+
 
 def geometric_support(measured):
     """Resolve clear container volume membership or a complete CAD table contact."""
@@ -134,9 +136,12 @@ def measured_supports(observation, capture, candidates):
 
 def support_context(capture, observation, subject, candidates):
     proof = observation.get('visual_identity', {}).get('evidence', {})
+    coverage = observation.get('visual_identity', {}).get('identity_coverage', {})
+    committed = (proof.get('source') == 'rgbd_instance_association' and bound_identity_coverage_source(observation)
+                 and subject['id'] in coverage.get('accepted_entity_ids', ()))
     if (observation.get('observation_id') != capture['observation_id']
             or observation.get('generation') != capture.get('generation')
-            or proof.get('source') != 'openai_decisions' or not proof.get('request_hash')):
+            or not committed and (proof.get('source') != 'openai_decisions' or not proof.get('request_hash'))):
         raise ValueError('observed_support_current_geometry_required')
     obj = next((obj for obj in observation.get('objects', []) if obj['id'] == subject['id']), {})
     points = np.asarray(obj.get('points_world_m', []), dtype=float)
@@ -144,7 +149,8 @@ def support_context(capture, observation, subject, candidates):
         raise ValueError('observed_support_current_geometry_required')
     tables = observation.get('demo_tables', {})
     measured = {'observation_id': capture['observation_id'], 'generation': capture.get('generation'),
-        'source': 'current_identity_bound_sam3_registered_rgbd', 'identity_request_hash': proof['request_hash'],
+        'source': 'current_identity_bound_sam3_registered_rgbd', 'identity_request_hash': proof.get('request_hash'),
+        'identity_association_digest': proof.get('association_digest'),
         'frame': 'world', 'unit': 'm', 'subject_id': subject['id'], 'point_count': len(points),
         'visible_bounds_world_m': [points.min(axis=0).tolist(), points.max(axis=0).tolist()],
         'measured_tables': {identifier: {'model': table['model'], 'surface_height_m': table['surface_height_m'],

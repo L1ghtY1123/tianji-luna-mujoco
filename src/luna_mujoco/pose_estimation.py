@@ -4,7 +4,6 @@ CAD poses are hypotheses only. This module never changes collision geometry,
 placement regions, objects identity, or robot execution.
 """
 import numpy as np
-
 from tianji_foundationpose.contracts import PoseError, validate_pose
 
 # FoundationPose accepts metric depth only in [0, 65.535], with zero invalid.
@@ -12,7 +11,7 @@ POSE_TRANSPORT_MAX_DEPTH_M = 65.535
 
 
 def snapshot_view(view):
-    required = ("frame_id", "camera_id", "calibration_id", "simulation_generation", "capture_time")
+    required = ("frame_id", "camera_id", "calibration_id", "robot_generation", "capture_time")
     if any(key not in view for key in required):
         raise PoseError("invalid_capture")
     rgb = np.asarray(view["rgb"]).copy()
@@ -70,7 +69,7 @@ class CadPoseEstimator:
         return {**result,"T_world_object":world_pose.tolist(),
                 "T_world_source":(world_pose @ np.linalg.inv(source_from_canonical)).tolist(),
                 "calibration_id":view["calibration_id"],
-                "simulation_generation":view["simulation_generation"],
+                "robot_generation":view["robot_generation"],
                 "depth_transport":view["depth_transport"],
                 "capture_time":view["capture_time"],"usage":"pose_hypothesis_only"}
 
@@ -81,8 +80,10 @@ class CadPoseEstimator:
         segmentation_view = snapshot_view(view)
         segmenter = self.segmentation_client
         if segmenter is None:
-            from .perception import Sam3Client
-            segmenter = Sam3Client()
+            import os
+
+            from sam3_service.image_client import Sam3ImageClient
+            segmenter = Sam3ImageClient(os.getenv('LUNA_SAM3_URL', 'http://127.0.0.1:8322'))
         detections = segmenter.segment(segmentation_view["rgb"],text,
                                        round(segmentation_view["capture_time"]*1_000_000))
         return [self.estimate_instance(view,detection["mask"],detection["score"],model_id=model_id,

@@ -33,33 +33,6 @@ def validate_grasp_budget(grasps, sampling_round):
 
 def empty_pool_filter(grasps):
     """Only a complete numeric rejection may consume another frozen pool."""
-    direction = grasps.get('downward_filter', {})
-    if direction.get('accepted_count') == 0:
-        rows = direction.get('candidate_evidence', [])
-        generated = grasps.get('candidate_replay', {}).get('all_generated_candidates')
-        if (not isinstance(generated, list) or not generated
-                or type(grasps.get('raw_candidate_count')) is not int
-                or grasps['raw_candidate_count'] != len(generated)
-                or any(not isinstance(row, dict) or type(row.get('index')) is not int for row in generated)
-                or len({row['index'] for row in generated}) != len(generated)):
-            raise AlgorithmError('empty grasp pool lacks original candidate identity evidence')
-        if (direction.get('axis') != 'actual_tool_positive_z_in_world'
-                or not isinstance(rows, list) or not rows
-                or direction.get('input_count') != len(rows)
-                or direction.get('rejected_count') != len(rows)
-                or any(type(row.get('candidate_index')) is not int
-                       or type(row.get('tilt_passed')) is not bool
-                       or type(row.get('away_from_robot_passed')) is not bool
-                       or row.get('accepted') is not False
-                       or not isinstance(row.get('sector'), dict)
-                       or (row['tilt_passed'] and row['away_from_robot_passed'] and row['sector'].get('accepted') is not False)
-                       or not all(type(row.get(key)) in (int, float) and np.isfinite(row[key])
-                                  for key in ('downward_dot', 'horizontal_away_from_robot_dot'))
-                       for row in rows)
-                or len(rows) != len(generated)
-                or {row['candidate_index'] for row in rows} != {row['index'] for row in generated}):
-            raise AlgorithmError('empty grasp pool lacks complete direction filter evidence')
-        return 'no_allowed_direction', 'grasp_no_allowed_direction', direction
     filtered = grasps.get('placement_reach_filter', {})
     rows = filtered.get('candidate_evidence', [])
     if (filtered.get('applied') is not True
@@ -131,8 +104,8 @@ def validate_planning_exhaustion(error, evaluation):
 def round_evidence(grasps, evaluation, sampling_round):
     result = {"sampling_round": sampling_round, "requested_candidate_count": grasps["requested_candidate_count"],
             "raw_candidate_count": grasps.get("raw_candidate_count"),
-            "generated_candidate_count": grasps.get("downward_filter", {}).get("input_count"),
-            "direction_accepted_count": grasps.get("downward_filter", {}).get("accepted_count"),
+            "generated_candidate_count": grasps.get("candidate_preparation", {}).get("input_count"),
+            "prepared_candidate_count": grasps.get("candidate_preparation", {}).get("prepared_count"),
             "tested_count": evaluation.get("tested_count", len(grasps["candidates"])),
             "valid_count": len(evaluation["valid_candidates"]),
             "batch_success_counts": [batch["success_count"] for batch in evaluation.get("batches", [])]}

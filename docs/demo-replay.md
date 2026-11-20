@@ -1,6 +1,6 @@
 # Tianji Luna MuJoCo 实验证据回放
 
-工作台「查看本次实验」或 `/replay.html?run=<id>&view=graph` 打开归档。查看图、RGB、掩码或碰撞模型只读取已有文件，不采集新帧、不调用模型、不执行机器人动作。当前执行契约见 [原生图说明](native-graph-implementation.md) 与 [技能指南](luna-skills-guide.md)。
+工作台「查看本次实验」或 `/#replay?run=<id>&view=graph` 在当前页打开归档。全宽任务图和图片预览也留在工作台；切到其他面板暂停视频并停止回放轮询，保留当前选择。查看图、RGB、掩码或碰撞模型只读取已有文件，不采集新帧、不调用模型、不执行机器人动作。当前执行契约见 [原生图说明](native-graph-implementation.md) 与 [技能指南](luna-skills-guide.md)。
 
 ## 任务图
 

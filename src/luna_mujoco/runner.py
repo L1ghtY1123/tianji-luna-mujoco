@@ -21,6 +21,7 @@ from .perception import PerceptionError
 from .placement import carrying_binding, grasp_support_reference, observed_object
 from .planning_settings import PlanningSettings
 from .skills import Registry
+from .workspace import WorkspaceAtlas
 
 LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +50,9 @@ class TrajectoryStartError(ValueError):
 
 def public_summary(value):
     """Keep trace evidence usable without streaming thousands of cloud/trajectory entries."""
+    from dataclasses import fields, is_dataclass
+    if is_dataclass(value) and not isinstance(value, type):
+        value = {field.name: getattr(value, field.name) for field in fields(value)}
     if isinstance(value, BaseModel):
         value = value.model_dump(mode='json')
     if isinstance(value, np.ndarray):
@@ -58,7 +62,8 @@ def public_summary(value):
                 for k, v in value.items() if not str(k).startswith("_")
                 and k not in {"rgb", "depth_m", "valid_depth", "instance_masks", "masks", "mask",
                               "valid_depth_mask", "pixels_rc", "completed_geometry_points_world_m",
-                              "points_world_m", "points_object_m", "points_tool_m", "point_sources", "views"}}
+                              "points_world_m", "points_object_m", "points_tool_m", "point_sources", "views",
+                              "silhouette_mask", "raw_identity_mask", "points", "pixels", "view"}}
     if isinstance(value, (list, tuple)):
         if len(value) > 8:
             return {"count": len(value), "first": [public_summary(v) for v in value[:3]]}
@@ -102,6 +107,7 @@ class Runner:
         self.spatial_memory = SpatialMemory()
         self.geometry_measurements = {}
         self.planning_regions = {}
+        self.workspace_atlas = WorkspaceAtlas()
 
     @property
     def visual_identity(self):
@@ -211,6 +217,9 @@ class Runner:
             self.state["collision_model"] = {"gripper": "actual_feedback",
                                               "attached": bool(self.holding_state and self.holding_state.get("attached"))}
 
+    def open_experiment_memory(self, run_id):
+        """Policy runners bind their persistent instance store before publishing a new run."""
+
     async def start(self, instruction, *, experiment=None):
         if self.active:
             raise ValueError("run_already_active")
@@ -218,12 +227,17 @@ class Runner:
             raise ValueError("algorithm_request_pending")
         if self.algorithm_cleanup_error:
             raise ValueError("algorithm_cleanup_failed_reset_to_retry")
-        if not 1 <= len(instruction.strip()) <= 200:
-            raise ValueError("instruction_length_must_be_1_to_200")
+        if not 1 <= len(instruction.strip()) <= 4000:
+            raise ValueError("instruction_length_must_be_1_to_4000")
+        from .core.scene_scope import scene_sections
+
+        scene_sections(instruction)
         snapshot = self.simulation.robot_snapshot()
         if not snapshot["confirmed"]:
             raise ValueError("confirm_scene_first")
-        self.run_id = uuid.uuid4().hex
+        run_id = uuid.uuid4().hex
+        self.open_experiment_memory(run_id)
+        self.run_id = run_id
         self.run_started_at = time.monotonic()
         self.invocation_count = 0
         self.algorithm_call_count = 0
@@ -280,7 +294,7 @@ class Runner:
     def clear_algorithm_state(self):
         """Queue Reset cleanup behind any old GPU request; new runs wait for both."""
         pending = (self.planning_worker, self.algorithm_cleanup_worker)
-        generation = self.simulation.robot_snapshot()["generation"]
+        generation = self.simulation.snapshot()["generation"]
         self.algorithm_cleanup_revision += 1
         revision = self.algorithm_cleanup_revision
         self.algorithm_cleanup_error = None
@@ -290,7 +304,7 @@ class Runner:
                 if worker is not None:
                     await asyncio.gather(asyncio.shield(worker), return_exceptions=True)
             # A later scene/reset schedules its own cleanup. Never clear its newer result.
-            if (self.simulation.robot_snapshot()["generation"] != generation
+            if (self.simulation.snapshot()["generation"] != generation
                     or self.algorithm_cleanup_revision != revision):
                 return
             try:
@@ -307,7 +321,7 @@ class Runner:
         self.algorithm_cleanup_worker = asyncio.create_task(cleanup())
 
     def check_generation(self):
-        if self.simulation.robot_snapshot()["generation"] != self.state["generation"]:
+        if self.simulation.robot_snapshot(include_tcp=False)["generation"] != self.state["generation"]:
             raise ValueError("simulation_generation_changed")
 
     def record_failure(self, context, stage, code, evidence):
@@ -327,12 +341,15 @@ class Runner:
                     'post_place_verification_input',
                     'head_observation', 'identity_reference', 'frozen_table', 'normal_capture_count', 'recovery_capture_count',
                     'observation_count', 'captured_observation_ids', 'analyzed_capture_ids', 'capture_epochs',
-                    'scene_observation', 'placement_semantics',
+                    'scene_observation', 'registered_capture', 'placement_semantics', 'grasp_sampling_budget',
                     'observation_pose_capture_id', 'observation_pose_reference',
                     'pending_transfer',
                     'visual_inputs_consumed', 'scene_inputs_consumed',
                     'requires_observation_pose', 'association_evidence',
-                    'initial_joint_reference', 'objects_updates', '_observation_analysis') if key in context}
+                    'initial_joint_reference', 'objects_updates', '_observation_analysis', 'initial_plan',
+                    'grounded_refs', 'grounded_observation', '_grounding_attempt') if key in context}
+        grounded = self.state['facts'].get('task_grounded', False)
+        capture_ready = self.state['facts'].get('capture_ready', False)
         context.clear()
         context.update(retained)
         self.state.update(target_id=None, destination_id=None, arm=None, verification=None,
@@ -342,7 +359,8 @@ class Runner:
         collection = (self.task_progress.scope == 'collection'
                       or self.state['task'] != 'place' and self.task_progress.selection_order == 'visual')
         self.state['facts'].update(needs_place=self.state['task'] != 'grasp',
-            destination_ready=self.state['task'] == 'grasp', collection_task=collection)
+            destination_ready=self.state['task'] == 'grasp', collection_task=collection,
+            task_grounded=grounded, capture_ready=capture_ready)
         self.state['facts']['center_reachability_enabled'] = True
         self.state['facts']['observed'] = bool(context.get('observation'))
         map_current = bool(self.spatial_memory.scene) and not self.spatial_memory.refresh_required
@@ -511,6 +529,7 @@ class Runner:
             self.record_annotation(observation, labels)
 
     def record_annotation(self, capture, labels):
+        self.state['object_labels'] = copy.deepcopy(labels)
         if self.experiment is None:
             return
         # Each revision has its own immutable image and status snapshot.
@@ -582,6 +601,15 @@ class Runner:
 
         hint = {"kind": "any", "color": "any",
                 'cad_motion_context': perception_motion_context(self.object_memory, self.spatial_memory)}
+        from .observation_motion import collision_mapping_scope
+
+        history = self.spatial_memory.geometry_history(capture['generation'])
+        if history:
+            hint['published_geometry'] = history
+            strategy, _ = collision_mapping_scope(capture, capture, context['planning_settings'],
+                                                  initialized=self.spatial_memory.initialized)
+            hint['local_geometry_only'] = strategy['requested_scope'] == 'local'
+        hint['grounded_observation'] = context.get('grounded_observation')
         has_instance_memory = bool(self.object_memory.observation_id)
         if has_instance_memory:
             hint['scene_queries'] = self.object_memory.scene_queries()
@@ -610,6 +638,10 @@ class Runner:
         if observation.get("observation_id") != capture["observation_id"]:
             raise ValueError("invalid_rgbd_observation_identity")
         observation["checkpoint"] = checkpoint
+        observation['full_collision_survey'] = bool(capture.get('full_collision_survey'))
+        observation['mapping_world'] = {key: capture.get(key) for key in
+                                        ('session_id', 'bridge_instance_id', 'geometry_revision')}
+        observation['mapping_world']['run_id'] = self.run_id
         observation['camera_ids'] = list(camera_ids or ('1', '2', '3'))
         if has_instance_memory:
             identifiers = [obj['id'] for obj in observation['objects']]
@@ -719,7 +751,7 @@ class Runner:
         observation = planning_observation(
             context.get('scene_observation') or context['observation'],
             self.object_memory, self.planning_regions)
-        feedback = self.simulation.robot_snapshot()
+        feedback = self.simulation.robot_snapshot(expected_generation=self.state['generation'])
         self.check_generation()
         observation["arms"] = feedback["arms"]
         observation["feedback_time"] = feedback["time"]
@@ -745,33 +777,82 @@ class Runner:
         if context.get('requires_observation_pose') and exclusion_state != 'observation':
             raise ValueError('changed_environment_requires_observation_pose')
         observation = context["observation"]
-        observation_pose_verified = False
-        if exclusion_state == 'selected' and context.get('observation_pose_capture_id'):
-            reference = context.get('observation_pose_reference', context.get('fine_capture', {}))
-            same_pose = (reference.get('observation_id') == context['observation_pose_capture_id']
-                and observation.get('time', -1) >= reference.get('time', float('inf'))
-                and all(arm in reference.get('arms', {}) and arm in observation.get('arms', {})
-                    and np.allclose(observation['arms'][arm]['joints_rad'], reference['arms'][arm]['joints_rad'],
-                                    atol=np.deg2rad(1), rtol=0) for arm in ('A', 'B')))
-            if not same_pose:
-                raise ValueError('observation_pose_analysis_required')
-            feedback = self.simulation.robot_snapshot()
-            if not all(np.allclose(feedback['arms'][arm]['joints_rad'], reference['arms'][arm]['joints_rad'],
-                                   atol=np.deg2rad(1), rtol=0) for arm in ('A', 'B')):
-                raise ValueError('observation_pose_analysis_required')
-            observation_pose_verified = True
-        mapping_observation = observation
-        model_mapping = bool(self.spatial_memory.lifecycle().get('requested_scope'))
+        from .memory_contracts import CollisionUpdate
+        from .observation_motion import collision_mapping_scope
+
+        self.check_generation()
+        if observation.get('generation') != self.state['generation']:
+            raise ValueError('collision_mapping_capture_generation_changed')
+        scene = self.spatial_memory.scene
+        lifecycle = self.spatial_memory.lifecycle()
+        required = set(lifecycle.get('required_entity_ids', ()))
+        covered = set((scene or {}).get('object_layers', {}).get('entities', {}))
+        if (scene and not self.spatial_memory.refresh_required and not observation.get('full_collision_survey')
+                and scene.get('generation') == observation['generation']
+                and scene.get('observation_id') == observation['observation_id']
+                and scene.get('database_revision') == self.spatial_memory.database_revision
+                and required <= covered and scene.get('exclusion_state') == exclusion_state
+                and (exclusion_state == 'observation' or scene.get('target_id') == self.state['target_id'])):
+            self.state['facts'].update(scene_available=True, collision_map_initialized=self.spatial_memory.initialized,
+                                       scene_ready=exclusion_state == 'selected', observation_map_ready=exclusion_state == 'observation')
+            return scene
+        strategy, pose = collision_mapping_scope(observation, observation, context['planning_settings'],
+                                                 initialized=self.spatial_memory.initialized)
+        if strategy['requested_scope'] == 'global':
+            feedback = await asyncio.to_thread(self.simulation.joint_feedback, self.state['generation'])
+            strategy, pose = collision_mapping_scope(observation, feedback, context['planning_settings'])
+        self.spatial_memory.request_update(CollisionUpdate.model_validate(strategy))
+        self.state['mapping_strategy'] = {**strategy, 'pose_evidence': pose}
         replacing_scene = bool(self.spatial_memory.scene)
-        head_only = exclusion_state == 'observation' and not replacing_scene and not model_mapping
-        if head_only:
-            mapping_observation = mapping_observation | {'views': {'3': observation['views']['3']}}
-        mapping_observation = mapping_observation | {'observation_pose_verified': observation_pose_verified,
-            'mapping_lifecycle': self.spatial_memory.lifecycle()}
+        mapping_observation = {**observation, 'observation_pose_verified': strategy['requested_scope'] == 'global',
+                               'mapping_lifecycle': self.spatial_memory.lifecycle()}
+        if observation.get('mapping_world'):
+            mapping_observation['mapping_lifecycle']['mapping_world'] = observation['mapping_world']
+        if replacing_scene and self.spatial_memory.scene['generation'] != observation['generation']:
+            parent = context.get('stopped_map_parent')
+            if not parent or parent['world'] != observation.get('mapping_world'):
+                raise ValueError('collision_memory_world_continuity_unconfirmed')
+            mapping_observation['mapping_lifecycle']['stopped_parent'] = parent
+        if context.get('rejected_global_token'):
+            mapping_observation['mapping_lifecycle']['rejected_global_token'] = context['rejected_global_token']
+        if replacing_scene:
+            lifecycle = mapping_observation['mapping_lifecycle']
+            lifecycle['previous_scene_token'] = self.spatial_memory.scene['scene_token']
+            if strategy['requested_scope'] == 'local':
+                from .spatial_memory import local_geometry_change
+
+                history = self.spatial_memory.geometry_history(observation['generation'])
+                retained = {}
+                for obj in observation['objects']:
+                    anchor = history.get(obj['id'])
+                    if not anchor or obj.get('local_geometry_change'):
+                        continue
+                    if bool(obj.get('cad')) != bool(anchor.get('cad')):
+                        continue
+                    if obj.get('cad') and obj['cad']['mesh_sha256'] != anchor['cad']['mesh_sha256']:
+                        continue
+                    if local_geometry_change(anchor, obj.get('points_world_m'), observation['views']) is None:
+                        retained[obj['id']] = anchor['observation_id']
+                lifecycle['retained_visible_sources'] = retained
+                mapping_observation['objects'] = [
+                    {**obj, 'cad': history[obj['id']]['cad']} if obj['id'] in retained and obj.get('cad')
+                    else obj for obj in observation['objects']]
         database_revision = self.spatial_memory.database_revision
         published_scene = await self.call_algorithm(
             self.algorithms.build_scene, mapping_observation, None if exclusion_state == 'observation' else self.state["target_id"],
             planning_settings=context["planning_settings"], exclusion_state=exclusion_state)
+        if strategy['requested_scope'] == 'global':
+            try:
+                feedback = await asyncio.to_thread(self.simulation.joint_feedback, self.state['generation'])
+                current, _ = collision_mapping_scope(observation, feedback, context['planning_settings'])
+                if current['requested_scope'] != 'global':
+                    raise ValueError('global_collision_map_observation_pose_changed_during_publication')
+            except (ValueError, RuntimeError, OSError):
+                context['rejected_global_token'] = published_scene['scene_token']
+                self.spatial_memory.invalidate([])
+                raise
+        self.check_generation()
+        context.pop('rejected_global_token', None)
         snapshot = published_scene.pop('collision_snapshot', None)
         surfaces = published_scene.pop('tsdf_surfaces', {})
         for measured in observation['objects']:
@@ -783,6 +864,7 @@ class Runner:
         self.spatial_memory.accept_publication(published_scene, observation, exclusion_state=exclusion_state,
                                                database_revision=database_revision)
         context['scene_observation'] = frozen_observation
+        context.pop('stopped_map_parent', None)
         if snapshot is not None and self.experiment is not None:
             if any(snapshot.get(key) != self.spatial_memory.scene.get(key)
                    for key in ('scene_token', 'observation_id', 'generation')):
@@ -790,12 +872,13 @@ class Runner:
             lifecycle = self.spatial_memory.lifecycle()
             stage_context = {
                 'skill': 'build_scene', 'policy_node': copy.deepcopy(self.state.get('active_policy_node', {})),
-                'scope': lifecycle.get('requested_scope'), 'reason': lifecycle.get('scope_reason'),
+                'scope': lifecycle['requested_scope'], 'reason': lifecycle['scope_reason'], 'pose_evidence': pose,
+                'parent_scene_token': mapping_observation['mapping_lifecycle'].get('previous_scene_token'),
                 'entity_ids': copy.deepcopy(lifecycle.get('required_entity_ids', [])),
                 'retired_entity_ids': copy.deepcopy(lifecycle.get('retired_entity_ids', [])),
                 'exclusion_state': exclusion_state,
                 'excluded_instance_id': self.state.get('target_id') if exclusion_state == 'selected' else None,
-                'world_semantics': 'current_observation_full_workspace_rebuild',
+                'world_semantics': 'measured_updates_with_spatial_memory' if replacing_scene else 'initial_workspace_measurement',
                 'object_labels': {key: value.get('description') or value.get('kind') or key
                                   for key, value in self.object_memory.entities().items()}
                                   if self.task_progress else {}}
@@ -811,7 +894,7 @@ class Runner:
         self.state['scene_evidence'] = {
             'scene_token': self.spatial_memory.scene.get('scene_token'), 'exclusion_state': exclusion_state,
             'excluded_instance_id': self.state['target_id'] if exclusion_state == 'selected' else None,
-            'camera_ids': ['3'] if head_only else ['1', '2', '3'],
+            'camera_ids': sorted(observation['views']),
             'observed_instance_ids': [item['id'] for item in observation['objects']],
             'table_cache': copy.deepcopy(table_cache),
             'object_layers': copy.deepcopy(self.spatial_memory.scene.get('object_layers', {})),
@@ -894,7 +977,8 @@ class Runner:
             self.check_generation()
         except Exception as error:
             self.emit("execution_stage_error", stage,
-                      {**evidence, "error": str(error)[:1000], "duration_s": time.monotonic() - started})
+                      {**evidence, "error": str(error)[:1000], "details": getattr(error, "details", {}),
+                         "duration_s": time.monotonic() - started})
             raise
         self.emit("execution_stage_complete", stage,
                   {**evidence, "result": result, "duration_s": time.monotonic() - started})
@@ -938,8 +1022,95 @@ class Runner:
                                          "duration_s": result["dt"]}
         return result
 
-    async def open_gripper(self, context):
-        return await self.motor(self.simulation.set_gripper, self.state['arm'], False)
+    async def open_gripper(self, context, **kwargs):
+        return await self.motor(self.simulation.set_gripper, self.state['arm'], False, **kwargs)
+
+    async def _dispatch_transfer(self, context, kind, motion_id, phases, binding, checks):
+        from .motion_sequence import build_sequence
+        from .robot_errors import CHECKED_START_TOLERANCE_DEG, CheckedStartChanged
+        arm = self.state['arm']
+        settings = context['planning_settings']
+        order = ('approach', 'grasp', 'lift') if kind == 'grasp' else ('approach', 'place', 'retreat')
+        planned = context['plan' if kind == 'grasp' else 'place_plan']
+        for attempt in range(2):
+            self.require_plan_binding(context, planned)
+            await self.verify_scene(context)
+            fresh = self.measured_state(context)
+            checked_start = np.asarray(phases['approach']['positions_rad'][0])
+            measured = np.asarray(fresh['arms'][arm]['joints_rad'])
+            if np.max(abs(measured - checked_start)) > np.deg2rad(CHECKED_START_TOLERANCE_DEG):
+                command = self.prepare_command(planned['phases']['approach'], feedback=fresh)
+                options = {'contact_goal_pose_world': planned['T_world_tcp']} if kind == 'grasp' else {}
+                checks['approach'] = await self.validate_motion(context,
+                    'approach_grasp' if kind == 'grasp' else 'approach', command, binding,
+                    measured_observation=fresh, **options)
+                phases['approach'] = command
+            prefix_only = kind == 'place'
+            sequence = build_sequence(phases, order[:2] if prefix_only else order,
+                gripper_events={} if prefix_only else {kind: {'closed': True}},
+                gripper_transition_s=settings['post_gripper_hold_s'])
+            try:
+                executed = await self.execution_stage(context, kind + '_sequence', self.motor,
+                    self.simulation.execute_trajectory, arm, sequence['positions_rad'], phases['approach']['dt'],
+                    times_s=sequence['times_s'], gripper_events=sequence['events'], motion_id=motion_id)
+            except CheckedStartChanged as error:
+                self.emit('trajectory_start_changed', '派发前实测关节起点变化', {
+                    **error.details, 'motion_id': motion_id, 'attempt': attempt + 1,
+                    'checked_feedback_time': fresh['feedback_time'],
+                    'planner_start_rad': planned['phases']['approach']['positions_rad'][0]})
+                if attempt or error.details.get('dispatched') is not False:
+                    raise
+                continue
+            except Exception as error:
+                if kind == 'grasp' and (getattr(error, 'details', {}) or {}).get('dispatched') is not False:
+                    if self.simulation.robot_snapshot()['generation'] == self.state['generation']:
+                        self.record_motion_receipt(context, 'lift_started', {
+                            'source': 'grasp_dispatch_unconfirmed', 'reason': str(error)[:500],
+                            'meaning': 'The previous support must be observed again.'})
+                raise
+
+            if prefix_only:
+                return await self._release_and_retreat(context, motion_id, phases['retreat'], binding, checks, executed)
+            return executed
+
+    async def _release_and_retreat(self, context, motion_id, planned_retreat, binding, checks, transport):
+        from .demo_placement import release_endpoint_evidence
+        from .robot_errors import CheckedStartChanged
+
+        arm, settings = self.state['arm'], context['planning_settings']
+        for attempt in range(2):
+            self.require_plan_binding(context, context['place_plan'])
+            await self.verify_scene(context)
+            measured = self.measured_state(context)
+            current = measured['arms'][arm]
+            endpoint = release_endpoint_evidence(context['place_plan']['goal'], context['holding'], current['tcp'])
+            if not endpoint['at_release_goal']:
+                raise ValueError('release_endpoint_not_reached')
+            opened = current['gripper_limits_rad'][0]
+            checks['release_collision_check'] = await self.validate_motion(context, 'open',
+                {'positions_rad': [current['joints_rad']], 'dt': planned_retreat['dt']},
+                binding, measured_observation=measured, gripper_end_position_rad=opened)
+            retreat = self.prepare_command(planned_retreat, feedback=measured)
+            current.update(gripper_position_rad=opened, gripper_closed_fraction=0.)
+            checks['retreat'] = await self.validate_motion(context, 'retreat', retreat, measured_observation=measured)
+            positions = list(retreat['positions_rad'])
+            times = (np.arange(len(positions)) * retreat['dt']).tolist()
+            hold = settings['post_gripper_hold_s']
+            if hold > 0.:
+                positions.insert(0, positions[0])
+                times = [0., *(t+hold for t in times)]
+            try:
+                result = await self.execution_stage(context, 'place_open_and_retreat', self.motor,
+                    self.simulation.execute_trajectory, arm, positions, retreat['dt'], times_s=times,
+                    gripper_events=[{'phase': 'place', 'closed': False, 'time_s': 0.}], motion_id=motion_id)
+            except CheckedStartChanged as error:
+                if attempt or error.details.get('dispatched') is not False:
+                    raise
+                self.emit('trajectory_start_changed', '释放前重新核对实测姿态', error.details)
+                continue
+            result['transport_before_release'] = transport
+            result['duration_s'] += transport['duration_s']
+            return result
 
     async def capture_holding_reference(self, context, grasp_feedback, source_observation):
         arm, target = self.state["arm"], self.state["target_id"]
@@ -978,9 +1149,28 @@ class Runner:
         return {"source": "pregrasp_rgbd_and_close_waypoint_feedback", "observation_id": observation["observation_id"],
                 "tcp_before_lift": context["tcp_before_lift"], "holding_verified": False}
 
+    async def sample_gripper(self, context, arm, after_time, checkpoint):
+        from .robot_skills.grasp_verification import gripper_feedback_state
+
+        epoch = self.observation_epoch
+        capture = await asyncio.to_thread(self.simulation.gripper_verification_sample,
+                                          arm, self.state['generation'], after_time)
+        self.check_generation()
+        if (epoch != self.observation_epoch or capture['generation'] != self.state['generation']
+                or capture.get('arm') != arm):
+            raise ValueError('gripper_verification_binding_changed')
+        self.emit('gripper_verification_feedback', checkpoint, {
+            **gripper_feedback_state(capture, arm), 'feedback_id': capture['feedback_id'],
+            'source': capture['source'], 'camera_ids': list(capture.get('views', {})),
+            'wrist_error': capture.get('wrist_error')})
+        if capture.get('views'):
+            self.record_observation(capture, checkpoint)
+        return capture
+
     async def verify_grasp(self, context):
         from .robot_skills.grasp_verification import (
             grasp_visual_context,
+            holding_from_feedback,
             inherit_grasp_identity,
             object_held_question,
         )
@@ -988,20 +1178,26 @@ class Runner:
 
         if context.get('grasp_execution', {}).get('completed') is not True:
             raise ValueError('visual_grasp_requires_completed_sequence')
-        capture = await self.capture_observation(context)
-        self.record_observation(capture, 'verify_grasp')
         target, arm = self.state['target_id'], self.state['arm']
-        visual_context = grasp_visual_context(capture, context['holding'])
-        presence_context = {key: value for key, value in visual_context.items() if key != 'target_id'}
-        presence_context['visual_camera_ids'] = [visual_context['primary_wrist_camera_id']]
-        presence_context['visual_modalities'] = ['rgb']
-        try:
-            holding_judgment = await self._judge(context, [object_held_question(arm)],
-                include_task=False, extra=presence_context, reference={})
-        except VisualDecisionError as error:
-            holding_judgment = {
-                'judgments': {'object_held': {'status': 'unknown', 'reason': 'visual_request_failed'}},
-                'evidence': {**copy.deepcopy(error.evidence), 'error': str(error)}}
+        capture = await self.sample_gripper(context, arm, context['grasp_execution']['completed_feedback_time_s'],
+                                            'verify_grasp')
+        context['grasp_verification_sample'] = capture
+        measured = holding_from_feedback(capture, arm)
+        holding_judgment = {'judgments': {'object_held': {'status': measured['status']}},
+            'evidence': {'source': measured['source'], 'observation_id': capture['observation_id'],
+                         'generation': capture['generation'], 'gripper_feedback': [measured['feedback']],
+                         'wrist_error': capture.get('wrist_error'), 'model_called': False}}
+        if measured['requires_visual'] and capture.get('views'):
+            presence_context = grasp_visual_context(capture, context['holding'])
+            presence_context.pop('target_id')
+            presence_context['visual_camera_ids'] = [presence_context['primary_wrist_camera_id']]
+            try:
+                holding_judgment = await self._judge(context, [object_held_question(arm)],
+                    include_task=False, extra=presence_context, reference={}, verification_capture=capture)
+            except VisualDecisionError as error:
+                holding_judgment = {
+                    'judgments': {'object_held': {'status': 'unknown', 'reason': 'visual_request_failed'}},
+                    'evidence': {**copy.deepcopy(error.evidence), 'error': str(error)}}
         presence = holding_judgment['judgments']['object_held']['status']
         presence_evidence = {'status': presence, 'rule': 'measured_position_then_closed_gripper_vision',
             'source': holding_judgment.get('evidence', {}).get('source', 'openai_decisions'),
@@ -1013,15 +1209,16 @@ class Runner:
                 identity_binding = inherit_grasp_identity(context['holding'], context['grasp_execution'], capture,
                     target_id=target, arm=arm, owner_id=self.run_id, motion_epoch=self.motion_epoch,
                     action_epoch=self.observation_epoch)
-                state = 'held'
             except ValueError as error:
                 identity_binding = {'source': 'continuous_grasp_execution', 'status': 'unknown',
-                                    'reason': str(error), 'visual_identity_verified': False}
+                                    'reason': str(error), 'outcome': 'unknown', 'visual_identity_verified': False}
+            else:
+                state = 'held'
         answer = {'held': 'yes', 'empty': 'no'}.get(state, 'unknown')
         result = {'success': answer == 'yes', 'status': 'held' if answer == 'yes' else answer,
             'source': 'gripper_holding_and_execution_identity',
             'visual_evidence': {'source': presence_evidence['source'], 'observation_id': capture['observation_id'],
-                'generation': capture['generation'], 'image_input': 'strict_workspace_rgb',
+                'generation': capture['generation'], 'image_input': 'executing_wrist_rgb' if capture.get('views') else None,
                 'grasp_execution': copy.deepcopy(context['grasp_execution'])},
             'reason': None if answer == 'yes' else (identity_binding or {}).get('reason', 'visual_grasp_' + state),
             'observation_id': capture['observation_id'],
@@ -1031,6 +1228,8 @@ class Runner:
             'invocation_id': self.state['current_step']['invocation_id']}
         result['holding_judgment'] = holding_judgment
         result['identity_binding'] = identity_binding
+        result['target_identity_outcome'] = identity_binding['outcome'] if identity_binding else 'not_checked'
+        result['verification_steps'] = {'holding_presence': presence, 'target_identity': result['target_identity_outcome']}
         result['grasp_state'] = state
         result['holding_presence'] = presence_evidence
         context['grasp_verification'] = result
@@ -1038,7 +1237,6 @@ class Runner:
         holding = context['holding']
         holding.update(state=state, verified=result['success'], verification=copy.deepcopy(result))
         if result['success']:
-            context['pre_place_capture'] = capture
             holding.update(state='held', observation=copy.deepcopy(context['observation']),
                 scene=copy.deepcopy(self.spatial_memory.scene),
                 scene_observation=copy.deepcopy(context.get('scene_observation', {})))
@@ -1133,42 +1331,36 @@ class Runner:
         self.record_object_operation(context, operation)
 
     async def execute_grasp(self, context):
-        from .motion_sequence import build_sequence
-
         arm, plan = self.state['arm'], context['plan']
-        settings = context['planning_settings']
         self.require_plan_binding(context, plan)
         await self.verify_scene(context)
         grasp_support_reference(self.measured_state(context), self.state['target_id'], plan['T_world_tcp'],
             source_reference=plan.get('lift_clearance'), scene_token=self.spatial_memory.scene['scene_token'])
         context['execution_started'] = True
-        await self.execution_stage(context, 'open_gripper', self.open_gripper, context)
-        feedback = self.measured_state(context)
-        phases = copy.deepcopy(plan['phases'])
-        phases['approach'] = self.prepare_command(phases['approach'], feedback=feedback)
-        checks = {}
-        checking = copy.deepcopy(feedback)
-        for phase, check_phase in (('approach', 'approach_grasp'), ('grasp', 'grasp')):
-            checks[phase] = await self.validate_motion(context, check_phase, phases[phase],
-                measured_observation=checking, contact_goal_pose_world=plan['T_world_tcp'],
-                previous_check=plan.get('command_checks', {}).get(phase))
-            checking['arms'][arm]['joints_rad'] = phases[phase]['positions_rad'][-1]
-        checks['closure'] = await self.validate_motion(context, 'grasp_closure',
-            {'positions_rad': [checking['arms'][arm]['joints_rad']], 'dt': .02},
-            measured_observation=checking)
-        checks['lift'] = await self.validate_motion(context, 'grasp_lift', phases['lift'],
-            measured_observation=checking,
-            previous_check=plan.get('command_checks', {}).get('lift'))
-        sequence = build_sequence(phases, ('approach', 'grasp', 'lift'),
-            gripper_events={'grasp': {'closed': True}}, gripper_transition_s=settings['gripper_transition_s'])
-        self.holding_state = {'owner_id': self.run_id, 'generation': self.state['generation'],
-            'arm': arm, 'instance_id': self.state['target_id'], 'state': 'provisional',
-            'verified': False, 'attached': False, 'reason': 'continuous_grasp_in_progress'}
-        self.record_motion_receipt(context, 'lift_started', {
-            'source': 'continuous_grasp_command', 'meaning': 'Grasp sequence dispatched. Previous support is unconfirmed.'})
-        executed = await self.execution_stage(context, 'grasp_sequence', self.motor,
-            self.simulation.execute_trajectory, arm, sequence['positions_rad'], phases['approach']['dt'],
-            times_s=sequence['times_s'], gripper_events=sequence['events'])
+        async with self.simulation.motion_scope([arm], 'grasp', self.state['generation'], self.motion_epoch) as motion_id:
+            await self.execution_stage(context, 'open_gripper', self.open_gripper, context, motion_id=motion_id)
+            feedback = self.measured_state(context)
+            phases = copy.deepcopy(plan['phases'])
+            phases['approach'] = self.prepare_command(phases['approach'], feedback=feedback)
+            checks = {}
+            checking = copy.deepcopy(feedback)
+            for phase, check_phase in (('approach', 'approach_grasp'), ('grasp', 'grasp')):
+                checks[phase] = await self.validate_motion(context, check_phase, phases[phase],
+                    measured_observation=checking, contact_goal_pose_world=plan['T_world_tcp'],
+                    previous_check=plan.get('command_checks', {}).get(phase))
+                checking['arms'][arm]['joints_rad'] = phases[phase]['positions_rad'][-1]
+            checks['closure'] = await self.validate_motion(context, 'grasp_closure',
+                {'positions_rad': [checking['arms'][arm]['joints_rad']], 'dt': .02},
+                measured_observation=checking)
+            checks['lift'] = await self.validate_motion(context, 'grasp_lift', phases['lift'],
+                measured_observation=checking,
+                previous_check=plan.get('command_checks', {}).get('lift'))
+            self.holding_state = {'owner_id': self.run_id, 'generation': self.state['generation'],
+                'arm': arm, 'instance_id': self.state['target_id'], 'state': 'provisional',
+                'verified': False, 'attached': False, 'reason': 'continuous_grasp_in_progress'}
+            executed = await self._dispatch_transfer(context, 'grasp', motion_id, phases, None, checks)
+            self.record_motion_receipt(context, 'lift_started', {
+                'source': 'completed_grasp_sequence', 'meaning': 'Lift executed. Confirm holding before attaching.'})
         closed_at = next(event['feedback'] for event in executed['gripper_events'] if event['closed'])
         await self.capture_holding_reference(context, closed_at, feedback)
         result = {'arm': arm, 'candidate_index': plan.get('candidate_index'),
@@ -1189,9 +1381,8 @@ class Runner:
     async def execute_place(self, context):
         from .container_release import release_mode
         from .demo_placement import release_endpoint_evidence
-        from .motion_sequence import build_sequence
 
-        plan, settings = context['place_plan'], context['planning_settings']
+        plan = context['place_plan']
         arm = self.state['arm']
         self.require_plan_binding(context, plan)
         mode = release_mode(plan['placement_request'])
@@ -1221,11 +1412,8 @@ class Runner:
         checking['arms'][arm].update(gripper_position_rad=open_position, gripper_closed_fraction=0.)
         checks['retreat'] = await self.validate_motion(context, 'retreat', phases['retreat'],
             measured_observation=checking, previous_check=plan.get('command_checks', {}).get('retreat'))
-        sequence = build_sequence(phases, ('approach', 'place', 'retreat'),
-            gripper_events={'place': {'closed': False}}, gripper_transition_s=settings['gripper_transition_s'])
-        executed = await self.execution_stage(context, 'place_sequence', self.motor,
-            self.simulation.execute_trajectory, arm, sequence['positions_rad'], phases['approach']['dt'],
-            times_s=sequence['times_s'], gripper_events=sequence['events'])
+        async with self.simulation.motion_scope([arm], 'place', self.state['generation'], self.motion_epoch) as motion_id:
+            executed = await self._dispatch_transfer(context, 'place', motion_id, phases, binding, checks)
         release_feedback = next(event['feedback'] for event in executed['gripper_events'] if not event['closed'])
         context['release_tcp'] = release_feedback['arms'][arm]['tcp']
         endpoint = release_endpoint_evidence(plan['goal'], holding, context['release_tcp'])
@@ -1265,8 +1453,8 @@ class Runner:
 
 
     async def verify_place(self, context):
-        """Validate the execution receipt before the graph node requests visual evidence."""
-        snapshot = self.simulation.robot_snapshot()
+        """Validate the execution receipt before measuring the released gripper."""
+        snapshot = self.simulation.robot_snapshot(include_tcp=False)
         self.check_generation()
         completed = bool(self.state['facts'].get('place_execution_completed'))
         commanded = context.get('demo_place_execution', {}).get('release_commanded') is True
@@ -1280,6 +1468,35 @@ class Runner:
         context['place_verification'] = result
         self.state['facts']['place_evidence_pending'] = False
         return result
+
+    async def dispatch_observation_path(self, context, scene, plan, stage, **validation):
+        from .robot_errors import CheckedStartChanged
+
+        paths = {arm: np.asarray(plan['paths'][arm], dtype=float) for arm in ('A', 'B')}
+        if len(paths['A']) != len(paths['B']):
+            raise ValueError('dual_trajectory_sample_counts_differ')
+        async with self.simulation.motion_scope(['A', 'B'], 'observe', self.state['generation'],
+                                                self.motion_epoch) as motion_id:
+            for attempt in range(2):
+                measured = self.measured_state(context)
+                checked = {}
+                for arm, path in paths.items():
+                    start = measured['arms'][arm]['joints_rad']
+                    if np.max(np.abs(path[0] - start)) > np.deg2rad(1.):
+                        raise TrajectoryStartError(arm, start, path[0], measured)
+                    checked[arm] = np.vstack((start, path)).tolist()
+                await self.call_algorithm(self.algorithms.validate_dual_observation, measured, scene, checked,
+                                          planning_settings=context['planning_settings'], **validation)
+                await self.verify_scene(context)
+                try:
+                    return await self.execution_stage(context, stage, self.motor,
+                        self.simulation.execute_dual_trajectory, checked, plan['dt'],
+                        execution_settings=context['planning_settings'], motion_id=motion_id)
+                except CheckedStartChanged as error:
+                    self.emit('trajectory_start_changed', '双臂派发前实测起点变化', {
+                        **error.details, 'motion_id': motion_id, 'attempt': attempt + 1})
+                    if attempt or error.details.get('dispatched') is not False:
+                        raise
 
     async def move_to_observe(self, context, *, joint_goals=None):
         if context.get("holding") or self.holding_state is not None:
@@ -1301,22 +1518,7 @@ class Runner:
             plan = await self.call_algorithm(self.algorithms.plan_dual_observation_motion,
                 self.measured_state(context), motion_scene, poses,
                 planning_settings=context["planning_settings"])
-            feedback = self.simulation.robot_snapshot()
-            current = feedback["arms"]
-            paths = {arm: np.asarray(plan["paths"][arm], dtype=float) for arm in ("A", "B")}
-            if len(paths["A"]) != len(paths["B"]):
-                raise ValueError("dual_trajectory_sample_counts_differ")
-            for arm in ("A", "B"):
-                if np.max(np.abs(paths[arm][0] - current[arm]["joints_rad"])) > np.deg2rad(1):
-                    raise TrajectoryStartError(arm, current[arm]["joints_rad"], paths[arm][0], feedback)
-            # Both arms get the same measured-start connector and time axis.
-            paths = {arm: np.vstack((current[arm]["joints_rad"], paths[arm])).tolist() for arm in ("A", "B")}
-            await self.call_algorithm(self.algorithms.validate_dual_observation,
-                self.measured_state(context), motion_scene, paths,
-                planning_settings=context["planning_settings"])
-            results = await self.execution_stage(context, "observe_pose_AB", self.motor,
-                self.simulation.execute_dual_trajectory, paths, plan["dt"],
-                execution_settings=context['planning_settings'])
+            results = await self.dispatch_observation_path(context, motion_scene, plan, 'observe_pose_AB')
             # Keep the prior world solely for recovery motion until a complete
             # fresh scene replaces it. It must not authorize manipulation.
             self.spatial_memory.invalidate([])

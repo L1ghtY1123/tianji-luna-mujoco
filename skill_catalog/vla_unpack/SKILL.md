@@ -2,6 +2,8 @@
 
 When the user requires return and objects observation after every delivery, the input's matching post-delivery observation receipt is required before processing. The graph must arrange it; this skill does not return or observe implicitly.
 
+Capture a synchronized three-camera reference at the prepared workbench pose immediately before processing. Bind it to the verified release and use it for the before/after comparison.
+
 Invoke the configured processing capability for its bound input at the workbench input region and required starting posture. Its MuJoCo implementation replaces the package with a separate product; simulator truth stays inside the effect implementation. The action receipt does not prove the product exists visually. verify_unpack separately confirms the effect and creates the product ID. Preserve partial effects; do not blindly repeat processing.
 
 Inputs, typed arguments, prerequisites, effects and recoverable results are defined in `contract.json` and the registered parameter schema. Responses authors normal and recovery routes; Decisions only selects existing branches. This skill executes only its selected operation. Current policy: `docs/cad-runtime-policy-20261102.md`.

@@ -70,6 +70,19 @@ class ObjectDatabase:
         """Notify consumers only after a successful physical-state transaction commits."""
         self._subscribers.append(callback)
 
+    def grounding_ids(self, group_ids):
+        """Find committed physical groups without persisting task reference bindings."""
+        with self._transaction() as connection:
+            result = {}
+            for group_id in group_ids:
+                rows = connection.execute('SELECT entity_id FROM history WHERE event_key=? AND kind=?',
+                    ('rgbd-grounding:' + group_id, 'instance_rgbd_grounded')).fetchall()
+                if len(rows) > 1:
+                    raise ValueError('duplicate_committed_grounding_group')
+                if rows:
+                    result[group_id] = str(rows[0]['entity_id'])
+            return result
+
     def changes_since(self, revision):
         with self._transaction() as connection:
             return [{'revision': row['revision'], 'entity_id': str(row['entity_id']),
@@ -84,15 +97,6 @@ class ObjectDatabase:
         views = capture.get('raw_views', capture['views'])
         arrays = {camera: view['rgb'] for camera, view in views.items()}
         metadata['cameras'] = {}
-        metadata['workspace_filter'] = capture.get('workspace_filter', {})
-        for camera, view in capture['views'].items():
-            scope = view.get('effective_mask')
-            if scope is None:
-                scope = view.get('workspace_mask')
-            if scope is not None:
-                arrays['effective__' + camera] = np.asarray(scope, dtype=bool)
-            if view.get('workspace_mask') is not None:
-                arrays['workspace__' + camera] = np.asarray(view['workspace_mask'], dtype=bool)
         for camera, view in views.items():
             if not all(key in view for key in ('depth_m', 'valid_depth', 'intrinsics', 'T_world_camera')):
                 continue
@@ -122,6 +126,16 @@ class ObjectDatabase:
                     masks.setdefault(identifier, {})[camera] = mask
         with self._transaction(write=True) as connection:
             for identifier, views in masks.items():
+                previous = connection.execute(
+                    'SELECT masks_npz FROM instance_masks WHERE observation_id=? AND entity_id=?',
+                    (capture['observation_id'], identifier)).fetchone()
+                if previous is not None:
+                    with np.load(BytesIO(previous['masks_npz']), allow_pickle=False) as archive:
+                        saved = {camera: archive[camera].copy() for camera in archive.files}
+                    for camera, mask in views.items():
+                        if camera in saved and not np.array_equal(saved[camera], mask):
+                            raise ValueError('immutable_instance_mask_changed')
+                    views = {**saved, **views}
                 encoded = BytesIO()
                 np.savez_compressed(encoded, **views)
                 connection.execute('INSERT INTO instance_masks VALUES (?, ?, ?) '
@@ -129,7 +143,7 @@ class ObjectDatabase:
                     (capture['observation_id'], identifier, encoded.getvalue()))
 
     def reference(self, entities):
-        """Load each instance's dated image with the box measured on that image."""
+        """Load dated RGB with confirmed visual boxes or measured silhouette masks."""
         captures, references, previous_observation_id = {}, {}, None
         with self._transaction() as connection:
             if entities:
@@ -159,6 +173,7 @@ class ObjectDatabase:
                 metadata, images = captures[capture_id]
                 references[identifier] = {**metadata, 'camera_id': camera, 'rgb': images[camera],
                     'bbox': list(entity['bbox']), 'source': entity.get('identity_source'),
+                    'registration_basis': entity.get('registration_basis'), 'entity_id': identifier,
                     'request_hash': entity.get('identity_request_hash')}
                 stored_masks = connection.execute(
                     'SELECT masks_npz FROM instance_masks WHERE observation_id=? AND entity_id=?',
@@ -180,29 +195,26 @@ class ObjectDatabase:
                     views[view_id] = {**calibration, 'rgb': images[view_id]}
                     if 'depth__' + view_id in images:
                         views[view_id].update(depth_m=images['depth__' + view_id], valid_depth=images['valid__' + view_id])
-                for view_id, view in views.items():
-                    scope = images.get('workspace__' + view_id)
-                    scope_source = 'source_time_workspace_mask'
-                    if scope is None and all(key in view for key in ('depth_m', 'valid_depth', 'intrinsics', 'T_world_camera')):
-                        from .workspace import WorkspaceAtlas
-
-                        filtered = WorkspaceAtlas().mask_capture({'views': {view_id: dict(view)}})
-                        scope = filtered['views'][view_id]['workspace_mask']
-                        images['workspace__' + view_id] = scope
-                        scope_source = 'workspace_reprojected_with_dated_calibration'
-                    if scope is None:
-                        scope = np.zeros(view['rgb'].shape[:2], dtype=bool)
-                        scope_source = 'historical_workspace_scope_unavailable'
-                    if 'mask' in view:
-                        view['mask'] = view['mask'] & scope
-                    view['rgb'] = np.where(scope[..., None], view['rgb'], 0)
-                    view['effective_mask'] = scope
-                    view['scope_source'] = scope_source
-                    if 'depth_m' in view:
-                        view['depth_m'] = np.where(scope, view['depth_m'], 0)
-                        view['valid_depth'] = view['valid_depth'] & scope
+                proposal = entity.get('current_identity_proposal') or {}
+                if (proposal.get('observation_id') == capture_id
+                        and proposal.get('generation') == metadata.get('generation')):
+                    for view_id, box in proposal.get('boxes', {}).items():
+                        if view_id in views:
+                            views[view_id]['bbox'] = list(box)
+                            views[view_id]['box_source'] = 'confirmed_instance_mask_bounds'
+                for view in views.values():
+                    view['scope_source'] = 'full_stored_camera_frame'
                 references[identifier]['views'] = views
-                references[identifier]['rgb'] = views[camera]['rgb']
+                # Preserve the original pixel coordinates of older wrist-primary records.
+                views[camera].setdefault('bbox', list(entity['bbox']))
+                if camera != '3':
+                    from .visual_identity import mask_box
+                    head = views.get('3', {})
+                    mask = head.get('mask')
+                    box = mask_box(mask) if mask is not None and np.any(mask) else head.get('bbox')
+                    references[identifier].update(camera_id='3' if head else None, rgb=head.get('rgb'), bbox=box)
+                else:
+                    references[identifier]['rgb'] = views[camera]['rgb']
         return {'entities': entities, 'identity_references': references,
                 'previous_observation_id': previous_observation_id}
 
@@ -250,7 +262,11 @@ class ObjectDatabase:
         references, owners, selection = {}, {}, {}
         for identifier, entity in entities.items():
             record = self.get(identifier)
-            states, total = select_identity_history(record.get('history', []), entity)
+            history = record.get('history', [])
+            original = entity.get('initial_reference')
+            if original:
+                history = [{'kind': 'scene_instance_confirmed', 'state': original}, *history]
+            states, total = select_identity_history(history, entity)
             selection[identifier] = {'eligible_count': total, 'selected_observation_ids': [
                 state['reference_observation_id'] for state in states]}
             for index, state in enumerate(states):
@@ -371,6 +387,8 @@ class ObjectDatabase:
                                  ensure_ascii=False, sort_keys=True, allow_nan=False)
             entity = self._entity(connection, identifier)
             origin = json.loads(entity['initial_json'])
+            if 'initial_reference' in state and state['initial_reference'] != origin.get('initial_reference'):
+                raise ValueError('objects_initial_reference_is_immutable')
             if origin.get('world_key') is not None and 'world_key' in state and state['world_key'] != origin['world_key']:
                 raise ValueError('objects_instance_scene_scope_changed')
             existing = connection.execute(

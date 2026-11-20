@@ -43,13 +43,13 @@ export function createCameraPanel(container, status, {
     if (payload.generation < generation) return;
     if (!payload.cameras.length) {
       clear();
-      status.textContent = '等待 Graph 观测或视觉核验节点采集。';
+      status.textContent = mode === 'preview' ? '等待 Base 相机启动。' : '等待 Graph 获取三相机同步、稳定的 RGBD。';
       return;
     }
     const identifier = mode === "preview" ? payload.preview_frame_id : payload.observation_id;
     const prefix = mode === "preview" ? "/api/camera-preview" : "/api/cameras";
     const channels = mode === "preview" ? [["rgb", "RGB"]] : [["rgb", "RGB"], ["depth", "深度伪彩"]];
-    if (payload.cameras.length !== 3 || !identifier || !Number.isFinite(payload.time)) throw new Error('三路相机捕获信息不完整。');
+    if ((mode === 'task' && payload.cameras.length !== 3) || !identifier || !Number.isFinite(payload.time)) throw new Error('相机捕获信息不完整。');
     const ids = new Set();
     for (const camera of payload.cameras) {
       const id = String(camera.id);
@@ -64,7 +64,7 @@ export function createCameraPanel(container, status, {
     // The same captured image may receive labels after semantic processing finishes.
     const currentLabelKey = JSON.stringify(mode === 'task' ? payload.object_labels ?? null : null);
     if (identifier === observationId && payload.generation === generation && currentLabelKey === labelKey) return;
-    const frames = ["2", "3", "1"].map(id => payload.cameras.find(camera => String(camera.id) === id)).map(camera => ({
+    const frames = ["2", "3", "1"].map(id => payload.cameras.find(camera => String(camera.id) === id)).filter(Boolean).map(camera => ({
       camera,
       images: channels.map(([kind, label]) => {
         const image = element('img');
@@ -77,6 +77,9 @@ export function createCameraPanel(container, status, {
     // Decode off-DOM: retain the previous complete frame while any image is loading.
     await Promise.all(frames.flatMap(frame => frame.images.map(image => image.decode())));
     if (requestedRevision !== revision || payload.generation < generation) return;
+    for (const [id, card] of cards) {
+      if (!ids.has(id)) { card.node.remove(); cards.delete(id); }
+    }
     for (const { camera, images } of frames) {
       const id = String(camera.id);
       let card = cards.get(id);
@@ -93,7 +96,7 @@ export function createCameraPanel(container, status, {
         const frameLabel = element('p', 'camera-frame');
         node.append(heading, group, frameLabel);
         container.append(node);
-        card = { heading, figures, frameLabel };
+        card = { node, heading, figures, frameLabel };
         cards.set(id, card);
       }
       card.heading.textContent = camera.label ?? `相机 ${camera.id}`;
@@ -125,7 +128,9 @@ export function createCameraPanel(container, status, {
     generation = payload.generation;
     observationId = identifier;
     labelKey = currentLabelKey;
-    status.textContent = `${mode === "preview" ? "最近授权观测 RGB" : "最近任务观察"} ${observationId} · 场景 ${generation}`;
+    status.textContent = mode === 'preview'
+      ? `Base 实时预览 · ${payload.cameras.length}/3 路 · 任务采集另行检查同步与稳定性`
+      : `任务 RGBD · 三路${payload.readiness?.stable ? '已稳定' : '未就绪'} · 时间差 ${payload.synchronization?.spread_ms?.toFixed(1) ?? '—'} ms · ${observationId}`;
   }
 
   function refresh() {

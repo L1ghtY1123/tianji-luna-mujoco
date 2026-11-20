@@ -27,6 +27,7 @@ def skill_error_result(error, state, arguments):
     code = getattr(error, 'code', None) or str(error) or type(error).__name__
     details = exception_details(error)
     unknown = details.get('status') == 'unknown' or code.startswith((
+        'task_grounding_unknown', 'grounding_capture_invalidated', 'grounding_database_revision_changed',
         'visual_identity_unknown', 'task_target_geometry_unknown', 'source_objects_unknown',
         'observed_support_unknown', 'observed_support_current_geometry_required',
         'observed_instance_missing_or_ambiguous', 'task_completion_unconfirmed'))
@@ -283,7 +284,7 @@ def failure_record(error, state):
 
 def result_details(result):
     """Verification skills return their own evidence directly, unlike raised service errors."""
-    fields = ('component', 'stage', 'purpose', 'observation_id', 'request_hash',
+    fields = ('component', 'stage', 'purpose', 'message', 'observation_id', 'request_hash',
               'diagnostic_checks', 'known_facts', 'unknowns', 'evidence_refs', 'sam3_queries')
     details = {}
     semantic = result.get('evidence') or {}

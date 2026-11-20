@@ -12,7 +12,8 @@
   ],
   "requires": {
     "target_selected": true,
-    "observed": true
+    "observed": true,
+    "task_grounded": true
   },
   "provides": [
     "destination_selected",

@@ -42,8 +42,10 @@ class PhysicalMemoryWriter:
     def checkpoint(self, memory, *, skill, result, status, capture, observation, target_id,
                    run_id, step, release_execution=None, release_attempt=None, container_receipt=None):
         entities = memory.entities()
-        operation_observation_id = ((result.get('container_entry') or result.get('visual_evidence', {})).get('observation_id')
-            if skill == 'verify_place' else None) or observation.get('observation_id')
+        operation_observation_id = observation.get('observation_id')
+        if skill in {'verify_place', 'verify_grasp'}:
+            proof = result.get('container_entry') or result.get('visual_evidence') or result
+            operation_observation_id = proof.get('observation_id') or operation_observation_id
         observed = skill == 'observe_scene' and status == 'success'
         identifiers = {key for key, entity in entities.items() if entity['status'] == 'active'} if observed else {
             target_id, result.get('selected_id'), result.get('input_entity_id'), result.get('output_entity_id')}
@@ -57,14 +59,11 @@ class PhysicalMemoryWriter:
                 measured = next((obj for obj in observation['objects'] if obj['id'] == identifier), None)
                 if measured is not None:
                     entity['geometry_reference'] = measurement_reference(measured, observation)
-                masks = [(int(np.count_nonzero(mask)), camera, mask)
-                    for camera, view in observation.get('views', {}).items()
-                    if (mask := view.get('identity_masks', view.get('instance_masks', {})).get(identifier))
-                    is not None and np.any(mask)]
-                if masks:
-                    _, camera, mask = max(masks, key=lambda row: row[0])
+                head = observation.get('views', {}).get('3', {})
+                mask = head.get('identity_masks', head.get('instance_masks', {})).get(identifier)
+                if mask is not None and np.any(mask):
                     entity.update(reference_observation_id=observation['observation_id'],
-                        reference_camera_id=camera, bbox=mask_box(mask), identity_source='openai_decisions',
+                        reference_camera_id='3', bbox=mask_box(mask), identity_source='openai_decisions',
                         identity_request_hash=observation['visual_identity']['evidence']['request_hash'])
             proposed.update(ObjectRecord.model_validate(entity))
             event = run_id + ':' + step['invocation_id'] + (':observation' if observed else '')

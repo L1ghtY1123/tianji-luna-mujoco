@@ -1,6 +1,6 @@
 {
   "id": "generate_grasps",
-  "description": "For CAD use the execution-arm offline library with current FoundationPose and default extra insertion 0 mm; TSDF GraspGen poses use the actual arm front TCP with zero additional insertion. For unknown objects feed the current published TSDF surface point cloud to GraspGen and request one native 100-candidate pool per round. The graph may request one additional round after confirmed exhaustion. Remain bound to the same qualified execution arm, target, capture and scene. GraspGen TCP +Z is prefiltered to the world +X forward / -Z downward sector with a configurable lateral angle limit, default 30 degrees. Grasp Lift follows world +Z for 150 mm. Numerical endpoint orientation and sampled Lift FK checks enforce these constraints before execution. 所有 GraspGen 抓取按执行臂当前指端 TCP 选择较近的平行夹爪半转等价姿态，随后进入 IK 和完整碰撞检查。CAD 离线抓姿按库中 A/B 归属读取。 GraspGen model contact TCP is aligned with the actual gripper_front_A/B, with distinct left/right orientation transforms and zero extra insertion. Check the declared Robotiq model and base-to-contact 195 mm conversion; actual mount-to-front offset is 185 mm. Old grasp_insertion_m settings are retired. Keep forward/downward +Z sector and all actual-gripper geometry/collision checks.",
+  "description": "For CAD, use the execution-arm offline library and current FoundationPose, with 0 mm extra insertion by default. For an unknown object, send its current TSDF surface to GraspGen for 100 candidates per round. Convert the model contact frame to the actual Tianji gripper_front_A/B. The model base-to-contact offset is 195 mm and the robot mount-to-front offset is 185 mm. Retain tool +Z across the continuous forward-to-down pitch sector with at most 45 degrees lateral deviation, apply the configured local +Z insertion (default 10 mm, range 0–20 mm), select the equivalent jaw rotation, and verify the RAG pad support and opening. Over an observed bin floor, prefer top-entry candidates, then forward candidates. Within each approach group, try the narrower projected openings first. Numerical endpoint, collision and sampled FK checks cover the three-phase trajectory and the 150 mm world +Z lift. Remain bound to the arm, target, capture and scene. The graph may request a second round after confirmed exhaustion.",
   "requires": {
     "target_selected": true,
     "arm_selected": true,
@@ -20,7 +20,7 @@
     "placement_request",
     "planning_settings"
   ],
-  "capability": "For CAD use the execution-arm offline library with current FoundationPose and default extra insertion 0 mm; TSDF GraspGen poses use the actual arm front TCP with zero additional insertion",
+  "capability": "For CAD use the execution-arm offline library with current FoundationPose and default extra insertion 0 mm; TSDF GraspGen poses use the actual arm front TCP with the configured local +Z insertion, applied once before IK",
   "outputs": [
     "grasps_ready",
     "execution_or_evidence_record"

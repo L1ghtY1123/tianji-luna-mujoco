@@ -1,0 +1,8 @@
+newmtl PedestalWhite
+Kd 0.7000 0.7150 0.7300
+Ka 0 0 0
+Ks 0.1 0.1 0.1
+Ns 40
+d 1
+illum 2
+

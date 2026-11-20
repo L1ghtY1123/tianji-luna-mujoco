@@ -21,10 +21,10 @@ def build_sequence(phases, order, *, gripper_events, gripper_transition_s):
         if phase in gripper_events:
             event = {**gripper_events[phase], 'time_s': elapsed, 'phase': phase}
             events.append(event)
-            # The actuator gets its configured command duration, without a
-            # feedback verdict, network call or visual acquisition at this point.
-            elapsed += gripper_transition_s
-            positions.append(path[-1])
-            timestamps.append(elapsed)
+            # Base waits for measured completion at this waypoint before the next segment.
+            if gripper_transition_s > 0:
+                elapsed += gripper_transition_s
+                positions.append(path[-1])
+                timestamps.append(elapsed)
     return {'positions_rad': np.asarray(positions).tolist(),
             'times_s': np.asarray(timestamps).tolist(), 'events': events}

@@ -1,10 +1,10 @@
+import { mountWorkbench } from './workbench.js';
 import { renderFailureReport } from './failure-report.js';
 import './styles.css';
 import { request } from './api.js';
-import { loadCadAssets } from './cad-assets.js';
 import { runConclusion } from './run-conclusion.js';
-import { buildScene, createCadObject, controlsForState, formatJson, sceneFromSnapshot, mergeEvents, performanceSummary, candidateCount } from './model.js';
-import { createSceneView } from './scene-view.js';
+import { controlsForState, formatJson, mergeEvents, performanceSummary, candidateCount } from './model.js';
+import { createBaseView } from './base-view.js';
 import { createTraceList } from './trace.js';
 import { createTaskClock } from './task-clock.js';
 import { createPlanningSettingsEditor } from './planning-settings.js';
@@ -19,49 +19,28 @@ const renderTrace = createTraceList(byId('trace-list'), byId('event-count'));
 const taskClock = createTaskClock();
 const state = { connected: false, busy: false, dirty: false, dragging: false, planningLoading: false, snapshot: null, run: {}, events: [], draft: null, selectedId: null, manifestRevision: null, operation: 0, lastServerTime: 0, receivedAt: 0 };
 let activeView = 'scene';
-let sceneEditorOpen = true;
 let pointcloudOpen = null;
 const holdingSummary = element('p', 'run-holding-summary');
 byId('run-details').append(holdingSummary);
 const planningEditor = createPlanningSettingsEditor(byId('planning-groups'), { document, onChange: renderControls });
 const cameraPanel = createCameraPanel(byId('camera-grid'), byId('camera-status'), {
   document, request, schedule: setTimeout, cancel: clearTimeout,
-  isVisible: () => document.visibilityState !== 'hidden' && activeView === 'cameras' && byId('camera-panel').open !== false,
+  isVisible: () => document.visibilityState !== 'hidden' && !byId('workspace').hidden && activeView === 'cameras' && byId('camera-panel').open !== false,
 });
 cameraPanel.start();
 byId("camera-mode").addEventListener("change", event => cameraPanel.setMode(event.target.value));
-const colorValues = { pink: '#df71a9', red: '#ed6a66', blue: '#648af0', green: '#62b893', yellow: '#dec267', orange: '#dd9b5f', gray: '#929ba6', white: '#dddfe6', black: '#45515c' };
-const kindNames = { box: '长方体', cube: '立方体', sphere: '球体', cylinder: '圆柱体', bin: '开放物料盒', marker: '桌面放置标记' };
 let view = null;
 const pointcloudPanel = createPointcloudPanel(byId('pointcloud-content'), byId('pointcloud-status'), {
   document, request, onOverlay: overlay => {
     view?.setOverlay(overlay);
     byId('hide-pointcloud').hidden = !overlay;
   },
-  onEnvironmentVisible: visible => view?.setEnvironmentVisible(visible),
 });
 let manifestLoading = false;
 let manifestWanted = false;
 let lastRunError = null;
 let serverInstanceId = null;
 let serverReloading = false;
-let cadAssets = [];
-
-async function refreshCadAssets() {
-  try {
-    cadAssets = await loadCadAssets(request);
-    const selector = byId('add-asset');
-    selector.replaceChildren(...cadAssets.map(asset => {
-      const option = element('option', '', asset.label);
-      option.value = asset.id;
-      return option;
-    }));
-    selector.value = cadAssets.find(asset => asset.id === 'pink_wrapped')?.id ?? cadAssets[0]?.id ?? '';
-  } catch (error) { showError(`CAD 资产加载失败：${error.message}`); return; }
-  try { renderEditor(); renderControls(); }
-  catch (error) { showError(`场景编辑器更新失败：${error.message}`); }
-}
-
 function errorMessage(error) {
   const message = error instanceof Error ? error.message : String(error);
   try {
@@ -100,7 +79,7 @@ function errorMessage(error) {
   return hint ? `${hint}（${message}）` : `操作未完成：${message}。当前证据不足以确定更具体原因。`;
 }
 
-function showError(error, { recorded = false } = {}) {
+function showError(error, { recorded = false, source = '' } = {}) {
   const message = recorded ? String(error) : errorMessage(error);
   if (byId('planning-dialog').open) {
     byId('planning-error').textContent = message;
@@ -112,6 +91,7 @@ function showError(error, { recorded = false } = {}) {
   byId('error-details').textContent = message;
   byId('error-disclosure').open = false;
   byId('error-banner').hidden = false;
+  byId('error-banner').dataset.source = source;
 }
 
 function runFailure() {
@@ -136,171 +116,14 @@ function element(tag, className, text) {
   return node;
 }
 
-function markDirty() { state.dirty = true; view?.setDraft(state.draft); renderControls(); }
-
-function inputField(label, value, onChange, options = {}) {
-  const wrapper = element('label', 'input-field');
-  wrapper.append(element('span', '', label));
-  let input;
-  if (options.choices) {
-    input = element('select');
-    const choices = { ...options.choices };
-    if (!(value in choices)) choices[value] = value;
-    for (const [key, name] of Object.entries(choices)) {
-      const option = element('option', '', name);
-      option.value = key;
-      input.append(option);
-    }
-  } else {
-    input = element('input');
-    input.type = options.text ? 'text' : 'number';
-    if (!options.text) { input.step = options.step ?? '0.01'; input.inputMode = 'decimal'; }
-  }
-  const scale = options.scale ?? 1;
-  input.value = typeof value === 'number' ? (Number.isFinite(value) ? Number((value * scale).toFixed(4)) : '') : value;
-  input.addEventListener('input', () => {
-    let changedValue = input.value;
-    if (!options.text && !options.choices) {
-      const number = input.value.trim() === '' ? NaN : Number(input.value);
-      changedValue = Number.isFinite(number) ? number / scale : NaN;
-    }
-    onChange(changedValue);
-    markDirty();
-  });
-  wrapper.append(input);
-  return wrapper;
-}
-
-function vectorFields(parent, title, values, onChange, axes = ['X', 'Y', 'Z']) {
-  parent.append(element('div', 'field-heading', title));
-  const row = element('div', 'vector-fields');
-  axes.forEach((axis, index) => row.append(inputField(axis, values[index], value => onChange(index, value), { scale: 1000, step: '1' })));
-  parent.append(row);
-  return row;
-}
-
-function renderEditor() {
-  if (!state.draft) return;
-  byId('object-count').textContent = state.draft.objects.length;
-  if (!state.draft.objects.some(object => object.id === state.selectedId)) state.selectedId = state.draft.objects[0]?.id ?? null;
-  const rows = state.draft.objects.map(object => {
-    const row = element('button', `object-row ${object.id === state.selectedId ? 'selected' : ''}`);
-    row.type = 'button';
-    const swatch = element('span', 'object-swatch');
-    swatch.style.background = colorValues[object.color] ?? object.color;
-    const description = element('span', 'object-description');
-    const label = cadAssets.find(asset => asset.id === object.asset_id)?.label ?? kindNames[object.kind] ?? object.kind;
-    description.append(element('strong', '', object.id), element('small', '', `${label} · ${object.color}`));
-    row.append(swatch, description, element('span', 'row-arrow', '›'));
-    row.addEventListener('click', () => { state.selectedId = object.id; renderEditor(); renderControls(); });
-    return row;
-  });
-  byId('object-list').replaceChildren(...(rows.length ? rows : [element('div', 'empty-small', '场景中暂无物体，点击添加。')]));
-  const editor = byId('object-editor');
-  editor.replaceChildren();
-  const selected = state.draft.objects.find(object => object.id === state.selectedId);
-  if (selected) {
-    const title = element('div', 'selected-heading');
-    title.append(element('span', '', selected.id));
-    const remove = element('button', 'text-button danger', '移除');
-    remove.type = 'button';
-    remove.addEventListener('click', () => { state.draft.objects = state.draft.objects.filter(object => object.id !== selected.id); markDirty(); renderEditor(); });
-    title.append(remove);
-    editor.append(title);
-    const metadata = element('div', 'metadata-fields');
-    const assetChoices = Object.fromEntries(cadAssets.map(asset => [asset.id, asset.label]));
-    metadata.append(inputField('类型', selected.asset_id ?? selected.kind, value => {
-      const asset = cadAssets.find(item => item.id === value);
-      if (asset) {
-        selected.kind = 'cad';
-        selected.asset_id = asset.id;
-        selected.size = [...asset.size_m];
-        selected.color = asset.default_color;
-        for (const key of ['cross_section', 'visual_style', 'wall_thickness_m', 'mass_kg']) delete selected[key];
-      } else selected.kind = value;
-      if (value === 'bin') {
-        selected.wall_thickness_m ??= .01;
-        selected.mass_kg ??= .4;
-      }
-      if (value === 'marker') {
-        const used = new Set(state.draft.objects.filter(object => object !== selected && object.kind === 'marker').map(object => object.color));
-        selected.color = ['yellow', 'green', 'orange', 'red', 'blue'].find(color => !used.has(color)) ?? 'yellow';
-        selected.size = [.16, .12, .0002];
-        selected.position[2] = Number(state.draft.table.position[2]) + Number(state.draft.table.size[2]) / 2 + .0001;
-      }
-      renderEditor();
-    }, { choices: assetChoices }));
-    const colors = { red: '红色', blue: '蓝色', green: '绿色', yellow: '黄色', orange: '橙色' };
-    if (selected.kind !== 'marker') Object.assign(colors, { pink: '粉色', gray: '灰色', white: '白色', black: '黑色' });
-    metadata.append(inputField('颜色', selected.color, value => { selected.color = value; }, { choices: colors }));
-    if (selected.kind === 'cad') metadata.append(inputField('自定义颜色 #RRGGBB', selected.color.startsWith('#') ? selected.color : colorValues[selected.color],
-      value => { selected.color = value; }, { text: true }));
-    if (selected.kind === 'cylinder') metadata.append(inputField('截面', selected.cross_section ?? 'circle', value => {
-      selected.cross_section = value;
-      if (value === 'circle') selected.size[1] = selected.size[0];
-      renderEditor();
-    }, { choices: { circle: '圆形', ellipse: '椭圆形 · X/Y 独立' } }));
-    editor.append(metadata);
-    const positionFields = vectorFields(editor, '位置 / mm · 偏航角 / °', selected.position, (index, value) => { selected.position[index] = value; });
-    if (selected.kind === 'marker') positionFields.children[2].children[1].disabled = true;
-    positionFields.append(inputField('yaw / °', selected.yaw_deg, value => { selected.yaw_deg = value; }, { step: '5' }));
-    const sizeFields = vectorFields(editor, selected.kind === 'cad' ? 'CAD 原始尺寸 / mm' : selected.kind === 'bin' ? '外尺寸 / mm' : '尺寸 / mm', selected.size, (index, value) => {
-      const axes = selected.kind === 'cube' || selected.kind === 'sphere' ? [0, 1, 2]
-        : selected.kind === 'cylinder' && selected.cross_section !== 'ellipse' && index < 2 ? [0, 1] : [index];
-      for (const axis of axes) {
-        selected.size[axis] = value;
-        if (axis !== index) {
-          // Update linked dimensions in place so holding a spin button keeps focus.
-          sizeFields.children[axis].children[1].value = Number.isFinite(value) ? Number((value * 1000).toFixed(4)) : '';
-        }
-      }
-    }, selected.kind === 'bin' ? ['外长 X', '外宽 Y', '外高 Z'] : selected.kind === 'marker' ? ['X', 'Y'] : ['X', 'Y', 'Z']);
-    if (selected.kind === 'cad') {
-      for (const field of sizeFields.children) field.children[1].disabled = true;
-      editor.append(element('p', 'field-note', '使用原始 CAD 尺寸。可修改颜色、位置和朝向；新增后应用场景，再拖动调整摆放。'));
-    }
-    if (selected.kind === 'marker') {
-      editor.append(element('p', 'field-note', '固定在桌面的彩色放置区域，可调整 XY、长宽和朝向。每个标记需使用不同颜色；相机观测后才能作为放置目的地。'));
-    }
-    if (selected.kind === 'bin') {
-      editor.append(inputField('壁厚 / mm', selected.wall_thickness_m, value => { selected.wall_thickness_m = value; }, { scale: 1000, step: '1' }));
-      editor.append(inputField('质量 / kg', selected.mass_kg, value => { selected.mass_kg = value; }, { step: '.01' }));
-      editor.append(element('p', 'field-note', '顶部开放，底板与四壁组成一个刚体；物料盒受重力。外长、外宽必须大于两倍壁厚，外高必须大于壁厚。'));
-    }
-  }
-  const tableFields = byId('table-fields');
-  tableFields.replaceChildren();
-  tableFields.append(inputField('桌面颜色（名称 / #RRGGBB）', state.draft.table.color ?? 'white',
-    value => { state.draft.table.color = value; }, { text: true }));
-  vectorFields(tableFields, '桌面中心 / mm', state.draft.table.position, (index, value) => { state.draft.table.position[index] = value; });
-  vectorFields(tableFields, '桌面尺寸 / mm', state.draft.table.size, (index, value) => { state.draft.table.size[index] = value; });
-}
-
-function replaceDraft(snapshot) {
-  if (!snapshot?.objects || !snapshot?.table) return;
-  state.draft = sceneFromSnapshot(snapshot);
-  state.dirty = false;
-  view?.setDraft(null);
-  renderEditor();
-}
-
 function renderControls() {
   const inputs = { connected: state.connected, busy: state.busy, dirty: state.dirty, confirmed: state.snapshot?.confirmed, status: state.run.status, instruction: byId('instruction').value };
   const controls = controlsForState({ ...inputs, busy: state.busy || state.dragging });
-  // Lock the form during a drag without cancelling the drag itself.
-  view?.setInteraction({ enabled: !controlsForState(inputs).editDisabled, selectedId: state.selectedId });
-  byId('scene-fields').disabled = controls.editDisabled;
-  byId('add-object').disabled = controls.editDisabled || !cadAssets.length;
-  byId('apply-scene').disabled = controls.editDisabled || !state.dirty;
-  byId('cancel-scene').disabled = controls.editDisabled || !state.dirty;
-  byId('settle').disabled = controls.editDisabled || state.dirty;
-  byId('confirm').disabled = controls.confirmDisabled;
+  byId('prepare-devices').disabled = state.busy || state.run.status === 'running';
   byId('start').disabled = controls.startDisabled || Boolean(state.run.algorithm_pending || state.run.algorithm_cleanup_error) || state.planningLoading || !planningEditor.ready || planningEditor.dirty;
   byId('reset').disabled = controls.resetDisabled;
   byId('stop-task').disabled = !state.connected || state.run.status !== 'running';
   byId('instruction').disabled = controls.editDisabled;
-  if (byId('demo-preset')) byId('demo-preset').disabled = controls.editDisabled;
-  if (byId('demo-count')) byId('demo-count').disabled = controls.editDisabled;
   for (const id of ['experiment-name', 'record-video', 'experiment-save-mode']) byId(id).disabled = controls.editDisabled;
   const saveDisabled = byId('experiment-save-mode').value === 'none';
   byId('record-video').disabled = controls.editDisabled || saveDisabled;
@@ -317,11 +140,11 @@ function renderControls() {
   byId('apply-planning').disabled = planningLocked || !planningEditor.ready || !planningEditor.dirty || planningEditor.conflict;
   byId('reload-planning').disabled = planningLocked;
   byId('planning-status').textContent = state.planningLoading ? '正在读取算法参数…' : !planningEditor.ready ? '算法参数尚未加载；读取成功后才能开始任务。' : planningEditor.conflict ? '其他页面已更新算法参数。草稿已保留；请重新读取并检查后再修改。' : planningEditor.dirty ? '参数有未应用修改。点击「应用算法参数」后才能开始任务。' : '算法参数已应用。Reset 保留这些参数。';
-  const confirmed = state.snapshot?.confirmed && !state.dirty;
-  byId('scene-badge').textContent = !state.connected ? '待连接' : state.dirty ? '有未应用修改' : confirmed ? '已确认' : '待确认';
+  const confirmed = state.snapshot?.confirmed;
+  byId('scene-badge').textContent = !state.connected ? '待连接' : confirmed ? '反馈就绪' : '待准备';
   byId('scene-badge').classList.toggle('confirmed', Boolean(confirmed));
-  byId('scene-note').textContent = state.dirty ? '位置、yaw、尺寸与已应用物料盒的壁厚即时预览。类型、颜色和新增物体在点击「应用场景修改」后显示；完成后等待重力稳定并确认。' : confirmed ? '初始场景已确认。Reset 将恢复此物理基线。' : '拖动和数值修改都需先应用，再等待重力稳定并确认场景。类型、颜色和新增物体在应用后显示。';
-  byId('start-hint').textContent = state.dragging ? '松手后请应用场景修改。' : state.busy ? '请求处理中…' : state.run.status === 'running' ? '任务运行中，可点击停止任务。' : state.run.algorithm_pending ? '等待后台算法返回，仍可 Reset。' : state.run.algorithm_cleanup_error ? '算法清理失败，请 Reset 重试。' : !planningEditor.ready || state.planningLoading ? '等待算法参数加载。' : planningEditor.dirty ? '参数草稿未应用，请打开参数设置。' : state.dirty ? '请应用修改并重新确认场景。' : !state.snapshot?.confirmed ? '先确认场景，再开始任务。' : '场景就绪 · 放置需已验证持物。';
+  byId('scene-note').textContent = 'Base 管理设备与标定，仿真场景在 Luna 编辑。任务采集须通过三相机同步和稳定检查。';
+  byId('start-hint').textContent = state.busy ? '请求处理中…' : state.run.status === 'running' ? '任务运行中' : state.run.algorithm_pending ? '等待后台算法返回' : !confirmed ? '点击准备设备，等待实测反馈和三相机就绪。' : planningEditor.dirty ? '请先应用算法参数。' : '设备就绪；每次任务观测重新检查三相机。';
   byId('open-planning').classList.toggle('has-draft', planningEditor.dirty);
 }
 
@@ -336,7 +159,7 @@ function renderExperiment() {
   byId('experiment-status').textContent = `${experiment.name || '本次实验'} · ${retention} · ${video}${experiment.error ? ` · 保存/录制失败：${experiment.error}` : ''}`;
   byId('experiment-result').classList.toggle('has-error', Boolean(experiment.error) || ['failed', 'error', 'partial', 'interrupted', 'unavailable'].includes(experiment.video_status));
   byId('experiment-replay').hidden = !experiment.id;
-  byId('experiment-replay').href = experiment.id ? `/replay.html?run=${encodeURIComponent(experiment.id)}` : '/replay.html';
+  byId('experiment-replay').href = experiment.id ? `/#replay?run=${encodeURIComponent(experiment.id)}` : '/#replay';
 }
 
 function selectView(name) {
@@ -444,18 +267,15 @@ function applyState(payload) {
     state.lastServerTime = payload.server_time;
     state.receivedAt = performance.now();
   }
-  const previousGeneration = state.snapshot?.generation;
-  const previousManifestRevision = state.snapshot?.manifest_revision;
-  const wasRunning = state.run.status === 'running';
   state.snapshot = snapshot;
+  const mode = snapshot.runtime_mode;
+  byId('connection-mode').textContent = `${mode === 'simulation' ? '仿真' : mode === 'real' ? '真机' : '设备未确认'} · ${snapshot.robot_ip ?? ''}`;
+  byId('simulation-scene-link').hidden = mode !== 'simulation';
   cameraPanel.setGeneration(snapshot.generation);
   pointcloudPanel.setGeneration(snapshot.generation);
   state.run = payload.run ?? {};
   renderExperiment();
-  if (!state.draft || (!state.dirty && (snapshot.generation !== previousGeneration
-    || snapshot.manifest_revision !== previousManifestRevision
-    || (wasRunning && state.run.status !== 'running')))) replaceDraft(snapshot);
-  const names = { idle: snapshot.confirmed ? '场景就绪' : '等待确认', running: '任务运行中', succeeded: '任务成功', success: '任务成功', completed: '任务完成', partial_success: '部分完成', needs_attention: '结果待确认', failed: '任务失败', error: '任务出错', cancelled: '任务已取消', unsupported: '暂不支持此任务' };
+  const names = { idle: snapshot.confirmed ? '设备就绪' : '等待设备', running: '任务运行中', succeeded: '任务成功', success: '任务成功', completed: '任务完成', partial_success: '部分完成', needs_attention: '结果待确认', failed: '任务失败', error: '任务出错', cancelled: '任务已取消', unsupported: '暂不支持此任务' };
   byId('run-status').textContent = state.run.algorithm_cleanup_error ? '算法清理失败' : names[state.run.status] ?? state.run.status ?? '等待场景';
   byId('run-dot').className = `run-dot ${state.run.status === 'running' ? 'active' : ''} ${state.run.algorithm_cleanup_error || ['failed', 'error'].includes(state.run.status) ? 'failed' : ''}`;
   byId('task-value').textContent = ({ grasp: '抓取', place: '放置', grasp_place: '抓取并放置', unsupported: '不支持' })[state.run.task] ?? state.run.task ?? '—';
@@ -463,9 +283,13 @@ function applyState(payload) {
   byId('destination-value').textContent = state.run.destination_id ?? '—';
   byId('arm-value').textContent = state.run.arm ? `Arm ${state.run.arm}` : '—';
   const failure = runFailure();
-  if (failure && failure !== lastRunError) showError(failure, { recorded: true });
+  if (failure && (failure !== lastRunError || byId('error-banner').dataset.source === 'feedback')) showError(failure, { recorded: true });
   lastRunError = failure;
-  if (snapshot.physics_error) showError(`物理仿真出错：${snapshot.physics_error}。请检查后端日志并重启仿真。`);
+  if (snapshot.physics_error && !failure) showError(`Base 反馈不可用：${snapshot.physics_error}`, {source: 'feedback'});
+  else if (byId('error-banner').dataset.source === 'feedback') {
+    byId('error-banner').hidden = true;
+    byId('error-banner').dataset.source = '';
+  }
   const previousEvents = state.events;
   state.events = mergeEvents(state.events, payload.events, payload.events_mode);
   planningEditor.sync(payload.planning_settings);
@@ -489,7 +313,6 @@ function applyState(payload) {
   byId('run-planning-settings').hidden = !state.run.planning_settings;
   byId('run-planning-settings-content').textContent = state.run.planning_settings
     ? formatJson({ revision: state.run.settings_revision, settings: state.run.planning_settings }) : '';
-  view?.setTable(snapshot.table);
   view?.update(snapshot);
   if (snapshot.manifest_revision !== undefined && snapshot.manifest_revision !== state.manifestRevision && !manifestLoading) void refreshManifest();
   renderControls();
@@ -522,15 +345,8 @@ async function perform(path, body = {}, options = {}) {
     requestSucceeded = true;
     if (operation !== state.operation) return null;
     options.afterSuccess?.(result);
-    // Scene endpoints return the accepted snapshot. Use it even if the
-    // subsequent state refresh fails, so Reset cannot leave a stale preview.
-    if (options.refreshDraft && result.objects && result.table) {
-      applyState({ simulation: result, run: { status: 'idle', algorithm_pending: state.run.algorithm_pending }, events: [] });
-      replaceDraft(state.snapshot);
-    }
     const payload = await refreshState(operation);
     if (operation !== state.operation) return null;
-    if (options.refreshDraft) replaceDraft(state.snapshot);
     if (options.manifest) await refreshManifest();
     return payload;
   } catch (error) {
@@ -558,7 +374,10 @@ async function refreshHealth() {
       const badge = element('span', `service-state ${healthy ? 'healthy' : ''}`, label);
       const details = element('details', 'service-details');
       const summary = element('summary');
-      summary.append(element('span', '', name), badge);
+      const title = name === 'luna' && value.responses_model
+        ? `Responses ${value.responses_model} (${value.responses_reasoning_effort}) · Decisions ${value.decisions_model}`
+        : name;
+      summary.append(element('span', '', title), badge);
       details.append(summary, element('pre', '', formatJson(info)));
       row.append(details);
       return row;
@@ -596,13 +415,7 @@ function connectSocket() {
 }
 
 byId('dismiss-error').addEventListener('click', () => { byId('error-banner').hidden = true; });
-byId('toggle-scene-editor').addEventListener('click', () => {
-  sceneEditorOpen = !sceneEditorOpen;
-  byId('editor-panel').hidden = !sceneEditorOpen;
-  byId('workspace').classList.toggle('scene-collapsed', !sceneEditorOpen);
-  byId('toggle-scene-editor').ariaExpanded = String(sceneEditorOpen);
-  byId('toggle-scene-editor').textContent = sceneEditorOpen ? '收起场景' : '展开场景';
-});
+byId('prepare-devices').addEventListener('click', () => void perform('/api/prepare'));
 for (const name of ['scene', 'cameras', 'pointcloud']) {
   byId(`view-tab-${name}`).addEventListener('click', () => selectView(name));
   byId(`view-tab-${name}`).addEventListener('keydown', event => {
@@ -626,14 +439,6 @@ for (const category of ['common', 'experimental']) {
 selectView('scene');
 byId('instruction').addEventListener('input', renderControls);
 byId('experiment-save-mode').addEventListener('change', renderControls);
-byId('home-view').addEventListener('click', () => view?.home());
-byId('toggle-tcp-frames').addEventListener('click', event => {
-  const button = event.currentTarget;
-  const visible = button.getAttribute('aria-pressed') !== 'true';
-  button.setAttribute('aria-pressed', String(visible));
-  button.textContent = visible ? '隐藏 TCP 坐标系' : '显示 TCP 坐标系';
-  view?.setTcpFramesVisible(visible);
-});
 byId('hide-pointcloud').addEventListener('click', () => pointcloudPanel.setVisible(false));
 byId('pointcloud-panel').addEventListener('toggle', updatePointcloudOpen);
 byId('refresh-health').addEventListener('click', () => void refreshHealth());
@@ -654,32 +459,9 @@ byId('apply-planning').addEventListener('click', () => {
     });
   } catch (error) { showError(error); }
 });
-byId('add-object').addEventListener('click', () => {
-  if (!state.draft) return;
-  const asset = cadAssets.find(item => item.id === byId('add-asset').value);
-  if (!asset) return;
-  const object = createCadObject(state.draft, asset);
-  state.draft.objects.push(object);
-  state.selectedId = object.id;
-  markDirty();
-  renderEditor();
-});
-byId('apply-scene').addEventListener('click', () => {
-  try { void perform('/api/scene', buildScene(state.draft), { refreshDraft: true, manifest: true }); } catch (error) { showError(error); }
-});
-byId('cancel-scene').addEventListener('click', () => {
-  if (byId('cancel-scene').disabled) return;
-  view?.cancelInteraction();
-  replaceDraft(state.snapshot);
-  renderControls();
-});
-byId('demo-preset')?.addEventListener('click', () => void perform('/api/demo/preset', { object_count: Number(byId('demo-count').value) }, { refreshDraft: true, manifest: true }));
-byId('settle').addEventListener('click', () => void perform('/api/settle', {}, { refreshDraft: true }));
-byId('confirm').addEventListener('click', () => void perform('/api/confirm', {}, { refreshDraft: true }));
 byId('stop-task').addEventListener('click', () => void perform('/api/stop'));
 byId('reset').addEventListener('click', () => {
-  view?.cancelInteraction();
-  void perform('/api/reset', {}, { refreshDraft: true, manifest: true, afterSuccess: () => { taskClock.reset(); renderTaskClock(); } });
+  void perform('/api/reset', {}, { manifest: true, afterSuccess: () => { taskClock.reset(); renderTaskClock(); } });
 });
 byId('start').addEventListener('click', () => {
   if (byId('start').disabled) return;
@@ -692,34 +474,12 @@ byId('start').addEventListener('click', () => {
   });
 });
 
-function finishDrag() {
-  state.dragging = false;
-  renderControls();
-}
-
-try { view = createSceneView(byId('viewport'), {
-  onSelect(id) { state.selectedId = id; renderEditor(); },
-  onDragStart() { state.dragging = true; renderControls(); },
-  onDragEnd(id, position) {
-    const object = state.draft.objects.find(item => item.id === id);
-    if (object) {
-      object.position = [...position];
-      if (object.kind === 'marker') object.position[2] = Number(state.draft.table.position[2]) + Number(state.draft.table.size[2]) / 2 + .0001;
-      markDirty();
-      renderEditor();
-    }
-    finishDrag();
-  },
-  onDragCancel: finishDrag,
-}); } catch (error) {
-  byId('viewport-loading').replaceChildren(element('strong', '', '无法创建 3D 视图'), element('span', '', '请启用浏览器硬件加速，并使用支持 WebGL 2 的浏览器。'));
-  showError(`WebGL 初始化失败：${error.message}`);
-}
+try { view = createBaseView(byId('viewport')); } catch (error) { showError(error); }
+mountWorkbench({onTaskVisibility: active => view?.setActive(active)});
 void refreshState().catch(error => { setConnection(false); showError(`无法连接后端：${error.message}。请检查服务是否启动。`); });
 void refreshManifest();
 void refreshHealth();
 void refreshPlanningSettings();
-void refreshCadAssets();
 connectSocket();
 setInterval(() => { if (!state.connected) void refreshState().catch(() => {}); }, 5000);
 setInterval(() => void refreshHealth(), 15000);

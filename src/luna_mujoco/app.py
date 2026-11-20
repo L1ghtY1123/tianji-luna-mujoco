@@ -1,4 +1,4 @@
-"""Single process web workbench; MuJoCo owns its independent stepping thread."""
+"""Luna task console with a single tianji_base robot boundary."""
 import argparse
 import asyncio
 import copy
@@ -6,9 +6,9 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
-from functools import partial
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class StartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    instruction: str = Field(min_length=1, max_length=200)
+    instruction: str = Field(min_length=1, max_length=4000)
     generation: int | None = Field(default=None, ge=1)
     settings_revision: str | None = None
     experiment: ExperimentOptions = Field(default_factory=ExperimentOptions)
@@ -39,11 +39,6 @@ class SettingsRequest(BaseModel):
     expected_revision: str
 
 
-class DemoPresetRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    object_count: int = Field(default=2, ge=1, le=4, strict=True)
-
-
 def create_app(simulation=None, algorithms=None, decisions_factory=None, data_dir=None, *,
                experiment_dir=None, environment_assumptions=None):
     server_instance_id = str(uuid4())
@@ -51,9 +46,12 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
         raise ValueError("legacy_decisions_factory_not_supported")
     load_dotenv(ROOT / ".env", override=False)
     if simulation is None:
-        from .demo_scene import demo_observation_poses, demo_scene
-        from .simulation import Simulation
-        simulation = Simulation(scene=demo_scene(), initial_joints=demo_observation_poses())
+        from tianji_curobo.robot_geometry import robot_geometry_client
+        from .base_client import BaseClient
+        from .robot_runtime import RobotRuntime
+        base_url = os.getenv('LUNA_BASE_URL', 'http://127.0.0.1:8000')
+        gateway = BaseClient(base_url, public_url=os.getenv('LUNA_BASE_PUBLIC_URL', base_url))
+        simulation = RobotRuntime(gateway, robot_geometry_client())
     if algorithms is None:
         from .demo_algorithms import DemoAlgorithms
         from .demo_perception import DemoPerception
@@ -74,10 +72,18 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
     if environment_assumptions is None:
         conditions_path = ROOT / 'resources/workcell_assumptions.json'
         environment_assumptions = json.loads(conditions_path.read_text(encoding='utf-8')) if conditions_path.is_file() else {}
-    runner = PolicyController(simulation, algorithms, decisions_factory, run_directory,
+    catalog = getattr(getattr(getattr(algorithms, 'perception', None), 'cad_resolver', None), 'catalog', None)
+    known_assets = {code: {'label': row['display_name']} for row in (catalog.records.values() if catalog else ())
+                    for code in {row['asset_id'], row.get('source_asset_id')} if code}
+    runner = PolicyController(simulation, algorithms, decisions_factory, run_directory, known_assets=known_assets,
                     planning_settings=settings, experiments=experiments,
                     environment_assumptions=environment_assumptions)
     operations = asyncio.Lock()
+    from .simulation_scene_client import SimulationSceneClient
+    from .scene_editor import SimulationSceneEditor
+    from .scene_editor_api import scene_editor_router
+    scene_gateway = SimulationSceneClient(simulation.snapshot, scene_url=os.getenv('LUNA_SIMULATION_SCENE_URL'))
+    scene_editor = SimulationSceneEditor(scene_gateway)
     health_cache = {"at": 0., "value": {}}
     from .workspace import WorkspaceAtlas
     workspace_atlas = WorkspaceAtlas()
@@ -90,6 +96,7 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
         simulation.start()
         yield
         await runner.cancel()
+        scene_gateway.close()
         if runner.planning_worker is not None:
             await asyncio.gather(asyncio.shield(runner.planning_worker), return_exceptions=True)
         if runner.algorithm_cleanup_worker is not None:
@@ -99,20 +106,28 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
         await asyncio.to_thread(experiments.close)
         await asyncio.to_thread(simulation.close)
 
-    app = FastAPI(title="Tianji Luna MuJoCo", lifespan=lifespan)
+    app = FastAPI(title="Tianji Luna", lifespan=lifespan)
     app.state.runner = runner
     app.state.experiments = experiments
     app.include_router(experiment_router(experiments))
+    app.include_router(scene_editor_router(scene_editor, operations=operations, runner=runner))
 
     @app.get('/api/objects')
     async def object_memory():
-        world_key = runner.world_namespace + ':' + str(simulation.robot_snapshot()['generation'])
-        return {'objects': await asyncio.to_thread(runner.object_database.entities, world_key=world_key)}
+        world_key = simulation.world_id
+        run_id, database = runner.run_id, runner.object_database
+        return {'run_id': run_id, 'objects': (await asyncio.to_thread(database.entities, world_key=world_key)
+                if run_id and database is not None and world_key is not None else [])}
 
     @app.get('/api/objects/{identifier}/history')
-    async def object_history(identifier: str):
+    async def object_history(identifier: str, run_id: str | None = None):
+        current_run, database = runner.run_id, runner.object_database
+        if run_id is not None and run_id != current_run:
+            raise HTTPException(409, 'instance_belongs_to_a_different_experiment')
+        if not runner.run_id or database is None:
+            raise HTTPException(404, 'no_active_experiment_instance')
         try:
-            return await asyncio.to_thread(runner.object_database.get, identifier)
+            return {**await asyncio.to_thread(database.get, identifier), 'run_id': current_run}
         except ValueError as error:
             raise HTTPException(404, str(error)) from error
 
@@ -176,33 +191,29 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
     async def manifest():
         return await asyncio.to_thread(simulation.manifest)
 
-    @app.get("/api/cad-assets")
-    async def cad_assets():
-        from .cad_assets import cad_catalog
-
-        return cad_catalog()
-
     @app.get("/api/camera-preview")
     async def camera_preview():
         capture = await asyncio.to_thread(simulation.preview_rgb)
-        if capture is None or capture["generation"] != simulation.robot_snapshot()["generation"]:
-            feedback = simulation.robot_snapshot()
+        if capture is None or capture["generation"] != simulation.robot_snapshot(include_tcp=False)["generation"]:
+            feedback = simulation.robot_snapshot(include_tcp=False)
             return {'preview_frame_id': None, 'generation': feedback['generation'],
                     'time': feedback['time'], 'cameras': [], 'source': 'awaiting_graph_observation'}
         identifier = capture["preview_frame_id"]
+        encoded_identifier = quote(identifier, safe="~!*'()")
         preview_frames[identifier] = capture
         while len(preview_frames) > 2:
             preview_frames.pop(next(iter(preview_frames)))
         labels = {"2": "左腕", "3": "头部", "1": "右腕"}
         return {"preview_frame_id": identifier, "generation": capture["generation"], "time": capture["time"],
+                "source": capture.get('source'), "is_task_observation": False, "errors": capture.get('errors', {}),
                 "cameras": [{"id": c, "label": labels[c], "frame_id": identifier,
-                             "rgb_url": f"/api/camera-preview/{c}/rgb?frame_id={identifier}"}
-                            for c in ("2", "3", "1")]}
+                             "rgb_url": f"/api/camera-preview/{c}/rgb?frame_id={encoded_identifier}"}
+                            for c in ("2", "3", "1") if c in capture['views']]}
 
     @app.get("/api/camera-preview/{camera_id}/rgb")
     async def preview_image(camera_id: str, frame_id: str):
         capture = preview_frames.get(frame_id)
-        if capture is None or capture["generation"] != simulation.robot_snapshot()["generation"]:
+        if capture is None or capture["generation"] != simulation.robot_snapshot(include_tcp=False)["generation"]:
             raise HTTPException(409, "camera_frame_changed")
         if camera_id not in capture["views"]:
             raise HTTPException(404, "unknown_camera")
@@ -218,25 +229,27 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
     async def cameras():
         async with camera_lock:
             capture = simulation.latest_rgbd()
-            if capture is None or capture["generation"] != simulation.robot_snapshot()["generation"]:
+            if capture is None or capture["generation"] != simulation.robot_snapshot(include_tcp=False)["generation"]:
                 raise HTTPException(503, "camera_observation_unavailable")
             identifier = capture["observation_id"]
+            encoded_identifier = quote(identifier, safe="~!*'()")
             camera_frames[identifier] = capture
             while len(camera_frames) > 2:
                 camera_frames.pop(next(iter(camera_frames)))
             labels = {"1": "右腕 RGBD", "2": "左腕 RGBD", "3": "头部 RGBD"}
             return {"observation_id": identifier, "generation": capture["generation"], "time": capture["time"],
+                    'readiness': capture.get('readiness'), 'synchronization': capture.get('synchronization'),
                     "object_labels": copy.deepcopy(runner.state.get('object_labels'))
                     if runner.state.get('object_labels', {}).get('observation_id') == identifier else None,
                     "cameras": [{"id": camera_id, "label": labels[camera_id], "frame_id": identifier,
-                                 "rgb_url": f"/api/cameras/{camera_id}/rgb?frame_id={identifier}",
-                                 "depth_url": f"/api/cameras/{camera_id}/depth?frame_id={identifier}"}
+                                 "rgb_url": f"/api/cameras/{camera_id}/rgb?frame_id={encoded_identifier}",
+                                 "depth_url": f"/api/cameras/{camera_id}/depth?frame_id={encoded_identifier}"}
                                 for camera_id in ("1", "2", "3")]}
 
     @app.get("/api/cameras/{camera_id}/{channel}")
     async def camera_image(camera_id: str, channel: str, frame_id: str):
         capture = camera_frames.get(frame_id)
-        if capture is None or capture["generation"] != simulation.robot_snapshot()["generation"]:
+        if capture is None or capture["generation"] != simulation.robot_snapshot(include_tcp=False)["generation"]:
             raise HTTPException(409, "camera_frame_changed")
         if camera_id not in capture["views"] or channel not in ("rgb", "depth"):
             raise HTTPException(404, "unknown_camera_channel")
@@ -265,7 +278,7 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
             preview = await asyncio.to_thread(algorithms.request, "/perception/preview")
         except (RuntimeError, ValueError, OSError) as error:
             raise HTTPException(503, "perception_preview_unavailable") from error
-        if preview.get("generation") != simulation.robot_snapshot()["generation"]:
+        if preview.get("generation") != simulation.robot_snapshot(include_tcp=False)["generation"]:
             raise HTTPException(409, "perception_preview_generation_changed")
         return preview
 
@@ -282,7 +295,7 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
 
     @app.get("/api/workspace-scene")
     async def workspace_scene():
-        return {'simulation': simulation.snapshot(), 'server_instance_id': server_instance_id}
+        return {'simulation': await asyncio.to_thread(simulation.recording_snapshot), 'server_instance_id': server_instance_id}
 
     @app.get("/api/health")
     async def health():
@@ -293,46 +306,25 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
                 status = {"algorithms": {"ready": False, "error": type(error).__name__}}
             status["controller"] = {"ready": True, "name": "responses_program"}
             status["luna"] = {"ready": bool(runner.visual_identity and runner.visual_identity.api_key),
-                              "model": "gpt-6-luna", "api_verified": any(
+                              "model": "gpt-6-luna", "decisions_model": "gpt-6-luna",
+                              "responses_model": runner.compiler.model,
+                              "responses_reasoning_effort": runner.compiler.reasoning_effort,
+                              "api_verified": any(
                                   e["kind"] == "visual_decisions_call" and not e["data"].get("error")
                                   for e in runner.events)}
-            status["mujoco"] = {"ready": True, "time": simulation.snapshot()["time"]}
+            status["tianji_base"] = {"ready": simulation.snapshot().get("available", False), "url": simulation.url}
             health_cache.update(at=time.monotonic(), value=status)
         return health_cache["value"]
 
-    async def scene_action(function, *args):
+    @app.post('/api/prepare')
+    async def prepare():
         async with operations:
             if runner.active:
-                raise HTTPException(409, "run_active_reset_first")
-            if runner.holding_state is not None:
-                raise HTTPException(409, "holding_state_reset_required")
+                raise HTTPException(409, 'run_active')
             try:
-                previous_generation = simulation.robot_snapshot()["generation"]
-                result = await asyncio.to_thread(function, *args)
-                runner.clear()
-                if simulation.robot_snapshot()["generation"] != previous_generation:
-                    runner.clear_algorithm_state()
-                return result
-            except (ValueError, RuntimeError) as error:
-                raise HTTPException(422, str(error)) from error
-
-    @app.post("/api/scene")
-    async def configure(scene: dict):
-        return await scene_action(simulation.configure, scene)
-
-    @app.post("/api/demo/preset")
-    async def demo_preset(request: DemoPresetRequest):
-        from .demo_scene import demo_observation_poses, demo_scene
-        return await scene_action(partial(simulation.configure, initial_joints=demo_observation_poses()),
-                                  demo_scene(request.object_count))
-
-    @app.post("/api/settle")
-    async def settle():
-        return await scene_action(simulation.settle)
-
-    @app.post("/api/confirm")
-    async def confirm():
-        return await scene_action(simulation.confirm)
+                return await asyncio.to_thread(simulation.prepare)
+            except (ValueError, RuntimeError, OSError) as error:
+                raise HTTPException(503, str(error)) from error
 
     @app.post("/api/start")
     async def start(request: StartRequest):
@@ -350,20 +342,28 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
     @app.post('/api/stop')
     async def stop():
         async with operations:
-            result = simulation.stop_motion()
+            result = await asyncio.to_thread(simulation.stop_motion)
             await runner.cancel()
             return {**result, 'status': runner.state['status']}
 
     @app.post("/api/reset")
     async def reset():
         async with operations:
-            # Physics invalidation happens first, so an outstanding command cannot overwrite the reset.
             try:
+                before = await asyncio.to_thread(simulation.snapshot)
                 result = await asyncio.to_thread(simulation.reset)
                 await runner.cancel()
+                if result.get('ok') is not True:
+                    raise ValueError('task_stop_not_confirmed')
                 runner.clear()
-                runner.clear_algorithm_state()
-                return result
+                try:
+                    if before.get('runtime_mode') == 'simulation':
+                        scene = await asyncio.to_thread(scene_gateway.reset, initial_state=before)
+                        result.update(scope='simulation_and_task', simulation_reset=scene,
+                                      robot=await asyncio.to_thread(simulation.snapshot))
+                    return result
+                finally:
+                    runner.clear_algorithm_state()
             except (ValueError, RuntimeError) as error:
                 raise HTTPException(409, str(error)) from error
 
@@ -397,27 +397,6 @@ def create_app(simulation=None, algorithms=None, decisions_factory=None, data_di
         path = web / "index.html"
         if not path.exists():
             raise HTTPException(503, "frontend_not_built: cd web && npm install && npm run build")
-        return FileResponse(path)
-
-    @app.get("/collision-spheres.html")
-    async def collision_view():
-        path = web / "collision-spheres.html"
-        if not path.exists():
-            raise HTTPException(503, "collision_view_not_built: cd web && pnpm build")
-        return FileResponse(path)
-
-    @app.get("/replay.html")
-    async def experiment_replay():
-        path = web / "replay.html"
-        if not path.exists():
-            raise HTTPException(503, "experiment_replay_not_built")
-        return FileResponse(path)
-
-    @app.get("/workspaces.html")
-    async def workspace_view():
-        path = web / "workspaces.html"
-        if not path.exists():
-            raise HTTPException(503, "workspace_view_not_built: cd web && pnpm build")
         return FileResponse(path)
 
     return app

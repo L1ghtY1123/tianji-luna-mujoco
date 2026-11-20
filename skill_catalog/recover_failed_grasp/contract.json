@@ -1,6 +1,6 @@
 {
   "id": "recover_failed_grasp",
-  "description": "Require same-action explicit negative visual holding evidence after Lift, with no attachment. Clear temporary carrying and plan state. The graph owns subsequent observation, geometry updates and same-arm retry. Preserve unresolved holding when the visual judgment is unknown.",
+  "description": "Require same-action confirmed empty grasp from dated gripper feedback or wrist vision after Lift, with no attachment. Clear temporary carrying and plan state. The graph owns subsequent observation, geometry updates and same-arm retry. Preserve unresolved holding when the visual judgment is unknown.",
   "requires": {
     "recovery_needed": true,
     "arm_selected": true
@@ -15,7 +15,8 @@
     "failed_action_receipt"
   ],
   "errors": [
-    "grasp_recovery_empty_hand_unconfirmed"
+    "grasp_recovery_empty_hand_unconfirmed",
+    "empty_grasp_retry_exhausted"
   ],
   "invalidates_observation": false,
   "planning_effects": {
@@ -33,6 +34,6 @@
     "observation_map_ready": false,
     "same_arm_transfer_ready": false
   },
-  "capability": "Require same-action explicit negative visual holding evidence after Lift, with no attachment. Clear temporary carrying and plan state. The graph owns subsequent observation, geometry updates and same-arm retry. Preserve unresolved holding when the visual judgment is unknown.",
+  "capability": "Require same-action confirmed empty grasp from dated gripper feedback or wrist vision after Lift, with no attachment. Clear temporary carrying and plan state. The graph owns subsequent observation, geometry updates and same-arm retry. Preserve unresolved holding when the visual judgment is unknown.",
   "captures_observation": false
 }

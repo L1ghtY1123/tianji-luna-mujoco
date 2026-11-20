@@ -5,7 +5,7 @@ from functools import lru_cache
 from importlib.util import find_spec
 from pathlib import Path
 
-DECISION_INPUT_VERSION = 'depth-unified-placement-v10'
+DECISION_INPUT_VERSION = 'scene-association-v4-declared-scene'
 
 
 def evidence_digest(value):
@@ -25,7 +25,7 @@ def implementation_manifest():
         'resources/robot/marvin_gui_dual.yml'))
     files = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
              for path in sorted(paths) if path.is_file()}
-    for name in ('tianji_curobo', 'tianji_graspgen', 'tianji_sam3', 'tianji_foundationpose'):
+    for name in ('tianji_curobo', 'tianji_graspgen', 'sam3_service', 'tianji_foundationpose'):
         spec = find_spec(name)
         if spec is None or not spec.submodule_search_locations:
             files['algorithm-services/' + name] = 'unavailable'

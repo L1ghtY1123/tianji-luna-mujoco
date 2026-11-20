@@ -18,12 +18,15 @@ CUROBO_DEFAULTS = {
     'trajectory_collision_clearance_m': 0., 'optimizer_collision_activation_distance_m': .01,
     'trajopt_num_seeds': 4, 'plan_max_attempts': 20, 'finetune_attempts': 1,
     'finetune_dt_scale': .6, 'freq_hz': 40,
-    'approach_axis': 'z', 'approach_offset_m': -.15, 'approach_in_tool_frame': True,
-    'place_approach_axis': 'z', 'place_approach_offset_m': -.15, 'place_approach_in_tool_frame': True,
-    'place_retreat_axis': 'z', 'place_retreat_offset_m': -.15, 'place_retreat_in_tool_frame': True,
 }
 
-GRASP_LIFT_POLICY = {'lift_axis': 'z', 'lift_offset_m': .15, 'lift_in_tool_frame': False}
+# Offsets locate the pre-contact and retreat poses relative to the grasp/release goal.
+TRANSFER_MOTION_POLICY = {
+    'approach_axis': 'z', 'approach_offset_m': -.15, 'approach_in_tool_frame': True,
+    'lift_axis': 'z', 'lift_offset_m': .15, 'lift_in_tool_frame': False,
+    'place_approach_axis': 'z', 'place_approach_offset_m': .15, 'place_approach_in_tool_frame': False,
+    'place_retreat_axis': 'z', 'place_retreat_offset_m': .15, 'place_retreat_in_tool_frame': False,
+}
 
 RELEASE_ENDPOINT_POSITION_TOLERANCE_M = .005
 
@@ -109,24 +112,15 @@ class VLAUnpackSettings(BaseModel):
 
 
 class PlanningSettings(BaseModel):
-    experimental_semantic_only_mapping: bool = setting(True, "实验场景仅保留已识别物体",
-        "仅在双臂观测位姿分析完成后，保留SAM3物体/容器及桌面；删除未分类背景。初始运动地图不使用此规则。",
-        "filter")
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     holding_position_tolerance_fraction: float = setting(.02, "夹爪稳定位置容差", "执行稳定窗口内允许的位置变化，占有效行程的比例。", "verification", ge=.001, le=.1, step=.005)
-    holding_stable_window_s: float = setting(.2, "夹爪稳定窗口", "用于独立夹爪执行命令的稳定性诊断。", "verification", unit="s", ge=.05, le=1., step=.05)
-    gripper_stable_velocity_rad_s: float = setting(.015, "夹爪窗口稳定速度上限", "完整稳定窗口内驱动关节速度的时间加权均方根不超过此值，且位置变化满足容差才返回；超时失败。", "verification", unit="rad/s", step=.005, gt=0, le=.2)
-    gripper_timeout_s: float = setting(3., "夹爪稳定超时", "独立夹爪命令的仿真等待上限。视觉节点负责夹持结果。", "verification", unit="s", step=.1, gt=0, le=15)
+    gripper_timeout_s: float = setting(3., "夹爪到位超时", "传给 Base 的独立夹爪命令等待上限；稳定与堵转由 Base 实测反馈判定，视觉节点负责夹持结果。", "verification", unit="s", step=.1, ge=.5, le=15)
     motion_position_tolerance_rad: float = setting(.005, "运动到位误差", "轨迹结束后关节位置误差上限；不改变沿途跟踪保护。", "execution", unit="°", scale=180 / math.pi, step=.1, gt=0, le=.02)
-    motion_stable_velocity_rad_s: float = setting(.03, "运动到位速度上限", "末端关节速度连续满足要求才返回。", "execution", unit="rad/s", step=.01, gt=0, le=.2)
-    motion_stable_window_s: float = setting(.08, "运动到位稳定窗口", "仿真时间；短暂到位后再次偏离会重新计时。", "execution", unit="s", step=.02, ge=.02, le=1)
     motion_settle_timeout_s: float = setting(3., "运动到位超时", "轨迹结束后的最大等待时间；超时失败。", "execution", unit="s", step=.1, gt=0, le=15)
     grasp_goalset_size: int = setting(32, "抓取候选批大小", "每次 goalset 请求的候选上限，通过完整数值检查的首条轨迹结束搜索。", "grasp", ge=1, le=128, strict=True)
+    rag_grasp_insertion_m: float = setting(.010, "Tianji 指端抓取深度", "TSDF 抓姿转换为执行臂的 RAG 前端 TCP 后，沿其局部 +Z 伸入，再进行指面、IK 和碰撞检查。", "grasp", unit="mm", scale=1000, step=1, ge=0, le=.020)
     cad_grasp_insertion_m: float = setting(0., "CAD 抓取伸入深度", "CAD 离线库已设定抓取深度，默认额外伸入 0mm。工作台显式调整后，沿执行臂末端局部 +Z 在 IK 前应用一次。仅工作台配置可修改，Responses 无覆盖权限。", "grasp", unit="mm", scale=1000, step=1, ge=-.02, le=.03)
-    grasp_maximum_tilt_deg: float = setting(180., "抓姿最大倾角", "相对世界向下轴；180°不按倾角排除，最终由数值碰撞与 IK 判断。", "grasp", unit="°", step=5, ge=0, le=180)
-    grasp_require_away_from_robot: bool = setting(False, "只保留背离机身的抓取方向", "可选方向约束；默认关闭，不能代替碰撞检查。", "grasp")
-    grasp_maximum_lateral_angle_deg: float = setting(30., "抓姿最大左右偏角", "GraspGen 末端 +Z 限于世界 +X 前方至 −Z 下方扇区，此项限制偏离世界 XZ 平面的角度。CAD 离线抓姿使用已设定方向。", "grasp", unit="°", step=1, ge=0, le=45)
 
     ik_num_seeds: int = setting(32, "IK 优化 seeds", "官方 plan_grasp 内部 goalset IK 的优化起点数。",
                                "shared", ge=1, le=64, strict=True)
@@ -157,21 +151,21 @@ class PlanningSettings(BaseModel):
     freq_hz: int = setting(40, "SDK 轨迹采样频率", "实际映射 cuRobo interpolation_dt=1/frequency；不是 MuJoCo 物理步频。",
                            "planner", unit="Hz", ge=20, le=100, strict=True)
 
-    approach_axis: Literal["x", "y", "z"] = setting("z", "Approach 轴", "生成接近位姿的坐标轴。", "grasp")
+    approach_axis: Literal["x", "y", "z"] = setting("z", "Approach 轴", "抓取沿末端 Z 轴接近。", "grasp")
     approach_offset_m: float = setting(-.15, "Approach 偏移", "沿指定坐标轴相对抓取位姿偏移；不能为零。",
                                        "grasp", unit="mm", scale=1000, ge=-.5, le=.5)
-    approach_in_tool_frame: bool = setting(True, "Approach 使用 tool frame", "开启为 tool frame；关闭为 world frame。", "grasp")
+    approach_in_tool_frame: bool = setting(True, "Approach 使用 tool frame", "抓取接近使用末端坐标系。", "grasp")
     lift_axis: Literal["x", "y", "z"] = setting("z", "Lift 轴", "抓取提升固定使用世界 Z 轴。", "grasp")
     lift_offset_m: float = setting(.15, "Lift 偏移", "抓取后沿世界 +Z 提升 150 mm。",
                                    "grasp", unit="mm", scale=1000, gt=0, le=.5)
     lift_in_tool_frame: bool = setting(False, "Lift 使用 tool frame", "抓取提升使用世界坐标系。", "grasp")
 
-    place_approach_axis: Literal['x', 'y', 'z'] = setting('z', '放置接近轴', '官方默认', 'place')
-    place_approach_offset_m: float = setting(-.15, '放置接近偏移', '官方默认', 'place', unit='mm', scale=1000)
-    place_approach_in_tool_frame: bool = setting(True, '接近使用末端坐标', '官方默认', 'place')
-    place_retreat_axis: Literal['x', 'y', 'z'] = setting('z', '撤离轴', '官方默认', 'place')
-    place_retreat_offset_m: float = setting(-.15, '撤离偏移', '官方默认', 'place', unit='mm', scale=1000)
-    place_retreat_in_tool_frame: bool = setting(True, '撤离使用末端坐标', '官方默认', 'place')
+    place_approach_axis: Literal['x', 'y', 'z'] = setting('z', '放置接近轴', '固定基座 Z 轴，从上方接近释放点。', 'place')
+    place_approach_offset_m: float = setting(.15, '放置接近偏移', '接近起点在释放点竖直上方 150 mm。', 'place', unit='mm', scale=1000)
+    place_approach_in_tool_frame: bool = setting(False, '接近使用末端坐标', '放置接近使用固定基座坐标系。', 'place')
+    place_retreat_axis: Literal['x', 'y', 'z'] = setting('z', '撤离轴', '释放后沿固定基座 +Z 撤离。', 'place')
+    place_retreat_offset_m: float = setting(.15, '撤离偏移', '撤离终点在释放点竖直上方 150 mm。', 'place', unit='mm', scale=1000)
+    place_retreat_in_tool_frame: bool = setting(False, '撤离使用末端坐标', '放置撤离使用固定基座坐标系。', 'place')
 
     container_release_bottom_clearance_m: float = setting(.02, "容器释放高度余量", "末端 Z = 实测盒口最高点 + 物体高度 + 余量；默认20mm，含为保守附着包络增加的10mm。", "place", unit="mm", scale=1000, step=1, ge=0, le=1)
     container_release_fixed_xy: bool = setting(True, "容器使用配置释放区域", "container_release 使用下方配置的固定 XY，目标盒必须包含此区域。", "place")
@@ -182,7 +176,7 @@ class PlanningSettings(BaseModel):
                                        "place", unit="mm", scale=1000, step=1, ge=0, le=1)
 
 
-    gripper_transition_s: float = setting(.4, "连续动作夹爪开合时长", "三段轨迹中预留的夹爪驱动时间，不等待夹持反馈或视觉判断。", "execution", unit="s", step=.05, gt=0, le=3)
+    post_gripper_hold_s: float = setting(0., "夹爪到位后额外停留", "默认收到夹爪稳定回执即执行下一段。此设置仅增加实测完成后的停留。", "execution", unit="s", step=.05, ge=0, le=3)
     time_scale: float = setting(3., "时间伸长／补点倍率（三段共用）", "使用五次 Hermite 插值伸长执行时间，默认 3 倍。",
                                 "execution", unit="倍", step=.1, ge=1, le=10)
     pointcloud_filter: PointcloudFilterSettings = Field(default_factory=PointcloudFilterSettings)
@@ -199,6 +193,13 @@ class PlanningSettings(BaseModel):
         # GraspGen already returns its contact TCP. Align it with the actual
         # arm's front TCP; a saved legacy insertion must never move it again.
         migrated.pop('grasp_insertion_m', None)
+        migrated.pop('rag_bin_forward_min_insertion_m', None)
+        old_transition = migrated.pop('gripper_transition_s', None)
+        if old_transition is not None and old_transition != .4:
+            migrated.setdefault('post_gripper_hold_s', old_transition)
+        for retired in ('grasp_maximum_tilt_deg', 'grasp_require_away_from_robot',
+                        'grasp_maximum_lateral_angle_deg'):
+            migrated.pop(retired, None)
         # The fixed-open pregrasp place preflight was removed. Retire its
         # saved option instead of exposing an advanced setting with no effect.
         migrated.pop("place_max_candidates", None)
@@ -209,7 +210,7 @@ class PlanningSettings(BaseModel):
         for legacy_name in ("release_margin_m", "place_release_margin_m", "plan_timeout_s", "place_timeout_s"):
             migrated.pop(legacy_name, None)
         migrated.update(CUROBO_DEFAULTS)
-        migrated.update(GRASP_LIFT_POLICY)
+        migrated.update(TRANSFER_MOTION_POLICY)
         migrated.pop('container_release_gap_m', None)
         migrated.pop('place_release_height_m', None)
         migrated.pop('place_tcp_z_m', None)
@@ -217,15 +218,15 @@ class PlanningSettings(BaseModel):
         # Old values described TCP height, not object-bottom clearance.
         migrated.pop('place_tcp_height_m', None)
         migrated.pop('container_release_tcp_height_m', None)
+        # Device settling belongs to Base; discard retired local-simulator controls.
+        for retired in ('holding_stable_window_s', 'gripper_stable_velocity_rad_s',
+                        'motion_stable_velocity_rad_s', 'motion_stable_window_s'):
+            migrated.pop(retired, None)
         migrated.update(container_release_fixed_xy=True)
         return migrated
 
     @model_validator(mode="after")
     def validate_relationships(self):
-        if self.gripper_timeout_s <= self.holding_stable_window_s:
-            raise ValueError("夹爪超时必须大于稳定窗口")
-        if self.motion_settle_timeout_s <= self.motion_stable_window_s:
-            raise ValueError("运动到位超时必须大于稳定窗口")
         if self.trajopt_num_seeds > self.ik_num_seeds:
             raise ValueError("TrajOpt seeds 不能大于 IK 优化 seeds，否则 SDK 会增加内部 IK seeds")
         if self.ik_num_seeds > self.ik_seed_solver_num_seeds:
@@ -245,7 +246,7 @@ class PlanningSettings(BaseModel):
             schema['properties'][name]['description'] = 'cuRobo v0.9.0 official default'
         for name in ('container_release_fixed_xy',):
             schema['properties'][name]['readOnly'] = True
-        for name in GRASP_LIFT_POLICY:
+        for name in TRANSFER_MOTION_POLICY:
             schema['properties'][name]['readOnly'] = True
         return schema
 

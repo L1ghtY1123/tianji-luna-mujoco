@@ -20,4 +20,4 @@ def rgbd_context(capture):
                     np.quantile(values, [.05, .5, .95]).tolist() if values.size else []}
         views[camera] = item
     return {'observation_id': capture['observation_id'], 'views': views,
-            'scope': 'Measured sensor context. Skills consume workspace-filtered RGBD for object geometry and planning.'}
+            'scope': 'Measured full-view RGBD. Reachability is checked separately and never clips object evidence.'}

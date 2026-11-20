@@ -16,7 +16,6 @@ from ..agent.responses import ResponsesBudget, ResponsesCompiler
 from ..agent.schema import (
     Graph,
     TaskSpec,
-    object_task_specs,
     skill_catalog,
 )
 from ..algorithms import AlgorithmError
@@ -109,6 +108,12 @@ class ObserveArguments(BaseModel):
         'An identical failed analysis is not repeated. Reuse preserves the original observation ID/time.'))
 
 
+class SceneObserveArguments(ObserveArguments):
+    full_collision_survey: bool = Field(default=False, description=(
+        'Request new measurements for a full collision map at the configured dual-arm observation pose. '
+        'Ordinary observations update the existing collision memory locally.'))
+
+
 class ObservationMotionArguments(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     viewpoint: Literal['configured', 'wrist_tilt_positive', 'wrist_tilt_negative'] = Field(
@@ -116,7 +121,7 @@ class ObservationMotionArguments(BaseModel):
             'configured returns to the operator observation pose and can satisfy the required final '
             'return. The two wrist_tilt alternatives offset both sixth joints by +12 or -12 degrees from '
             'that pose to obtain different wrist-camera views. They are movement proposals, not certified '
-            'visible viewpoints; current-map cuRobo planning and execution checks are mandatory. '
+            'visible viewpoints; current-map cuRoboV2-Fast planning and execution checks are mandatory. '
             'After the selected movement, observe_scene analyzes the new capture.'))
 
 
@@ -135,10 +140,10 @@ class PolicyController(RobotOperations):
         self.environment_assumptions = copy.deepcopy(environment_assumptions or {})
         schemas = {'identify_target': TargetArguments, 'identify_destination': DestinationArguments,
                    'choose_arm': ArmArguments, 'build_scene': BuildSceneArguments,
-                   'prepare_unpack': PrepareUnpackArguments, 'observe_scene': ObserveArguments,
+                   'prepare_unpack': PrepareUnpackArguments, 'observe_scene': SceneObserveArguments, 'capture_scene': ObserveArguments,
                    'verify_place': VerifyPlaceArguments,
                    'move_to_observe': ObservationMotionArguments}
-        names = ('move_to_observe', 'return_to_initial_pose', 'observe_scene', 'select_target', 'identify_target', 'identify_destination',
+        names = ('ground_task', 'capture_scene', 'move_to_observe', 'return_to_initial_pose', 'observe_scene', 'select_target', 'identify_target', 'identify_destination',
                  'choose_arm', 'build_scene', 'generate_grasps', 'plan_grasp', 'execute_grasp', 'recover_failed_grasp',
                  'verify_grasp', 'perceive_placement_zone',
                  'plan_place', 'execute_place', 'verify_place', 'prepare_unpack',
@@ -149,16 +154,10 @@ class PolicyController(RobotOperations):
             self.registry.register(name, schemas.get(name, NoArguments), partial(self._dispatch, name))
         config = VisualAPI.from_environment()
         self.judgments = judgments or DecisionsJudgments(api_key=config.api_key, timeout_s=config.timeout_s)
-        self.object_database = object_database or ObjectDatabase(self.data_dir.parent / 'object-memory.sqlite3')
-        from .physical_memory import PhysicalMemoryWriter
-
-        self.memory_writer = PhysicalMemoryWriter(self.object_database)
-        self.world_namespace = self.simulation.world_id
-        self.object_registrar = ObjectRegistrar(self.object_database, self.judgments)
-        self.object_database.subscribe(self._database_committed)
-        self.algorithms.perception.visual_identity.register_instance = self.object_registrar.register_observed
-        self.algorithms.perception.visual_identity.load_identity_archive = self.object_database.identity_archive
-        self.algorithms.perception.visual_identity.registration_transaction = self.object_database.transaction
+        self.instance_directory = self.data_dir / 'instances'
+        self.object_database = None
+        if object_database is not None:
+            self._bind_instance_database(object_database)
         self.compiler = compiler or ResponsesCompiler(api_key=config.api_key,
             budget=ResponsesBudget(),
             compilation_memory=CompilationMemory(self.data_dir / 'compilation-memory.sqlite3'),
@@ -172,6 +171,33 @@ class PolicyController(RobotOperations):
         self.object_tasks = {}
         self.graph_executor = None
         self.observation_epoch = 0
+
+    def clear(self):
+        from ..object_memory import ObjectMemory
+        from ..spatial_memory import SpatialMemory
+
+        super().clear()
+        self.graph_executor = None
+        self.object_database = self.object_registrar = self.memory_writer = None
+        self.algorithms.perception.visual_identity.load_identity_archive = None
+        self.object_memory = ObjectMemory()
+        self.spatial_memory = SpatialMemory()
+
+    def _bind_instance_database(self, database):
+        from .physical_memory import PhysicalMemoryWriter
+
+        self.object_database = database
+        self.memory_writer = PhysicalMemoryWriter(database)
+        self.object_registrar = ObjectRegistrar(database, self.judgments)
+        database.subscribe(self._database_committed)
+        self.algorithms.perception.visual_identity.load_identity_archive = database.identity_archive
+
+    def open_experiment_memory(self, run_id):
+        # Bootstrap can fail before it builds this experiment’s graph.
+        self.graph_executor = None
+        # The run UUID also scopes reads of RGBD references, operation history and product lineage.
+        database = ObjectDatabase(self.instance_directory / run_id / 'object-memory.sqlite3')
+        self._bind_instance_database(database)
 
     async def _dispatch(self, name, context, arguments):
         return await self.execute(name, context, arguments.model_dump())
@@ -238,7 +264,7 @@ class PolicyController(RobotOperations):
     async def capture_scene_observation(self, context, arguments, *, purpose='associate_objects'):
         from ..robot_skills.observation import capture_reuse_rejection
 
-        mode = ObserveArguments.model_validate(arguments).capture_mode
+        mode = SceneObserveArguments.model_validate(arguments).capture_mode
         capture = context.get('latest_capture')
         identifier = (capture or {}).get('observation_id')
         initial_reference = bool(identifier and not context.get('analyzed_capture_ids')
@@ -246,7 +272,8 @@ class PolicyController(RobotOperations):
             == context.get('identity_reference', {}).get('observation_id'))
         reason = 'model_requested_fresh_capture'
         if capture is not None:
-            reason = capture_reuse_rejection(capture, self.simulation.robot_snapshot(),
+            reason = capture_reuse_rejection(capture, self.simulation.robot_snapshot(
+                include_tcp=False, expected_generation=self.state['generation']),
                 epoch_matches=context.get('capture_epochs', {}).get(identifier) == self.observation_epoch,
                 now=time.monotonic(), max_age_s=None)
         if initial_reference and mode == 'reuse_current' and reason is not None:
@@ -332,6 +359,7 @@ class PolicyController(RobotOperations):
                 # A new raw result photograph is not an ID-associated objects
                 # observation. Successful provides below may explicitly restore it.
                 self.state['facts']['observed'] = False
+                self.state['facts']['capture_ready'] = False
                 self.state['facts']['task_verified'] = False
         self.check_generation()
         status = result_status(result)
@@ -359,8 +387,9 @@ class PolicyController(RobotOperations):
                     'checkpoint': name, 'task_progress': self.state['task_progress'],
                     'temporal_memory': self.object_memory.snapshot(),
                     'model_event_ids': [event['id'] for event in calls],
-                    'evidence_source': result.get('container_entry', {}).get('source') or (
-                        'visual_checkpoint')})
+                    'evidence_source': (result.get('container_entry', {}).get('source') or
+                        result.get('holding_presence', {}).get('source') or
+                        result.get('visual_evidence', {}).get('source') or 'visual_checkpoint')})
         return result
 
     def record_object_operation(self, context, operation):
@@ -415,11 +444,13 @@ class PolicyController(RobotOperations):
                 previous_scene_token=scene['scene_token'])
 
     async def _bootstrap(self, context):
-        self.object_registrar.world_key = self.world_namespace + ':' + str(self.state['generation'])
+        self.object_registrar.world_key = self.simulation.world_id
+        if self.object_registrar.world_key is None:
+            raise DiagnosticError('robot_world_identity_unavailable', {})
         self._database_committed(self.object_database.changes_since(0))
         self.compiler.scene_context['grasp_parameter_defaults'] = {
             key: context['planning_settings'][key] for key in
-            ('cad_grasp_insertion_m', 'grasp_maximum_tilt_deg', 'grasp_require_away_from_robot')}
+            ('cad_grasp_insertion_m', 'rag_grasp_insertion_m')}
         self.compiler.scene_context['container_release_region'] = {key: context['planning_settings'][key]
             for key in ('container_release_fixed_xy', 'container_release_x_m', 'container_release_y_m',
                         'container_release_region_size_m')}
@@ -459,49 +490,30 @@ class PolicyController(RobotOperations):
             plan = await self.call_algorithm(self.compiler.compile, capture, instruction=self.state['instruction'])
             if not plan.task.supported:
                 raise ValueError('task_capability_missing:' + plan.task.reason)
-            from .compiled_task import task_entity_proposals
-            plan = plan.model_copy(update={'entities': task_entity_proposals(plan)})
-            self.begin_step('register_instances')
-            proposal_observations = await self.call_algorithm(
-                self.algorithms.perception.prepare_proposal_observations,
-                capture, [entity.model_dump(mode='json') for entity in plan.entities])
-            self.object_registrar.audit = audit
-            registration = await self.call_algorithm(self.object_registrar.bind_proposals,
-                plan.entities, capture, instruction=self.state['instruction'],
-                proposal_observations=proposal_observations)
-            from .compiled_task import bind_compiled_task
-            proposal = bind_compiled_task(plan, registration, self.object_registrar.entities())
+            from ..observation_labels import proposal_box_labels
+
+            self.record_annotation(capture, proposal_box_labels(capture, plan.scene_inventory))
+            self.emit('responses_localization', 'Responses 已定位声明物体并生成任务选择器', {
+                'observation_id': capture['observation_id'], 'generation': capture['generation'],
+                'declared_objects': [row.model_dump(mode='json') for row in plan.declared_objects],
+                'scene_inventory': [row.model_dump(mode='json') for row in plan.scene_inventory],
+                'task_selectors': [row.model_dump(mode='json') for row in plan.task_selectors],
+                'destination_regions': [row.model_dump(mode='json') for row in plan.destination_regions]})
         finally:
             done.set()
-        self.task_spec = TaskSpec.model_validate(proposal['task_spec'])
-        self.task_bindings = copy.deepcopy(proposal['task_bindings'])
+        # Symbolic refs stay in the graph. No permanent identity is allocated during compilation.
+        from ..object_memory import ObjectMemory
         from .failure_return import wrap_failure_exits
-        from .validation import validate_capabilities
-        self.policy_graph = Graph.model_validate(wrap_failure_exits(proposal['policy_graph']))
-        self.object_tasks = object_task_specs(self.policy_graph)
+        self.task_spec = plan.task
+        self.task_bindings = {'entity_ref_bindings': {}}
+        self.policy_graph = Graph.model_validate(wrap_failure_exits(plan.graph.model_dump(mode='json')))
+        self.object_tasks = {}
         self.active_object_task = None
-        validate_capabilities(self.policy_graph, self.registry.describe())
-        from ..object_memory import ObjectMemory, restored_object_record
         self.object_memory = ObjectMemory()
-        stored = self.object_database.entities(world_key=self.object_registrar.world_key)
-        self.object_memory.restore(tuple(restored_object_record(entity) for entity in stored
-                                         if entity['id'] in proposal['entities']))
-        self.object_memory.restore(tuple(restored_object_record(entity) for entity in proposal['entities'].values()))
-        reference = {**self.object_database.reference(self.object_memory.entities()),
-            'observation_id': capture['observation_id'], 'generation': capture.get('generation'), 'time': capture['time'],
-            'views': {camera: {'rgb': view['rgb']} for camera, view in capture['views'].items()},
-            'unresolved_proposals': copy.deepcopy(proposal['unresolved_proposals']),
-            'object_memory_snapshot': self.object_memory.snapshot()}
-        reference['owner_id'] = self.run_id
-        from ..observation_labels import registered_reference_labels
-
-        self.record_annotation(capture, registered_reference_labels(capture, reference))
-        context.update(initial_capture=capture, latest_capture=capture, fine_capture=capture,
-                       identity_reference=reference)
-        self.object_memory.observation_id = capture['observation_id']
-        self.task_progress.register_entities(self.object_memory.entities(),
-            {key: row.get('visual_membership', 'unknown') for key, row in proposal['entities'].items()})
-        self.task_progress.configure_task(self.task_spec, [], object_tasks=self.object_tasks)
+        context.update(initial_plan=plan, initial_capture=capture, latest_capture=capture, grounded_refs={},
+                       identity_reference={'entities': {}, 'identity_references': {}})
+        self.state['facts'].update(capture_ready=True, task_grounded=False)
+        self.task_progress.configure_task(self.task_spec, [])
         self.state.update(task_spec=self.task_spec.model_dump(mode='json'),
                           policy_graph=self.policy_graph.model_dump(mode='json'))
         self.emit('skill_catalog', '本次 graph 使用的 skills 契约', {'skills': skill_catalog(self.registry)})
@@ -510,6 +522,13 @@ class PolicyController(RobotOperations):
     async def observe(self, context, *, checkpoint=None, capture=None, camera_ids=None,
                       purpose=None, recovery=False):
         checkpoint = checkpoint or 'initial'
+        from .grounding import fixed_targets_delivered, prepare_grounding
+
+        scene_only = recovery and context.get('terminal_motion_stopped', False)
+        # A map refresh after final delivery still registers what the cameras can see.
+        # The completed transfer already binds its source, target and destination.
+        skip_role_binding = scene_only or (bool(context.get('grounded_refs'))
+            and fixed_targets_delivered(self.task_spec, self.task_progress))
         capture = await self.capture_observation(context, capture=capture, recovery=recovery)
         from ..robot_skills.placement_resolution import digest
         from .memory import perception_motion_context
@@ -521,7 +540,8 @@ class PolicyController(RobotOperations):
 
         def analysis_key():
             inputs = observation_inputs(context)
-            return digest({'capture_id': capture['observation_id'], 'checkpoint': checkpoint, 'inputs': inputs,
+            return digest({'capture_id': capture['observation_id'], 'checkpoint': checkpoint, 'scene_only': skip_role_binding, 'inputs': inputs,
+                'full_collision_survey': capture.get('full_collision_survey', False),
                 'cad_motion_context': perception_motion_context(self.object_memory, self.spatial_memory)})
 
         key = analysis_key()
@@ -536,6 +556,7 @@ class PolicyController(RobotOperations):
                     {'observation_id': capture['observation_id'], 'action_epoch': self.observation_epoch})
                 return context['observation']
         try:
+            await prepare_grounding(self, context, capture, scene_only=skip_role_binding)
             observation = await Runner.observe(self, context, checkpoint=checkpoint, capture=capture,
                 camera_ids=['1', '2', '3'], purpose='geometry', recovery=recovery)
         except (ValueError, RuntimeError) as error:
@@ -543,8 +564,8 @@ class PolicyController(RobotOperations):
                 context['_observation_analysis'] = {'key': analysis_key(), 'failure': str(error)}
             raise
         # A configured work area is an explicit prior, not a visually invented marker.
-        for identifier in self.compiler.configured_regions:
-            configuration = self.compiler.configured_regions[identifier]
+        regions = {} if scene_only else self.compiler.configured_regions
+        for identifier, configuration in regions.items():
             region = configured_destination(observation, configuration.get('region', self.region),
                 identifier=identifier, support_id=self.task_bindings.get('support_id'))
             observation['objects'] = [obj for obj in observation['objects'] if obj['id'] != identifier]
@@ -674,9 +695,9 @@ class PolicyController(RobotOperations):
                     if item.get('kind') not in {'table', 'marker'}}
         if (not bound_identity_coverage_source(observation)
                 or coverage.get('observation_id') != observation['observation_id']
-                or not coverage.get('request_hash')
-                or coverage['request_hash'] != evidence.get('request_hash')
-                or coverage.get('selection_rule') != 'probability_argmax'
+                or (coverage.get('source') != 'rgbd_instance_association' and (
+                    not coverage.get('request_hash') or coverage['request_hash'] != evidence.get('request_hash')
+                    or coverage.get('selection_rule') != 'probability_argmax'))
                 or not measured.issubset(coverage.get('accepted_entity_ids', []))):
             raise DiagnosticError('source_objects_unknown', {
                 'component': 'current_identity_evidence',
@@ -750,24 +771,43 @@ class PolicyController(RobotOperations):
         if candidates:
             selected, evidence = candidates[0], []
             if self.task_spec.selection_order == 'explicit':
-                ranks = {identifier: index for index, identifier in enumerate(self.task_spec.target_refs)}
-                selected = min(candidates, key=lambda item: (ranks.get(item['id'], len(ranks)), item['id']))
+                pending_order = [i for i in self.task_spec.target_refs if i not in completed]
+                selected = next((obj for obj in candidates if pending_order and obj['id'] == pending_order[0]), None)
+                if selected is None:
+                    return {'status': 'unknown', 'success': False, 'reason': 'requested_next_id_not_visible'}
                 evidence.append({'source': 'explicit_user_order'})
-            elif len(candidates) > 1:
+            elif len(candidates) > 1 or self.task_spec.selection_order in {'left_to_right', 'right_to_left'}:
+                order = self.task_spec.selection_order
+                if order in {'left_to_right', 'right_to_left'}:
+                    required = {i for i, value in self.task_progress.membership.items() if value == 'required'}
+                    absent = required - completed - {obj['id'] for obj in candidates}
+                    if absent or unresolved_membership or observation.get('visual_identity', {}).get('unassociated_candidates'):
+                        return {'status': 'unknown', 'success': False, 'reason': 'ordered_comparison_set_incomplete'}
+                subjects = []
+                for obj in candidates:
+                    row = {key: obj[key] for key in ('id', 'kind', 'color', 'description') if key in obj}
+                    points = np.asarray(obj.get('points_world_m', []))
+                    if points.ndim == 2 and points.shape[1] == 3 and len(points) and np.isfinite(points).all():
+                        row['center_world_m'] = np.median(points, axis=0).tolist()
+                        row['visible_bounds_world_m'] = np.quantile(points, [.02, .98], axis=0).tolist()
+                    subjects.append(row)
                 choices = tuple(obj['id'] for obj in candidates) + ('unknown',)
+                criterion = {
+                    'left_to_right': '本轮取机器人最左边的合格对象，即基座 Y 最大的对象。',
+                    'right_to_left': '本轮取机器人最右边的合格对象，即基座 Y 最小的对象。',
+                    'visual': '本轮优先选择夹持面露出、周边障碍少的合格对象。'}[order]
+                descriptions = {}
+                for subject in subjects:
+                    identifier = subject['id']
+                    center = subject.get('center_world_m')
+                    position = f'当前基座 Y={center[1]:+.3f} 米' if center else '当前基座位置未知'
+                    descriptions[identifier] = f"ID {identifier}, {remembered[identifier].get('description', '')}, {position}"
                 judged = await self._judge(context, [ChoiceRequest(name='next_target', choices=choices,
-                    descriptions={obj['id']: remembered[obj['id']].get('description') or
-                        (remembered[obj['id']].get('color', '') + ' ' + remembered[obj['id']]['kind'])
-                        for obj in candidates},
-                    instructions='Which offered object is easier to grasp NEXT in the CURRENT scene? '
-                        'Prefer exposed gripping surfaces, less occlusion and clear access between nearby objects. '
-                        'Removing an accessible object may expose another later. Compare scoped RGB and '
-                        'labelled candidate boxes; candidate order and IDs do not imply priority. '
-                        'Choose one offered ID, or unknown if it cannot be judged. This choice does not '
-                        'certify IK, collision clearance or motion feasibility.')], extra={
-                            'verification_scope': 'target_selection',
-                            'candidate_objects': [{key: obj[key] for key in ('id', 'kind', 'color', 'description')
-                                                   if key in obj} for obj in candidates],
+                    descriptions=descriptions, instructions=criterion +
+                    '仅在当前列出的未完成 ID 中选择。基座 +Y 是机器人左侧，图像左右随相机变化。'
+                    '结合当前图和测量，有遮挡或顺序无法区分时选 unknown。')], include_task=False, reference={}, extra={
+                            'verification_scope': 'target_selection', 'candidate_objects': subjects,
+                            'instruction': self.state['instruction'], 'selection_order': order,
                             'visual_modalities': ['rgb'],
                             'visual_masks': {camera: view.get('identity_masks', view.get('instance_masks', {}))
                                              for camera, view in observation.get('views', {}).items()}})
@@ -823,17 +863,10 @@ class PolicyController(RobotOperations):
         return await super().build_scene(context, exclusion_state)
 
     def _collision_entity_ids(self, context):
-        """Require current measured bodies; history does not populate the new map."""
+        """Keep active physical identities in scope through partial observations."""
         entities = self.object_memory.entities()
-        identifiers = {obj['id'] for obj in context.get('observation', {}).get('objects', [])}
-        return {identifier for identifier in identifiers if identifier in entities
-                and entities[identifier].get('kind') not in {'table', 'marker'}}
-
-    async def _mapping_strategy(self, context, arguments):
-        request = BuildSceneArguments.model_validate(arguments)
-        return {'requested_scope': 'global',
-                'strategy_source': 'sole_permitted_scope',
-                'scope_reason': request.reason or 'Rebuild the full workspace from the current observation'}
+        return {identifier for identifier, row in entities.items()
+                if row.get('kind') not in {'table', 'marker'} and row.get('status', 'active') == 'active'}
 
     def _bind_region(self, observation):
         identifier = self.state.get('destination_id') or self.task_bindings.get('destination_id')
@@ -885,6 +918,13 @@ class PolicyController(RobotOperations):
         if skill in {'identify_target', 'identify_destination', 'observe_scene', 'build_scene', 'choose_arm',
                      'generate_grasps'}:
             invalidate_placement(self, context, zone=skill in {'identify_target', 'identify_destination', 'observe_scene'})
+        if skill == 'capture_scene':
+            capture = await self.capture_scene_observation(context, arguments)
+            return {'success': True, 'observation_id': capture['observation_id'], 'source': 'base_rgbd'}
+        if skill == 'ground_task':
+            from .grounding import prepare_grounding
+            return await prepare_grounding(self, context, context['latest_capture'],
+                                           initial=not self.state['facts'].get('task_grounded'))
         if skill == 'perceive_placement_zone':
             invalidate_placement(self, context, zone=True)
             if self.state['destination_id'].startswith(('table-region:', 'surface-region:')):
@@ -909,10 +949,6 @@ class PolicyController(RobotOperations):
             if mapping.exclusion_state == 'selected' and not (
                     self.state['facts'].get('target_selected') and self.state.get('target_id')):
                 raise ValueError('selected_mapping_requires_current_target')
-            strategy = await self._mapping_strategy(context, arguments)
-            from ..memory_contracts import CollisionUpdate
-            self.spatial_memory.request_update(CollisionUpdate.model_validate(strategy))
-            self.state['mapping_strategy'] = copy.deepcopy(strategy)
             if mapping.exclusion_state == 'observation':
                 self.state['facts'].update(scene_ready=False, views_ready=False)
                 return await self.build_scene(context, 'observation')
@@ -948,7 +984,7 @@ class PolicyController(RobotOperations):
             self.emit('skill_configuration', '本次抓取使用工作台配置', {
                 'source': 'operator_configuration',
                 'parameters': {key: context['planning_settings'][key] for key in (
-                    'cad_grasp_insertion_m', 'grasp_maximum_tilt_deg', 'grasp_require_away_from_robot')},
+                    'cad_grasp_insertion_m', 'rag_grasp_insertion_m')},
                 'target_id': self.state['target_id'], 'arm': self.state['arm']})
             observation = context['observation']
             destination = observed_object(observation, self.state['destination_id'])
@@ -963,10 +999,7 @@ class PolicyController(RobotOperations):
                     'orientation_mode': 'preserve',
                     'release_mode': self.task_progress.records[self.state['target_id']]['release_mode'],
                     'free_placement': not destination['placement_reference'].get('fixed_xy', False)}
-                context['grasps'] = await self.call_algorithm(self.algorithms.generate_grasps,
-                    observation, self.state['target_id'], arm=self.state['arm'],
-                    placement_request=context['grasp_placement_request'],
-                    planning_settings=context['planning_settings'], report_progress=True)
+                context['grasps'] = await self.generate_bound_grasps(context, observation)
                 context['grasps_observation_id'] = observation['observation_id']
                 return context['grasps']
         if skill == 'identify_destination':
@@ -1136,9 +1169,13 @@ class PolicyController(RobotOperations):
             raise ValueError('viewpoint_requires_visual_limitation')
         context.pop('visibility_recovery', None)
 
-    async def _judge(self, context, requests, *, extra=None, include_task=True, reference=None):
-        capture = context['latest_capture']
-        if context.get('capture_epochs', {}).get(capture['observation_id']) != self.observation_epoch:
+    async def _judge(self, context, requests, *, extra=None, include_task=True, reference=None, verification_capture=None):
+        capture = context['latest_capture'] if verification_capture is None else verification_capture
+        if verification_capture is not None:
+            if (capture.get('generation') != self.state['generation'] or capture.get('source') != 'gripper_wrist_rgbd'
+                    or len(requests) != 1 or requests[0].name != 'object_held'):
+                raise ValueError('invalid_wrist_judgment_scope')
+        elif context.get('capture_epochs', {}).get(capture['observation_id']) != self.observation_epoch:
             raise ValueError('fresh_observation_required_before_visual_judgment')
         audit, done = self.visual_audit_sink()
         self.judgments.audit = audit
@@ -1215,7 +1252,7 @@ class PolicyController(RobotOperations):
             from .program_decisions import observation_evidence, observation_recovery
             if request.rule != 'visual':
                 assessment = observation_evidence(context, self.state)
-                at_pose = self.is_observation_pose(context, self.simulation.robot_snapshot())
+                at_pose = self.is_observation_pose(context)
                 value = observation_recovery(available_choices, branches,
                     needs_viewpoint_change=assessment['needs_viewpoint_change'],
                     empty_hand=assessment['empty_hand'], at_observation_pose=at_pose)
@@ -1308,7 +1345,7 @@ class PolicyController(RobotOperations):
             raise ValueError('policy_finished_with_pending_targets')
         pose_proof = None
         if self.task_spec.completion_pose == 'observation':
-            feedback = self.simulation.robot_snapshot()
+            feedback = self.simulation.joint_feedback(self.state['generation'])
             if not self.is_observation_pose(context, feedback):
                 raise DiagnosticError('completion_pose_unconfirmed', {
                     'component': 'robot_feedback', 'expected_pose': 'observation',
@@ -1319,7 +1356,7 @@ class PolicyController(RobotOperations):
             from ..robot_skills.return_pose import initial_pose_verdict
             if context.get('holding') or self.holding_state is not None:
                 raise DiagnosticError('completion_pose_unconfirmed', {'reason': 'empty_hands_unconfirmed'})
-            pose_proof = initial_pose_verdict(context['initial_joint_reference'], self.simulation.robot_snapshot())
+            pose_proof = initial_pose_verdict(context['initial_joint_reference'], self.simulation.joint_feedback(self.state['generation']))
             self.state['completion_pose_evidence'] = pose_proof
             self.state['facts']['at_initial_pose'] = bool(pose_proof['success'])
             if not pose_proof['success']:
@@ -1428,10 +1465,34 @@ class PolicyController(RobotOperations):
             raise
         except Exception as error:  # noqa: BLE001 -- task boundary records unexpected failures and stops motion
             record = failure_record(error, self.state)
-            if context.get('terminal_original_failure'):
-                record['failure_report']['original_task_failure'] = copy.deepcopy(context['terminal_original_failure'])
-            failed_step = copy.deepcopy(context.get('terminal_failed_step') or self.state.get('current_step'))
-            self.state.update(status='needs_attention', error=str(error)[:1000], **record,
+            primary = next(iter(getattr(getattr(self, 'graph_executor', None), 'unresolved_failures', {}).values()), None)
+            primary = primary or context.get('terminal_original_failure')
+            if primary and primary.get('error_code'):
+                from .diagnostics import build_failure_report, result_details
+                details = result_details(primary)
+                cause = primary['error_code']
+                if (cause != record['error_code'] or primary.get('skill') != record['failure_report'].get('skill')
+                        or (details.get('message') and details['message'] != record['error_details'].get('message'))):
+                    followup = record['failure_report']
+                    record.update(error_code=cause, error_details=details, failure_report=build_failure_report(
+                        cause, details, {**self.state, 'current_step': {'skill': primary.get('skill')}}))
+                    record['failure_report']['subsequent_failure'] = followup
+                record['failure_report']['original_task_failure'] = copy.deepcopy(primary)
+            elif primary:
+                record['failure_report']['original_task_failure'] = copy.deepcopy(primary)
+            failed_step = copy.deepcopy((primary or {}).get('partial_execution') or context.get('terminal_failed_step')
+                                        or self.state.get('current_step'))
+            if primary and primary.get('skill') and (failed_step or {}).get('skill') != primary['skill']:
+                failed_step = {k: primary[k] for k in ('skill', 'invocation_id', 'node_id') if primary.get(k)}
+            report = record['failure_report']
+            message = record['error_details'].get('message')
+            validation = record['error_details'].get('validation_errors') or []
+            if not message and validation:
+                first = validation[0]
+                message = first.get('message') if isinstance(first, dict) else str(first)
+            parts = [report.get('skill') or report.get('stage'), record['error_code'], message]
+            display_error = ' · '.join(dict.fromkeys(str(part) for part in parts if part))
+            self.state.update(status='needs_attention', error=display_error[:1000], **record,
                               failed_step=failed_step)
             if not context.get('failure_return_attempted'):
                 context['terminal_original_failure'] = copy.deepcopy(record['failure_report'])

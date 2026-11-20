@@ -1,8 +1,4 @@
-"""Record display-only geometry and shared RGB previews; encode without replaying tasks.
-
-Only the encoding subprocess imports MuJoCo, so its GL context stays on one
-thread and cannot interfere with the live simulation's sensor renderer.
-"""
+"""Record Base display snapshots and RGB previews without replaying robot actions."""
 
 import gzip
 import json
@@ -34,40 +30,11 @@ def _read_packets(path):
             yield json.loads(line)
 
 
-def _interpolate_geometry(first, second, fraction, timestamp):
-    following = {pose["id"]: pose for pose in second["geometry_poses"]}
-    poses = []
-    for pose in first["geometry_poses"]:
-        target = following[pose["id"]]
-        position = np.asarray(pose["position"], dtype=float)
-        position += fraction * (np.asarray(target["position"]) - position)
-        start = np.asarray(pose["quaternion"], dtype=float)
-        end = np.asarray(target["quaternion"], dtype=float)
-        start /= np.linalg.norm(start)
-        end /= np.linalg.norm(end)
-        dot = float(start @ end)
-        if dot < 0:
-            end = -end
-            dot = -dot
-        if dot > .9995:
-            quaternion = start + fraction * (end - start)
-        else:
-            angle = math.acos(min(1., dot))
-            quaternion = (math.sin((1 - fraction) * angle) * start
-                          + math.sin(fraction * angle) * end) / math.sin(angle)
-        quaternion /= np.linalg.norm(quaternion)
-        poses.append({"id": pose["id"], "position": position.tolist(), "quaternion": quaternion.tolist()})
-    return {**first, "t_s": timestamp, "source_t_s": [first["t_s"], second["t_s"]],
-            "sim_time": first["sim_time"] + fraction * (second["sim_time"] - first["sim_time"]),
-            "geometry_poses": poses}
-
-
-def resample_frames(packets, duration_s, fps, *, interpolate=False):
+def resample_frames(packets, duration_s, fps):
     """Stream two source frames at a time onto a wall-clock video timeline.
 
     Before the first capture the frame is absent (black). After the last capture
-    the last frame is held. Camera pixels are never interpolated. Geometry can
-    use linear position interpolation and shortest-arc quaternion SLERP.
+    the last frame is held. Only measured snapshots are shown.
     """
     if not math.isfinite(duration_s) or duration_s < 0 or fps <= 0:
         raise ValueError("duration must be finite and nonnegative, and fps positive")
@@ -81,18 +48,15 @@ def resample_frames(packets, duration_s, fps, *, interpolate=False):
             following = next(packets, None)
             if following is not None and following["t_s"] < previous["t_s"]:
                 raise ValueError("capture timestamps must be ordered")
-        frame = previous
-        if (interpolate and previous is not None and following is not None
-                and previous.get("manifest_revision") == following.get("manifest_revision")):
-            fraction = (timestamp - previous["t_s"]) / (following["t_s"] - previous["t_s"])
-            frame = _interpolate_geometry(previous, following, fraction, timestamp)
-        yield timestamp, frame
+        yield timestamp, previous
 
 
 def stitch_cameras(views):
     """Left wrist 2, head 3, right wrist 1; preserve aspect with black padding."""
     strip = Image.new("RGB", (1920, 480))
     for index, camera_id in enumerate(CAMERA_ORDER):
+        if camera_id not in views:
+            continue
         rgb = np.asarray(views[camera_id]["rgb"])
         if rgb.ndim != 3 or rgb.shape[2] != 3 or rgb.dtype != np.uint8:
             raise ValueError(f"camera {camera_id} must supply uint8 RGB pixels")
@@ -147,17 +111,15 @@ class VideoRecorder:
             (self.directory / "videos" / "camera_frames").mkdir(parents=True, exist_ok=True)
             snapshot = self.simulation.recording_snapshot()
             self._check_generation(snapshot)
-            initial = snapshot["geometry_update"]
-            self._recording = {"schema_version": 3, "generation": self.generation,
-                               **initial,
-                               "geometry_revisions": {str(snapshot["manifest_revision"]): initial},
-                               "geometry_updates": [],
-                               "camera_order": list(CAMERA_ORDER), "clock": "monotonic_seconds_since_run_start",
-                               "scene_resampling": "linear_position_shortest_arc_quaternion_slerp_within_revision",
-                               "geometry_revision_transition": "previous_frame_hold_then_switch",
-                               "camera_resampling": "previous_frame_hold", "before_first_capture": "black",
-                               "after_last_capture": "last_frame_hold", "geometry_target_fps": SCENE_FPS,
-                               "camera_max_fps": CAMERA_FPS}
+            from .base_recording import freeze_renderer
+            renderer = freeze_renderer(self.simulation, self.directory, snapshot['base_scene'])
+            self._recording = {'schema_version': 4, 'source': 'tianji_base', 'generation': self.generation,
+                'geometry_manifest': {'revision': snapshot['manifest_revision'], 'geometries': [], 'meshes': {}},
+                'geometry_revisions': {}, 'geometry_updates': [], 'base_renderer': renderer,
+                'camera_order': list(CAMERA_ORDER), 'clock': 'monotonic_seconds_since_run_start',
+                'scene_resampling': 'previous_measured_frame_hold', 'camera_resampling': 'previous_frame_hold',
+                'before_first_capture': 'black', 'after_last_capture': 'last_frame_hold',
+                'geometry_target_fps': SCENE_FPS, 'camera_max_fps': CAMERA_FPS}
             _write_json(self.directory / "videos" / "recording.json", self._recording)
             for name, target in (("geometry", self._sample_geometry), ("preview", self._sample_preview)):
                 thread = threading.Thread(target=target, name=f"experiment-{name}", daemon=True)
@@ -169,7 +131,7 @@ class VideoRecorder:
 
     def _check_generation(self, snapshot):
         if snapshot["generation"] != self.generation:
-            raise RuntimeError("simulation generation changed during recording")
+            raise RuntimeError("Base robot session changed during recording")
 
     def _observe_time(self, kind, timestamp):
         stats = self._stats[kind]
@@ -192,16 +154,11 @@ class VideoRecorder:
                         break
                     self._check_generation(snapshot)
                     timestamp = max(0., captured_at - self.started_at)
-                    if snapshot["manifest_revision"] != revision:
-                        revision = snapshot["manifest_revision"]
-                        self._recording["geometry_revisions"][str(revision)] = snapshot["geometry_update"]
-                        self._recording["geometry_updates"].append({
-                            "t_s": timestamp, "sim_time": snapshot["time"], "manifest_revision": revision,
-                            "source": "simulation_display_geometry", "is_visual_evidence": False})
-                        _write_json(self.directory / "videos" / "recording.json", self._recording)
-                    packet = {"t_s": timestamp, "sim_time": snapshot["time"], "generation": self.generation,
-                              "manifest_revision": revision,
-                              "geometry_poses": snapshot["geometry_poses"], "arms": snapshot["arms"]}
+                    if snapshot['manifest_revision'] != revision:
+                        raise RuntimeError('base_geometry_changed_during_recording')
+                    packet = {'t_s': timestamp, 'sim_time': snapshot['time'], 'generation': self.generation,
+                              'manifest_revision': revision, 'geometry_poses': [], 'arms': snapshot['arms'],
+                              'base_scene': snapshot['base_scene']}
                     output.write(json.dumps(packet, separators=(",", ":")) + "\n")
                     output.flush()
                     self._observe_time("scene", timestamp)
@@ -310,8 +267,6 @@ def encode_videos(directory):
     directory = Path(directory).resolve()
     environment = os.environ.copy()
     if sys.platform.startswith("linux"):
-        environment["MUJOCO_GL"] = "osmesa"
-        environment["PYOPENGL_PLATFORM"] = "osmesa"
         environment["LP_NUM_THREADS"] = "1"
     # -m must also work when the app was started with an in-process sys.path entry.
     environment["PYTHONPATH"] = os.pathsep.join([str(Path(__file__).resolve().parents[1]),
@@ -359,98 +314,15 @@ def _encode_rgb(frames, destination, fps, size, ffmpeg):
         temporary.unlink(missing_ok=True)
 
 
-def _recorded_scene(directory, recording):
-    """Recover omitted schema-1 supports only from this run's frozen initial scene."""
-    scene = recording["scene"]
-    supports_recorded = any(
-        geometry["name"].startswith("support_table_")
-        for geometry in recording["geometry_manifest"]["geometries"]
-    )
-    if "support_tables" in scene or not supports_recorded:
-        return scene
-    config_path = directory / "config.json"
-    if not config_path.is_file():
-        raise RuntimeError("recorded support tables require this run's frozen config.json")
-    initial = json.loads(config_path.read_text(encoding="utf-8")).get("simulation_initial", {})
-    if initial.get("generation") != recording["generation"]:
-        raise RuntimeError("frozen initial scene generation does not match the recording")
-    if initial.get("table") != scene["table"] or not initial.get("support_tables"):
-        raise RuntimeError("frozen initial scene does not supply matching recorded support tables")
-    return {**scene, "support_tables": initial["support_tables"]}
-
-
-def _recording_model(builder, directory, recording):
-    import mujoco
-
-    from .model_builder import normalize_scene
-
-    model = builder.build(normalize_scene(_recorded_scene(directory, recording)))
-    for geometry in recording["geometry_manifest"]["geometries"]:
-        index = int(geometry["id"])
-        if index < 0 or index >= model.ngeom or model.geom(index).name != geometry["name"]:
-            raise RuntimeError(f"recorded geometry IDs do not match the rendering model: {geometry['id']}")
-        kind = mujoco.mjtGeom(int(model.geom_type[index])).name.removeprefix("mjGEOM_").lower()
-        if "type" in geometry and kind != geometry["type"]:
-            raise RuntimeError(f"recorded geometry type does not match the rendering model: {index}")
-        if "size" in geometry and not np.allclose(model.geom_size[index], geometry["size"],
-                                                 rtol=1e-6, atol=1e-8):
-            raise RuntimeError(f"recorded geometry size does not match the rendering model: {index}")
-    model.vis.global_.offwidth = 1280
-    model.vis.global_.offheight = 720
-    model.vis.quality.offsamples = 4
-    data = mujoco.MjData(model)
-    mujoco.mj_forward(model, data)
-    return model, data
-
-
 def _scene_images(directory, recording):
-    import mujoco
+    from .base_recording import render_recorded_scenes
 
-    from .model_builder import ModelBuilder
-
-    builder = ModelBuilder()
-    renderer = None
-    try:
-        model, data = _recording_model(builder, directory, recording)
-        revision = recording["geometry_manifest"].get("revision")
-        options = mujoco.MjvOption()
-        options.geomgroup[3] = 0
-        camera = mujoco.MjvCamera()
-        camera.type = mujoco.mjtCamera.mjCAMERA_FREE
-        camera.lookat[:] = [.30, .03, .77]
-        camera.distance = 2.1
-        camera.azimuth = 210
-        camera.elevation = -35
-        renderer = mujoco.Renderer(model, height=720, width=1280)
-        packets = _read_packets(directory / "frames.jsonl.gz")
-        for timestamp, packet in resample_frames(packets, recording["duration_s"], SCENE_FPS, interpolate=True):
-            if packet is None:
-                yield _elapsed_overlay(Image.new("RGB", (1280, 720)), timestamp)
-                continue
-            frame_revision = packet.get("manifest_revision", revision)
-            if frame_revision != revision:
-                update = recording.get("geometry_revisions", {}).get(str(frame_revision))
-                if update is None:
-                    raise RuntimeError(f"missing recorded geometry revision: {frame_revision}")
-                renderer.close()
-                renderer = None
-                model, data = _recording_model(builder, directory, update)
-                renderer = mujoco.Renderer(model, height=720, width=1280)
-                revision = frame_revision
-            renderer.update_scene(data, camera=camera, scene_option=options)
-            poses = {int(pose["id"]): pose for pose in packet["geometry_poses"]}
-            for geometry in renderer.scene.geoms[:renderer.scene.ngeom]:
-                if geometry.objtype == mujoco.mjtObj.mjOBJ_GEOM and geometry.objid in poses:
-                    pose = poses[geometry.objid]
-                    geometry.pos[:] = pose["position"]
-                    rotation = np.empty(9)
-                    mujoco.mju_quat2Mat(rotation, np.asarray(pose["quaternion"]))
-                    geometry.mat[:] = rotation.reshape(3, 3)
-            yield _elapsed_overlay(Image.fromarray(renderer.render()), timestamp)
-    finally:
-        if renderer is not None:
-            renderer.close()
-        builder.close()
+    if recording.get('source') != 'tianji_base':
+        raise ValueError('legacy_recording_requires_its_existing_video')
+    frames = resample_frames(_read_packets(directory / 'frames.jsonl.gz'),
+                             recording['duration_s'], SCENE_FPS)
+    for timestamp, image in render_recorded_scenes(directory, recording, frames):
+        yield _elapsed_overlay(image, timestamp)
 
 
 def _camera_images(directory, recording):

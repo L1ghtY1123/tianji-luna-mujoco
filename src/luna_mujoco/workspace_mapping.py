@@ -1,4 +1,4 @@
-"""Rebuild anonymous workspace TSDF from each registered RGBD observation."""
+"""Update anonymous workspace TSDF from registered RGBD and a bound previous map."""
 from copy import deepcopy
 from dataclasses import replace
 
@@ -10,19 +10,51 @@ from .workspace import WorkspaceAtlas
 BACKGROUND_LAYER = 'workspace_environment'
 
 
+def merge_measured_blocks(previous, current):
+    """Replace measured cells, keeping earlier TSDF cells outside current observations."""
+    import torch
+
+    coords = 'active_block_coords'
+    keys, inverse = torch.unique(torch.cat((previous[coords], current[coords])), dim=0, return_inverse=True)
+    old, new = inverse.split([len(previous[coords]), len(current[coords])])
+    seen = current['block_data'][..., 1] > 0
+    merged = {coords: keys}
+    if previous.keys() != current.keys():
+        raise ValueError('workspace_block_representation_changed')
+    for name, value in current.items():
+        if name == coords:
+            continue
+        if name == 'block_grid_rgb':
+            measured = value[..., 3] > 0
+        elif name in {'block_features', 'block_feature_weight'}:
+            measured = current['block_feature_weight'] > 0
+        elif value.shape[:2] == seen.shape:
+            measured = seen
+        else:
+            raise ValueError(f'workspace_block_representation_changed:{name}')
+        target = value.new_zeros((len(keys), *value.shape[1:]))
+        target[old] = previous[name]
+        mask = measured.reshape((*measured.shape, *((1,) * (value.ndim - 2))))
+        target[new] = torch.where(mask, value, target[new])
+        merged[name] = target
+    return merged
+
+
 class WorkspaceMapper:
-    """Rebuild all workspace cells; reuse allocations without retaining old measurements."""
+    """Merge observed workspace cells and export the composed collision distance field."""
 
     def __init__(self, segmenter):
         self.segmenter = segmenter
         self.atlas = WorkspaceAtlas()
         self.mapper = None
+        self.previous_blocks = self.pending_blocks = None
         self.workspace_grids = None
         self.cad_surfaces = {}
         self.diagnostics = {}
 
     def reset(self):
         self.mapper = None
+        self.previous_blocks = self.pending_blocks = None
 
     def _workspace(self, points):
         import torch
@@ -127,6 +159,12 @@ class WorkspaceMapper:
         incoming['block_data'].masked_fill_(~keep[..., None], 0.)
         active = (incoming['block_data'][..., 1] > 0).any(dim=-1)
         incoming = {key: values[active] for key, values in incoming.items()}
+        parent = decoded.get('mapping_lifecycle', {}).get('previous_scene_token')
+        if parent:
+            if self.previous_blocks is None:
+                raise ValueError('workspace_history_unavailable')
+            incoming = merge_measured_blocks(self.previous_blocks, incoming)
+        self.pending_blocks = incoming
         self.mapper.reset()
         self.mapper.integrator.import_blocks(incoming)
         grid = self.mapper.compute_esdf()
@@ -139,7 +177,7 @@ class WorkspaceMapper:
             **(surface_geometry_metadata(centers, .02) if len(centers) else {})}
         self.diagnostics = {'scope': 'global', 'reused': False,
             'surface_cell_count': len(centers), 'tsdf_voxel_size_m': .02,
-            'observation_id': decoded['observation_set_id'], 'historical_cells_retained': False,
+            'observation_id': decoded['observation_set_id'], 'historical_cells_retained': bool(parent),
             'occluded_space': 'unobserved', 'outside_workspace': 'discard',
-            'esdf_update': 'recompute_from_current_workspace_tsdf'}
+            'esdf_update': 'recompute_from_updated_workspace_tsdf'}
         return grid, deepcopy(metadata)

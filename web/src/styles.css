@@ -149,3 +149,6 @@
 .placement-camera-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
 .failure-evidence{margin-top:10px;font-size:20px;overflow-wrap:anywhere}.failure-evidence section{margin:12px 0;padding:10px;border:1px solid #76524f;border-radius:6px}.failure-evidence pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:20px;max-height:420px;overflow:auto}.failure-evidence h3{font-size:24px;margin:12px 0 6px}
+
+.base-twin-frame,.base-cloud-view{width:100%;height:100%;border:0;position:absolute;inset:0}.base-twin-frame[hidden],.base-cloud-view[hidden]{display:none}
+.device-actions{display:flex;flex-direction:column;align-items:flex-start;gap:10px}

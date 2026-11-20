@@ -4,9 +4,9 @@ import json
 import math
 from copy import deepcopy
 
-from ..core.decisions import predicate_status
 from ..decision_conditions import condition, parse_answers
 from ..observation_requirements import assessment
+from ..surface_placement import placement_evidence_id
 from ..visual_api import VisualAPI, VisualDecisionError, merge_decision_evidence
 from ..vla_configuration import vla_processing_effect
 from .evidence import (
@@ -94,13 +94,12 @@ def verify_unpacking(client, capture, *, target_id, release_evidence, action_evi
                      source='mock_vla')
     _require(active_target_ids == [target_id], 'single_active_target_required')
     table = release_evidence
-    confidence = table.get('confidence')
+    receipt_id = placement_evidence_id(table)
     _require(bool(action_evidence.get('table_release_feedback_id'))
              and table.get('release_feedback_id') == action_evidence['table_release_feedback_id']
              and table.get('target_id') == target_id and table.get('status') == 'at_destination'
              and table.get('identity_source') == 'execution_chain'
-             and predicate_status(confidence) == 'yes'
-             and bool(table.get('request_hash')) and bool(table.get('binding_id')), 'table_release_required')
+             and bool(receipt_id) and bool(table.get('binding_id')), 'table_release_required')
     validate_table_release_reference(table_release_capture, table_release_reference, capture,
                                      table, action_evidence, owner_id)
     verification_capture = unpack_verification_capture(capture)
@@ -134,7 +133,8 @@ def verify_unpacking(client, capture, *, target_id, release_evidence, action_evi
                   'identity_scope': 'process_input_only_not_product_identity',
                   'execution_chain': {key: deepcopy(value) for key, value in scope.items()
                                       if key != 'table_release_reference'},
-                  'table_release_request_hash': table['request_hash'], 'table_release_binding_id': table['binding_id'],
+                  'table_release_evidence_id': receipt_id, 'table_release_binding_id': table['binding_id'],
+                  **({'table_release_request_hash': table['request_hash']} if table.get('request_hash') else {}),
                   'table_release_reference': deepcopy(table_release_reference),
                   'verification_capture': deepcopy(verification_capture),
                   'work_area_zoom': None, 'observation_assessment': observation,

@@ -1,4 +1,4 @@
-"""Tianji Luna MuJoCo entry point."""
+"""Tianji Luna Base-connected entry point."""
 from .app import create_app as create_workbench
 
 

@@ -1,3 +1,4 @@
+import './replay.css';
 import { renderFailureReport, loadArchivedFailureReport } from './failure-report.js';
 import { request } from './api.js';
 import { createTraceList } from './trace.js';
@@ -86,8 +87,11 @@ function formatDate(value) {
   return Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : '时间未提供';
 }
 
-export function mountReplayPage(document) {
-  const byId = id => document.getElementById(id);
+export function mountReplayPage(root, parameters) {
+  const document = root.ownerDocument;
+  const byId = id => root.querySelector(`[data-id="${id}"]`);
+  let active = true;
+  let routeVersion = 0;
   const objectList = byId('replay-object-list') ? createObjectList(byId('replay-object-list'), {document}) : null;
   const element = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -95,7 +99,7 @@ export function mountReplayPage(document) {
     if (text !== undefined) node.textContent = text;
     return node;
   };
-  const initialUrl = new URL(window.location.href);
+  const initialUrl = {searchParams: parameters};
   const initialRun = initialUrl.searchParams.get('run');
   const initialTime = clampReplayTime(initialUrl.searchParams.get('t'));
   const state = {
@@ -121,12 +125,12 @@ export function mountReplayPage(document) {
   async function showCollision() {
     const operation = ++collisionOperation, runId = state.runId;
     const {createCollisionReplay} = await import('./replay-collision.js');
-    if (operation !== collisionOperation || runId !== state.runId || state.view !== 'collision') return;
+    if (!active || operation !== collisionOperation || runId !== state.runId || state.view !== 'collision') return;
     collisionReplay?.dispose();
-    collisionReplay = createCollisionReplay(document, {load: path => request(fileUrl(runId, path))});
+    collisionReplay = createCollisionReplay(root, {load: path => request(fileUrl(runId, path))});
     await collisionReplay.update(state.events);
   }
-  document.body.classList.toggle('graph-only', initialUrl.searchParams.get('standalone') === '1');
+  root.classList.toggle('graph-only', initialUrl.searchParams.get('standalone') === '1');
 
   function showError(error) {
     byId('page-error').textContent = error instanceof Error ? error.message : String(error);
@@ -144,16 +148,25 @@ export function mountReplayPage(document) {
   }
 
   function updateUrl() {
-    const url = new URL(window.location.href);
-    if (state.runId) url.searchParams.set('run', state.runId);
-    else url.searchParams.delete('run');
-    url.searchParams.set('view', state.view);
-    url.searchParams.set('t', state.time.toFixed(3));
-    window.history.replaceState(null, '', url);
-    const standalone = new URL(url);
-    standalone.searchParams.set('view', 'graph');
-    standalone.searchParams.set('standalone', '1');
-    byId('standalone-graph').href = standalone.href;
+    if (!active) return;
+    const params = new URLSearchParams({view: state.view, t: state.time.toFixed(3)});
+    if (state.runId) params.set('run', state.runId);
+    if (root.classList.contains('graph-only')) params.set('standalone', '1');
+    window.history.replaceState(null, '', `#replay?${params}`);
+    byId('standalone-graph').href = '#replay';
+    byId('standalone-graph').textContent = root.classList.contains('graph-only') ? '退出全宽' : '全宽查看任务图';
+  }
+
+  const renderedViews = new Set();
+  function renderActiveView() {
+    const view = state.view;
+    if (!state.manifest || renderedViews.has(view)) return;
+    renderedViews.add(view);
+    if (view === 'graph') renderGraph();
+    if (view === 'visual') renderObjectMemory();
+    if (view === 'observations') renderObservations();
+    if (view === 'data') renderFiles();
+    if (view === 'video') loadVideos();
   }
 
   function setView(view) {
@@ -165,6 +178,7 @@ export function mountReplayPage(document) {
       byId(`view-${name}`).hidden = name !== view;
     }
     updateUrl();
+    renderActiveView();
     if (view === 'collision') showCollision().catch(showError);
     else { collisionOperation++; collisionReplay?.dispose(); }
   }
@@ -430,7 +444,6 @@ export function mountReplayPage(document) {
   }
 
   function renderObservations() {
-    state.observations = decisionObservations(state.events);
     const select = byId('observation-select');
     select.replaceChildren();
     const count = state.observations.reduce((sum, observation) => sum + observation.calls.length, 0);
@@ -554,7 +567,8 @@ export function mountReplayPage(document) {
         const button = element('button', 'button', '查看 Decisions 输入');
         button.addEventListener('click', () => {
           state.decisionCallId = String(item.id);
-          showObservation(observation.id);
+          state.observationId = observation.id;
+          renderedViews.delete('observations');
           setView('observations');
         });
         byId('node-artifacts').append(button);
@@ -628,7 +642,7 @@ export function mountReplayPage(document) {
   function scheduleRefresh() {
     window.clearTimeout(state.poll);
     const manifest = state.manifest;
-    if (!manifest || (!manifest.busy && manifest.status !== 'running' && !['encoding', 'recording', 'pending'].includes(manifest.video_status))) return;
+    if (!active || !manifest || (!manifest.busy && manifest.status !== 'running' && !['encoding', 'recording', 'pending'].includes(manifest.video_status))) return;
     state.poll = window.setTimeout(() => refreshSelected().catch(showError), 3000);
   }
 
@@ -642,14 +656,12 @@ export function mountReplayPage(document) {
     state.manifest = manifest;
     state.events = events;
     state.graph = buildExecutionGraph(state.events);
+    state.observations = decisionObservations(events);
     state.experiments = state.experiments.map(item => item.id === manifest.id ? manifest : item);
     renderSummary();
     renderList();
-    renderFiles();
-    renderObservations();
-    renderObjectMemory();
-    renderGraph();
-    loadVideos();
+    renderedViews.clear();
+    renderActiveView();
     scheduleRefresh();
   }
 
@@ -673,6 +685,13 @@ export function mountReplayPage(document) {
     fileEvidence.clear();
     observationEvidence.clear();
     policy.clear();
+    for (const track of tracks) {
+      track.available = false;
+      if (track.video.hasAttribute('src')) {
+        track.video.removeAttribute('src');
+        track.video.load();
+      }
+    }
     state.runId = runId;
     state.manifest = null;
     state.selectedNode = null;
@@ -693,6 +712,7 @@ export function mountReplayPage(document) {
       state.manifest = manifest;
       state.events = events;
       state.graph = buildExecutionGraph(state.events);
+      state.observations = decisionObservations(events);
       byId('empty-selection').hidden = true;
       byId('experiment-content').hidden = false;
       byId('node-title').textContent = '节点详情';
@@ -708,11 +728,8 @@ export function mountReplayPage(document) {
       byId('file-download').hidden = true;
       byId('array-references').replaceChildren();
       renderSummary({ replaceName: true });
-      renderGraph();
-      renderFiles();
-      renderObservations();
-      renderObjectMemory();
-      loadVideos();
+      renderedViews.clear();
+      updateDuration();
       seek(time);
       setView(state.view);
       scheduleRefresh();
@@ -726,7 +743,7 @@ export function mountReplayPage(document) {
   async function loadList() {
     const operation = state.operation;
     const listOperation = ++state.listOperation;
-    const payload = await request('/api/experiments');
+    const payload = await request('/api/experiments?indexed_sizes_only=true');
     if (operation !== state.operation || listOperation !== state.listOperation) return;
     state.experiments = [...(payload.experiments ?? [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     byId('experiment-root').textContent = payload.root ?? '未提供';
@@ -965,12 +982,37 @@ export function mountReplayPage(document) {
     const observation = state.observations.find(item => item.id === state.observationId);
     if (Number.isFinite(observation?.time)) { stopPlayback(); setView('video'); seek(observation.time); }
   });
-  byId('standalone-graph').addEventListener('click', updateUrl);
-  window.addEventListener('pagehide', () => { stopPlayback(); window.clearTimeout(state.poll); });
-  loadList().then(() => {
-    const id = initialRun || state.experiments[0]?.id;
-    if (id) return selectRun(id, initialTime);
-  }).catch(showError);
+  byId('standalone-graph').addEventListener('click', event => {
+    event.preventDefault(); root.classList.toggle('graph-only'); setView('graph'); policy.fit();
+  });
+  const ready = (initialRun
+    ? Promise.all([selectRun(initialRun, initialTime), loadList()])
+    : loadList().then(() => {
+      const first = state.experiments[0];
+      if (first) return selectRun(first.id, initialTime);
+    })).catch(showError);
+  return {
+    setActive(value) {
+      active = value;
+      if (!active) {
+        routeVersion++;
+        stopPlayback(); window.clearTimeout(state.poll);
+        collisionOperation++; collisionReplay?.dispose(); collisionReplay = null;
+      } else {
+        scheduleRefresh();
+        if (state.view === 'collision' && state.runId) showCollision().catch(showError);
+      }
+    },
+    async navigate(params) {
+      const version = ++routeVersion;
+      await ready;
+      if (!active || version !== routeVersion) return;
+      if (params.has('run') && params.get('run') !== state.runId) await selectRun(params.get('run'), clampReplayTime(params.get('t')));
+      if (!active || version !== routeVersion) return;
+      root.classList.toggle('graph-only', params.get('standalone') === '1');
+      if (REPLAY_VIEWS.includes(params.get('view'))) setView(params.get('view'));
+      if (params.has('t')) { stopPlayback(); seek(clampReplayTime(params.get('t'))); }
+      updateUrl();
+    },
+  };
 }
-
-if (typeof document !== 'undefined') mountReplayPage(document);
